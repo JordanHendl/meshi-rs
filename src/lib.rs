@@ -13,11 +13,21 @@ use tracing_subscriber::FmtSubscriber;
 use utils::timer::Timer;
 
 #[repr(C)]
+/// Information used to create a [`MeshiEngine`].
+///
+/// Both strings must be valid null terminated C strings.
+#[repr(C)]
 pub struct MeshiEngineInfo {
+    /// Name of the application using the engine.
     pub application_name: *const c_char,
+    /// Directory containing the application resources.
     pub application_location: *const c_char,
 }
 
+/// Primary engine instance returned by [`meshi_make_engine`].
+///
+/// This struct owns the rendering and physics systems and should be
+/// destroyed with [`meshi_destroy_engine`] when no longer needed.
 #[repr(C)]
 pub struct MeshiEngine {
     name: String,
@@ -61,16 +71,21 @@ impl MeshiEngine {
         let dt = self.frame_timer.elapsed_micro_f32();
         self.frame_timer.start();
         self.render.update(dt);
+        self.physics.update(dt);
 
-        return dt;
+        dt
     }
 }
 
 #[repr(C)]
 pub struct Renderable {}
 
+/// Create a new engine instance.
+///
+/// # Safety
+/// `info` must be a valid pointer to a [`MeshiEngineInfo`] with valid C strings.
 #[no_mangle]
-extern "C" fn meshi_make_engine(info: &MeshiEngineInfo) -> *mut MeshiEngine {
+pub extern "C" fn meshi_make_engine(info: *const MeshiEngineInfo) -> *mut MeshiEngine {
     // a builder for `FmtSubscriber`.
     let subscriber = FmtSubscriber::builder()
         // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
@@ -81,22 +96,42 @@ extern "C" fn meshi_make_engine(info: &MeshiEngineInfo) -> *mut MeshiEngine {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    let mut e = MeshiEngine::new(&info);
+    let mut e = MeshiEngine::new(unsafe { &*info });
     e.frame_timer.start();
     return Box::into_raw(e);
 }
+
+/// Destroy an engine previously created with [`meshi_make_engine`].
+///
+/// # Safety
+/// `engine` must point to a valid [`MeshiEngine`] returned from
+/// [`meshi_make_engine`] and must not be used after calling this function.
+#[no_mangle]
+pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
+    if !engine.is_null() {
+        unsafe { drop(Box::from_raw(engine)) };
+    }
+}
+/// Register a callback to receive window events from the renderer.
+///
+/// # Safety
+/// `engine` must be a valid pointer returned by [`meshi_make_engine`].
 #[no_mangle]
 pub extern "C" fn meshi_register_event_callback(
-    engine: &mut MeshiEngine,
+    engine: *mut MeshiEngine,
     user_data: *mut c_void,
     cb: extern "C" fn(*mut render::event::Event, *mut c_void),
 ) {
-    engine.render.set_event_cb(cb, user_data);
+    unsafe { &mut *engine }.render.set_event_cb(cb, user_data);
 }
 
+/// Advance the simulation by one frame and render the result.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
-    return unsafe { &mut *(engine) }.update() as c_float;
+    unsafe { &mut *engine }.update() as c_float
 }
 
 ////////////////////////////////////////////
@@ -105,64 +140,96 @@ pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 ////////////////////////////////////////////
+/// Obtain a mutable pointer to the engine's renderer.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut RenderEngine {
-    return &mut (unsafe { &mut *(engine) }.render);
+    unsafe { &mut (*engine).render }
 }
 
+/// Register a new renderable mesh object.
+///
+/// # Safety
+/// `render` must be a valid pointer obtained from [`meshi_get_graphics_system`]
+/// and `info` must point to a valid [`FFIMeshObjectInfo`].
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_renderable(
-    render: &mut RenderEngine,
-    info: &FFIMeshObjectInfo,
+    render: *mut RenderEngine,
+    info: *const FFIMeshObjectInfo,
 ) -> Handle<MeshObject> {
-    render.register_mesh_object(info)
+    unsafe { &mut *render }.register_mesh_object(unsafe { &*info })
 }
 
+/// Update the transformation matrix for a renderable object.
+///
+/// # Safety
+/// `render` must be valid and `transform` must not be null.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_renderable_transform(
-    render: &mut RenderEngine,
-    h: &Handle<MeshObject>,
-    transform: &Mat4,
+    render: *mut RenderEngine,
+    h: Handle<MeshObject>,
+    transform: *const Mat4,
 ) {
-    render.set_mesh_object_transform(*h, transform);
+    unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
 }
 
+/// Create a directional light for the scene.
+///
+/// # Safety
+/// `render` must be valid and `info` must not be null.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_directional_light(
-    render: &mut RenderEngine,
-    info: &DirectionalLightInfo,
+    render: *mut RenderEngine,
+    info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
-    render.register_directional_light(info)
+    unsafe { &mut *render }.register_directional_light(unsafe { &*info })
 }
 
+/// Update the transform for a directional light.
+///
+/// # Safety
+/// `render` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_directional_light_transform(
-    render: &mut RenderEngine,
-    h: &Handle<DirectionalLight>,
-    transform: &Mat4,
+    render: *mut RenderEngine,
+    h: Handle<DirectionalLight>,
+    transform: *const Mat4,
 ) {
-    //    render.register_directional_light(info)
+    unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
 }
 
+/// Set the world-to-camera transform used for rendering.
+///
+/// # Safety
+/// `render` and `transform` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_camera(render: &mut RenderEngine, transform: &Mat4) {
-    render.set_camera(transform);
+pub extern "C" fn meshi_gfx_set_camera(render: *mut RenderEngine, transform: *const Mat4) {
+    unsafe { &mut *render }.set_camera(unsafe { &*transform });
 }
 
+/// Set the projection matrix used for rendering.
+///
+/// # Safety
+/// `render` and `transform` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_projection(render: &mut RenderEngine, transform: &Mat4) {
-    render.set_projection(transform);
+pub extern "C" fn meshi_gfx_set_projection(render: *mut RenderEngine, transform: *const Mat4) {
+    unsafe { &mut *render }.set_projection(unsafe { &*transform });
 }
 
+/// Enable or disable mouse capture for the renderer window.
+///
+/// # Safety
+/// `render` must be a valid pointer.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_capture_mouse(render: &mut RenderEngine, value: i32) {
+pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32) {
     if value == 0 {
-        render.set_capture_mouse(false);
+        unsafe { &mut *render }.set_capture_mouse(false);
     } else {
-        render.set_capture_mouse(true);
+        unsafe { &mut *render }.set_capture_mouse(true);
     }
 }
-
 
 ////////////////////////////////////////////
 //////////////////PHYSICS///////////////////
@@ -170,56 +237,69 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: &mut RenderEngine, value: i32)
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 ////////////////////////////////////////////
+/// Access the internal physics simulation.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut PhysicsSimulation {
-    return &mut *(unsafe { &mut *(engine) }.physics);
+    unsafe { &mut (*engine).physics }
 }
 
+/// Create a new material in the physics system.
+///
+/// # Safety
+/// `physics` and `info` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_create_material(
-    physics: &mut PhysicsSimulation,
-    info: &physics::MaterialInfo,
+    physics: *mut PhysicsSimulation,
+    info: *const physics::MaterialInfo,
 ) -> Handle<physics::Material> {
-    physics.create_material(info)
+    unsafe { &mut *physics }.create_material(unsafe { &*info })
 }
 
+/// Release a physics material handle.
 #[no_mangle]
 pub extern "C" fn meshi_physx_release_material(
-    physics: &mut PhysicsSimulation,
-    h: &Handle<physics::Material>,
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::Material>,
 ) {
-    physics.release_material(*h);
+    unsafe { &mut *physics }.release_material(unsafe { *h });
 }
 
+/// Create a rigid body instance.
 #[no_mangle]
 pub extern "C" fn meshi_physx_create_rigid_body(
-    physics: &mut PhysicsSimulation,
-    info: &physics::RigidBodyInfo,
+    physics: *mut PhysicsSimulation,
+    info: *const physics::RigidBodyInfo,
 ) -> Handle<physics::RigidBody> {
-    physics.create_rigid_body(info)
+    unsafe { &mut *physics }.create_rigid_body(unsafe { &*info })
 }
 
+/// Destroy a rigid body and free its resources.
 #[no_mangle]
 pub extern "C" fn meshi_physx_release_rigid_body(
-    physics: &mut PhysicsSimulation,
-    h: &Handle<physics::RigidBody>,
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
 ) {
-    physics.release_rigid_body(*h);
+    unsafe { &mut *physics }.release_rigid_body(unsafe { *h });
 }
 
+/// Apply a force to a rigid body.
 #[no_mangle]
 pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
-    physics: &mut PhysicsSimulation,
-    h: &Handle<physics::RigidBody>,
-    info: &ForceApplyInfo,
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
+    info: *const ForceApplyInfo,
 ) {
-    physics.apply_rigid_body_force(*h, info);
+    unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
+/// Retrieve the current position and rotation of a rigid body.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_status(
-    physics: &mut PhysicsSimulation,
-    h: &Handle<physics::RigidBody>,
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
 ) -> *const physics::ActorStatus {
-    &physics.get_rigid_body_info(*h)
+    unsafe { &(*physics).get_rigid_body_info(unsafe { *h }) }
 }
