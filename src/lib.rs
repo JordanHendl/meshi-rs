@@ -6,7 +6,7 @@ use dashi::utils::Handle;
 use glam::Mat4;
 use object::{FFIMeshObjectInfo, MeshObject};
 use physics::{ForceApplyInfo, PhysicsSimulation};
-use render::{RenderEngine, RenderEngineInfo};
+use render::{DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo};
 use std::ffi::*;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -130,15 +130,15 @@ pub extern "C" fn meshi_gfx_set_renderable_transform(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_directional_light(
     render: &mut RenderEngine,
-    info: &miso::DirectionalLightInfo,
-) -> Handle<miso::DirectionalLight> {
+    info: &DirectionalLightInfo,
+) -> Handle<DirectionalLight> {
     render.register_directional_light(info)
 }
 
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_directional_light_transform(
     render: &mut RenderEngine,
-    h: &Handle<miso::DirectionalLight>,
+    h: &Handle<DirectionalLight>,
     transform: &Mat4,
 ) {
     //    render.register_directional_light(info)

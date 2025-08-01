@@ -1,4 +1,4 @@
-use crate::render::database::{geometry::MeshResource, Database};
+use crate::render::database::{Database};
 use dashi::utils::Handle;
 use glam::Mat4;
 use tracing::info;
@@ -37,33 +37,33 @@ impl From<&FFIMeshObjectInfo> for MeshObjectInfo {
 }
 
 impl MeshObjectInfo {
-    pub fn make_object(&self, db: &mut Database, scene: &mut miso::Scene) -> MeshObject {
+    pub fn make_object(&self, db: &mut Database) -> MeshObject {
         info!(
             "Registering Mesh Renderable {}||{}",
             self.mesh, self.material
         );
-        if let Ok(mesh) = db.fetch_mesh(self.mesh) {
-            let mut targets = Vec::new();
-            for m in &mesh.submeshes {
-                assert!(m.m.valid());
-                let mat = if m.mat.valid() {
-                    m.mat
-                } else {
-                    db.fetch_material("DEFAULT").unwrap()
-                };
-                targets.push(scene.register_object(&miso::ObjectInfo {
-                    mesh: m.m,
-                    material: mat,
-                    transform: self.transform,
-                }));
-            }
+ //       if let Ok(mesh) = db.fetch_mesh(self.mesh) {
+ //           let mut targets = Vec::new();
+ //           for m in &mesh.submeshes {
+ //               assert!(m.m.valid());
+ //               let mat = if m.mat.valid() {
+ //                   m.mat
+ //               } else {
+ //                   db.fetch_material("DEFAULT").unwrap()
+ //               };
+ //               targets.push(scene.register_object(&miso::ObjectInfo {
+ //                   mesh: m.m,
+ //                   material: mat,
+ //                   transform: self.transform,
+ //               }));
+ //           }
 
-            return MeshObject {
-                targets,
-                mesh,
-                transform: self.transform,
-            };
-        }
+ //           return MeshObject {
+ //               targets,
+ //               mesh,
+ //               transform: self.transform,
+ //           };
+ //       }
 
         Default::default()
     }
@@ -71,7 +71,7 @@ impl MeshObjectInfo {
 
 #[derive(Default)]
 pub struct MeshObject {
-    pub targets: Vec<Handle<miso::Renderable>>,
-    pub mesh: MeshResource,
+//    pub targets: Vec<Handle<miso::Renderable>>,
+//    pub mesh: MeshResource,
     pub transform: Mat4,
 }
