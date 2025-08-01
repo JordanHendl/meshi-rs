@@ -243,7 +243,7 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32)
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut PhysicsSimulation {
-    unsafe { &mut (*engine).physics }
+    unsafe { (*engine).physics.as_mut() as *mut PhysicsSimulation }
 }
 
 /// Create a new material in the physics system.
