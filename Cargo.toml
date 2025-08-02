@@ -21,6 +21,7 @@ gltf = "1.4.1"  # For reading glTF files
 unzip3 = "1.0.0"
 base64 = "0.22.1"
 winit = "0.26"
+rayon = "1.10"
 
 [dev-dependencies]
 tempfile = "3"
@@ -54,4 +55,9 @@ harness = false
 [[test]]
 name = "scene"
 path = "tests/scene.rs"
+harness = false
+
+[[test]]
+name = "gfx_release"
+path = "tests/gfx_release.rs"
 harness = false

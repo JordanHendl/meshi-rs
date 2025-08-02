@@ -897,6 +897,7 @@ dependencies = [
  "gltf",
  "image 0.24.9",
  "koji",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",
