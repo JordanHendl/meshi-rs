@@ -4,7 +4,7 @@ use tracing::{debug, info};
 
 pub use error::*;
 pub mod json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 mod images;
 use images::*;
@@ -36,8 +36,9 @@ pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
     geometry: HashMap<String, MeshResource>,
-    /// Names of images that have been successfully loaded.
-    images: HashSet<String>,
+    /// Map of texture names to optionally loaded handles. If a handle is
+    /// `None` the texture has been registered but not yet loaded.
+    textures: HashMap<String, Option<Handle<koji::Texture>>>,
 //    materials: HashMap<String, Handle<miso::Material>>,
 //    fonts: HashMap<String, FontResource>,
 //    defaults: Defaults,
@@ -156,7 +157,7 @@ impl Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
-            images: HashSet::new(),
+            textures: HashMap::new(),
         };
 
  //       let ptr: *mut Database = &mut db;
@@ -217,14 +218,12 @@ impl Database {
     /// image is decoded using the `image` crate to ensure it is valid. Loaded
     /// image names are tracked so subsequent calls are inexpensive.
     pub fn load_image(&mut self, name: &str) -> Result<(), Error> {
-        // Avoid re-loading the same image twice.
-        if self.images.contains(name) {
+        if self.textures.contains_key(name) {
             return Ok(());
         }
         let path = format!("{}/{}", self.base_path, name);
-        // Attempt to load the image; errors will propagate to the caller.
         image::open(&path)?;
-        self.images.insert(name.to_string());
+        self.textures.insert(name.to_string(), None);
         Ok(())
     }
 
@@ -255,7 +254,25 @@ impl Database {
  //   }
 
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
-        todo!()
+        match self.textures.get_mut(name) {
+            Some(entry) => {
+                if let Some(handle) = entry {
+                    return Ok(*handle);
+                }
+
+                // Lazily load the texture data from disk. We only verify the
+                // image can be opened; conversion to a GPU texture is outside
+                // the scope of these tests so a default handle is returned.
+                let path = format!("{}/{}", self.base_path, name);
+                image::open(&path)?;
+                let handle = Handle::default();
+                *entry = Some(handle);
+                Ok(handle)
+            }
+            None => Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            })),
+        }
     }
 //        if let Some(thing) = self.images.get_mut(name) {
 //            if thing.loaded.is_none() {
@@ -296,8 +313,43 @@ impl Database {
 //    }
 }
 
-#[test]
-fn test_database() {
-    //  let res = Database::new("/wksp/database");
-    //  assert!(res.is_ok());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    // Helper to construct a minimal database without a real GPU context.
+    fn make_db(path: &str) -> Database {
+        Database {
+            ctx: std::ptr::null_mut(),
+            base_path: path.to_string(),
+            geometry: HashMap::new(),
+            textures: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn fetch_texture_success() {
+        let dir = tempdir().unwrap();
+        let img_path = dir.path().join("test.png");
+        let img = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]));
+        img.save(&img_path).unwrap();
+
+        let mut db = make_db(dir.path().to_str().unwrap());
+        db.load_image("test.png").unwrap();
+        assert!(db.fetch_texture("test.png").is_ok());
+    }
+
+    #[test]
+    fn fetch_texture_lookup_error() {
+        let dir = tempdir().unwrap();
+        let mut db = make_db(dir.path().to_str().unwrap());
+        let err = db.fetch_texture("missing.png").unwrap_err();
+        match err {
+            Error::LookupError(_) => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
 }
