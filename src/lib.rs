@@ -59,6 +59,7 @@ impl MeshiEngine {
             render: RenderEngine::new(&RenderEngineInfo {
                 application_path: appdir.to_string(),
                 scene_info: None,
+                headless: false,
             }),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
