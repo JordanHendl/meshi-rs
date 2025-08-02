@@ -6,7 +6,7 @@ pub use error::*;
 pub mod json;
 use std::collections::HashMap;
 use std::fs;
-mod images;
+pub mod images;
 use images::*;
 mod material;
 use material::*;
@@ -145,19 +145,7 @@ impl Database {
 //            ..Default::default()
 //        });
 
-        let mut geometry = HashMap::new();
-        geometry.insert(
-            "MESHI_TRIANGLE".to_string(),
-            geometry_primitives::make_triangle(&Default::default(), ctx),
-        );
-        geometry.insert(
-            "MESHI_CUBE".to_string(),
-            geometry_primitives::make_cube(&Default::default(), ctx),
-        );
-        geometry.insert(
-            "MESHI_SPHERE".to_string(),
-            geometry_primitives::make_sphere(&Default::default(), ctx),
-        );
+        let geometry = load_primitives(ctx);
 
         let mut textures = HashMap::new();
         textures.insert("DEFAULT".to_string(), Some(Handle::default()));
@@ -209,8 +197,8 @@ impl Database {
     /// that it can be retrieved later by tests or callers.
     pub fn load_model(&mut self, name: &str) -> Result<()> {
         let path = format!("{}/{}", self.base_path, name);
-        // Ensure the file exists on disk.
-        fs::read(&path)?;
+        // Ensure the file exists and is valid glTF.
+        parse_gltf(&path).map_err(|e| e.to_string())?;
         // Register the model in the geometry map if not already present.
         self.geometry
             .entry(name.to_string())
@@ -231,7 +219,7 @@ impl Database {
             return Ok(());
         }
         let path = format!("{}/{}", self.base_path, name);
-        image::open(&path)?;
+        load_image_from_path(&path)?;
         self.textures.insert(name.to_string(), None);
         Ok(())
     }
