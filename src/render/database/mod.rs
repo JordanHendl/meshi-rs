@@ -1,6 +1,6 @@
 pub mod error;
 use dashi::{utils::Handle, Buffer};
-use tracing::{debug, info};
+use tracing::info;
 
 pub use error::*;
 pub mod json;
@@ -153,11 +153,14 @@ impl Database {
             geometry_primitives::make_sphere(&Default::default(), ctx),
         );
 
+        let mut textures = HashMap::new();
+        textures.insert("DEFAULT".to_string(), Some(Handle::default()));
+
         let db = Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
-            textures: HashMap::new(),
+            textures,
         };
 
  //       let ptr: *mut Database = &mut db;
@@ -269,6 +272,18 @@ impl Database {
                 *entry = Some(handle);
                 Ok(handle)
             }
+            None => Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            })),
+        }
+    }
+    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
+        self.fetch_texture(name)
+    }
+
+    pub fn fetch_mesh(&self, name: &str) -> Result<MeshResource, Error> {
+        match self.geometry.get(name) {
+            Some(mesh) => Ok(mesh.clone()),
             None => Err(Error::LookupError(LookupError {
                 entry: name.to_string(),
             })),
