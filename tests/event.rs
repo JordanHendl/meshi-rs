@@ -1,7 +1,10 @@
-use std::ffi::{c_void, CString};
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
-use meshi::*;
 use meshi::render::event::Event;
+use meshi::*;
+use std::ffi::{c_void, CString};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
     let counter: &AtomicUsize = unsafe { &*(data as *const AtomicUsize) };
@@ -14,7 +17,11 @@ fn main() {
     }
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
-    let info = MeshiEngineInfo { application_name: name.as_ptr(), application_location: loc.as_ptr() };
+    let info = MeshiEngineInfo {
+        application_name: name.as_ptr(),
+        application_location: loc.as_ptr(),
+        headless: 0,
+    };
     let engine = unsafe { meshi_make_engine(&info) };
     let counter = Arc::new(AtomicUsize::new(0));
     unsafe {
