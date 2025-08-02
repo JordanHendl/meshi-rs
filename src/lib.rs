@@ -6,7 +6,10 @@ use dashi::utils::Handle;
 use glam::Mat4;
 use object::{FFIMeshObjectInfo, MeshObject};
 use physics::{ForceApplyInfo, PhysicsSimulation};
-use render::{DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo};
+use render::{
+    CubePrimitiveInfo, DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo,
+    SpherePrimitiveInfo, TrianglePrimitiveInfo,
+};
 use std::ffi::*;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -195,6 +198,30 @@ pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<M
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
     unsafe { &mut *render }.create_triangle()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cube_ex(
+    render: *mut RenderEngine,
+    info: *const CubePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_sphere_ex(
+    render: *mut RenderEngine,
+    info: *const SpherePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_triangle_ex(
+    render: *mut RenderEngine,
+    info: *const TrianglePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_triangle_ex(unsafe { &*info })
 }
 
 /// Update the transformation matrix for a renderable object.

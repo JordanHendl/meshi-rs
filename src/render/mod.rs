@@ -4,11 +4,12 @@ use dashi::{
     utils::{Handle, Pool},
     *,
 };
-use database::Database;
+use database::{make_cube, make_sphere, make_triangle, Database};
+pub use database::{CubePrimitiveInfo, SpherePrimitiveInfo, TrianglePrimitiveInfo};
 use glam::{Mat4, Vec4};
 use tracing::info;
 
-use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo};
+use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget};
 pub mod config;
 pub mod database;
 pub mod event;
@@ -187,6 +188,48 @@ impl RenderEngine {
         self.mesh_objects.insert(object).unwrap()
     }
 
+    pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
+        let mesh = make_cube(info, &mut self.ctx);
+        let material = self.database.fetch_material("DEFAULT").unwrap();
+        let object = MeshObject {
+            targets: vec![MeshTarget {
+                mesh: mesh.clone(),
+                material,
+            }],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
+        let mesh = make_sphere(info, &mut self.ctx);
+        let material = self.database.fetch_material("DEFAULT").unwrap();
+        let object = MeshObject {
+            targets: vec![MeshTarget {
+                mesh: mesh.clone(),
+                material,
+            }],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_triangle_ex(&mut self, info: &TrianglePrimitiveInfo) -> Handle<MeshObject> {
+        let mesh = make_triangle(info, &mut self.ctx);
+        let material = self.database.fetch_material("DEFAULT").unwrap();
+        let object = MeshObject {
+            targets: vec![MeshTarget {
+                mesh: mesh.clone(),
+                material,
+            }],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
     pub fn set_mesh_object_transform(
         &mut self,
         handle: Handle<MeshObject>,
@@ -253,7 +296,10 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-        self.event_cb = Some(EventCallbackInfo { event_cb, user_data });
+        self.event_cb = Some(EventCallbackInfo {
+            event_cb,
+            user_data,
+        });
     }
 
     /// Load the resources referenced by `SceneInfo` into the renderer's

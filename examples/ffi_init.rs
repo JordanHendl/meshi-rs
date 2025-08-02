@@ -1,5 +1,5 @@
 use glam::Mat4;
-use meshi::*;
+use meshi::{render::CubePrimitiveInfo, *};
 use std::ffi::CString;
 
 fn main() {
@@ -7,7 +7,8 @@ fn main() {
     let loc = CString::new(".").unwrap();
     let engine = unsafe { meshi_make_engine_headless(app.as_ptr(), loc.as_ptr()) };
     let render = unsafe { meshi_get_graphics_system(engine) };
-    let cube = unsafe { meshi_gfx_create_cube(render) };
+    let info = CubePrimitiveInfo { size: 0.5 };
+    let cube = unsafe { meshi_gfx_create_cube_ex(render, &info) };
     unsafe {
         meshi_gfx_set_renderable_transform(render, cube, &Mat4::IDENTITY);
     }
