@@ -127,7 +127,9 @@ impl RenderEngine {
 
     pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
         let info: MeshObjectInfo = info.into();
-        let object = info.make_object(&mut self.database);
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -137,7 +139,9 @@ impl RenderEngine {
             material: "MESHI_CUBE",
             transform: Mat4::IDENTITY,
         };
-        let object = info.make_object(&mut self.database);
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -147,7 +151,9 @@ impl RenderEngine {
             material: "MESHI_SPHERE",
             transform: Mat4::IDENTITY,
         };
-        let object = info.make_object(&mut self.database);
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -157,7 +163,9 @@ impl RenderEngine {
             material: "MESHI_TRIANGLE",
             transform: Mat4::IDENTITY,
         };
-        let object = info.make_object(&mut self.database);
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
     }
 
