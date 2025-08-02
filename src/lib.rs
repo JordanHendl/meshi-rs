@@ -61,7 +61,8 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
-            }),
+            })
+            .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
             name: appname.to_string(),

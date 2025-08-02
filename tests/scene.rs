@@ -1,6 +1,6 @@
+use image::{Rgba, RgbaImage};
 use meshi::render::{RenderEngine, RenderEngineInfo, SceneInfo};
 use std::fs;
-use image::{RgbaImage, Rgba};
 
 fn main() {
     // Skip test when no display is available, similar to existing tests.
@@ -12,7 +12,10 @@ fn main() {
     let mut dir = std::env::temp_dir();
     dir.push("meshi_scene_test");
     // Ensure a unique directory per run.
-    dir.push(format!("{}", std::time::SystemTime::now().elapsed().unwrap().as_nanos()));
+    dir.push(format!(
+        "{}",
+        std::time::SystemTime::now().elapsed().unwrap().as_nanos()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let db_dir = dir.join("database");
     fs::create_dir_all(&db_dir).unwrap();
@@ -25,8 +28,8 @@ fn main() {
 
     // Dummy image file using the image crate.
     let img_path = db_dir.join("albedo.png");
-    let mut img = RgbaImage::new(1,1);
-    img.put_pixel(0,0,Rgba([255,0,0,255]));
+    let mut img = RgbaImage::new(1, 1);
+    img.put_pixel(0, 0, Rgba([255, 0, 0, 255]));
     img.save(&img_path).unwrap();
 
     // Initialise renderer pointing at our temp directory.
@@ -34,7 +37,8 @@ fn main() {
         application_path: dir.to_str().unwrap().into(),
         scene_info: None,
         headless: false,
-    });
+    })
+    .expect("failed to initialize renderer");
 
     // Configure the scene.
     let scene_info = SceneInfo {
