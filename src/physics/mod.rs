@@ -40,6 +40,29 @@ pub struct ForceApplyInfo {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub enum CollisionShapeType {
+    #[default]
+    Sphere = 0,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CollisionShape {
+    pub shape_type: CollisionShapeType,
+    pub radius: f32,
+}
+
+impl Default for CollisionShape {
+    fn default() -> Self {
+        Self {
+            shape_type: CollisionShapeType::Sphere,
+            radius: 1.0,
+        }
+    }
+}
+
+#[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct RigidBodyInfo {
     pub material: Handle<Material>,
@@ -47,6 +70,7 @@ pub struct RigidBodyInfo {
     pub initial_velocity: Vec3,
     pub initial_rotation: glam::Quat,
     pub has_gravity: u32,
+    pub collision_shape: CollisionShape,
 }
 
 #[repr(C)]
@@ -76,15 +100,13 @@ pub struct RigidBody {
     position: Vec3,
     velocity: Vec3,
     rotation: Quat,
+    shape: CollisionShape,
     material: Handle<Material>,
     has_gravity: u32,
+    forces: Vec<Vec3>,
 }
 
 impl RigidBody {
-    pub fn apply_force(&mut self, force: Vec3) {
-        self.velocity = self.velocity + force;
-    }
-
     pub fn dampen_velocity(&mut self, mat: &Material, dt: &Vec3) {
         let dfc = mat.info.dynamic_friction_m;
         self.velocity = self.velocity - (vec3(dfc, dfc, dfc) * dt);
@@ -98,14 +120,25 @@ pub struct ActorStatus {
     pub rotation: Quat,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct ContactInfo {
+    pub a: Handle<RigidBody>,
+    pub b: Handle<RigidBody>,
+    pub normal: Vec3,
+    pub penetration: f32,
+}
+
 impl From<&RigidBodyInfo> for RigidBody {
     fn from(value: &RigidBodyInfo) -> Self {
         RigidBody {
             position: value.initial_position,
             velocity: Default::default(),
             rotation: value.initial_rotation,
+            shape: value.collision_shape,
             material: value.material,
             has_gravity: value.has_gravity,
+            forces: Vec::new(),
         }
     }
 }
@@ -121,6 +154,7 @@ pub struct PhysicsSimulation {
     info: SimulationInfo,
     materials: Pool<Material>,
     rigid_bodies: Pool<RigidBody>,
+    contacts: Vec<ContactInfo>,
     default_material: Handle<Material>,
 }
 
@@ -130,6 +164,7 @@ impl PhysicsSimulation {
             info: info.clone(),
             materials: Default::default(),
             rigid_bodies: Default::default(),
+            contacts: Vec::new(),
             default_material: Default::default(),
         };
 
@@ -143,8 +178,13 @@ impl PhysicsSimulation {
         self.rigid_bodies.for_each_occupied_mut(|r| {
             let mat = self.materials.get_ref(r.material).unwrap();
             if r.has_gravity == 1 {
-                r.apply_force(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
+                r.forces
+                    .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
             }
+
+            let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
+            r.velocity += total_force;
+            r.forces.clear();
 
             let adj_velocity = r.velocity * dt;
             let pos = r.position;
@@ -152,6 +192,61 @@ impl PhysicsSimulation {
 
             r.dampen_velocity(mat, &dt);
         });
+
+        // Collision detection and resolution
+        self.contacts.clear();
+        let mut handles = Vec::new();
+        self.rigid_bodies
+            .for_each_occupied_handle_mut(|h| handles.push(h));
+        for i in 0..handles.len() {
+            for j in (i + 1)..handles.len() {
+                let ha = handles[i];
+                let hb = handles[j];
+
+                let a_pos = self.rigid_bodies.get_ref(ha).unwrap().position;
+                let b_pos = self.rigid_bodies.get_ref(hb).unwrap().position;
+                let a_vel = self.rigid_bodies.get_ref(ha).unwrap().velocity;
+                let b_vel = self.rigid_bodies.get_ref(hb).unwrap().velocity;
+                let a_rad = self.rigid_bodies.get_ref(ha).unwrap().shape.radius;
+                let b_rad = self.rigid_bodies.get_ref(hb).unwrap().shape.radius;
+
+                let delta = b_pos - a_pos;
+                let dist = delta.length();
+                let penetration = a_rad + b_rad - dist;
+                if penetration > 0.0 {
+                    let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+                    let correction = normal * (penetration / 2.0);
+
+                    let rel_vel = b_vel - a_vel;
+                    let vel_along_normal = rel_vel.dot(normal);
+                    let mut a_vel_new = a_vel;
+                    let mut b_vel_new = b_vel;
+                    if vel_along_normal < 0.0 {
+                        let impulse = normal * vel_along_normal;
+                        a_vel_new += impulse;
+                        b_vel_new -= impulse;
+                    }
+
+                    {
+                        let a_mut = self.rigid_bodies.get_mut_ref(ha).unwrap();
+                        a_mut.position = a_pos - correction;
+                        a_mut.velocity = a_vel_new;
+                    }
+                    {
+                        let b_mut = self.rigid_bodies.get_mut_ref(hb).unwrap();
+                        b_mut.position = b_pos + correction;
+                        b_mut.velocity = b_vel_new;
+                    }
+
+                    self.contacts.push(ContactInfo {
+                        a: ha,
+                        b: hb,
+                        normal,
+                        penetration,
+                    });
+                }
+            }
+        }
     }
 
     pub fn create_material(&mut self, info: &MaterialInfo) -> Handle<Material> {
@@ -179,7 +274,8 @@ impl PhysicsSimulation {
         self.rigid_bodies
             .get_mut_ref(h)
             .unwrap()
-            .apply_force(info.amt);
+            .forces
+            .push(info.amt);
     }
 
     pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) {
@@ -187,6 +283,13 @@ impl PhysicsSimulation {
         if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
             rb.position = info.position;
             rb.rotation = info.rotation;
+        }
+    }
+
+    pub fn set_rigid_body_collision_shape(&mut self, h: Handle<RigidBody>, shape: &CollisionShape) {
+        assert!(h.valid());
+        if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
+            rb.shape = *shape;
         }
     }
 
@@ -198,5 +301,9 @@ impl PhysicsSimulation {
     pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Vec3 {
         assert!(h.valid());
         self.rigid_bodies.get_ref(h).unwrap().velocity
+    }
+
+    pub fn get_contacts(&self) -> &[ContactInfo] {
+        &self.contacts
     }
 }

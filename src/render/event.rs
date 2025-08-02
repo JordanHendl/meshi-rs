@@ -195,9 +195,26 @@ pub struct Event {
     timestamp: c_uint,
 }
 
+impl Event {
+    pub fn event_type(&self) -> EventType {
+        self.event_type
+    }
+
+    pub fn source(&self) -> EventSource {
+        self.source
+    }
+
+    pub unsafe fn motion2d(&self) -> Vec2 {
+        self.payload.motion2d.motion
+    }
+}
+
 use glam::{vec2, Vec2};
 
-use winit::event::{ElementState, Event as WEvent, KeyboardInput, MouseButton as WMouseButton, VirtualKeyCode, WindowEvent, DeviceEvent};
+use winit::event::{
+    DeviceEvent, ElementState, Event as WEvent, MouseButton as WMouseButton, MouseScrollDelta,
+    VirtualKeyCode, WindowEvent,
+};
 
 //impl From<SdlEvent> for Event {
 //    fn from(sdl_event: SdlEvent) -> Self {
@@ -539,24 +556,109 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                     WMouseButton::Right => MouseButton::Right,
                     _ => MouseButton::Left,
                 };
-                let et = if *state == ElementState::Pressed { EventType::Pressed } else { EventType::Released };
+                let et = if *state == ElementState::Pressed {
+                    EventType::Pressed
+                } else {
+                    EventType::Released
+                };
                 Some(Event {
                     event_type: et,
                     source: EventSource::MouseButton,
-                    payload: Payload { mouse_button: MouseButtonPayload { button: btn, pos: vec2(0.0, 0.0) } },
+                    payload: Payload {
+                        mouse_button: MouseButtonPayload {
+                            button: btn,
+                            pos: vec2(0.0, 0.0),
+                        },
+                    },
+                    timestamp: 0,
+                })
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (*x as f32, *y as f32),
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+                };
+                Some(Event {
+                    event_type: EventType::Motion2D,
+                    source: EventSource::Mouse,
+                    payload: Payload { motion2d: Motion2DPayload { motion: vec2(x, y) } },
+                    timestamp: 0,
+                })
+            }
+            WindowEvent::Focused(focused) => {
+                let et = if *focused {
+                    EventType::Pressed
+                } else {
+                    EventType::Released
+                };
+                Some(Event {
+                    event_type: et,
+                    source: EventSource::Unknown,
+                    payload: Payload {
+                        press: PressPayload {
+                            key: KeyCode::Undefined,
+                            previous: EventType::Unknown,
+                        },
+                    },
                     timestamp: 0,
                 })
             }
             _ => None,
         },
-        WEvent::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+        WEvent::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => Some(Event {
+            event_type: EventType::Motion2D,
+            source: EventSource::Mouse,
+            payload: Payload {
+                motion2d: Motion2DPayload {
+                    motion: vec2(delta.0 as f32, delta.1 as f32),
+                },
+            },
+            timestamp: 0,
+        }),
+        WEvent::DeviceEvent { event: DeviceEvent::MouseWheel { delta }, .. } => {
+            let (x, y) = match delta {
+                MouseScrollDelta::LineDelta(x, y) => (*x as f32, *y as f32),
+                MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+            };
             Some(Event {
                 event_type: EventType::Motion2D,
                 source: EventSource::Mouse,
-                payload: Payload { motion2d: Motion2DPayload { motion: vec2(delta.0 as f32, delta.1 as f32) } },
+                payload: Payload {
+                    motion2d: Motion2DPayload {
+                        motion: vec2(x, y),
+                    },
+                },
                 timestamp: 0,
             })
         }
+        WEvent::DeviceEvent { event: DeviceEvent::Button { state, .. }, .. } => {
+            let et = if *state == ElementState::Pressed {
+                EventType::Pressed
+            } else {
+                EventType::Released
+            };
+            Some(Event {
+                event_type: et,
+                source: EventSource::Gamepad,
+                payload: Payload {
+                    press: PressPayload {
+                        key: KeyCode::Undefined,
+                        previous: EventType::Unknown,
+                    },
+                },
+                timestamp: 0,
+            })
+        }
+        WEvent::DeviceEvent { event: DeviceEvent::Motion { axis, value }, .. } => Some(Event {
+            event_type: EventType::Joystick,
+            source: EventSource::Gamepad,
+            payload: Payload {
+                motion2d: Motion2DPayload {
+                    motion: vec2(*axis as f32, *value as f32),
+                },
+            },
+            timestamp: 0,
+        }),
         _ => None,
     }
 }

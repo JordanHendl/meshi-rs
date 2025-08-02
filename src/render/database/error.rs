@@ -43,17 +43,29 @@ impl fmt::Display for LoadingError {
     }
 }
 
-impl std::error::Error for SlotError {}
+impl std::error::Error for SlotError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
-impl std::error::Error for LookupError {}
+impl std::error::Error for LookupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
-impl std::error::Error for LoadingError {}
+impl std::error::Error for LoadingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
 #[derive(Debug)]
 pub enum Error {
     LookupError(LookupError),
     LoadingError(LoadingError),
-    SlotError(),
+    SlotError(SlotError),
 }
 
 impl fmt::Display for Error {
@@ -61,7 +73,7 @@ impl fmt::Display for Error {
         match self {
             Error::LookupError(err) => err.fmt(f),
             Error::LoadingError(err) => err.fmt(f),
-            Error::SlotError() => SlotError {}.fmt(f),
+            Error::SlotError(err) => err.fmt(f),
         }
     }
 }
@@ -71,7 +83,7 @@ impl std::error::Error for Error {
         match self {
             Error::LookupError(err) => Some(err),
             Error::LoadingError(err) => Some(err),
-            Error::SlotError() => None,
+            Error::SlotError(err) => Some(err),
         }
     }
 }

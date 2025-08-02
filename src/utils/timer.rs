@@ -80,8 +80,8 @@ impl Timer {
         }
     }
 
-    // Get the current elapsed time in milliseconds as f32
-    pub fn elapsed_micro_f32(&self) -> f32 {
-        (self.elapsed_micro() as f32 / 1000.0) / 1000.0
+    // Get the current elapsed time in seconds as f32
+    pub fn elapsed_seconds_f32(&self) -> f32 {
+        self.elapsed_micro() as f32 / 1_000_000.0
     }
 }
