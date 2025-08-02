@@ -61,7 +61,8 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
-            }),
+            })
+            .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
             name: appname.to_string(),
@@ -129,7 +130,11 @@ pub extern "C" fn meshi_make_engine_headless(
 #[no_mangle]
 pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
     if !engine.is_null() {
-        unsafe { drop(Box::from_raw(engine)) };
+        unsafe {
+            // Take ownership and ensure the engine is fully dropped before returning.
+            let _engine = Box::from_raw(engine);
+            // `_engine` is dropped here when it goes out of scope.
+        }
     }
 }
 /// Register a callback to receive window events from the renderer.

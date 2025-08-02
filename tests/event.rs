@@ -17,6 +17,7 @@ extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
 }
 
 fn main() {
+
     // Test conversion from winit events
     let window_id: winit::window::WindowId = unsafe { std::mem::zeroed() };
 
@@ -78,19 +79,19 @@ fn main() {
     if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
         return;
     }
+  
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
-        headless: 0,
+        headless: 1,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     let counter = Arc::new(AtomicUsize::new(0));
     unsafe {
         meshi_register_event_callback(engine, Arc::as_ptr(&counter) as *mut _, cb);
         meshi_update(engine);
-        meshi_destroy_engine(engine);
     }
     assert!(counter.load(Ordering::SeqCst) > 0);
 }
