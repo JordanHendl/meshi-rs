@@ -31,9 +31,6 @@ jobs:
       - name: Build
         run: cargo build --release
 
-      - name: Package
-        run: cargo package --allow-dirty --no-verify
-
       - name: Prepare artifact
         shell: bash
         run: |
