@@ -14,6 +14,7 @@ struct Vertex {
     color: Vec4,
 }
 
+#[repr(C)]
 pub struct CubePrimitiveInfo {
     pub size: f32,
 }
@@ -136,6 +137,7 @@ pub fn make_cube(info: &CubePrimitiveInfo, ctx: &mut dashi::Context) -> MeshReso
     }
 }
 
+#[repr(C)]
 pub struct TrianglePrimitiveInfo {
     pub size: f32,
 }
@@ -207,6 +209,7 @@ pub fn make_triangle(info: &TrianglePrimitiveInfo, ctx: &mut dashi::Context) -> 
     }
 }
 
+#[repr(C)]
 pub struct SpherePrimitiveInfo {
     pub radius: f32,
     pub segments: u32,

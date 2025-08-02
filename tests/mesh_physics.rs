@@ -1,5 +1,6 @@
 use glam::{Mat4, Quat, Vec3};
 use meshi::physics::{ActorStatus, RigidBodyInfo};
+use meshi::render::database::geometry_primitives::CubePrimitiveInfo;
 use meshi::*;
 use std::ffi::CString;
 
@@ -15,11 +16,10 @@ fn main() {
 
     // Graphics mesh object
     let render = unsafe { meshi_get_graphics_system(engine) };
-    let cube = unsafe { meshi_gfx_create_cube(render) };
+    let cube_info = CubePrimitiveInfo { size: 0.5 };
+    let cube = unsafe { meshi_gfx_create_cube_ex(render, &cube_info) };
     let transform = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
-    unsafe {
-        meshi_gfx_set_renderable_transform(render, cube, &transform);
-    }
+    unsafe { meshi_gfx_set_renderable_transform(render, cube, &transform) };
 
     // Physics rigid body
     let physics = unsafe { meshi_get_physics_system(engine) };

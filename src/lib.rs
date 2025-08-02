@@ -198,8 +198,24 @@ pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<Mes
 }
 
 #[no_mangle]
+pub extern "C" fn meshi_gfx_create_cube_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::CubePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
+}
+
+#[no_mangle]
 pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
     unsafe { &mut *render }.create_sphere()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_sphere_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::SpherePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
 }
 
 #[no_mangle]
