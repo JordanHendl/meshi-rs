@@ -20,6 +20,7 @@ koji = {git = "https://github.com/JordanHendl/koji"}
 gltf = "1.4.1"  # For reading glTF files
 unzip3 = "1.0.0"
 base64 = "0.22.1"
+winit = "0.26"
 
 [lib]
 crate-type=["cdylib"]
