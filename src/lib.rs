@@ -310,11 +310,52 @@ pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
     unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
+/// Set the position and rotation of a rigid body.
+///
+/// # Safety
+/// `physics`, `h`, and `info` must be valid, non-null pointers.
+#[no_mangle]
+pub extern "C" fn meshi_physx_set_rigid_body_transform(
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
+    info: *const physics::ActorStatus,
+) {
+    unsafe { &mut *physics }.set_rigid_body_transform(unsafe { *h }, unsafe { &*info });
+}
+
 /// Retrieve the current position and rotation of a rigid body.
+///
+/// # Safety
+/// `physics`, `h`, and `out_status` must be valid, non-null pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
-) -> *const physics::ActorStatus {
-    unsafe { &(*physics).get_rigid_body_info(unsafe { *h }) }
+    out_status: *mut physics::ActorStatus,
+) {
+    let status = unsafe { &*physics }.get_rigid_body_status(unsafe { *h });
+    unsafe { *out_status = status };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physics::{ActorStatus, PhysicsSimulation, RigidBodyInfo, SimulationInfo};
+    use glam::{Quat, Vec3};
+
+    #[test]
+    fn rigid_body_transform_roundtrip() {
+        let mut sim = PhysicsSimulation::new(&SimulationInfo::default());
+        let rb = sim.create_rigid_body(&RigidBodyInfo::default());
+        let transform = ActorStatus {
+            position: Vec3::new(1.0, 2.0, 3.0),
+            rotation: Quat::IDENTITY,
+        };
+
+        meshi_physx_set_rigid_body_transform(&mut sim, &rb as *const _, &transform);
+        let mut out = ActorStatus::default();
+        meshi_physx_get_rigid_body_status(&mut sim, &rb as *const _, &mut out);
+        assert_eq!(out.position, transform.position);
+        assert_eq!(out.rotation, transform.rotation);
+    }
 }
