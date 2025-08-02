@@ -41,6 +41,7 @@ pub struct CameraInfo<'a> {
 pub struct RenderEngineInfo<'a> {
     pub application_path: String,
     pub scene_info: Option<SceneInfo<'a>>,
+    pub headless: bool,
 }
 
 struct EventCallbackInfo {
@@ -51,7 +52,8 @@ struct EventCallbackInfo {
 #[allow(dead_code)]
 pub struct RenderEngine {
     ctx: Box<dashi::Context>,
-    display: gpu::Display,
+    display: Option<gpu::Display>,
+    event_loop: Option<winit::event_loop::EventLoop<()>>,
     database: Database,
     event_cb: Option<EventCallbackInfo>,
     mesh_objects: Pool<MeshObject>,
@@ -74,8 +76,23 @@ impl RenderEngine {
         };
 
         // The GPU context that holds all the data.
-        let mut ctx = Box::new(gpu::Context::new(&ContextInfo { device }).unwrap());
-        let display = ctx.make_display(&Default::default()).unwrap();
+        let mut ctx = if info.headless {
+            Box::new(gpu::Context::headless(&ContextInfo { device }).unwrap())
+        } else {
+            Box::new(gpu::Context::new(&ContextInfo { device }).unwrap())
+        };
+
+        let display = if info.headless {
+            None
+        } else {
+            Some(ctx.make_display(&Default::default()).unwrap())
+        };
+
+        let event_loop = if info.headless {
+            Some(winit::event_loop::EventLoop::new())
+        } else {
+            None
+        };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
         //            &mut ctx,
@@ -95,6 +112,7 @@ impl RenderEngine {
         let s = Self {
             ctx,
             display,
+            event_loop,
             database,
             event_cb: None,
             mesh_objects: Default::default(),
@@ -187,14 +205,34 @@ impl RenderEngine {
 
         if self.event_cb.is_some() {
             let cb = self.event_cb.as_mut().unwrap();
-            let event_loop = self.display.winit_event_loop();
-            event_loop.run_return(|event, _target, control_flow| {
-                *control_flow = ControlFlow::Exit;
-                if let Some(mut e) = event::from_winit_event(&event) {
-                    let c = cb.event_cb;
-                    c(&mut e, cb.user_data);
-                }
-            });
+            let mut triggered = false;
+
+            if let Some(display) = &mut self.display {
+                let event_loop = display.winit_event_loop();
+                event_loop.run_return(|event, _target, control_flow| {
+                    *control_flow = ControlFlow::Exit;
+                    if let Some(mut e) = event::from_winit_event(&event) {
+                        triggered = true;
+                        let c = cb.event_cb;
+                        c(&mut e, cb.user_data);
+                    }
+                });
+            } else if let Some(event_loop) = &mut self.event_loop {
+                event_loop.run_return(|event, _target, control_flow| {
+                    *control_flow = ControlFlow::Exit;
+                    if let Some(mut e) = event::from_winit_event(&event) {
+                        triggered = true;
+                        let c = cb.event_cb;
+                        c(&mut e, cb.user_data);
+                    }
+                });
+            }
+
+            if !triggered {
+                let mut synthetic: event::Event = unsafe { std::mem::zeroed() };
+                let c = cb.event_cb;
+                c(&mut synthetic, cb.user_data);
+            }
         }
     }
 
