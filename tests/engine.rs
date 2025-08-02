@@ -1,3 +1,4 @@
+use meshi::render::database::geometry_primitives::{CubePrimitiveInfo, SpherePrimitiveInfo};
 use meshi::*;
 use std::ffi::CString;
 
@@ -11,7 +12,14 @@ fn main() {
     };
     let engine = unsafe { meshi_make_engine(&info) };
     assert!(!engine.is_null());
-    unsafe {
-        meshi_update(engine);
-    }
+    let render = unsafe { meshi_get_graphics_system(engine) };
+    let cube_info = CubePrimitiveInfo { size: 1.0 };
+    unsafe { meshi_gfx_create_cube_ex(render, &cube_info) };
+    let sphere_info = SpherePrimitiveInfo {
+        radius: 1.0,
+        segments: 8,
+        rings: 8,
+    };
+    unsafe { meshi_gfx_create_sphere_ex(render, &sphere_info) };
+    unsafe { meshi_update(engine) };
 }
