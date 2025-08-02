@@ -186,12 +186,20 @@ impl RenderEngine {
         }
     }
 
+    pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
+        self.directional_lights.release(handle);
+    }
+
     pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
         let info: MeshObjectInfo = info.into();
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
+        self.mesh_objects.release(handle);
     }
 
     pub fn create_cube(&mut self) -> Handle<MeshObject> {
@@ -239,10 +247,7 @@ impl RenderEngine {
             Some(obj) => {
                 obj.transform = *transform;
                 for target in &obj.targets {
-                    info!(
-                        "Submitting transform for mesh '{}'", 
-                        target.mesh.name
-                    );
+                    info!("Submitting transform for mesh '{}'", target.mesh.name);
                 }
             }
             None => {

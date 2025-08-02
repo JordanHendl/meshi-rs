@@ -207,6 +207,14 @@ pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle
     unsafe { &mut *render }.create_triangle()
 }
 
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_mesh_object(
+    render: *mut RenderEngine,
+    h: *const Handle<MeshObject>,
+) {
+    unsafe { &mut *render }.release_mesh_object(unsafe { *h });
+}
+
 /// Update the transformation matrix for a renderable object.
 ///
 /// # Safety
@@ -235,6 +243,14 @@ pub extern "C" fn meshi_gfx_create_directional_light(
     info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
     unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_directional_light(
+    render: *mut RenderEngine,
+    h: *const Handle<DirectionalLight>,
+) {
+    unsafe { &mut *render }.release_directional_light(unsafe { *h });
 }
 
 /// Update the transform for a directional light.

@@ -55,3 +55,8 @@ harness = false
 name = "scene"
 path = "tests/scene.rs"
 harness = false
+
+[[test]]
+name = "gfx_release"
+path = "tests/gfx_release.rs"
+harness = false
