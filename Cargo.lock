@@ -401,6 +401,19 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
+source = "git+https://github.com/JordanHendl/dashi?branch=main#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
+dependencies = [
+ "ash",
+ "ash-window",
+ "raw-window-handle",
+ "serde",
+ "vk-mem",
+ "winit",
+]
+
+[[package]]
+name = "dashi"
+version = "0.1.0"
 source = "git+https://github.com/JordanHendl/dashi#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
 dependencies = [
  "ash",
@@ -451,7 +464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -752,10 +765,10 @@ dependencies = [
 [[package]]
 name = "koji"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/koji#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
+source = "git+https://github.com/JordanHendl/koji?branch=main#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
 dependencies = [
  "bytemuck",
- "dashi",
+ "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi)",
  "glam",
  "gltf",
  "image 0.24.9",
@@ -878,7 +891,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
- "dashi",
+ "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi?branch=main)",
  "fontdue",
  "glam",
  "gltf",
@@ -1297,7 +1310,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1998,6 +2011,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
+dependencies = [
+ "windows-targets 0.53.3",
 ]
 
 [[package]]
