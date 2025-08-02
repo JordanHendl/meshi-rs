@@ -71,7 +71,7 @@ impl MeshiEngine {
 
     fn update(&mut self) -> f32 {
         self.frame_timer.stop();
-        let dt = self.frame_timer.elapsed_micro_f32();
+        let dt = self.frame_timer.elapsed_seconds_f32();
         self.frame_timer.start();
         self.render.update(dt);
         self.physics.update(dt);
