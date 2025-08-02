@@ -42,7 +42,7 @@ fn main() {
     };
     let ev = from_winit_event(&focus_event).expect("focused");
     assert_eq!(ev.event_type(), EventType::Pressed);
-    assert_eq!(ev.source(), EventSource::Unknown);
+    assert_eq!(ev.source(), EventSource::Window);
 
     let focus_event = WEvent::WindowEvent {
         window_id,
@@ -50,7 +50,7 @@ fn main() {
     };
     let ev = from_winit_event(&focus_event).expect("unfocused");
     assert_eq!(ev.event_type(), EventType::Released);
-    assert_eq!(ev.source(), EventSource::Unknown);
+    assert_eq!(ev.source(), EventSource::Window);
 
     let device_id: winit::event::DeviceId = unsafe { std::mem::zeroed() };
 

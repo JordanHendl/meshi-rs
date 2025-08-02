@@ -21,6 +21,7 @@ pub enum EventSource {
     Mouse = 2,
     MouseButton = 3,
     Gamepad = 4,
+    Window = 5,
 }
 
 #[allow(dead_code)]
@@ -522,7 +523,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
         WEvent::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => Some(Event {
                 event_type: EventType::Quit,
-                source: EventSource::Unknown,
+                source: EventSource::Window,
                 payload: Payload { press: PressPayload { key: KeyCode::Undefined, previous: EventType::Unknown } },
                 timestamp: 0,
             }),
@@ -593,7 +594,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                 };
                 Some(Event {
                     event_type: et,
-                    source: EventSource::Unknown,
+                    source: EventSource::Window,
                     payload: Payload {
                         press: PressPayload {
                             key: KeyCode::Undefined,
