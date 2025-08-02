@@ -16,6 +16,11 @@ pub mod font;
 mod geometry_primitives;
 pub use font::*;
 
+#[derive(Default, Clone)]
+pub struct MeshResource {
+    pub name: String,
+}
+
 #[allow(dead_code)]
 struct Defaults {
 //    image: Handle<koji::Texture>,
@@ -26,7 +31,7 @@ struct Defaults {
 pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
-//    geometry: HashMap<String, MeshResource>,
+    geometry: HashMap<String, MeshResource>,
 //    images: HashMap<String, ImageResource>,
 //    materials: HashMap<String, Handle<miso::Material>>,
 //    fonts: HashMap<String, FontResource>,
@@ -43,7 +48,7 @@ impl Database {
         ctx: &mut dashi::Context,
     ) -> Result<Self, Error> {
         info!("Loading Database {}", format!("{}/db.json", base_path));
-        let json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
+        let _json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
 //        let info: json::Database = serde_json::from_str(&json_data)?;
 //
 //        let images_cfg = load_db_images(base_path, &info);
@@ -128,18 +133,30 @@ impl Database {
 //            ..Default::default()
 //        });
 
-        let mut db = Database {
+        let mut geometry = HashMap::new();
+        geometry.insert(
+            "MESHI_TRIANGLE".to_string(),
+            MeshResource {
+                name: "MESHI_TRIANGLE".to_string(),
+            },
+        );
+        geometry.insert(
+            "MESHI_CUBE".to_string(),
+            MeshResource {
+                name: "MESHI_CUBE".to_string(),
+            },
+        );
+        geometry.insert(
+            "MESHI_SPHERE".to_string(),
+            MeshResource {
+                name: "MESHI_SPHERE".to_string(),
+            },
+        );
+
+        let db = Database {
             base_path: base_path.to_string(),
             ctx,
-            //scene,
-//            images,
-//            fonts,
-//            geometry: Default::default(),
-//            //materials: Default::default(),
-//            defaults: Defaults {
-//                image: default_texture,
-//                material: default_material,
-//            },
+            geometry,
         };
 
  //       let ptr: *mut Database = &mut db;

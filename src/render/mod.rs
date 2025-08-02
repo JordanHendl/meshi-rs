@@ -51,6 +51,7 @@ struct EventCallbackInfo {
 #[allow(dead_code)]
 pub struct RenderEngine {
     ctx: Box<dashi::Context>,
+    display: gpu::Display,
     database: Database,
     event_cb: Option<EventCallbackInfo>,
     mesh_objects: Pool<MeshObject>,
@@ -74,6 +75,7 @@ impl RenderEngine {
 
         // The GPU context that holds all the data.
         let mut ctx = Box::new(gpu::Context::new(&ContextInfo { device }).unwrap());
+        let display = ctx.make_display(&Default::default()).unwrap();
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
         //            &mut ctx,
@@ -92,12 +94,11 @@ impl RenderEngine {
 
         let s = Self {
             ctx,
-            //            scene,
+            display,
             database,
             event_cb: None,
             mesh_objects: Default::default(),
             directional_lights: Default::default(),
-            //            global_camera,
         };
 
         s
@@ -125,14 +126,39 @@ impl RenderEngine {
     }
 
     pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
-        todo!()
-        //        let info: MeshObjectInfo = info.into();
-        //        info!(
-        //            "Registering Mesh Object {} with material {}",
-        //            info.mesh, info.material
-        //        );
-        //       let object = info.make_object(&mut self.database, &mut self.scene);
-        //        self.mesh_objects.insert(object).unwrap()
+        let info: MeshObjectInfo = info.into();
+        let object = info.make_object(&mut self.database);
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_cube(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_CUBE",
+            material: "MESHI_CUBE",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info.make_object(&mut self.database);
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_sphere(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_SPHERE",
+            material: "MESHI_SPHERE",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info.make_object(&mut self.database);
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_triangle(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_TRIANGLE",
+            material: "MESHI_TRIANGLE",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info.make_object(&mut self.database);
+        self.mesh_objects.insert(object).unwrap()
     }
 
     pub fn set_mesh_object_transform(
@@ -148,15 +174,20 @@ impl RenderEngine {
     }
 
     pub fn update(&mut self, _delta_time: f32) {
-        //        for event in self.event_pump.poll_iter() {
-        //            if let Some(cb) = self.event_cb.as_mut() {
-        //                let mut e: event::Event = event.into();
-        //                let c = cb.event_cb;
-        //                c(&mut e, cb.user_data);
-        //            }
-        //        }
+        use winit::event_loop::ControlFlow;
+        use winit::platform::run_return::EventLoopExtRunReturn;
 
-        //        self.scene.update();
+        if self.event_cb.is_some() {
+            let cb = self.event_cb.as_mut().unwrap();
+            let event_loop = self.display.winit_event_loop();
+            event_loop.run_return(|event, _target, control_flow| {
+                *control_flow = ControlFlow::Exit;
+                if let Some(mut e) = event::from_winit_event(&event) {
+                    let c = cb.event_cb;
+                    c(&mut e, cb.user_data);
+                }
+            });
+        }
     }
 
     pub fn set_projection(&mut self, proj: &Mat4) {
@@ -176,10 +207,7 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-        //       self.event_cb = Some(EventCallbackInfo {
-        //           event_cb,
-        //           user_data,
-        //       });
+        self.event_cb = Some(EventCallbackInfo { event_cb, user_data });
     }
 
     pub fn set_scene(&mut self, _info: &SceneInfo) {

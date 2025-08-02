@@ -162,6 +162,21 @@ pub extern "C" fn meshi_gfx_create_renderable(
     unsafe { &mut *render }.register_mesh_object(unsafe { &*info })
 }
 
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_cube()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_sphere()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_triangle()
+}
+
 /// Update the transformation matrix for a renderable object.
 ///
 /// # Safety

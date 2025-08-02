@@ -197,6 +197,8 @@ pub struct Event {
 
 use glam::{vec2, Vec2};
 
+use winit::event::{ElementState, Event as WEvent, KeyboardInput, MouseButton as WMouseButton, VirtualKeyCode, WindowEvent, DeviceEvent};
+
 //impl From<SdlEvent> for Event {
 //    fn from(sdl_event: SdlEvent) -> Self {
 //        match sdl_event {
@@ -391,3 +393,170 @@ use glam::{vec2, Vec2};
 //        _ => KeyCode::Undefined,
 //    }
 //}
+
+fn map_virtual_keycode(key: VirtualKeyCode) -> KeyCode {
+    use VirtualKeyCode::*;
+    match key {
+        A => KeyCode::A,
+        B => KeyCode::B,
+        C => KeyCode::C,
+        D => KeyCode::D,
+        E => KeyCode::E,
+        F => KeyCode::F,
+        G => KeyCode::G,
+        H => KeyCode::H,
+        I => KeyCode::I,
+        J => KeyCode::J,
+        K => KeyCode::K,
+        L => KeyCode::L,
+        M => KeyCode::M,
+        N => KeyCode::N,
+        O => KeyCode::O,
+        P => KeyCode::P,
+        Q => KeyCode::Q,
+        R => KeyCode::R,
+        S => KeyCode::S,
+        T => KeyCode::T,
+        U => KeyCode::U,
+        V => KeyCode::V,
+        W => KeyCode::W,
+        X => KeyCode::X,
+        Y => KeyCode::Y,
+        Z => KeyCode::Z,
+        Key0 => KeyCode::Digit0,
+        Key1 => KeyCode::Digit1,
+        Key2 => KeyCode::Digit2,
+        Key3 => KeyCode::Digit3,
+        Key4 => KeyCode::Digit4,
+        Key5 => KeyCode::Digit5,
+        Key6 => KeyCode::Digit6,
+        Key7 => KeyCode::Digit7,
+        Key8 => KeyCode::Digit8,
+        Key9 => KeyCode::Digit9,
+        Escape => KeyCode::Escape,
+        Return => KeyCode::Enter,
+        Space => KeyCode::Space,
+        Tab => KeyCode::Tab,
+        Back => KeyCode::Backspace,
+        Insert => KeyCode::Insert,
+        Delete => KeyCode::Delete,
+        Home => KeyCode::Home,
+        End => KeyCode::End,
+        PageUp => KeyCode::PageUp,
+        PageDown => KeyCode::PageDown,
+        Left => KeyCode::ArrowLeft,
+        Right => KeyCode::ArrowRight,
+        Up => KeyCode::ArrowUp,
+        Down => KeyCode::ArrowDown,
+        F1 => KeyCode::F1,
+        F2 => KeyCode::F2,
+        F3 => KeyCode::F3,
+        F4 => KeyCode::F4,
+        F5 => KeyCode::F5,
+        F6 => KeyCode::F6,
+        F7 => KeyCode::F7,
+        F8 => KeyCode::F8,
+        F9 => KeyCode::F9,
+        F10 => KeyCode::F10,
+        F11 => KeyCode::F11,
+        F12 => KeyCode::F12,
+        LShift | RShift => KeyCode::Shift,
+        LControl | RControl => KeyCode::Control,
+        LAlt | RAlt => KeyCode::Alt,
+        LWin | RWin => KeyCode::Meta,
+        Minus => KeyCode::Minus,
+        Equals => KeyCode::Equals,
+        LBracket => KeyCode::LeftBracket,
+        RBracket => KeyCode::RightBracket,
+        Backslash => KeyCode::Backslash,
+        Semicolon => KeyCode::Semicolon,
+        Apostrophe => KeyCode::Apostrophe,
+        Comma => KeyCode::Comma,
+        Period => KeyCode::Period,
+        Slash => KeyCode::Slash,
+        Grave => KeyCode::GraveAccent,
+        Numpad0 => KeyCode::Numpad0,
+        Numpad1 => KeyCode::Numpad1,
+        Numpad2 => KeyCode::Numpad2,
+        Numpad3 => KeyCode::Numpad3,
+        Numpad4 => KeyCode::Numpad4,
+        Numpad5 => KeyCode::Numpad5,
+        Numpad6 => KeyCode::Numpad6,
+        Numpad7 => KeyCode::Numpad7,
+        Numpad8 => KeyCode::Numpad8,
+        Numpad9 => KeyCode::Numpad9,
+        NumpadAdd => KeyCode::NumpadAdd,
+        NumpadSubtract => KeyCode::NumpadSubtract,
+        NumpadMultiply => KeyCode::NumpadMultiply,
+        NumpadDivide => KeyCode::NumpadDivide,
+        NumpadDecimal => KeyCode::NumpadDecimal,
+        NumpadEnter => KeyCode::NumpadEnter,
+        CapsLock => KeyCode::CapsLock,
+        Numlock => KeyCode::NumLock,
+        Scroll => KeyCode::ScrollLock,
+        Snapshot => KeyCode::PrintScreen,
+        Pause => KeyCode::Pause,
+        _ => KeyCode::Undefined,
+    }
+}
+
+pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
+    match event {
+        WEvent::WindowEvent { event, .. } => match event {
+            WindowEvent::CloseRequested => Some(Event {
+                event_type: EventType::Quit,
+                source: EventSource::Unknown,
+                payload: Payload { press: PressPayload { key: KeyCode::Undefined, previous: EventType::Unknown } },
+                timestamp: 0,
+            }),
+            WindowEvent::KeyboardInput { input, .. } => {
+                if let Some(k) = input.virtual_keycode {
+                    let key = map_virtual_keycode(k);
+                    let et = if input.state == ElementState::Pressed {
+                        EventType::Pressed
+                    } else {
+                        EventType::Released
+                    };
+                    Some(Event {
+                        event_type: et,
+                        source: EventSource::Key,
+                        payload: Payload { press: PressPayload { key, previous: EventType::Unknown } },
+                        timestamp: 0,
+                    })
+                } else {
+                    None
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => Some(Event {
+                event_type: EventType::Motion2D,
+                source: EventSource::Mouse,
+                payload: Payload { motion2d: Motion2DPayload { motion: vec2(position.x as f32, position.y as f32) } },
+                timestamp: 0,
+            }),
+            WindowEvent::MouseInput { state, button, .. } => {
+                let btn = match button {
+                    WMouseButton::Left => MouseButton::Left,
+                    WMouseButton::Right => MouseButton::Right,
+                    _ => MouseButton::Left,
+                };
+                let et = if *state == ElementState::Pressed { EventType::Pressed } else { EventType::Released };
+                Some(Event {
+                    event_type: et,
+                    source: EventSource::MouseButton,
+                    payload: Payload { mouse_button: MouseButtonPayload { button: btn, pos: vec2(0.0, 0.0) } },
+                    timestamp: 0,
+                })
+            }
+            _ => None,
+        },
+        WEvent::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+            Some(Event {
+                event_type: EventType::Motion2D,
+                source: EventSource::Mouse,
+                payload: Payload { motion2d: Motion2DPayload { motion: vec2(delta.0 as f32, delta.1 as f32) } },
+                timestamp: 0,
+            })
+        }
+        _ => None,
+    }
+}
