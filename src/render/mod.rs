@@ -8,7 +8,8 @@ use database::{Database, Error as DatabaseError};
 use glam::{Mat4, Vec4};
 use tracing::{info, warn};
 
-use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo};
+use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget};
+use crate::render::database::geometry_primitives::{self, CubePrimitiveInfo, SpherePrimitiveInfo};
 pub mod config;
 pub mod database;
 pub mod event;
@@ -186,12 +187,20 @@ impl RenderEngine {
         }
     }
 
+    pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
+        self.directional_lights.release(handle);
+    }
+
     pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
         let info: MeshObjectInfo = info.into();
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
         self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
+        self.mesh_objects.release(handle);
     }
 
     pub fn create_cube(&mut self) -> Handle<MeshObject> {
@@ -206,6 +215,25 @@ impl RenderEngine {
         self.mesh_objects.insert(object).unwrap()
     }
 
+    pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
+        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let mesh = geometry_primitives::make_cube(info, ctx);
+        let material = self
+            .database
+            .fetch_material("DEFAULT")
+            .expect("failed to fetch default material");
+        let target = MeshTarget {
+            mesh: mesh.clone(),
+            material,
+        };
+        let object = MeshObject {
+            targets: vec![target],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
     pub fn create_sphere(&mut self) -> Handle<MeshObject> {
         let info = MeshObjectInfo {
             mesh: "MESHI_SPHERE",
@@ -215,6 +243,25 @@ impl RenderEngine {
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
+        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let mesh = geometry_primitives::make_sphere(info, ctx);
+        let material = self
+            .database
+            .fetch_material("DEFAULT")
+            .expect("failed to fetch default material");
+        let target = MeshTarget {
+            mesh: mesh.clone(),
+            material,
+        };
+        let object = MeshObject {
+            targets: vec![target],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -239,10 +286,7 @@ impl RenderEngine {
             Some(obj) => {
                 obj.transform = *transform;
                 for target in &obj.targets {
-                    info!(
-                        "Submitting transform for mesh '{}'", 
-                        target.mesh.name
-                    );
+                    info!("Submitting transform for mesh '{}'", target.mesh.name);
                 }
             }
             None => {

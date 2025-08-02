@@ -198,13 +198,37 @@ pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<Mes
 }
 
 #[no_mangle]
+pub extern "C" fn meshi_gfx_create_cube_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::CubePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
+}
+
+#[no_mangle]
 pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
     unsafe { &mut *render }.create_sphere()
 }
 
 #[no_mangle]
+pub extern "C" fn meshi_gfx_create_sphere_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::SpherePrimitiveInfo,
+) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
+}
+
+#[no_mangle]
 pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
     unsafe { &mut *render }.create_triangle()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_mesh_object(
+    render: *mut RenderEngine,
+    h: *const Handle<MeshObject>,
+) {
+    unsafe { &mut *render }.release_mesh_object(unsafe { *h });
 }
 
 /// Update the transformation matrix for a renderable object.
@@ -235,6 +259,14 @@ pub extern "C" fn meshi_gfx_create_directional_light(
     info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
     unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_directional_light(
+    render: *mut RenderEngine,
+    h: *const Handle<DirectionalLight>,
+) {
+    unsafe { &mut *render }.release_directional_light(unsafe { *h });
 }
 
 /// Update the transform for a directional light.
