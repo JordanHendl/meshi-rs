@@ -1,11 +1,13 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, fmt};
 
 use dashi::{
     utils::{Handle, Pool},
     *,
 };
-use database::{make_cube, make_sphere, make_triangle, Database};
+
+use database::{make_cube, make_sphere, make_triangle, Database, Database, Error as DatabaseError};
 pub use database::{CubePrimitiveInfo, SpherePrimitiveInfo, TrianglePrimitiveInfo};
+
 use glam::{Mat4, Vec4};
 use tracing::info;
 
@@ -13,6 +15,40 @@ use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget};
 pub mod config;
 pub mod database;
 pub mod event;
+
+#[derive(Debug)]
+pub enum RenderError {
+    DeviceSelection,
+    ContextCreation,
+    DisplayCreation,
+    Database(DatabaseError),
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RenderError::DeviceSelection => write!(f, "failed to select device"),
+            RenderError::ContextCreation => write!(f, "failed to create GPU context"),
+            RenderError::DisplayCreation => write!(f, "failed to create display"),
+            RenderError::Database(err) => write!(f, "database error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RenderError::Database(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<DatabaseError> for RenderError {
+    fn from(value: DatabaseError) -> Self {
+        RenderError::Database(value)
+    }
+}
 
 pub struct SceneInfo<'a> {
     pub models: &'a [&'a str],
@@ -52,7 +88,7 @@ struct EventCallbackInfo {
 
 #[allow(dead_code)]
 pub struct RenderEngine {
-    ctx: Box<dashi::Context>,
+    ctx: Option<Box<gpu::Context>>,
     display: Option<gpu::Display>,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     database: Database,
@@ -63,9 +99,9 @@ pub struct RenderEngine {
 
 #[allow(dead_code)]
 impl RenderEngine {
-    pub fn new(info: &RenderEngineInfo) -> Self {
-        let device = DeviceSelector::new()
-            .unwrap()
+    pub fn new(info: &RenderEngineInfo) -> Result<Self, RenderError> {
+        let device_selector = DeviceSelector::new().map_err(|_| RenderError::DeviceSelection)?;
+        let device = device_selector
             .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
             .unwrap_or_default();
 
@@ -78,21 +114,30 @@ impl RenderEngine {
 
         // The GPU context that holds all the data.
         let mut ctx = if info.headless {
-            Box::new(gpu::Context::headless(&ContextInfo { device }).unwrap())
+            Box::new(
+                gpu::Context::headless(&ContextInfo { device })
+                    .map_err(|_| RenderError::ContextCreation)?,
+            )
         } else {
-            Box::new(gpu::Context::new(&ContextInfo { device }).unwrap())
+            Box::new(
+                gpu::Context::new(&ContextInfo { device })
+                    .map_err(|_| RenderError::ContextCreation)?,
+            )
         };
 
         let display = if info.headless {
             None
         } else {
-            Some(ctx.make_display(&Default::default()).unwrap())
+            Some(
+                ctx.make_display(&Default::default())
+                    .map_err(|_| RenderError::DisplayCreation)?,
+            )
         };
 
         let event_loop = if info.headless {
-            Some(winit::event_loop::EventLoop::new())
-        } else {
             None
+        } else {
+            Some(winit::event_loop::EventLoop::new())
         };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
@@ -102,7 +147,7 @@ impl RenderEngine {
         //            },
         //        ));
 
-        let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx).unwrap();
+        let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
 
         //        let global_camera = scene.register_camera(&CameraInfo {
         //            pass: "ALL",
@@ -111,7 +156,7 @@ impl RenderEngine {
         //        });
 
         let s = Self {
-            ctx,
+            ctx: Some(ctx),
             display,
             event_loop,
             database,
@@ -120,7 +165,7 @@ impl RenderEngine {
             directional_lights: Default::default(),
         };
 
-        s
+        Ok(s)
     }
 
     pub fn register_directional_light(
@@ -235,11 +280,24 @@ impl RenderEngine {
         handle: Handle<MeshObject>,
         transform: &glam::Mat4,
     ) {
-        //        if let Some(m) = self.mesh_objects.get_ref(handle) {
-        //            for t in &m.targets {
-        //                self.scene.update_object_transform(*t, transform);
-        //            }
-        //        }
+        match self.mesh_objects.get_mut_ref(handle) {
+            Some(obj) => {
+                obj.transform = *transform;
+                for target in &obj.targets {
+                    info!(
+                        "Submitting transform for mesh '{}'", 
+                        target.mesh.name
+                    );
+                }
+            }
+            None => {
+                info!(
+                    "Attempted to set transform for invalid mesh object handle (slot: {}, generation: {})",
+                    handle.slot,
+                    handle.generation
+                );
+            }
+        }
     }
 
     pub fn update(&mut self, _delta_time: f32) {
@@ -313,5 +371,18 @@ impl RenderEngine {
             self.database.load_image(i)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for RenderEngine {
+    fn drop(&mut self) {
+        if let Some(display) = self.display.take() {
+            if let Some(ctx) = self.ctx.as_mut() {
+                ctx.destroy_display(display);
+            }
+        }
+        if let Some(ctx) = self.ctx.take() {
+            ctx.destroy();
+        }
     }
 }
