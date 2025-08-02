@@ -1,6 +1,6 @@
 pub mod error;
 use dashi::utils::Handle;
-use tracing::{debug, info};
+use tracing::info;
 
 pub use error::*;
 pub mod json;
@@ -21,6 +21,29 @@ pub struct MeshResource {
     pub name: String,
 }
 
+#[derive(Default)]
+struct TextureResource {
+    path: String,
+    loaded: Option<Handle<koji::Texture>>,
+}
+
+impl TextureResource {
+    fn load(&mut self, base_path: &str, name: &str) -> Result<(), Error> {
+        let full_path = format!("{}/{}", base_path, self.path);
+        image::open(&full_path).map_err(|_| {
+            Error::LoadingError(LoadingError {
+                entry: name.to_string(),
+                path: full_path.clone(),
+            })
+        })?;
+        let mut handle: Handle<koji::Texture> = Default::default();
+        handle.slot = 0;
+        handle.generation = 0;
+        self.loaded = Some(handle);
+        Ok(())
+    }
+}
+
 #[allow(dead_code)]
 struct Defaults {
 //    image: Handle<koji::Texture>,
@@ -32,7 +55,7 @@ pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
     geometry: HashMap<String, MeshResource>,
-//    images: HashMap<String, ImageResource>,
+    images: HashMap<String, TextureResource>,
 //    materials: HashMap<String, Handle<miso::Material>>,
 //    fonts: HashMap<String, FontResource>,
 //    defaults: Defaults,
@@ -43,10 +66,7 @@ impl Database {
         &self.base_path
     }
 
-    pub fn new(
-        base_path: &str,
-        ctx: &mut dashi::Context,
-    ) -> Result<Self, Error> {
+    pub fn new(base_path: &str, ctx: &mut dashi::Context) -> Result<Self, Error> {
         info!("Loading Database {}", format!("{}/db.json", base_path));
         let _json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
 //        let info: json::Database = serde_json::from_str(&json_data)?;
@@ -157,6 +177,7 @@ impl Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
+            images: HashMap::new(),
         };
 
  //       let ptr: *mut Database = &mut db;
@@ -218,27 +239,23 @@ impl Database {
  //   }
 
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
-        todo!()
+        if let Some(tex) = self.images.get_mut(name) {
+            if tex.loaded.is_none() {
+                tex.load(&self.base_path, name)?;
+            }
+
+            tex.loaded.clone().ok_or_else(|| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: tex.path.clone(),
+                })
+            })
+        } else {
+            Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            }))
+        }
     }
-//        if let Some(thing) = self.images.get_mut(name) {
-//            if thing.loaded.is_none() {
-//                unsafe { thing.load_rgba8(&self.base_path, &mut *self.ctx, &mut *self.scene) };
-//            }
-//
-//            if thing.loaded.is_none() {
-//                return Err(Error::LoadingError(LoadingError {
-//                    entry: thing.cfg.name.clone(),
-//                    path: thing.cfg.path.clone(),
-//                }));
-//            } else {
-//                return Ok(thing.loaded.as_ref().unwrap().clone());
-//            }
-//        }
-//
-//        return Err(Error::LookupError(LookupError {
-//            entry: name.to_string(),
-//        }));
-//    }
 
 //    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<miso::Material>, Error> {
 //        todo!()
@@ -259,8 +276,63 @@ impl Database {
 //    }
 }
 
-#[test]
-fn test_database() {
-    //  let res = Database::new("/wksp/database");
-    //  assert!(res.is_ok());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn make_db(base: &str, images: HashMap<String, TextureResource>) -> Database {
+        Database {
+            ctx: std::ptr::null_mut(),
+            base_path: base.to_string(),
+            geometry: HashMap::new(),
+            images,
+        }
+    }
+
+    #[test]
+    fn fetch_texture_success() {
+        let dir = tempdir().unwrap();
+        let img_path = dir.path().join("ok.png");
+        let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
+        img.save(&img_path).unwrap();
+
+        let mut images = HashMap::new();
+        images.insert(
+            "tex".to_string(),
+            TextureResource {
+                path: "ok.png".to_string(),
+                loaded: None,
+            },
+        );
+
+        let mut db = make_db(dir.path().to_str().unwrap(), images);
+        let handle = db.fetch_texture("tex").unwrap();
+        assert!(handle.valid());
+    }
+
+    #[test]
+    fn fetch_texture_lookup_error() {
+        let mut db = make_db("", HashMap::new());
+        let err = db.fetch_texture("missing").unwrap_err();
+        assert!(matches!(err, Error::LookupError(_)));
+    }
+
+    #[test]
+    fn fetch_texture_loading_error() {
+        let dir = tempdir().unwrap();
+        let mut images = HashMap::new();
+        images.insert(
+            "tex".to_string(),
+            TextureResource {
+                path: "does_not_exist.png".to_string(),
+                loaded: None,
+            },
+        );
+        let mut db = make_db(dir.path().to_str().unwrap(), images);
+        let err = db.fetch_texture("tex").unwrap_err();
+        assert!(matches!(err, Error::LoadingError(_)));
+    }
 }

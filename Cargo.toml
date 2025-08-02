@@ -47,3 +47,6 @@ harness = false
 name = "mesh_physics"
 path = "tests/mesh_physics.rs"
 harness = false
+
+[dev-dependencies]
+tempfile = "3"
