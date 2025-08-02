@@ -4,8 +4,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
       VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
     steps:
@@ -20,6 +23,7 @@ jobs:
           override: true
 
       - name: Install llvmpipe Vulkan driver
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers
@@ -30,17 +34,34 @@ jobs:
       - name: Package
         run: cargo package --allow-dirty --no-verify
 
-      # Uncomment this step to publish to crates.io
-      # - name: Publish to crates.io
-      #   run: cargo publish --token ${{ secrets.CARGO_TOKEN }}
-
-      - name: Archive release artifacts
+      - name: Prepare artifact
+        shell: bash
         run: |
           mkdir -p artifacts
-          cp -r target/release artifacts/
-          tar -czf artifacts.tar.gz -C artifacts .
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp target/release/meshi.dll artifacts/meshi.dll
+          else
+            cp target/release/libmeshi.so artifacts/meshi.so
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: meshi-${{ matrix.os }}
+          path: artifacts/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts.tar.gz
+          files: |
+            artifacts/meshi-ubuntu-latest/meshi.so
+            artifacts/meshi-windows-latest/meshi.dll
