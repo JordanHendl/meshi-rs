@@ -153,9 +153,14 @@ pub extern "C" fn meshi_register_event_callback(
 /// Advance the simulation by one frame and render the result.
 ///
 /// # Safety
-/// `engine` must be a valid engine pointer.
+/// The caller must pass a valid pointer returned by [`meshi_make_engine`].
+/// Providing a null pointer causes this function to return `0.0` without
+/// performing any update.
 #[no_mangle]
 pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
+    if engine.is_null() {
+        return 0.0;
+    }
     unsafe { &mut *engine }.update() as c_float
 }
 
@@ -205,13 +210,18 @@ pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle
 /// Update the transformation matrix for a renderable object.
 ///
 /// # Safety
-/// `render` must be valid and `transform` must not be null.
+/// `render` must be obtained from [`meshi_get_graphics_system`] and
+/// `transform` must point to a valid [`Mat4`]. If either pointer is null this
+/// function returns without modifying the renderable.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_renderable_transform(
     render: *mut RenderEngine,
     h: Handle<MeshObject>,
     transform: *const Mat4,
 ) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
     unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
 }
 
@@ -351,13 +361,18 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
 /// Retrieve the current position and rotation of a rigid body.
 ///
 /// # Safety
-/// `physics`, `h`, and `out_status` must be valid, non-null pointers.
+/// `physics`, `h`, and `out_status` must all be valid pointers. The function
+/// returns immediately and leaves `out_status` untouched if any pointer is
+/// null.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     out_status: *mut physics::ActorStatus,
 ) {
+    if physics.is_null() || h.is_null() || out_status.is_null() {
+        return;
+    }
     let status = unsafe { &*physics }.get_rigid_body_status(unsafe { *h });
     unsafe { *out_status = status };
 }
