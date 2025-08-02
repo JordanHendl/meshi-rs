@@ -89,9 +89,9 @@ impl RenderEngine {
         };
 
         let event_loop = if info.headless {
-            Some(winit::event_loop::EventLoop::new())
-        } else {
             None
+        } else {
+            Some(winit::event_loop::EventLoop::new())
         };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
