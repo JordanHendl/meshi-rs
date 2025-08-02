@@ -192,11 +192,24 @@ impl RenderEngine {
         handle: Handle<MeshObject>,
         transform: &glam::Mat4,
     ) {
-        //        if let Some(m) = self.mesh_objects.get_ref(handle) {
-        //            for t in &m.targets {
-        //                self.scene.update_object_transform(*t, transform);
-        //            }
-        //        }
+        match self.mesh_objects.get_mut_ref(handle) {
+            Some(obj) => {
+                obj.transform = *transform;
+                for target in &obj.targets {
+                    info!(
+                        "Submitting transform for mesh '{}'", 
+                        target.mesh.name
+                    );
+                }
+            }
+            None => {
+                info!(
+                    "Attempted to set transform for invalid mesh object handle (slot: {}, generation: {})",
+                    handle.slot,
+                    handle.generation
+                );
+            }
+        }
     }
 
     pub fn update(&mut self, _delta_time: f32) {
