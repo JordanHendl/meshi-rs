@@ -51,7 +51,7 @@ struct EventCallbackInfo {
 
 #[allow(dead_code)]
 pub struct RenderEngine {
-    ctx: Box<dashi::Context>,
+    ctx: Option<Box<gpu::Context>>,
     display: Option<gpu::Display>,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     database: Database,
@@ -89,9 +89,9 @@ impl RenderEngine {
         };
 
         let event_loop = if info.headless {
-            Some(winit::event_loop::EventLoop::new())
-        } else {
             None
+        } else {
+            Some(winit::event_loop::EventLoop::new())
         };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
@@ -110,7 +110,7 @@ impl RenderEngine {
         //        });
 
         let s = Self {
-            ctx,
+            ctx: Some(ctx),
             display,
             event_loop,
             database,
@@ -192,11 +192,24 @@ impl RenderEngine {
         handle: Handle<MeshObject>,
         transform: &glam::Mat4,
     ) {
-        //        if let Some(m) = self.mesh_objects.get_ref(handle) {
-        //            for t in &m.targets {
-        //                self.scene.update_object_transform(*t, transform);
-        //            }
-        //        }
+        match self.mesh_objects.get_mut_ref(handle) {
+            Some(obj) => {
+                obj.transform = *transform;
+                for target in &obj.targets {
+                    info!(
+                        "Submitting transform for mesh '{}'", 
+                        target.mesh.name
+                    );
+                }
+            }
+            None => {
+                info!(
+                    "Attempted to set transform for invalid mesh object handle (slot: {}, generation: {})",
+                    handle.slot,
+                    handle.generation
+                );
+            }
+        }
     }
 
     pub fn update(&mut self, _delta_time: f32) {
@@ -253,7 +266,10 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-        self.event_cb = Some(EventCallbackInfo { event_cb, user_data });
+        self.event_cb = Some(EventCallbackInfo {
+            event_cb,
+            user_data,
+        });
     }
 
     /// Load the resources referenced by `SceneInfo` into the renderer's
@@ -267,5 +283,18 @@ impl RenderEngine {
             self.database.load_image(i)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for RenderEngine {
+    fn drop(&mut self) {
+        if let Some(display) = self.display.take() {
+            if let Some(ctx) = self.ctx.as_mut() {
+                ctx.destroy_display(display);
+            }
+        }
+        if let Some(ctx) = self.ctx.take() {
+            ctx.destroy();
+        }
     }
 }
