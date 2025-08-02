@@ -16,12 +16,13 @@ use utils::timer::Timer;
 /// Information used to create a [`MeshiEngine`].
 ///
 /// Both strings must be valid null terminated C strings.
-#[repr(C)]
 pub struct MeshiEngineInfo {
     /// Name of the application using the engine.
     pub application_name: *const c_char,
     /// Directory containing the application resources.
     pub application_location: *const c_char,
+    /// Whether to run without creating a window (0 = windowed, 1 = headless).
+    pub headless: i32,
 }
 
 /// Primary engine instance returned by [`meshi_make_engine`].
@@ -59,7 +60,7 @@ impl MeshiEngine {
             render: RenderEngine::new(&RenderEngineInfo {
                 application_path: appdir.to_string(),
                 scene_info: None,
-                headless: false,
+                headless: info.headless != 0,
             }),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
@@ -100,6 +101,24 @@ pub extern "C" fn meshi_make_engine(info: *const MeshiEngineInfo) -> *mut MeshiE
     let mut e = MeshiEngine::new(unsafe { &*info });
     e.frame_timer.start();
     return Box::into_raw(e);
+}
+
+/// Convenience wrapper to create a headless engine without modifying
+/// [`MeshiEngineInfo`].
+///
+/// # Safety
+/// `application_name` and `application_location` must be valid C strings.
+#[no_mangle]
+pub extern "C" fn meshi_make_engine_headless(
+    application_name: *const c_char,
+    application_location: *const c_char,
+) -> *mut MeshiEngine {
+    let info = MeshiEngineInfo {
+        application_name,
+        application_location,
+        headless: 1,
+    };
+    meshi_make_engine(&info)
 }
 
 /// Destroy an engine previously created with [`meshi_make_engine`].
