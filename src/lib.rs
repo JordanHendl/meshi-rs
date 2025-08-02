@@ -5,7 +5,7 @@ mod utils;
 use dashi::utils::Handle;
 use glam::Mat4;
 use object::{FFIMeshObjectInfo, MeshObject};
-use physics::{ForceApplyInfo, PhysicsSimulation};
+use physics::{CollisionShape, ContactInfo, ForceApplyInfo, PhysicsSimulation};
 use render::{DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo};
 use std::ffi::*;
 use tracing::{info, Level};
@@ -61,7 +61,8 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
-            }),
+            })
+            .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
             name: appname.to_string(),
@@ -129,7 +130,11 @@ pub extern "C" fn meshi_make_engine_headless(
 #[no_mangle]
 pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
     if !engine.is_null() {
-        unsafe { drop(Box::from_raw(engine)) };
+        unsafe {
+            // Take ownership and ensure the engine is fully dropped before returning.
+            let _engine = Box::from_raw(engine);
+            // `_engine` is dropped here when it goes out of scope.
+        }
     }
 }
 /// Register a callback to receive window events from the renderer.
@@ -148,9 +153,14 @@ pub extern "C" fn meshi_register_event_callback(
 /// Advance the simulation by one frame and render the result.
 ///
 /// # Safety
-/// `engine` must be a valid engine pointer.
+/// The caller must pass a valid pointer returned by [`meshi_make_engine`].
+/// Providing a null pointer causes this function to return `0.0` without
+/// performing any update.
 #[no_mangle]
 pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
+    if engine.is_null() {
+        return 0.0;
+    }
     unsafe { &mut *engine }.update() as c_float
 }
 
@@ -200,13 +210,18 @@ pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle
 /// Update the transformation matrix for a renderable object.
 ///
 /// # Safety
-/// `render` must be valid and `transform` must not be null.
+/// `render` must be obtained from [`meshi_get_graphics_system`] and
+/// `transform` must point to a valid [`Mat4`]. If either pointer is null this
+/// function returns without modifying the renderable.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_renderable_transform(
     render: *mut RenderEngine,
     h: Handle<MeshObject>,
     transform: *const Mat4,
 ) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
     unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
 }
 
@@ -370,15 +385,53 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
 /// Retrieve the current position and rotation of a rigid body.
 ///
 /// # Safety
-/// `physics`, `h`, and `out_status` must be valid, non-null pointers.
+/// `physics`, `h`, and `out_status` must all be valid pointers. The function
+/// returns immediately and leaves `out_status` untouched if any pointer is
+/// null.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     out_status: *mut physics::ActorStatus,
 ) {
+    if physics.is_null() || h.is_null() || out_status.is_null() {
+        return;
+    }
     let status = unsafe { &*physics }.get_rigid_body_status(unsafe { *h });
     unsafe { *out_status = status };
+}
+
+/// Set the collision shape for a rigid body.
+///
+/// # Safety
+/// `physics`, `h`, and `shape` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_physx_set_collision_shape(
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
+    shape: *const CollisionShape,
+) {
+    unsafe { &mut *physics }.set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape });
+}
+
+/// Retrieve collision contacts from the last simulation update.
+/// Returns the number of contacts written to `out_contacts`.
+///
+/// # Safety
+/// `physics` and `out_contacts` must be valid pointers and `out_contacts`
+/// must have space for at least `max` elements.
+#[no_mangle]
+pub extern "C" fn meshi_physx_get_contacts(
+    physics: *mut PhysicsSimulation,
+    out_contacts: *mut ContactInfo,
+    max: usize,
+) -> usize {
+    let contacts = unsafe { &*physics }.get_contacts();
+    let count = contacts.len().min(max);
+    unsafe {
+        std::ptr::copy_nonoverlapping(contacts.as_ptr(), out_contacts, count);
+    }
+    count
 }
 
 #[cfg(test)]
