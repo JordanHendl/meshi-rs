@@ -194,4 +194,9 @@ impl PhysicsSimulation {
         assert!(h.valid());
         self.rigid_bodies.get_ref(h).unwrap().into()
     }
+
+    pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Vec3 {
+        assert!(h.valid());
+        self.rigid_bodies.get_ref(h).unwrap().velocity
+    }
 }
