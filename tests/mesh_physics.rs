@@ -42,9 +42,8 @@ fn main() {
     assert_eq!(out.rotation, new_status.rotation);
 
     unsafe {
+        meshi_gfx_release_mesh_object(render, &cube);
         meshi_physx_release_rigid_body(physics, &rb);
-    }
-    unsafe {
         meshi_destroy_engine(engine);
     }
 }

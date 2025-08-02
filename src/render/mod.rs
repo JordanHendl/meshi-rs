@@ -143,6 +143,20 @@ impl RenderEngine {
         }
     }
 
+    pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
+        self.directional_lights.release(handle);
+    }
+
+    pub fn has_directional_light(&self, handle: Handle<DirectionalLight>) -> bool {
+        self.directional_lights.get_ref(handle).is_some()
+    }
+
+    pub fn insert_dummy_directional_light(&mut self) -> Handle<DirectionalLight> {
+        self.directional_lights
+            .insert(DirectionalLight::default())
+            .unwrap()
+    }
+
     pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
         let info: MeshObjectInfo = info.into();
         let object = info
@@ -197,6 +211,18 @@ impl RenderEngine {
         //                self.scene.update_object_transform(*t, transform);
         //            }
         //        }
+    }
+
+    pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
+        self.mesh_objects.release(handle);
+    }
+
+    pub fn has_mesh_object(&self, handle: Handle<MeshObject>) -> bool {
+        self.mesh_objects.get_ref(handle).is_some()
+    }
+
+    pub fn insert_dummy_mesh_object(&mut self) -> Handle<MeshObject> {
+        self.mesh_objects.insert(MeshObject::default()).unwrap()
     }
 
     pub fn update(&mut self, _delta_time: f32) {
@@ -269,3 +295,4 @@ impl RenderEngine {
         Ok(())
     }
 }
+
