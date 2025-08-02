@@ -1,10 +1,10 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, fmt};
 
 use dashi::{
     utils::{Handle, Pool},
     *,
 };
-use database::Database;
+use database::{Database, Error as DatabaseError};
 use glam::{Mat4, Vec4};
 use tracing::info;
 
@@ -12,6 +12,40 @@ use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo};
 pub mod config;
 pub mod database;
 pub mod event;
+
+#[derive(Debug)]
+pub enum RenderError {
+    DeviceSelection,
+    ContextCreation,
+    DisplayCreation,
+    Database(DatabaseError),
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RenderError::DeviceSelection => write!(f, "failed to select device"),
+            RenderError::ContextCreation => write!(f, "failed to create GPU context"),
+            RenderError::DisplayCreation => write!(f, "failed to create display"),
+            RenderError::Database(err) => write!(f, "database error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RenderError::Database(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<DatabaseError> for RenderError {
+    fn from(value: DatabaseError) -> Self {
+        RenderError::Database(value)
+    }
+}
 
 pub struct SceneInfo<'a> {
     pub models: &'a [&'a str],
@@ -62,9 +96,9 @@ pub struct RenderEngine {
 
 #[allow(dead_code)]
 impl RenderEngine {
-    pub fn new(info: &RenderEngineInfo) -> Self {
-        let device = DeviceSelector::new()
-            .unwrap()
+    pub fn new(info: &RenderEngineInfo) -> Result<Self, RenderError> {
+        let device_selector = DeviceSelector::new().map_err(|_| RenderError::DeviceSelection)?;
+        let device = device_selector
             .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
             .unwrap_or_default();
 
@@ -77,15 +111,24 @@ impl RenderEngine {
 
         // The GPU context that holds all the data.
         let mut ctx = if info.headless {
-            Box::new(gpu::Context::headless(&ContextInfo { device }).unwrap())
+            Box::new(
+                gpu::Context::headless(&ContextInfo { device })
+                    .map_err(|_| RenderError::ContextCreation)?,
+            )
         } else {
-            Box::new(gpu::Context::new(&ContextInfo { device }).unwrap())
+            Box::new(
+                gpu::Context::new(&ContextInfo { device })
+                    .map_err(|_| RenderError::ContextCreation)?,
+            )
         };
 
         let display = if info.headless {
             None
         } else {
-            Some(ctx.make_display(&Default::default()).unwrap())
+            Some(
+                ctx.make_display(&Default::default())
+                    .map_err(|_| RenderError::DisplayCreation)?,
+            )
         };
 
         let event_loop = if info.headless {
@@ -101,7 +144,7 @@ impl RenderEngine {
         //            },
         //        ));
 
-        let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx).unwrap();
+        let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
 
         //        let global_camera = scene.register_camera(&CameraInfo {
         //            pass: "ALL",
@@ -119,7 +162,7 @@ impl RenderEngine {
             directional_lights: Default::default(),
         };
 
-        s
+        Ok(s)
     }
 
     pub fn register_directional_light(
