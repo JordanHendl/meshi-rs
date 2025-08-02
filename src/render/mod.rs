@@ -210,7 +210,16 @@ impl RenderEngine {
         self.event_cb = Some(EventCallbackInfo { event_cb, user_data });
     }
 
-    pub fn set_scene(&mut self, _info: &SceneInfo) {
-        todo!()
+    /// Load the resources referenced by `SceneInfo` into the renderer's
+    /// database. Models and images that fail to load will return an error so
+    /// callers can react accordingly.
+    pub fn set_scene(&mut self, info: &SceneInfo) -> Result<(), database::Error> {
+        for m in info.models {
+            self.database.load_model(m)?;
+        }
+        for i in info.images {
+            self.database.load_image(i)?;
+        }
+        Ok(())
     }
 }

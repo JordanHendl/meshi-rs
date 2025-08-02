@@ -4,7 +4,7 @@ use tracing::{debug, info};
 
 pub use error::*;
 pub mod json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 mod images;
 use images::*;
@@ -32,7 +32,8 @@ pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
     geometry: HashMap<String, MeshResource>,
-//    images: HashMap<String, ImageResource>,
+    /// Names of images that have been successfully loaded.
+    images: HashSet<String>,
 //    materials: HashMap<String, Handle<miso::Material>>,
 //    fonts: HashMap<String, FontResource>,
 //    defaults: Defaults,
@@ -157,6 +158,7 @@ impl Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
+            images: HashSet::new(),
         };
 
  //       let ptr: *mut Database = &mut db;
@@ -189,6 +191,42 @@ impl Database {
  //       }
 
         Ok(db)
+    }
+
+    /// Load a model file referenced by `name` into the database.
+    ///
+    /// The model path is resolved relative to the database base path. The
+    /// model is considered loaded once the file exists and is readable. The
+    /// currently stubbed implementation simply registers the model name so
+    /// that it can be retrieved later by tests or callers.
+    pub fn load_model(&mut self, name: &str) -> Result<(), Error> {
+        let path = format!("{}/{}", self.base_path, name);
+        // Ensure the file exists on disk.
+        fs::read(&path)?;
+        // Register the model in the geometry map if not already present.
+        self.geometry
+            .entry(name.to_string())
+            .or_insert(MeshResource {
+                name: name.to_string(),
+            });
+        Ok(())
+    }
+
+    /// Load an image file referenced by `name` into the database.
+    ///
+    /// The image path is resolved relative to the database base path. The
+    /// image is decoded using the `image` crate to ensure it is valid. Loaded
+    /// image names are tracked so subsequent calls are inexpensive.
+    pub fn load_image(&mut self, name: &str) -> Result<(), Error> {
+        // Avoid re-loading the same image twice.
+        if self.images.contains(name) {
+            return Ok(());
+        }
+        let path = format!("{}/{}", self.base_path, name);
+        // Attempt to load the image; errors will propagate to the caller.
+        image::open(&path)?;
+        self.images.insert(name.to_string());
+        Ok(())
     }
 
  //   fn insert_material(&mut self, name: &str, mat: Handle<koji::Material>) {
