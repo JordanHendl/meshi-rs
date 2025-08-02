@@ -1,5 +1,5 @@
 pub mod error;
-use dashi::utils::Handle;
+use dashi::{utils::Handle, Buffer};
 use tracing::{debug, info};
 
 pub use error::*;
@@ -19,6 +19,10 @@ pub use font::*;
 #[derive(Default, Clone)]
 pub struct MeshResource {
     pub name: String,
+    pub vertices: Handle<Buffer>,
+    pub num_vertices: usize,
+    pub indices: Handle<Buffer>,
+    pub num_indices: usize,
 }
 
 #[allow(dead_code)]
@@ -137,21 +141,15 @@ impl Database {
         let mut geometry = HashMap::new();
         geometry.insert(
             "MESHI_TRIANGLE".to_string(),
-            MeshResource {
-                name: "MESHI_TRIANGLE".to_string(),
-            },
+            geometry_primitives::make_triangle(&Default::default(), ctx),
         );
         geometry.insert(
             "MESHI_CUBE".to_string(),
-            MeshResource {
-                name: "MESHI_CUBE".to_string(),
-            },
+            geometry_primitives::make_cube(&Default::default(), ctx),
         );
         geometry.insert(
             "MESHI_SPHERE".to_string(),
-            MeshResource {
-                name: "MESHI_SPHERE".to_string(),
-            },
+            geometry_primitives::make_sphere(&Default::default(), ctx),
         );
 
         let db = Database {
@@ -208,6 +206,7 @@ impl Database {
             .entry(name.to_string())
             .or_insert(MeshResource {
                 name: name.to_string(),
+                ..Default::default()
             });
         Ok(())
     }
