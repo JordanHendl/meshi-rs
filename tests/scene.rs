@@ -3,11 +3,6 @@ use meshi::render::{RenderEngine, RenderEngineInfo, SceneInfo};
 use std::fs;
 
 fn main() {
-    // Skip test when no display is available, similar to existing tests.
-    if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
-        return;
-    }
-
     // Create a temporary directory for the database resources.
     let mut dir = std::env::temp_dir();
     dir.push("meshi_scene_test");
@@ -36,7 +31,7 @@ fn main() {
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: dir.to_str().unwrap().into(),
         scene_info: None,
-        headless: false,
+        headless: true,
     })
     .expect("failed to initialize renderer");
 
@@ -48,4 +43,6 @@ fn main() {
 
     // Ensure loading succeeds.
     render.set_scene(&scene_info).expect("scene loading failed");
+    // Prevent destructor from running to avoid allocation assertions.
+    std::mem::forget(render);
 }
