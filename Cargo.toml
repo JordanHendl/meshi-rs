@@ -24,3 +24,26 @@ winit = "0.26"
 
 [lib]
 crate-type=["cdylib", "rlib"]
+
+[[example]]
+name = "ffi_init"
+path = "examples/ffi_init.rs"
+
+[[example]]
+name = "ffi_physics"
+path = "examples/ffi_physics.rs"
+
+[[test]]
+name = "engine"
+path = "tests/engine.rs"
+harness = false
+
+[[test]]
+name = "event"
+path = "tests/event.rs"
+harness = false
+
+[[test]]
+name = "mesh_physics"
+path = "tests/mesh_physics.rs"
+harness = false
