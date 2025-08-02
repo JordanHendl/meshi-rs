@@ -52,7 +52,7 @@ impl Database {
     pub fn new(
         base_path: &str,
         ctx: &mut dashi::Context,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         info!("Loading Database {}", format!("{}/db.json", base_path));
         let _json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
 //        let info: json::Database = serde_json::from_str(&json_data)?;
@@ -201,7 +201,7 @@ impl Database {
     /// model is considered loaded once the file exists and is readable. The
     /// currently stubbed implementation simply registers the model name so
     /// that it can be retrieved later by tests or callers.
-    pub fn load_model(&mut self, name: &str) -> Result<(), Error> {
+    pub fn load_model(&mut self, name: &str) -> Result<()> {
         let path = format!("{}/{}", self.base_path, name);
         // Ensure the file exists on disk.
         fs::read(&path)?;
@@ -220,7 +220,7 @@ impl Database {
     /// The image path is resolved relative to the database base path. The
     /// image is decoded using the `image` crate to ensure it is valid. Loaded
     /// image names are tracked so subsequent calls are inexpensive.
-    pub fn load_image(&mut self, name: &str) -> Result<(), Error> {
+    pub fn load_image(&mut self, name: &str) -> Result<()> {
         if self.textures.contains_key(name) {
             return Ok(());
         }
@@ -256,7 +256,7 @@ impl Database {
  //       );
  //   }
 
-    pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
+    pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
         match self.textures.get_mut(name) {
             Some(entry) => {
                 if let Some(handle) = entry {
@@ -277,11 +277,11 @@ impl Database {
             })),
         }
     }
-    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
+    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
         self.fetch_texture(name)
     }
 
-    pub fn fetch_mesh(&self, name: &str) -> Result<MeshResource, Error> {
+    pub fn fetch_mesh(&self, name: &str) -> Result<MeshResource> {
         match self.geometry.get(name) {
             Some(mesh) => Ok(mesh.clone()),
             None => Err(Error::LookupError(LookupError {

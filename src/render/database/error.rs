@@ -1,4 +1,8 @@
 use std::fmt;
+
+/// A convenient result type wrapping [`Error`].
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub struct SlotError {}
 
@@ -38,11 +42,38 @@ impl fmt::Display for LoadingError {
         )
     }
 }
+
+impl std::error::Error for SlotError {}
+
+impl std::error::Error for LookupError {}
+
+impl std::error::Error for LoadingError {}
+
 #[derive(Debug)]
 pub enum Error {
     LookupError(LookupError),
     LoadingError(LoadingError),
     SlotError(),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::LookupError(err) => err.fmt(f),
+            Error::LoadingError(err) => err.fmt(f),
+            Error::SlotError() => SlotError {}.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::LookupError(err) => Some(err),
+            Error::LoadingError(err) => Some(err),
+            Error::SlotError() => None,
+        }
+    }
 }
 
 impl From<String> for Error {
