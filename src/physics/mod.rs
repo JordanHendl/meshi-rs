@@ -49,8 +49,11 @@ pub struct RigidBodyInfo {
     pub has_gravity: u32,
 }
 
-#[repr(packed)]
+#[repr(C)]
 #[derive(Default)]
+/// C representation keeps `Material` compatible with FFI. `MaterialInfo` is
+/// already `repr(C)`, so this struct simply follows C layout without needing
+/// additional packing.
 pub struct Material {
     info: MaterialInfo,
 }
@@ -62,14 +65,19 @@ impl From<&MaterialInfo> for Material {
         }
     }
 }
-#[repr(packed)]
+#[repr(C)]
 #[derive(Default)]
+/// `RigidBody` is shared across the FFI boundary. `Vec3` and `Quat` from
+/// `glam` use 16-byte alignment, so the field order is arranged from largest
+/// to smallest to avoid interior padding. The `material` handle precedes the
+/// `has_gravity` flag so that all fields remain naturally aligned under
+/// `repr(C)`.
 pub struct RigidBody {
     position: Vec3,
     velocity: Vec3,
     rotation: Quat,
-    has_gravity: u32,
     material: Handle<Material>,
+    has_gravity: u32,
 }
 
 impl RigidBody {
@@ -96,8 +104,8 @@ impl From<&RigidBodyInfo> for RigidBody {
             position: value.initial_position,
             velocity: Default::default(),
             rotation: value.initial_rotation,
-            has_gravity: value.has_gravity,
             material: value.material,
+            has_gravity: value.has_gravity,
         }
     }
 }
