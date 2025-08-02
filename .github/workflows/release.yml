@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install llvmpipe Vulkan driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        run: cargo package --allow-dirty --no-verify
+
+      # Uncomment this step to publish to crates.io
+      # - name: Publish to crates.io
+      #   run: cargo publish --token ${{ secrets.CARGO_TOKEN }}
+
+      - name: Archive release artifacts
+        run: |
+          mkdir -p artifacts
+          cp -r target/release artifacts/
+          tar -czf artifacts.tar.gz -C artifacts .
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts.tar.gz
