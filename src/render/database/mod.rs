@@ -44,6 +44,12 @@ pub struct Database {
 //    defaults: Defaults,
 }
 
+// The database wraps a raw pointer to the rendering context but loading models
+// and images only touches filesystem data structures. It is therefore safe to
+// send across threads as long as external synchronization (like a `Mutex`) is
+// used.
+unsafe impl Send for Database {}
+
 impl Database {
     pub fn base_path(&self) -> &str {
         &self.base_path
