@@ -401,7 +401,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi?rev=b3da472#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
+source = "git+https://github.com/JordanHendl/dashi?branch=main#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
 dependencies = [
  "ash",
  "ash-window",
@@ -765,7 +765,7 @@ dependencies = [
 [[package]]
 name = "koji"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/koji?rev=9caeab7#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
+source = "git+https://github.com/JordanHendl/koji?branch=main#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
 dependencies = [
  "bytemuck",
  "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi)",
@@ -891,7 +891,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
- "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi?rev=b3da472)",
+ "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi?branch=main)",
  "fontdue",
  "glam",
  "gltf",
