@@ -15,8 +15,8 @@ image = "0.24"
 fontdue = "0.9.2"
 #dashi = {path = "/wksp/git/dashi", features = ["dashi-serde"]}
 #miso = {path = "/wksp/git/miso"}
-dashi = {version = "0.0.0", git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"], rev = "b3da472"}
-koji = {version = "0.0.0", git = "https://github.com/JordanHendl/koji", rev = "9caeab7"}
+dashi = {version = "0.1.0", git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"], branch = "main"}
+koji = {version = "0.1.0", git = "https://github.com/JordanHendl/koji", branch = "main"}
 gltf = "1.4.1"  # For reading glTF files
 unzip3 = "1.0.0"
 base64 = "0.22.1"
