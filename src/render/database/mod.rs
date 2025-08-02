@@ -4,7 +4,7 @@ use tracing::{debug, info};
 
 pub use error::*;
 pub mod json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 mod images;
 use images::*;
@@ -32,8 +32,8 @@ pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
     geometry: HashMap<String, MeshResource>,
-    /// Names of images that have been successfully loaded.
-    images: HashSet<String>,
+    /// Map of texture names to lazily loaded GPU handles.
+    images: HashMap<String, Option<Handle<koji::Texture>>>,
 //    materials: HashMap<String, Handle<miso::Material>>,
 //    fonts: HashMap<String, FontResource>,
 //    defaults: Defaults,
@@ -158,7 +158,7 @@ impl Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
-            images: HashSet::new(),
+            images: HashMap::new(),
         };
 
  //       let ptr: *mut Database = &mut db;
@@ -218,14 +218,9 @@ impl Database {
     /// image is decoded using the `image` crate to ensure it is valid. Loaded
     /// image names are tracked so subsequent calls are inexpensive.
     pub fn load_image(&mut self, name: &str) -> Result<(), Error> {
-        // Avoid re-loading the same image twice.
-        if self.images.contains(name) {
-            return Ok(());
-        }
-        let path = format!("{}/{}", self.base_path, name);
-        // Attempt to load the image; errors will propagate to the caller.
-        image::open(&path)?;
-        self.images.insert(name.to_string());
+        // Register the image if it hasn't been seen before. The actual image
+        // data is loaded lazily by `fetch_texture` when first requested.
+        self.images.entry(name.to_string()).or_insert(None);
         Ok(())
     }
 
@@ -256,7 +251,30 @@ impl Database {
  //   }
 
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
-        todo!()
+        match self.images.get_mut(name) {
+            Some(entry) => {
+                if entry.is_none() {
+                    // Lazily load the texture from disk. Any failure is
+                    // propagated to the caller as a loading error.
+                    let path = format!("{}/{}", self.base_path, name);
+                    image::open(&path)?;
+                    *entry = Some(Handle::default());
+                }
+
+                // By this point the texture should be loaded.
+                if let Some(handle) = entry.clone() {
+                    Ok(handle)
+                } else {
+                    Err(Error::LoadingError(LoadingError {
+                        entry: name.to_string(),
+                        path: format!("{}/{}", self.base_path, name),
+                    }))
+                }
+            }
+            None => Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            })),
+        }
     }
 //        if let Some(thing) = self.images.get_mut(name) {
 //            if thing.loaded.is_none() {
