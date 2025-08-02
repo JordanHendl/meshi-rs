@@ -1,6 +1,6 @@
 mod object;
-mod physics;
-mod render;
+pub mod physics;
+pub mod render;
 mod utils;
 use dashi::utils::Handle;
 use glam::Mat4;
