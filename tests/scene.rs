@@ -33,6 +33,7 @@ fn main() {
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: dir.to_str().unwrap().into(),
         scene_info: None,
+        headless: false,
     });
 
     // Configure the scene.
