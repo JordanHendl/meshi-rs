@@ -210,6 +210,18 @@ pub extern "C" fn meshi_gfx_set_renderable_transform(
     unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
 }
 
+/// Release a previously created mesh object handle.
+///
+/// # Safety
+/// `render` and `h` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_mesh_object(
+    render: *mut RenderEngine,
+    h: *const Handle<MeshObject>,
+) {
+    unsafe { &mut *render }.release_mesh_object(unsafe { *h });
+}
+
 /// Create a directional light for the scene.
 ///
 /// # Safety
@@ -233,6 +245,18 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
     transform: *const Mat4,
 ) {
     unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
+}
+
+/// Release a directional light from the renderer.
+///
+/// # Safety
+/// `render` and `h` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_release_directional_light(
+    render: *mut RenderEngine,
+    h: *const Handle<DirectionalLight>,
+) {
+    unsafe { &mut *render }.release_directional_light(unsafe { *h });
 }
 
 /// Set the world-to-camera transform used for rendering.
