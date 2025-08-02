@@ -1,4 +1,4 @@
-use std::{ffi::c_void, fmt};
+use std::{ffi::c_void, fmt, sync::{Arc, Mutex}};
 
 use dashi::{
     utils::{Handle, Pool},
@@ -6,7 +6,7 @@ use dashi::{
 };
 use database::{Database, Error as DatabaseError};
 use glam::{Mat4, Vec4};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo};
 pub mod config;
@@ -324,13 +324,46 @@ impl RenderEngine {
     /// database. Models and images that fail to load will return an error so
     /// callers can react accordingly.
     pub fn set_scene(&mut self, info: &SceneInfo) -> Result<(), database::Error> {
-        for m in info.models {
-            self.database.load_model(m)?;
+        let db = Arc::new(Mutex::new(&mut self.database));
+        let errors: Arc<Mutex<Vec<database::Error>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let models = info.models;
+        let images = info.images;
+
+        rayon::scope(|s| {
+            let db_clone = db.clone();
+            let err_clone = errors.clone();
+            s.spawn(move |_| {
+                for m in models {
+                    if let Err(e) = db_clone.lock().unwrap().load_model(m) {
+                        warn!("Failed to load model {}: {}", m, e);
+                        err_clone.lock().unwrap().push(e);
+                    }
+                }
+            });
+
+            let db_clone = db.clone();
+            let err_clone = errors.clone();
+            s.spawn(move |_| {
+                for i in images {
+                    if let Err(e) = db_clone.lock().unwrap().load_image(i) {
+                        warn!("Failed to load image {}: {}", i, e);
+                        err_clone.lock().unwrap().push(e);
+                    }
+                }
+            });
+        });
+
+        match Arc::try_unwrap(errors)
+            .unwrap()
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .next()
+        {
+            Some(e) => Err(e),
+            None => Ok(()),
         }
-        for i in info.images {
-            self.database.load_image(i)?;
-        }
-        Ok(())
     }
 }
 

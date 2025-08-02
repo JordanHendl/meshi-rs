@@ -18,8 +18,25 @@ fn main() {
     // Minimal db.json so Database::new succeeds.
     fs::write(db_dir.join("db.json"), "{}").unwrap();
 
-    // Dummy model file.
-    fs::write(db_dir.join("model.gltf"), b"test").unwrap();
+    // Create a minimal valid glTF model the database can parse.
+    let bin_path = db_dir.join("data.bin");
+    let mut bin = Vec::new();
+    for f in [
+        0.0f32, 0.0, 0.0, // v0
+        1.0, 0.0, 0.0, // v1
+        0.0, 1.0, 0.0, // v2
+    ] {
+        bin.extend_from_slice(&f.to_le_bytes());
+    }
+    for i in [0u16, 1, 2] {
+        bin.extend_from_slice(&i.to_le_bytes());
+    }
+    fs::write(&bin_path, &bin).unwrap();
+    let gltf = format!(
+        "{{\n  \"asset\": {{ \"version\": \"2.0\" }},\n  \"scenes\": [{{ \"nodes\": [0] }}],\n  \"scene\": 0,\n  \"nodes\": [{{ \"mesh\": 0 }}],\n  \"meshes\": [{{ \"primitives\": [{{ \"attributes\": {{ \"POSITION\": 0 }}, \"indices\": 1 }}] }}],\n  \"buffers\": [{{ \"uri\": \"data.bin\", \"byteLength\": {} }}],\n  \"bufferViews\": [{{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 36 }}, {{ \"buffer\": 0, \"byteOffset\": 36, \"byteLength\": 6 }}],\n  \"accessors\": [{{ \"bufferView\": 0, \"componentType\": 5126, \"count\": 3, \"type\": \"VEC3\", \"min\": [0.0,0.0,0.0], \"max\": [1.0,1.0,0.0] }}, {{ \"bufferView\": 1, \"componentType\": 5123, \"count\": 3, \"type\": \"SCALAR\" }}]\n}}",
+        bin.len()
+    );
+    fs::write(db_dir.join("model.gltf"), gltf).unwrap();
 
     // Dummy image file using the image crate.
     let img_path = db_dir.join("albedo.png");
