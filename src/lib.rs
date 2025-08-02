@@ -129,7 +129,11 @@ pub extern "C" fn meshi_make_engine_headless(
 #[no_mangle]
 pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
     if !engine.is_null() {
-        unsafe { drop(Box::from_raw(engine)) };
+        unsafe {
+            // Take ownership and ensure the engine is fully dropped before returning.
+            let _engine = Box::from_raw(engine);
+            // `_engine` is dropped here when it goes out of scope.
+        }
     }
 }
 /// Register a callback to receive window events from the renderer.

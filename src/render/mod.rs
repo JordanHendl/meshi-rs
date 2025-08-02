@@ -51,7 +51,7 @@ struct EventCallbackInfo {
 
 #[allow(dead_code)]
 pub struct RenderEngine {
-    ctx: Box<dashi::Context>,
+    ctx: Option<Box<gpu::Context>>,
     display: Option<gpu::Display>,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     database: Database,
@@ -110,7 +110,7 @@ impl RenderEngine {
         //        });
 
         let s = Self {
-            ctx,
+            ctx: Some(ctx),
             display,
             event_loop,
             database,
@@ -253,7 +253,10 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-        self.event_cb = Some(EventCallbackInfo { event_cb, user_data });
+        self.event_cb = Some(EventCallbackInfo {
+            event_cb,
+            user_data,
+        });
     }
 
     /// Load the resources referenced by `SceneInfo` into the renderer's
@@ -267,5 +270,18 @@ impl RenderEngine {
             self.database.load_image(i)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for RenderEngine {
+    fn drop(&mut self) {
+        if let Some(display) = self.display.take() {
+            if let Some(ctx) = self.ctx.as_mut() {
+                ctx.destroy_display(display);
+            }
+        }
+        if let Some(ctx) = self.ctx.take() {
+            ctx.destroy();
+        }
     }
 }
