@@ -195,6 +195,58 @@ pub struct Event {
     timestamp: c_uint,
 }
 
+impl Event {
+    pub fn quit() -> Self {
+        Self {
+            event_type: EventType::Quit,
+            source: EventSource::Unknown,
+            payload: Payload {
+                press: PressPayload {
+                    key: KeyCode::Undefined,
+                    previous: EventType::Unknown,
+                },
+            },
+            timestamp: 0,
+        }
+    }
+
+    pub fn key(event_type: EventType, key: KeyCode) -> Self {
+        Self {
+            event_type,
+            source: EventSource::Key,
+            payload: Payload {
+                press: PressPayload {
+                    key,
+                    previous: EventType::Unknown,
+                },
+            },
+            timestamp: 0,
+        }
+    }
+
+    pub fn mouse_button(event_type: EventType, button: MouseButton, pos: Vec2) -> Self {
+        Self {
+            event_type,
+            source: EventSource::MouseButton,
+            payload: Payload {
+                mouse_button: MouseButtonPayload { button, pos },
+            },
+            timestamp: 0,
+        }
+    }
+
+    pub fn motion2d(motion: Vec2) -> Self {
+        Self {
+            event_type: EventType::Motion2D,
+            source: EventSource::Mouse,
+            payload: Payload {
+                motion2d: Motion2DPayload { motion },
+            },
+            timestamp: 0,
+        }
+    }
+}
+
 use glam::{vec2, Vec2};
 
 //impl From<SdlEvent> for Event {

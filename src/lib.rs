@@ -231,6 +231,24 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32)
     }
 }
 
+/// Create a cube primitive and return its handle.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_cube()
+}
+
+/// Create a sphere primitive and return its handle.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_sphere()
+}
+
+/// Create a triangle primitive and return its handle.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
+    unsafe { &mut *render }.create_triangle()
+}
+
 ////////////////////////////////////////////
 //////////////////PHYSICS///////////////////
 ////////////////////////////////////////////

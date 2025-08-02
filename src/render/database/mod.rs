@@ -201,7 +201,7 @@ impl Database {
  //   }
 
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>, Error> {
-        todo!()
+        Err(Error::LookupError(LookupError { entry: name.to_string() }))
     }
 //        if let Some(thing) = self.images.get_mut(name) {
 //            if thing.loaded.is_none() {
