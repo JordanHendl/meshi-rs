@@ -103,13 +103,10 @@ pub struct RigidBody {
     shape: CollisionShape,
     material: Handle<Material>,
     has_gravity: u32,
+    forces: Vec<Vec3>,
 }
 
 impl RigidBody {
-    pub fn apply_force(&mut self, force: Vec3) {
-        self.velocity = self.velocity + force;
-    }
-
     pub fn dampen_velocity(&mut self, mat: &Material, dt: &Vec3) {
         let dfc = mat.info.dynamic_friction_m;
         self.velocity = self.velocity - (vec3(dfc, dfc, dfc) * dt);
@@ -141,6 +138,7 @@ impl From<&RigidBodyInfo> for RigidBody {
             shape: value.collision_shape,
             material: value.material,
             has_gravity: value.has_gravity,
+            forces: Vec::new(),
         }
     }
 }
@@ -180,8 +178,13 @@ impl PhysicsSimulation {
         self.rigid_bodies.for_each_occupied_mut(|r| {
             let mat = self.materials.get_ref(r.material).unwrap();
             if r.has_gravity == 1 {
-                r.apply_force(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
+                r.forces
+                    .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
             }
+
+            let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
+            r.velocity += total_force;
+            r.forces.clear();
 
             let adj_velocity = r.velocity * dt;
             let pos = r.position;
@@ -271,7 +274,8 @@ impl PhysicsSimulation {
         self.rigid_bodies
             .get_mut_ref(h)
             .unwrap()
-            .apply_force(info.amt);
+            .forces
+            .push(info.amt);
     }
 
     pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) {
