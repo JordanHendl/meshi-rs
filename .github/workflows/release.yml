@@ -5,6 +5,10 @@ on:
     inputs:
       tag:
         required: true
+
+permissions:
+  contents: write  # allow release creation
+  
 jobs:
   build:
     runs-on: ${{ matrix.os }}
