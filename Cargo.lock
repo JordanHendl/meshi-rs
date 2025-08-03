@@ -401,19 +401,6 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi?branch=main#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
-dependencies = [
- "ash",
- "ash-window",
- "raw-window-handle",
- "serde",
- "vk-mem",
- "winit",
-]
-
-[[package]]
-name = "dashi"
-version = "0.1.0"
 source = "git+https://github.com/JordanHendl/dashi#b3da472c4cd2aef75f686ab14ace86e3c4f50f1c"
 dependencies = [
  "ash",
@@ -768,7 +755,7 @@ version = "0.1.0"
 source = "git+https://github.com/JordanHendl/koji?branch=main#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
 dependencies = [
  "bytemuck",
- "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi)",
+ "dashi",
  "glam",
  "gltf",
  "image 0.24.9",
@@ -891,7 +878,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
- "dashi 0.1.0 (git+https://github.com/JordanHendl/dashi?branch=main)",
+ "dashi",
  "fontdue",
  "glam",
  "gltf",
