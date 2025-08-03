@@ -1,8 +1,4 @@
-use std::{
-    ffi::c_void,
-    fmt,
-    sync::{Arc, Mutex},
-};
+use std::{ffi::c_void, fmt};
 
 use dashi::{
     utils::{Handle, Pool},
@@ -403,46 +399,25 @@ impl RenderEngine {
     /// database. Models and images that fail to load will return an error so
     /// callers can react accordingly.
     pub fn set_scene(&mut self, info: &SceneInfo) -> Result<(), database::Error> {
-        let db = Arc::new(Mutex::new(&mut self.database));
-        let errors: Arc<Mutex<Vec<database::Error>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut results = Vec::new();
 
-        let models = info.models;
-        let images = info.images;
-
-        rayon::scope(|s| {
-            let db_clone = db.clone();
-            let err_clone = errors.clone();
-            s.spawn(move |_| {
-                for m in models {
-                    if let Err(e) = db_clone.lock().unwrap().load_model(m) {
-                        warn!("Failed to load model {}: {}", m, e);
-                        err_clone.lock().unwrap().push(e);
-                    }
-                }
-            });
-
-            let db_clone = db.clone();
-            let err_clone = errors.clone();
-            s.spawn(move |_| {
-                for i in images {
-                    if let Err(e) = db_clone.lock().unwrap().load_image(i) {
-                        warn!("Failed to load image {}: {}", i, e);
-                        err_clone.lock().unwrap().push(e);
-                    }
-                }
-            });
-        });
-
-        match Arc::try_unwrap(errors)
-            .unwrap()
-            .into_inner()
-            .unwrap()
-            .into_iter()
-            .next()
-        {
-            Some(e) => Err(e),
-            None => Ok(()),
+        for m in info.models {
+            let res = self.database.load_model(m);
+            if let Err(ref e) = res {
+                warn!("Failed to load model {}: {}", m, e);
+            }
+            results.push(res);
         }
+
+        for i in info.images {
+            let res = self.database.load_image(i);
+            if let Err(ref e) = res {
+                warn!("Failed to load image {}: {}", i, e);
+            }
+            results.push(res);
+        }
+
+        results.into_iter().collect::<Result<(), _>>()
     }
 }
 
