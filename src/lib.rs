@@ -38,15 +38,12 @@ pub struct MeshiEngine {
 }
 
 impl MeshiEngine {
-    fn new(info: &MeshiEngineInfo) -> Box<MeshiEngine> {
-        assert!(!info.application_name.is_null());
-        assert!(!info.application_location.is_null());
-        let appname = unsafe { CStr::from_ptr(info.application_name) }
-            .to_str()
-            .unwrap();
-        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }
-            .to_str()
-            .unwrap();
+    fn new(info: &MeshiEngineInfo) -> Option<Box<MeshiEngine>> {
+        if info.application_name.is_null() || info.application_location.is_null() {
+            return None;
+        }
+        let appname = unsafe { CStr::from_ptr(info.application_name) }.to_str().ok()?;
+        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }.to_str().ok()?;
 
         if appdir.is_empty() {
             appdir = ".";
@@ -56,7 +53,7 @@ impl MeshiEngine {
         info!("Application Name: '{}'", appname);
         info!("Application Dir: '{}'", appdir);
 
-        Box::new(MeshiEngine {
+        Some(Box::new(MeshiEngine {
             render: RenderEngine::new(&RenderEngineInfo {
                 application_path: appdir.to_string(),
                 scene_info: None,
@@ -66,7 +63,7 @@ impl MeshiEngine {
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             frame_timer: Timer::new(),
             name: appname.to_string(),
-        })
+        }))
     }
 
     fn update(&mut self) -> f32 {
@@ -97,11 +94,18 @@ pub extern "C" fn meshi_make_engine(info: *const MeshiEngineInfo) -> *mut MeshiE
         // completes the builder.
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("setting default subscriber failed");
 
-    let mut e = MeshiEngine::new(unsafe { &*info });
-    e.frame_timer.start();
-    return Box::into_raw(e);
+    if info.is_null() {
+        return std::ptr::null_mut();
+    }
+    if let Some(mut e) = MeshiEngine::new(unsafe { &*info }) {
+        e.frame_timer.start();
+        Box::into_raw(e)
+    } else {
+        std::ptr::null_mut()
+    }
 }
 
 /// Convenience wrapper to create a headless engine without modifying
@@ -147,6 +151,9 @@ pub extern "C" fn meshi_register_event_callback(
     user_data: *mut c_void,
     cb: extern "C" fn(*mut render::event::Event, *mut c_void),
 ) {
+    if engine.is_null() {
+        return;
+    }
     unsafe { &mut *engine }.render.set_event_cb(cb, user_data);
 }
 
@@ -176,6 +183,9 @@ pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut RenderEngine {
+    if engine.is_null() {
+        return std::ptr::null_mut();
+    }
     unsafe { &mut (*engine).render }
 }
 
@@ -189,11 +199,17 @@ pub extern "C" fn meshi_gfx_create_renderable(
     render: *mut RenderEngine,
     info: *const FFIMeshObjectInfo,
 ) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.register_mesh_object(unsafe { &*info })
 }
 
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.create_cube()
 }
 
@@ -202,11 +218,17 @@ pub extern "C" fn meshi_gfx_create_cube_ex(
     render: *mut RenderEngine,
     info: *const render::database::geometry_primitives::CubePrimitiveInfo,
 ) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
 }
 
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.create_sphere()
 }
 
@@ -215,11 +237,17 @@ pub extern "C" fn meshi_gfx_create_sphere_ex(
     render: *mut RenderEngine,
     info: *const render::database::geometry_primitives::SpherePrimitiveInfo,
 ) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
 }
 
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.create_triangle()
 }
 
@@ -228,6 +256,9 @@ pub extern "C" fn meshi_gfx_release_mesh_object(
     render: *mut RenderEngine,
     h: *const Handle<MeshObject>,
 ) {
+    if render.is_null() || h.is_null() {
+        return;
+    }
     unsafe { &mut *render }.release_mesh_object(unsafe { *h });
 }
 
@@ -258,6 +289,9 @@ pub extern "C" fn meshi_gfx_create_directional_light(
     render: *mut RenderEngine,
     info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *render }.register_directional_light(unsafe { &*info })
 }
 
@@ -266,6 +300,9 @@ pub extern "C" fn meshi_gfx_release_directional_light(
     render: *mut RenderEngine,
     h: *const Handle<DirectionalLight>,
 ) {
+    if render.is_null() || h.is_null() {
+        return;
+    }
     unsafe { &mut *render }.release_directional_light(unsafe { *h });
 }
 
@@ -279,6 +316,9 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
     h: Handle<DirectionalLight>,
     transform: *const Mat4,
 ) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
     unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
 }
 
@@ -288,6 +328,9 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_camera(render: *mut RenderEngine, transform: *const Mat4) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
     unsafe { &mut *render }.set_camera(unsafe { &*transform });
 }
 
@@ -297,6 +340,9 @@ pub extern "C" fn meshi_gfx_set_camera(render: *mut RenderEngine, transform: *co
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_projection(render: *mut RenderEngine, transform: *const Mat4) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
     unsafe { &mut *render }.set_projection(unsafe { &*transform });
 }
 
@@ -306,11 +352,10 @@ pub extern "C" fn meshi_gfx_set_projection(render: *mut RenderEngine, transform:
 /// `render` must be a valid pointer.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32) {
-    if value == 0 {
-        unsafe { &mut *render }.set_capture_mouse(false);
-    } else {
-        unsafe { &mut *render }.set_capture_mouse(true);
+    if render.is_null() {
+        return;
     }
+    unsafe { &mut *render }.set_capture_mouse(value != 0);
 }
 
 ////////////////////////////////////////////
@@ -325,6 +370,9 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32)
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
 pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut PhysicsSimulation {
+    if engine.is_null() {
+        return std::ptr::null_mut();
+    }
     unsafe { (*engine).physics.as_mut() as *mut PhysicsSimulation }
 }
 
@@ -337,6 +385,9 @@ pub extern "C" fn meshi_physx_create_material(
     physics: *mut PhysicsSimulation,
     info: *const physics::MaterialInfo,
 ) -> Handle<physics::Material> {
+    if physics.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *physics }.create_material(unsafe { &*info })
 }
 
@@ -346,6 +397,9 @@ pub extern "C" fn meshi_physx_release_material(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::Material>,
 ) {
+    if physics.is_null() || h.is_null() {
+        return;
+    }
     unsafe { &mut *physics }.release_material(unsafe { *h });
 }
 
@@ -355,6 +409,9 @@ pub extern "C" fn meshi_physx_create_rigid_body(
     physics: *mut PhysicsSimulation,
     info: *const physics::RigidBodyInfo,
 ) -> Handle<physics::RigidBody> {
+    if physics.is_null() || info.is_null() {
+        return Handle::default();
+    }
     unsafe { &mut *physics }.create_rigid_body(unsafe { &*info })
 }
 
@@ -364,6 +421,9 @@ pub extern "C" fn meshi_physx_release_rigid_body(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
 ) {
+    if physics.is_null() || h.is_null() {
+        return;
+    }
     unsafe { &mut *physics }.release_rigid_body(unsafe { *h });
 }
 
@@ -374,6 +434,9 @@ pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
     h: *const Handle<physics::RigidBody>,
     info: *const ForceApplyInfo,
 ) {
+    if physics.is_null() || h.is_null() || info.is_null() {
+        return;
+    }
     unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
@@ -386,8 +449,15 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     info: *const physics::ActorStatus,
-) {
-    unsafe { &mut *physics }.set_rigid_body_transform(unsafe { *h }, unsafe { &*info });
+    ) -> i32 {
+    if physics.is_null() || h.is_null() || info.is_null() {
+        return 0;
+    }
+    if unsafe { &mut *physics }.set_rigid_body_transform(unsafe { *h }, unsafe { &*info }) {
+        1
+    } else {
+        0
+    }
 }
 
 /// Retrieve the current position and rotation of a rigid body.
@@ -401,12 +471,16 @@ pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     out_status: *mut physics::ActorStatus,
-) {
+    ) -> i32 {
     if physics.is_null() || h.is_null() || out_status.is_null() {
-        return;
+        return 0;
     }
-    let status = unsafe { &*physics }.get_rigid_body_status(unsafe { *h });
-    unsafe { *out_status = status };
+    if let Some(status) = unsafe { &*physics }.get_rigid_body_status(unsafe { *h }) {
+        unsafe { *out_status = status };
+        1
+    } else {
+        0
+    }
 }
 
 /// Set the collision shape for a rigid body.
@@ -418,8 +492,17 @@ pub extern "C" fn meshi_physx_set_collision_shape(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     shape: *const CollisionShape,
-) {
-    unsafe { &mut *physics }.set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape });
+    ) -> i32 {
+    if physics.is_null() || h.is_null() || shape.is_null() {
+        return 0;
+    }
+    if unsafe { &mut *physics }
+        .set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape })
+    {
+        1
+    } else {
+        0
+    }
 }
 
 /// Retrieve collision contacts from the last simulation update.
@@ -434,6 +517,9 @@ pub extern "C" fn meshi_physx_get_contacts(
     out_contacts: *mut ContactInfo,
     max: usize,
 ) -> usize {
+    if physics.is_null() || out_contacts.is_null() {
+        return 0;
+    }
     let contacts = unsafe { &*physics }.get_contacts();
     let count = contacts.len().min(max);
     unsafe {
@@ -457,9 +543,15 @@ mod tests {
             rotation: Quat::IDENTITY,
         };
 
-        meshi_physx_set_rigid_body_transform(&mut sim, &rb as *const _, &transform);
+        assert_eq!(
+            meshi_physx_set_rigid_body_transform(&mut sim, &rb as *const _, &transform),
+            1
+        );
         let mut out = ActorStatus::default();
-        meshi_physx_get_rigid_body_status(&mut sim, &rb as *const _, &mut out);
+        assert_eq!(
+            meshi_physx_get_rigid_body_status(&mut sim, &rb as *const _, &mut out),
+            1
+        );
         assert_eq!(out.position, transform.position);
         assert_eq!(out.rotation, transform.rotation);
     }
