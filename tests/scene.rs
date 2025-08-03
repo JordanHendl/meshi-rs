@@ -1,5 +1,5 @@
 use image::{Rgba, RgbaImage};
-use meshi::render::{RenderEngine, RenderEngineInfo, SceneInfo};
+use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo, SceneInfo};
 use std::fs;
 
 fn main() {
@@ -49,6 +49,7 @@ fn main() {
         application_path: dir.to_str().unwrap().into(),
         scene_info: None,
         headless: true,
+        backend: RenderBackend::Canvas,
     })
     .expect("failed to initialize renderer");
 

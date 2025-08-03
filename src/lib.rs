@@ -6,7 +6,9 @@ use dashi::utils::Handle;
 use glam::Mat4;
 use object::{FFIMeshObjectInfo, MeshObject};
 use physics::{CollisionShape, ContactInfo, ForceApplyInfo, PhysicsSimulation};
-use render::{DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo};
+use render::{
+    DirectionalLight, DirectionalLightInfo, RenderBackend, RenderEngine, RenderEngineInfo,
+};
 use std::ffi::*;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -62,6 +64,7 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
+                backend: RenderBackend::Canvas,
             })
             .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
