@@ -3,9 +3,9 @@ pub mod physics;
 pub mod render;
 mod utils;
 use dashi::utils::Handle;
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use object::{FFIMeshObjectInfo, MeshObject};
-use physics::{CollisionShape, ContactInfo, ForceApplyInfo, PhysicsSimulation};
+use physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, PhysicsSimulation};
 use render::{
     DirectionalLight, DirectionalLightInfo, RenderBackend, RenderEngine, RenderEngineInfo,
 };
@@ -79,7 +79,7 @@ impl MeshiEngine {
         self.frame_timer.start();
         let dt_secs = dt.as_secs_f32();
         self.render.update(dt_secs);
-        self.physics.update(dt_secs);
+        let _ = self.physics.update(dt_secs);
 
         dt_secs
     }
@@ -329,6 +329,22 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
     unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
 }
 
+/// Update the properties for a directional light.
+///
+/// # Safety
+/// `render` and `info` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_directional_light_info(
+    render: *mut RenderEngine,
+    h: Handle<DirectionalLight>,
+    info: *const DirectionalLightInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+    unsafe { &mut *render }.set_directional_light_info(h, unsafe { &*info });
+}
+
 /// Set the world-to-camera transform used for rendering.
 ///
 /// # Safety
@@ -381,6 +397,19 @@ pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut Phy
         return std::ptr::null_mut();
     }
     unsafe { (*engine).physics.as_mut() as *mut PhysicsSimulation }
+}
+
+/// Set the gravitational acceleration for the physics simulation.
+///
+/// # Safety
+/// `physics` must be a valid pointer. The gravity is expressed in meters per
+/// second squared.
+#[no_mangle]
+pub extern "C" fn meshi_physx_set_gravity(physics: *mut PhysicsSimulation, gravity_mps: f32) {
+    if physics.is_null() {
+        return;
+    }
+    unsafe { &mut *physics }.set_gravity(gravity_mps);
 }
 
 /// Create a new material in the physics system.
@@ -444,7 +473,7 @@ pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
     if physics.is_null() || h.is_null() || info.is_null() {
         return;
     }
-    unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
+    let _ = unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
 /// Set the position and rotation of a rigid body.
@@ -531,6 +560,24 @@ pub extern "C" fn meshi_physx_get_contacts(
         std::ptr::copy_nonoverlapping(contacts.as_ptr(), out_contacts, count);
     }
     count
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_collision_shape_sphere(radius: f32) -> CollisionShape {
+    CollisionShape {
+        dimensions: Vec3::ZERO,
+        radius,
+        shape_type: CollisionShapeType::Sphere,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_collision_shape_box(dimensions: Vec3) -> CollisionShape {
+    CollisionShape {
+        dimensions,
+        radius: 0.0,
+        shape_type: CollisionShapeType::Box,
+    }
 }
 
 #[cfg(test)]

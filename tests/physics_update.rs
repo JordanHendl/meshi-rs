@@ -9,7 +9,7 @@ fn physics_update_applies_gravity_and_damping() {
     });
 
     let dt = 1.0f32;
-    sim.update(dt);
+    sim.update(dt).unwrap();
 
     let status = sim
         .get_rigid_body_status(rb)

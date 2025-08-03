@@ -4,8 +4,28 @@ use std::collections::{HashMap, HashSet};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Environment parameters for the physics simulation.
+///
+/// Gravity defaults to Earth's gravity (`-9.8`). It can be customized by
+/// constructing an [`EnvironmentInfo`] with a different value:
+///
+/// ```
+/// use meshi::physics::{EnvironmentInfo, PhysicsSimulation, SimulationInfo};
+///
+/// let mut info = SimulationInfo::default();
+/// info.environment = EnvironmentInfo::new(-3.7); // roughly moon gravity
+/// let _sim = PhysicsSimulation::new(&info);
+/// ```
 pub struct EnvironmentInfo {
-    gravity_mps: f32,
+    /// Gravitational acceleration in meters per second squared.
+    pub gravity_mps: f32,
+}
+
+impl EnvironmentInfo {
+    /// Create a new [`EnvironmentInfo`] with the provided gravity value.
+    pub fn new(gravity_mps: f32) -> Self {
+        Self { gravity_mps }
+    }
 }
 
 impl Default for EnvironmentInfo {
@@ -45,13 +65,17 @@ pub struct ForceApplyInfo {
 pub enum CollisionShapeType {
     #[default]
     Sphere = 0,
+    Box = 1,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CollisionShape {
-    pub shape_type: CollisionShapeType,
+    /// Full extents of the box shape. For spheres this value is ignored.
+    pub dimensions: Vec3,
+    /// Radius for sphere shapes. For boxes this value is ignored.
     pub radius: f32,
+    pub shape_type: CollisionShapeType,
 }
 
 impl Default for CollisionShape {
@@ -59,6 +83,7 @@ impl Default for CollisionShape {
         Self {
             shape_type: CollisionShapeType::Sphere,
             radius: 1.0,
+            dimensions: Vec3::ONE,
         }
     }
 }
@@ -130,6 +155,45 @@ pub struct ContactInfo {
     pub penetration: f32,
 }
 
+fn collide_sphere_box(
+    sphere_pos: Vec3,
+    radius: f32,
+    box_pos: Vec3,
+    box_half: Vec3,
+) -> Option<(Vec3, f32)> {
+    let diff = sphere_pos - box_pos;
+    let closest = vec3(
+        diff.x.clamp(-box_half.x, box_half.x),
+        diff.y.clamp(-box_half.y, box_half.y),
+        diff.z.clamp(-box_half.z, box_half.z),
+    );
+    let delta = diff - closest;
+    let dist_sq = delta.length_squared();
+    if dist_sq < radius * radius {
+        let dist = dist_sq.sqrt();
+        if dist > 0.0 {
+            let normal = -(delta / dist);
+            Some((normal, radius - dist))
+        } else {
+            let over_x = box_half.x - diff.x.abs();
+            let over_y = box_half.y - diff.y.abs();
+            let over_z = box_half.z - diff.z.abs();
+            if over_x < over_y && over_x < over_z {
+                let normal = vec3(if diff.x > 0.0 { -1.0 } else { 1.0 }, 0.0, 0.0);
+                Some((normal, radius + over_x))
+            } else if over_y < over_z {
+                let normal = vec3(0.0, if diff.y > 0.0 { -1.0 } else { 1.0 }, 0.0);
+                Some((normal, radius + over_y))
+            } else {
+                let normal = vec3(0.0, 0.0, if diff.z > 0.0 { -1.0 } else { 1.0 });
+                Some((normal, radius + over_z))
+            }
+        }
+    } else {
+        None
+    }
+}
+
 impl From<&RigidBodyInfo> for RigidBody {
     fn from(value: &RigidBodyInfo) -> Self {
         RigidBody {
@@ -150,6 +214,11 @@ impl From<&RigidBody> for ActorStatus {
             rotation: value.rotation,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicsError {
+    InvalidHandle,
 }
 pub struct PhysicsSimulation {
     info: SimulationInfo,
@@ -173,25 +242,35 @@ impl PhysicsSimulation {
         s.default_material = default;
         s
     }
+  
+    /// Set the global gravitational acceleration in meters per second squared.
+    pub fn set_gravity(&mut self, gravity_mps: f32) {
+        self.info.environment.gravity_mps = gravity_mps;
+    }
+  
+    pub fn update(&mut self, dt: f32) -> Result<(), PhysicsError> {
+        let dt_vec = vec3(dt, dt, dt);
+        let mut had_invalid = false;
 
-    pub fn update(&mut self, dt: f32) {
-        let dt = vec3(dt, dt, dt);
         self.rigid_bodies.for_each_occupied_mut(|r| {
-            let mat = self.materials.get_ref(r.material).unwrap();
-            if r.has_gravity == 1 {
-                r.forces
-                    .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
+            if let Some(mat) = self.materials.get_ref(r.material) {
+                if r.has_gravity == 1 {
+                    r.forces
+                        .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt_vec);
+                }
+
+                let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
+                r.velocity += total_force;
+                r.forces.clear();
+
+                let adj_velocity = r.velocity * dt_vec;
+                let pos = r.position;
+                r.position = pos + adj_velocity;
+
+                r.dampen_velocity(mat, &dt_vec);
+            } else {
+                had_invalid = true;
             }
-
-            let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
-            r.velocity += total_force;
-            r.forces.clear();
-
-            let adj_velocity = r.velocity * dt;
-            let pos = r.position;
-            r.position = pos + adj_velocity;
-
-            r.dampen_velocity(mat, &dt);
         });
 
         // Collision detection and resolution using a simple spatial grid
@@ -203,39 +282,98 @@ impl PhysicsSimulation {
         // Determine a cell size based on the largest radius
         let mut max_radius = 0.0f32;
         for &h in &handles {
-            let rb = self.rigid_bodies.get_ref(h).unwrap();
-            max_radius = max_radius.max(rb.shape.radius);
+           if let Some(rb) = self.rigid_bodies.get_ref(h) {
+             let r = match rb.shape.shape_type {
+                CollisionShapeType::Sphere => rb.shape.radius,
+                CollisionShapeType::Box => rb.shape.dimensions.max_element() * 0.5,
+              };
+              max_radius = max_radius.max(r);
+            } else {
+                had_invalid = true;
+            }
         }
-        let cell_size = if max_radius > 0.0 { max_radius * 2.0 } else { 1.0 };
+        let cell_size = if max_radius > 0.0 {
+            max_radius * 2.0
+        } else {
+            1.0
+        };
 
         // Populate the grid
         let mut grid: HashMap<(i32, i32, i32), Vec<Handle<RigidBody>>> = HashMap::new();
         for &h in &handles {
-            let rb = self.rigid_bodies.get_ref(h).unwrap();
-            let cell = (
-                (rb.position.x / cell_size).floor() as i32,
-                (rb.position.y / cell_size).floor() as i32,
-                (rb.position.z / cell_size).floor() as i32,
-            );
-            grid.entry(cell).or_default().push(h);
+            if let Some(rb) = self.rigid_bodies.get_ref(h) {
+                let cell = (
+                    (rb.position.x / cell_size).floor() as i32,
+                    (rb.position.y / cell_size).floor() as i32,
+                    (rb.position.z / cell_size).floor() as i32,
+                );
+                grid.entry(cell).or_default().push(h);
+            } else {
+                had_invalid = true;
+            }
         }
 
         // Helper closure to process a potential pair
         let mut process_pair = |ha: Handle<RigidBody>, hb: Handle<RigidBody>| {
-            let a_pos = self.rigid_bodies.get_ref(ha).unwrap().position;
-            let b_pos = self.rigid_bodies.get_ref(hb).unwrap().position;
-            let a_vel = self.rigid_bodies.get_ref(ha).unwrap().velocity;
-            let b_vel = self.rigid_bodies.get_ref(hb).unwrap().velocity;
-            let a_rad = self.rigid_bodies.get_ref(ha).unwrap().shape.radius;
-            let b_rad = self.rigid_bodies.get_ref(hb).unwrap().shape.radius;
+            let a_ref = self.rigid_bodies.get_ref(ha).unwrap();
+            let b_ref = self.rigid_bodies.get_ref(hb).unwrap();
+            let a_pos = a_ref.position;
+            let b_pos = b_ref.position;
+            let a_vel = a_ref.velocity;
+            let b_vel = b_ref.velocity;
+            let a_shape = a_ref.shape;
+            let b_shape = b_ref.shape;
 
-            let delta = b_pos - a_pos;
-            let dist = delta.length();
-            let penetration = a_rad + b_rad - dist;
-            if penetration > 0.0 {
-                let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+            let mut result: Option<(Vec3, f32)> = None;
+
+            match (a_shape.shape_type, b_shape.shape_type) {
+                (CollisionShapeType::Sphere, CollisionShapeType::Sphere) => {
+                    let delta = b_pos - a_pos;
+                    let dist = delta.length();
+                    let penetration = a_shape.radius + b_shape.radius - dist;
+                    if penetration > 0.0 {
+                        let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Box, CollisionShapeType::Box) => {
+                    let a_half = a_shape.dimensions * 0.5;
+                    let b_half = b_shape.dimensions * 0.5;
+                    let delta = b_pos - a_pos;
+                    let overlap_x = a_half.x + b_half.x - delta.x.abs();
+                    let overlap_y = a_half.y + b_half.y - delta.y.abs();
+                    let overlap_z = a_half.z + b_half.z - delta.z.abs();
+                    if overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0 {
+                        if overlap_x < overlap_y && overlap_x < overlap_z {
+                            let normal = vec3(delta.x.signum(), 0.0, 0.0);
+                            result = Some((normal, overlap_x));
+                        } else if overlap_y < overlap_z {
+                            let normal = vec3(0.0, delta.y.signum(), 0.0);
+                            result = Some((normal, overlap_y));
+                        } else {
+                            let normal = vec3(0.0, 0.0, delta.z.signum());
+                            result = Some((normal, overlap_z));
+                        }
+                    }
+                }
+                (CollisionShapeType::Sphere, CollisionShapeType::Box) => {
+                    if let Some((normal, penetration)) =
+                        collide_sphere_box(a_pos, a_shape.radius, b_pos, b_shape.dimensions * 0.5)
+                    {
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Box, CollisionShapeType::Sphere) => {
+                    if let Some((normal, penetration)) =
+                        collide_sphere_box(b_pos, b_shape.radius, a_pos, a_shape.dimensions * 0.5)
+                    {
+                        result = Some((-normal, penetration));
+                    }
+                }
+            }
+
+            if let Some((normal, penetration)) = result {
                 let correction = normal * (penetration / 2.0);
-
                 let rel_vel = b_vel - a_vel;
                 let vel_along_normal = rel_vel.dot(normal);
                 let mut a_vel_new = a_vel;
@@ -246,15 +384,19 @@ impl PhysicsSimulation {
                     b_vel_new -= impulse;
                 }
 
-                {
-                    let a_mut = self.rigid_bodies.get_mut_ref(ha).unwrap();
+                if let Some(a_mut) = self.rigid_bodies.get_mut_ref(ha) {
                     a_mut.position = a_pos - correction;
                     a_mut.velocity = a_vel_new;
+                } else {
+                    had_invalid = true;
+                    return;
                 }
-                {
-                    let b_mut = self.rigid_bodies.get_mut_ref(hb).unwrap();
+                if let Some(b_mut) = self.rigid_bodies.get_mut_ref(hb) {
                     b_mut.position = b_pos + correction;
                     b_mut.velocity = b_vel_new;
+                } else {
+                    had_invalid = true;
+                    return;
                 }
 
                 self.contacts.push(ContactInfo {
@@ -310,6 +452,12 @@ impl PhysicsSimulation {
                 }
             }
         }
+
+        if had_invalid {
+            Err(PhysicsError::InvalidHandle)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn create_material(&mut self, info: &MaterialInfo) -> Handle<Material> {
@@ -333,19 +481,23 @@ impl PhysicsSimulation {
         self.rigid_bodies.release(h);
     }
 
-    pub fn apply_rigid_body_force(&mut self, h: Handle<RigidBody>, info: &ForceApplyInfo) {
-        self.rigid_bodies
-            .get_mut_ref(h)
-            .unwrap()
-            .forces
-            .push(info.amt);
-    }
-
-    pub fn set_rigid_body_transform(
+    pub fn apply_rigid_body_force(
         &mut self,
         h: Handle<RigidBody>,
-        info: &ActorStatus,
-    ) -> bool {
+        info: &ForceApplyInfo,
+    ) -> Result<(), PhysicsError> {
+        if !h.valid() {
+            return Err(PhysicsError::InvalidHandle);
+        }
+        if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
+            rb.forces.push(info.amt);
+            Ok(())
+        } else {
+            Err(PhysicsError::InvalidHandle)
+        }
+    }
+
+    pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) -> bool {
         if !h.valid() {
             return false;
         }
