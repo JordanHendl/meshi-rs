@@ -16,6 +16,7 @@ struct MeshObject;
 struct DirectionalLightInfo;
 struct DirectionalLight;
 struct Mat4;
+struct Vec3;
 struct PhysicsSimulation;
 struct MaterialInfo;
 struct RigidBodyInfo;
@@ -59,6 +60,8 @@ int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, 
 int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
 int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
 size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
+struct CollisionShape meshi_physx_collision_shape_sphere(float radius);
+struct CollisionShape meshi_physx_collision_shape_box(struct Vec3 dimensions);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -45,13 +45,17 @@ pub struct ForceApplyInfo {
 pub enum CollisionShapeType {
     #[default]
     Sphere = 0,
+    Box = 1,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CollisionShape {
-    pub shape_type: CollisionShapeType,
+    /// Full extents of the box shape. For spheres this value is ignored.
+    pub dimensions: Vec3,
+    /// Radius for sphere shapes. For boxes this value is ignored.
     pub radius: f32,
+    pub shape_type: CollisionShapeType,
 }
 
 impl Default for CollisionShape {
@@ -59,6 +63,7 @@ impl Default for CollisionShape {
         Self {
             shape_type: CollisionShapeType::Sphere,
             radius: 1.0,
+            dimensions: Vec3::ONE,
         }
     }
 }
@@ -128,6 +133,45 @@ pub struct ContactInfo {
     pub b: Handle<RigidBody>,
     pub normal: Vec3,
     pub penetration: f32,
+}
+
+fn collide_sphere_box(
+    sphere_pos: Vec3,
+    radius: f32,
+    box_pos: Vec3,
+    box_half: Vec3,
+) -> Option<(Vec3, f32)> {
+    let diff = sphere_pos - box_pos;
+    let closest = vec3(
+        diff.x.clamp(-box_half.x, box_half.x),
+        diff.y.clamp(-box_half.y, box_half.y),
+        diff.z.clamp(-box_half.z, box_half.z),
+    );
+    let delta = diff - closest;
+    let dist_sq = delta.length_squared();
+    if dist_sq < radius * radius {
+        let dist = dist_sq.sqrt();
+        if dist > 0.0 {
+            let normal = -(delta / dist);
+            Some((normal, radius - dist))
+        } else {
+            let over_x = box_half.x - diff.x.abs();
+            let over_y = box_half.y - diff.y.abs();
+            let over_z = box_half.z - diff.z.abs();
+            if over_x < over_y && over_x < over_z {
+                let normal = vec3(if diff.x > 0.0 { -1.0 } else { 1.0 }, 0.0, 0.0);
+                Some((normal, radius + over_x))
+            } else if over_y < over_z {
+                let normal = vec3(0.0, if diff.y > 0.0 { -1.0 } else { 1.0 }, 0.0);
+                Some((normal, radius + over_y))
+            } else {
+                let normal = vec3(0.0, 0.0, if diff.z > 0.0 { -1.0 } else { 1.0 });
+                Some((normal, radius + over_z))
+            }
+        }
+    } else {
+        None
+    }
 }
 
 impl From<&RigidBodyInfo> for RigidBody {
@@ -213,13 +257,21 @@ impl PhysicsSimulation {
         // Determine a cell size based on the largest radius
         let mut max_radius = 0.0f32;
         for &h in &handles {
-            if let Some(rb) = self.rigid_bodies.get_ref(h) {
-                max_radius = max_radius.max(rb.shape.radius);
+           if let Some(rb) = self.rigid_bodies.get_ref(h) {
+             let r = match rb.shape.shape_type {
+                CollisionShapeType::Sphere => rb.shape.radius,
+                CollisionShapeType::Box => rb.shape.dimensions.max_element() * 0.5,
+              };
+              max_radius = max_radius.max(r);
             } else {
                 had_invalid = true;
             }
         }
-        let cell_size = if max_radius > 0.0 { max_radius * 2.0 } else { 1.0 };
+        let cell_size = if max_radius > 0.0 {
+            max_radius * 2.0
+        } else {
+            1.0
+        };
 
         // Populate the grid
         let mut grid: HashMap<(i32, i32, i32), Vec<Handle<RigidBody>>> = HashMap::new();
@@ -238,31 +290,65 @@ impl PhysicsSimulation {
 
         // Helper closure to process a potential pair
         let mut process_pair = |ha: Handle<RigidBody>, hb: Handle<RigidBody>| {
-            let (a_pos, a_vel, a_rad, b_pos, b_vel, b_rad) = match (
-                self.rigid_bodies.get_ref(ha),
-                self.rigid_bodies.get_ref(hb),
-            ) {
-                (Some(a), Some(b)) => (
-                    a.position,
-                    a.velocity,
-                    a.shape.radius,
-                    b.position,
-                    b.velocity,
-                    b.shape.radius,
-                ),
-                _ => {
-                    had_invalid = true;
-                    return;
+            let a_ref = self.rigid_bodies.get_ref(ha).unwrap();
+            let b_ref = self.rigid_bodies.get_ref(hb).unwrap();
+            let a_pos = a_ref.position;
+            let b_pos = b_ref.position;
+            let a_vel = a_ref.velocity;
+            let b_vel = b_ref.velocity;
+            let a_shape = a_ref.shape;
+            let b_shape = b_ref.shape;
+
+            let mut result: Option<(Vec3, f32)> = None;
+
+            match (a_shape.shape_type, b_shape.shape_type) {
+                (CollisionShapeType::Sphere, CollisionShapeType::Sphere) => {
+                    let delta = b_pos - a_pos;
+                    let dist = delta.length();
+                    let penetration = a_shape.radius + b_shape.radius - dist;
+                    if penetration > 0.0 {
+                        let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+                        result = Some((normal, penetration));
+                    }
                 }
-            };
+                (CollisionShapeType::Box, CollisionShapeType::Box) => {
+                    let a_half = a_shape.dimensions * 0.5;
+                    let b_half = b_shape.dimensions * 0.5;
+                    let delta = b_pos - a_pos;
+                    let overlap_x = a_half.x + b_half.x - delta.x.abs();
+                    let overlap_y = a_half.y + b_half.y - delta.y.abs();
+                    let overlap_z = a_half.z + b_half.z - delta.z.abs();
+                    if overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0 {
+                        if overlap_x < overlap_y && overlap_x < overlap_z {
+                            let normal = vec3(delta.x.signum(), 0.0, 0.0);
+                            result = Some((normal, overlap_x));
+                        } else if overlap_y < overlap_z {
+                            let normal = vec3(0.0, delta.y.signum(), 0.0);
+                            result = Some((normal, overlap_y));
+                        } else {
+                            let normal = vec3(0.0, 0.0, delta.z.signum());
+                            result = Some((normal, overlap_z));
+                        }
+                    }
+                }
+                (CollisionShapeType::Sphere, CollisionShapeType::Box) => {
+                    if let Some((normal, penetration)) =
+                        collide_sphere_box(a_pos, a_shape.radius, b_pos, b_shape.dimensions * 0.5)
+                    {
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Box, CollisionShapeType::Sphere) => {
+                    if let Some((normal, penetration)) =
+                        collide_sphere_box(b_pos, b_shape.radius, a_pos, a_shape.dimensions * 0.5)
+                    {
+                        result = Some((-normal, penetration));
+                    }
+                }
+            }
 
-            let delta = b_pos - a_pos;
-            let dist = delta.length();
-            let penetration = a_rad + b_rad - dist;
-            if penetration > 0.0 {
-                let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+            if let Some((normal, penetration)) = result {
                 let correction = normal * (penetration / 2.0);
-
                 let rel_vel = b_vel - a_vel;
                 let vel_along_normal = rel_vel.dot(normal);
                 let mut a_vel_new = a_vel;
@@ -386,11 +472,7 @@ impl PhysicsSimulation {
         }
     }
 
-    pub fn set_rigid_body_transform(
-        &mut self,
-        h: Handle<RigidBody>,
-        info: &ActorStatus,
-    ) -> bool {
+    pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) -> bool {
         if !h.valid() {
             return false;
         }
