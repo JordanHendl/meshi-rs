@@ -2,38 +2,38 @@
 
 #include <cstdint>
 
-struct Handle {
+struct MeshiHandle {
     std::uint32_t index;
     std::uint32_t generation;
 };
 
-struct Vec2 {
+struct MeshiVec2 {
     float x, y;
 };
 
-struct alignas(16) Vec3 {
+struct alignas(16) MeshiVec3 {
     float x, y, z;
 };
 
-struct alignas(16) Vec4 {
+struct alignas(16) MeshiVec4 {
     float x, y, z, w;
 };
 
-struct alignas(16) Quat {
+struct alignas(16) MeshiQuat {
     float x, y, z, w;
 };
 
-struct Mat4 {
+struct MeshiMat4 {
     float m[4][4];
 };
 
 struct MeshiEngine;
-struct RenderEngine;
-struct PhysicsSimulation;
-struct MeshObject;
-struct DirectionalLight;
-struct Material;
-struct RigidBody;
+struct MeshiRenderEngine;
+struct MeshiPhysicsSimulation;
+struct MeshiMeshObject;
+struct MeshiDirectionalLight;
+struct MeshiMaterial;
+struct MeshiRigidBody;
 
 struct MeshiEngineInfo {
     const char* application_name;
@@ -41,19 +41,19 @@ struct MeshiEngineInfo {
     std::int32_t headless;
 };
 
-struct FFIMeshObjectInfo {
+struct MeshiFFIMeshObjectInfo {
     const char* mesh;
     const char* material;
-    Mat4 transform;
+    MeshiMat4 transform;
 };
 
-struct DirectionalLightInfo {
-    Vec4 direction;
-    Vec4 color;
+struct MeshiDirectionalLightInfo {
+    MeshiVec4 direction;
+    MeshiVec4 color;
     float intensity;
 };
 
-enum class EventType : std::uint32_t {
+enum class MeshiEventType : std::uint32_t {
     Unknown = 0,
     Quit = 1,
     Pressed = 2,
@@ -62,7 +62,7 @@ enum class EventType : std::uint32_t {
     Motion2D = 5,
 };
 
-enum class EventSource : std::uint32_t {
+enum class MeshiEventSource : std::uint32_t {
     Unknown = 0,
     Key = 1,
     Mouse = 2,
@@ -71,7 +71,7 @@ enum class EventSource : std::uint32_t {
     Window = 5,
 };
 
-enum class KeyCode : std::uint32_t {
+enum class MeshiKeyCode : std::uint32_t {
     A = 0,
     B,
     C,
@@ -185,78 +185,78 @@ enum class KeyCode : std::uint32_t {
     Undefined,
 };
 
-enum class MouseButton : std::uint32_t {
+enum class MeshiMouseButton : std::uint32_t {
     Left,
     Right,
 };
 
-struct PressPayload {
-    KeyCode key;
-    EventType previous;
+struct MeshiPressPayload {
+    MeshiKeyCode key;
+    MeshiEventType previous;
 };
 
-struct Motion2DPayload {
-    Vec2 motion;
+struct MeshiMotion2DPayload {
+    MeshiVec2 motion;
 };
 
-struct MouseButtonPayload {
-    MouseButton button;
-    Vec2 pos;
+struct MeshiMouseButtonPayload {
+    MeshiMouseButton button;
+    MeshiVec2 pos;
 };
 
-union Payload {
-    PressPayload press;
-    Motion2DPayload motion2d;
-    MouseButtonPayload mouse_button;
+union MeshiPayload {
+    MeshiPressPayload press;
+    MeshiMotion2DPayload motion2d;
+    MeshiMouseButtonPayload mouse_button;
 };
 
-struct Event {
-    EventType event_type;
-    EventSource source;
-    Payload payload;
+struct MeshiEvent {
+    MeshiEventType event_type;
+    MeshiEventSource source;
+    MeshiPayload payload;
     std::uint32_t timestamp;
 };
 
-struct MaterialInfo {
+struct MeshiMaterialInfo {
     float dynamic_friction_m;
 };
 
-struct ForceApplyInfo {
-    Vec3 amt;
+struct MeshiForceApplyInfo {
+    MeshiVec3 amt;
 };
 
-enum class CollisionShapeType : std::uint32_t {
+enum class MeshiCollisionShapeType : std::uint32_t {
     Sphere = 0,
 };
 
-struct CollisionShape {
-    CollisionShapeType shape_type;
+struct MeshiCollisionShape {
+    MeshiCollisionShapeType shape_type;
     float radius;
 };
 
-struct RigidBodyInfo {
-    Handle material;
-    Vec3 initial_position;
-    Vec3 initial_velocity;
-    Quat initial_rotation;
+struct MeshiRigidBodyInfo {
+    MeshiHandle material;
+    MeshiVec3 initial_position;
+    MeshiVec3 initial_velocity;
+    MeshiQuat initial_rotation;
     std::uint32_t has_gravity;
-    CollisionShape collision_shape;
+    MeshiCollisionShape collision_shape;
 };
 
-struct ActorStatus {
-    Vec3 position;
-    Quat rotation;
+struct MeshiActorStatus {
+    MeshiVec3 position;
+    MeshiQuat rotation;
 };
 
-struct ContactInfo {
-    Handle a;
-    Handle b;
-    Vec3 normal;
+struct MeshiContactInfo {
+    MeshiHandle a;
+    MeshiHandle b;
+    MeshiVec3 normal;
     float penetration;
 };
 
-using MeshObjectHandle = Handle;
-using DirectionalLightHandle = Handle;
-using MaterialHandle = Handle;
-using RigidBodyHandle = Handle;
+using MeshiMeshObjectHandle = MeshiHandle;
+using MeshiDirectionalLightHandle = MeshiHandle;
+using MeshiMaterialHandle = MeshiHandle;
+using MeshiRigidBodyHandle = MeshiHandle;
 
