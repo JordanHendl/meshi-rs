@@ -27,6 +27,8 @@ Run the test suite to verify functionality:
 cargo test
 ```
 
+Whenever altering FFI signatures or structs, update `include/meshi/meshi.h` and `meshi_types.h`, then run `cargo test` to verify synchronization.
+
 ## Examples
 
 Sample code demonstrating the FFI interface lives in the `examples/` directory. Run an example with:
