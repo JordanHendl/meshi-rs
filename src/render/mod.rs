@@ -219,6 +219,16 @@ impl RenderEngine {
         }
     }
 
+    pub fn set_directional_light_info(
+        &mut self,
+        handle: Handle<DirectionalLight>,
+        info: &DirectionalLightInfo,
+    ) {
+        if let Some(light) = self.directional_lights.get_mut_ref(handle) {
+            light.info = *info;
+        }
+    }
+
     pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
         self.directional_lights.release(handle);
     }
