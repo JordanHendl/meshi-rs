@@ -14,9 +14,11 @@ use tracing::{info, warn};
 
 use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget};
 use crate::render::database::geometry_primitives::{self, CubePrimitiveInfo, SpherePrimitiveInfo};
+mod canvas;
 pub mod config;
 pub mod database;
 pub mod event;
+mod graph;
 
 #[derive(Debug)]
 pub enum RenderError {
@@ -76,11 +78,19 @@ pub struct CameraInfo<'a> {
     pub projection: Mat4,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum RenderBackend {
+    #[default]
+    Canvas,
+    Graph,
+}
+
 #[derive(Default)]
 pub struct RenderEngineInfo<'a> {
     pub application_path: String,
     pub scene_info: Option<SceneInfo<'a>>,
     pub headless: bool,
+    pub backend: RenderBackend,
 }
 
 struct EventCallbackInfo {
@@ -99,6 +109,12 @@ pub struct RenderEngine {
     directional_lights: Pool<DirectionalLight>,
     camera: Mat4,
     projection: Mat4,
+    backend: Backend,
+}
+
+enum Backend {
+    Canvas(canvas::CanvasBackend),
+    Graph(graph::GraphBackend),
 }
 
 #[allow(dead_code)]
@@ -110,6 +126,17 @@ impl RenderEngine {
             .unwrap_or_default();
 
         info!("Initializing Render Engine with device {}", device);
+
+        let backend = match info.backend {
+            RenderBackend::Canvas => {
+                info!("Using canvas backend");
+                Backend::Canvas(canvas::CanvasBackend::new())
+            }
+            RenderBackend::Graph => {
+                info!("Using graph backend");
+                Backend::Graph(graph::GraphBackend::new())
+            }
+        };
 
         let cfg = config::RenderEngineConfig {
             scene_cfg_path: Some(format!("{}/koji.json", info.application_path)),
@@ -169,6 +196,7 @@ impl RenderEngine {
             directional_lights: Default::default(),
             camera: Mat4::IDENTITY,
             projection: Mat4::IDENTITY,
+            backend,
         };
 
         Ok(s)
