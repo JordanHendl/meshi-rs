@@ -208,6 +208,10 @@ impl Event {
     pub unsafe fn motion2d(&self) -> Vec2 {
         self.payload.motion2d.motion
     }
+
+    pub unsafe fn key(&self) -> KeyCode {
+        self.payload.press.key
+    }
 }
 
 use glam::{vec2, Vec2};
@@ -509,11 +513,12 @@ fn map_virtual_keycode(key: VirtualKeyCode) -> KeyCode {
         NumpadDivide => KeyCode::NumpadDivide,
         NumpadDecimal => KeyCode::NumpadDecimal,
         NumpadEnter => KeyCode::NumpadEnter,
-        CapsLock => KeyCode::CapsLock,
+        Capital => KeyCode::CapsLock,
         Numlock => KeyCode::NumLock,
         Scroll => KeyCode::ScrollLock,
         Snapshot => KeyCode::PrintScreen,
         Pause => KeyCode::Pause,
+        Apps => KeyCode::Menu,
         _ => KeyCode::Undefined,
     }
 }
@@ -586,6 +591,26 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                     timestamp: 0,
                 })
             }
+            WindowEvent::Resized(size) => Some(Event {
+                event_type: EventType::Motion2D,
+                source: EventSource::Window,
+                payload: Payload {
+                    motion2d: Motion2DPayload {
+                        motion: vec2(size.width as f32, size.height as f32),
+                    },
+                },
+                timestamp: 0,
+            }),
+            WindowEvent::Moved(position) => Some(Event {
+                event_type: EventType::Motion2D,
+                source: EventSource::Window,
+                payload: Payload {
+                    motion2d: Motion2DPayload {
+                        motion: vec2(position.x as f32, position.y as f32),
+                    },
+                },
+                timestamp: 0,
+            }),
             WindowEvent::Focused(focused) => {
                 let et = if *focused {
                     EventType::Pressed
