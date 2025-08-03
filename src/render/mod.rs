@@ -1,4 +1,8 @@
-use std::{ffi::c_void, fmt, sync::{Arc, Mutex}};
+use std::{
+    ffi::c_void,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use dashi::{
     utils::{Handle, Pool},
@@ -93,6 +97,8 @@ pub struct RenderEngine {
     event_cb: Option<EventCallbackInfo>,
     mesh_objects: Pool<MeshObject>,
     directional_lights: Pool<DirectionalLight>,
+    camera: Mat4,
+    projection: Mat4,
 }
 
 #[allow(dead_code)]
@@ -161,6 +167,8 @@ impl RenderEngine {
             event_cb: None,
             mesh_objects: Default::default(),
             directional_lights: Default::default(),
+            camera: Mat4::IDENTITY,
+            projection: Mat4::IDENTITY,
         };
 
         Ok(s)
@@ -337,16 +345,20 @@ impl RenderEngine {
     }
 
     pub fn set_projection(&mut self, proj: &Mat4) {
-        //        self.scene
-        //            .update_camera_projection(self.global_camera, proj);
+        self.projection = *proj;
     }
 
     pub fn set_capture_mouse(&mut self, capture: bool) {
-        //        self.ctx.get_sdl_ctx().mouse().set_relative_mouse_mode(capture);
+        if let Some(display) = &self.display {
+            let window = display.winit_window();
+            if let Err(e) = window.set_cursor_grab(capture) {
+                warn!("failed to set cursor grab: {:?}", e);
+            }
+            window.set_cursor_visible(!capture);
+        }
     }
     pub fn set_camera(&mut self, camera: &Mat4) {
-        //       self.scene
-        //           .update_camera_transform(self.global_camera, camera);
+        self.camera = *camera;
     }
     pub fn set_event_cb(
         &mut self,
