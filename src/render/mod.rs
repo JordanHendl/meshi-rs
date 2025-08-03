@@ -109,7 +109,7 @@ pub struct RenderEngine {
 }
 
 enum Backend {
-    Canvas(canvas::CanvasBackend),
+    Canvas(canvas::CanvasRenderer),
     Graph(graph::GraphBackend),
 }
 
@@ -126,7 +126,7 @@ impl RenderEngine {
         let backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
-                Backend::Canvas(canvas::CanvasBackend::new())
+                Backend::Canvas(canvas::CanvasRenderer::new())
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");
@@ -364,6 +364,13 @@ impl RenderEngine {
                 let mut synthetic: event::Event = unsafe { std::mem::zeroed() };
                 let c = cb.event_cb;
                 c(&mut synthetic, cb.user_data);
+            }
+        }
+
+        if let (Some(ctx), Some(display)) = (self.ctx.as_mut(), self.display.as_mut()) {
+            match &mut self.backend {
+                Backend::Canvas(r) => r.render(ctx, display, &self.mesh_objects),
+                Backend::Graph(_) => {}
             }
         }
     }
