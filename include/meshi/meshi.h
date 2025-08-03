@@ -11,6 +11,7 @@ extern "C" {
 struct MeshiEngine;
 struct MeshiEngineInfo;
 struct RenderEngine;
+struct AudioEngine;
 struct FFIMeshObjectInfo;
 struct MeshObject;
 struct DirectionalLightInfo;
@@ -35,6 +36,7 @@ void meshi_destroy_engine(struct MeshiEngine* engine);
 void meshi_register_event_callback(struct MeshiEngine* engine, void* user_data, MeshiEventCallback cb);
 float meshi_update(struct MeshiEngine* engine);
 struct RenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
+struct AudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
 
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);

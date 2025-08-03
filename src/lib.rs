@@ -1,7 +1,9 @@
+pub mod audio;
 mod object;
 pub mod physics;
 pub mod render;
 mod utils;
+use audio::{AudioEngine, AudioEngineInfo};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
 use object::{FFIMeshObjectInfo, MeshObject};
@@ -36,6 +38,7 @@ pub struct MeshiEngine {
     name: String,
     render: RenderEngine,
     physics: Box<PhysicsSimulation>,
+    audio: AudioEngine,
     frame_timer: Timer,
 }
 
@@ -68,6 +71,7 @@ impl MeshiEngine {
             })
             .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
+            audio: AudioEngine::new(&AudioEngineInfo::default()),
             frame_timer: Timer::new(),
             name: appname.to_string(),
         }))
@@ -142,7 +146,8 @@ pub extern "C" fn meshi_make_engine_headless(
 pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
     if !engine.is_null() {
         unsafe {
-            // Take ownership and ensure the engine is fully dropped before returning.
+            // Take ownership and ensure the engine and all subsystems are fully dropped
+            // (render, physics and audio) before returning.
             let _engine = Box::from_raw(engine);
             // `_engine` is dropped here when it goes out of scope.
         }
@@ -379,6 +384,24 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32)
         return;
     }
     unsafe { &mut *render }.set_capture_mouse(value != 0);
+}
+
+////////////////////////////////////////////
+///////////////////AUDIO////////////////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+/// Obtain a mutable pointer to the engine's audio system.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer.
+#[no_mangle]
+pub extern "C" fn meshi_get_audio_system(engine: *mut MeshiEngine) -> *mut AudioEngine {
+    if engine.is_null() {
+        return std::ptr::null_mut();
+    }
+    unsafe { &mut (*engine).audio }
 }
 
 ////////////////////////////////////////////
