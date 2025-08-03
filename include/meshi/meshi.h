@@ -38,6 +38,16 @@ float meshi_update(struct MeshiEngine* engine);
 struct RenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
 struct AudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
 
+// Audio
+struct Handle meshi_audio_create_source(struct AudioEngine* audio, const char* path);
+void meshi_audio_destroy_source(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_play(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_pause(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_stop(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_set_looping(struct AudioEngine* audio, struct Handle h, int32_t looping);
+void meshi_audio_set_volume(struct AudioEngine* audio, struct Handle h, float volume);
+void meshi_audio_set_pitch(struct AudioEngine* audio, struct Handle h, float pitch);
+
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);
 struct Handle meshi_gfx_create_cube(struct RenderEngine* render);
@@ -61,6 +71,8 @@ void meshi_physx_release_rigid_body(struct PhysicsSimulation* physics, const str
 void meshi_physx_apply_force_to_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h, const struct ForceApplyInfo* info);
 int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, const struct Handle* h, const struct ActorStatus* info);
 int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
+// Returns the current velocity of a rigid body or a zero vector on failure.
+struct Vec3 meshi_physx_get_rigid_body_velocity(struct PhysicsSimulation* physics, const struct Handle* h);
 int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
 size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
 struct CollisionShape meshi_physx_collision_shape_sphere(float radius);
