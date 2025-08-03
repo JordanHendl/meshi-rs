@@ -1,5 +1,5 @@
 use glam::vec2;
-use meshi::render::event::{from_winit_event, Event, EventSource, EventType};
+use meshi::render::event::{from_winit_event, Event, EventSource, EventType, KeyCode};
 use meshi::*;
 use std::ffi::{c_void, CString};
 use std::sync::{
@@ -7,7 +7,7 @@ use std::sync::{
     Arc,
 };
 use winit::event::{
-    DeviceEvent, ElementState, Event as WEvent, MouseScrollDelta, TouchPhase, WindowEvent,
+    DeviceEvent, ElementState, Event as WEvent, KeyboardInput, MouseScrollDelta, TouchPhase, VirtualKeyCode, WindowEvent,
     ModifiersState,
 };
 
@@ -36,6 +36,21 @@ fn main() {
     let motion = unsafe { ev.motion2d() };
     assert_eq!(motion, vec2(1.0, -1.0));
 
+    let resize_event = WEvent::WindowEvent {
+        window_id,
+        event: WindowEvent::Resized(winit::dpi::PhysicalSize { width: 800, height: 600 }),
+    };
+    let ev = from_winit_event(&resize_event).expect("resize");
+    assert_eq!(ev.event_type(), EventType::Motion2D);
+    assert_eq!(ev.source(), EventSource::Window);
+    let size = unsafe { ev.motion2d() };
+    assert_eq!(size, vec2(800.0, 600.0));
+
+    let close_event = WEvent::WindowEvent { window_id, event: WindowEvent::CloseRequested };
+    let ev = from_winit_event(&close_event).expect("close");
+    assert_eq!(ev.event_type(), EventType::Quit);
+    assert_eq!(ev.source(), EventSource::Window);
+
     let focus_event = WEvent::WindowEvent {
         window_id,
         event: WindowEvent::Focused(true),
@@ -51,6 +66,25 @@ fn main() {
     let ev = from_winit_event(&focus_event).expect("unfocused");
     assert_eq!(ev.event_type(), EventType::Released);
     assert_eq!(ev.source(), EventSource::Window);
+
+    let key_event = WEvent::WindowEvent {
+        window_id,
+        event: WindowEvent::KeyboardInput {
+            device_id: unsafe { std::mem::zeroed() },
+            input: KeyboardInput {
+                scancode: 0,
+                state: ElementState::Pressed,
+                virtual_keycode: Some(VirtualKeyCode::Capital),
+                modifiers: ModifiersState::empty(),
+            },
+            is_synthetic: false,
+        },
+    };
+    let ev = from_winit_event(&key_event).expect("capslock");
+    assert_eq!(ev.event_type(), EventType::Pressed);
+    assert_eq!(ev.source(), EventSource::Key);
+    let key = unsafe { ev.key() };
+    assert_eq!(key, KeyCode::CapsLock);
 
     let device_id: winit::event::DeviceId = unsafe { std::mem::zeroed() };
 
