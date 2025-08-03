@@ -4,8 +4,28 @@ use std::collections::{HashMap, HashSet};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Environment parameters for the physics simulation.
+///
+/// Gravity defaults to Earth's gravity (`-9.8`). It can be customized by
+/// constructing an [`EnvironmentInfo`] with a different value:
+///
+/// ```
+/// use meshi::physics::{EnvironmentInfo, PhysicsSimulation, SimulationInfo};
+///
+/// let mut info = SimulationInfo::default();
+/// info.environment = EnvironmentInfo::new(-3.7); // roughly moon gravity
+/// let _sim = PhysicsSimulation::new(&info);
+/// ```
 pub struct EnvironmentInfo {
-    gravity_mps: f32,
+    /// Gravitational acceleration in meters per second squared.
+    pub gravity_mps: f32,
+}
+
+impl EnvironmentInfo {
+    /// Create a new [`EnvironmentInfo`] with the provided gravity value.
+    pub fn new(gravity_mps: f32) -> Self {
+        Self { gravity_mps }
+    }
 }
 
 impl Default for EnvironmentInfo {
@@ -222,7 +242,12 @@ impl PhysicsSimulation {
         s.default_material = default;
         s
     }
-
+  
+    /// Set the global gravitational acceleration in meters per second squared.
+    pub fn set_gravity(&mut self, gravity_mps: f32) {
+        self.info.environment.gravity_mps = gravity_mps;
+    }
+  
     pub fn update(&mut self, dt: f32) -> Result<(), PhysicsError> {
         let dt_vec = vec3(dt, dt, dt);
         let mut had_invalid = false;
