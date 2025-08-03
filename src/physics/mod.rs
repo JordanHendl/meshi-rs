@@ -1,5 +1,6 @@
 use dashi::utils::{Handle, Pool};
 use glam::*;
+use std::collections::{HashMap, HashSet};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -193,57 +194,119 @@ impl PhysicsSimulation {
             r.dampen_velocity(mat, &dt);
         });
 
-        // Collision detection and resolution
+        // Collision detection and resolution using a simple spatial grid
         self.contacts.clear();
         let mut handles = Vec::new();
         self.rigid_bodies
             .for_each_occupied_handle_mut(|h| handles.push(h));
-        for i in 0..handles.len() {
-            for j in (i + 1)..handles.len() {
-                let ha = handles[i];
-                let hb = handles[j];
 
-                let a_pos = self.rigid_bodies.get_ref(ha).unwrap().position;
-                let b_pos = self.rigid_bodies.get_ref(hb).unwrap().position;
-                let a_vel = self.rigid_bodies.get_ref(ha).unwrap().velocity;
-                let b_vel = self.rigid_bodies.get_ref(hb).unwrap().velocity;
-                let a_rad = self.rigid_bodies.get_ref(ha).unwrap().shape.radius;
-                let b_rad = self.rigid_bodies.get_ref(hb).unwrap().shape.radius;
+        // Determine a cell size based on the largest radius
+        let mut max_radius = 0.0f32;
+        for &h in &handles {
+            let rb = self.rigid_bodies.get_ref(h).unwrap();
+            max_radius = max_radius.max(rb.shape.radius);
+        }
+        let cell_size = if max_radius > 0.0 { max_radius * 2.0 } else { 1.0 };
 
-                let delta = b_pos - a_pos;
-                let dist = delta.length();
-                let penetration = a_rad + b_rad - dist;
-                if penetration > 0.0 {
-                    let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
-                    let correction = normal * (penetration / 2.0);
+        // Populate the grid
+        let mut grid: HashMap<(i32, i32, i32), Vec<Handle<RigidBody>>> = HashMap::new();
+        for &h in &handles {
+            let rb = self.rigid_bodies.get_ref(h).unwrap();
+            let cell = (
+                (rb.position.x / cell_size).floor() as i32,
+                (rb.position.y / cell_size).floor() as i32,
+                (rb.position.z / cell_size).floor() as i32,
+            );
+            grid.entry(cell).or_default().push(h);
+        }
 
-                    let rel_vel = b_vel - a_vel;
-                    let vel_along_normal = rel_vel.dot(normal);
-                    let mut a_vel_new = a_vel;
-                    let mut b_vel_new = b_vel;
-                    if vel_along_normal < 0.0 {
-                        let impulse = normal * vel_along_normal;
-                        a_vel_new += impulse;
-                        b_vel_new -= impulse;
+        // Helper closure to process a potential pair
+        let mut process_pair = |ha: Handle<RigidBody>, hb: Handle<RigidBody>| {
+            let a_pos = self.rigid_bodies.get_ref(ha).unwrap().position;
+            let b_pos = self.rigid_bodies.get_ref(hb).unwrap().position;
+            let a_vel = self.rigid_bodies.get_ref(ha).unwrap().velocity;
+            let b_vel = self.rigid_bodies.get_ref(hb).unwrap().velocity;
+            let a_rad = self.rigid_bodies.get_ref(ha).unwrap().shape.radius;
+            let b_rad = self.rigid_bodies.get_ref(hb).unwrap().shape.radius;
+
+            let delta = b_pos - a_pos;
+            let dist = delta.length();
+            let penetration = a_rad + b_rad - dist;
+            if penetration > 0.0 {
+                let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+                let correction = normal * (penetration / 2.0);
+
+                let rel_vel = b_vel - a_vel;
+                let vel_along_normal = rel_vel.dot(normal);
+                let mut a_vel_new = a_vel;
+                let mut b_vel_new = b_vel;
+                if vel_along_normal < 0.0 {
+                    let impulse = normal * vel_along_normal;
+                    a_vel_new += impulse;
+                    b_vel_new -= impulse;
+                }
+
+                {
+                    let a_mut = self.rigid_bodies.get_mut_ref(ha).unwrap();
+                    a_mut.position = a_pos - correction;
+                    a_mut.velocity = a_vel_new;
+                }
+                {
+                    let b_mut = self.rigid_bodies.get_mut_ref(hb).unwrap();
+                    b_mut.position = b_pos + correction;
+                    b_mut.velocity = b_vel_new;
+                }
+
+                self.contacts.push(ContactInfo {
+                    a: ha,
+                    b: hb,
+                    normal,
+                    penetration,
+                });
+            }
+        };
+
+        let mut checked: HashSet<(u16, u16)> = HashSet::new();
+        let offsets = [-1, 0, 1];
+        for (cell, bodies) in grid.iter() {
+            for i in 0..bodies.len() {
+                let ha = bodies[i];
+
+                // Check other bodies in the same cell
+                for j in (i + 1)..bodies.len() {
+                    let hb = bodies[j];
+                    let key = if ha.slot < hb.slot {
+                        (ha.slot, hb.slot)
+                    } else {
+                        (hb.slot, ha.slot)
+                    };
+                    if checked.insert(key) {
+                        process_pair(ha, hb);
                     }
+                }
 
-                    {
-                        let a_mut = self.rigid_bodies.get_mut_ref(ha).unwrap();
-                        a_mut.position = a_pos - correction;
-                        a_mut.velocity = a_vel_new;
+                // Check neighboring cells
+                for dx in offsets.iter() {
+                    for dy in offsets.iter() {
+                        for dz in offsets.iter() {
+                            if *dx == 0 && *dy == 0 && *dz == 0 {
+                                continue;
+                            }
+                            let neighbor = (cell.0 + *dx, cell.1 + *dy, cell.2 + *dz);
+                            if let Some(neighbors) = grid.get(&neighbor) {
+                                for &hb in neighbors {
+                                    let key = if ha.slot < hb.slot {
+                                        (ha.slot, hb.slot)
+                                    } else {
+                                        (hb.slot, ha.slot)
+                                    };
+                                    if checked.insert(key) {
+                                        process_pair(ha, hb);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    {
-                        let b_mut = self.rigid_bodies.get_mut_ref(hb).unwrap();
-                        b_mut.position = b_pos + correction;
-                        b_mut.velocity = b_vel_new;
-                    }
-
-                    self.contacts.push(ContactInfo {
-                        a: ha,
-                        b: hb,
-                        normal,
-                        penetration,
-                    });
                 }
             }
         }
@@ -278,29 +341,51 @@ impl PhysicsSimulation {
             .push(info.amt);
     }
 
-    pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) {
-        assert!(h.valid());
+    pub fn set_rigid_body_transform(
+        &mut self,
+        h: Handle<RigidBody>,
+        info: &ActorStatus,
+    ) -> bool {
+        if !h.valid() {
+            return false;
+        }
         if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
             rb.position = info.position;
             rb.rotation = info.rotation;
+            true
+        } else {
+            false
         }
     }
 
-    pub fn set_rigid_body_collision_shape(&mut self, h: Handle<RigidBody>, shape: &CollisionShape) {
-        assert!(h.valid());
+    pub fn set_rigid_body_collision_shape(
+        &mut self,
+        h: Handle<RigidBody>,
+        shape: &CollisionShape,
+    ) -> bool {
+        if !h.valid() {
+            return false;
+        }
         if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
             rb.shape = *shape;
+            true
+        } else {
+            false
         }
     }
 
-    pub fn get_rigid_body_status(&self, h: Handle<RigidBody>) -> ActorStatus {
-        assert!(h.valid());
-        self.rigid_bodies.get_ref(h).unwrap().into()
+    pub fn get_rigid_body_status(&self, h: Handle<RigidBody>) -> Option<ActorStatus> {
+        if !h.valid() {
+            return None;
+        }
+        self.rigid_bodies.get_ref(h).map(|rb| rb.into())
     }
 
-    pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Vec3 {
-        assert!(h.valid());
-        self.rigid_bodies.get_ref(h).unwrap().velocity
+    pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Option<Vec3> {
+        if !h.valid() {
+            return None;
+        }
+        self.rigid_bodies.get_ref(h).map(|rb| rb.velocity)
     }
 
     pub fn get_contacts(&self) -> &[ContactInfo] {
