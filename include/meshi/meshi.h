@@ -59,6 +59,8 @@ void meshi_physx_release_rigid_body(struct PhysicsSimulation* physics, const str
 void meshi_physx_apply_force_to_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h, const struct ForceApplyInfo* info);
 int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, const struct Handle* h, const struct ActorStatus* info);
 int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
+// Returns the current velocity of a rigid body or a zero vector on failure.
+struct Vec3 meshi_physx_get_rigid_body_velocity(struct PhysicsSimulation* physics, const struct Handle* h);
 int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
 size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
 struct CollisionShape meshi_physx_collision_shape_sphere(float radius);

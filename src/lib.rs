@@ -519,6 +519,27 @@ pub extern "C" fn meshi_physx_get_rigid_body_status(
     }
 }
 
+/// Retrieve the current velocity of a rigid body.
+///
+/// If any pointer is invalid or the handle does not reference a valid body,
+/// a zero vector is returned.
+///
+/// # Safety
+/// `physics` and `h` must be valid, non-null pointers.
+#[no_mangle]
+pub extern "C" fn meshi_physx_get_rigid_body_velocity(
+    physics: *mut PhysicsSimulation,
+    h: *const Handle<physics::RigidBody>,
+) -> Vec3 {
+    if physics.is_null() || h.is_null() {
+        return Vec3::ZERO;
+    }
+
+    unsafe { &*physics }
+        .get_rigid_body_velocity(unsafe { *h })
+        .unwrap_or(Vec3::ZERO)
+}
+
 /// Set the collision shape for a rigid body.
 ///
 /// # Safety
