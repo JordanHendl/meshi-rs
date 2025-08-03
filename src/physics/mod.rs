@@ -278,29 +278,51 @@ impl PhysicsSimulation {
             .push(info.amt);
     }
 
-    pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) {
-        assert!(h.valid());
+    pub fn set_rigid_body_transform(
+        &mut self,
+        h: Handle<RigidBody>,
+        info: &ActorStatus,
+    ) -> bool {
+        if !h.valid() {
+            return false;
+        }
         if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
             rb.position = info.position;
             rb.rotation = info.rotation;
+            true
+        } else {
+            false
         }
     }
 
-    pub fn set_rigid_body_collision_shape(&mut self, h: Handle<RigidBody>, shape: &CollisionShape) {
-        assert!(h.valid());
+    pub fn set_rigid_body_collision_shape(
+        &mut self,
+        h: Handle<RigidBody>,
+        shape: &CollisionShape,
+    ) -> bool {
+        if !h.valid() {
+            return false;
+        }
         if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
             rb.shape = *shape;
+            true
+        } else {
+            false
         }
     }
 
-    pub fn get_rigid_body_status(&self, h: Handle<RigidBody>) -> ActorStatus {
-        assert!(h.valid());
-        self.rigid_bodies.get_ref(h).unwrap().into()
+    pub fn get_rigid_body_status(&self, h: Handle<RigidBody>) -> Option<ActorStatus> {
+        if !h.valid() {
+            return None;
+        }
+        self.rigid_bodies.get_ref(h).map(|rb| rb.into())
     }
 
-    pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Vec3 {
-        assert!(h.valid());
-        self.rigid_bodies.get_ref(h).unwrap().velocity
+    pub fn get_rigid_body_velocity(&self, h: Handle<RigidBody>) -> Option<Vec3> {
+        if !h.valid() {
+            return None;
+        }
+        self.rigid_bodies.get_ref(h).map(|rb| rb.velocity)
     }
 
     pub fn get_contacts(&self) -> &[ContactInfo] {
