@@ -31,8 +31,8 @@ impl Timer {
 
     // Stop the timer
     pub fn stop(&mut self) {
-        if let Some(start_time) = self.start_time {
-            self.elapsed = start_time.elapsed();
+        if self.start_time.is_some() {
+            self.elapsed = self.elapsed_duration();
             self.start_time = None;
             self.is_paused = false;
         }
@@ -40,8 +40,8 @@ impl Timer {
 
     // Pause the timer
     pub fn pause(&mut self) {
-        if let Some(start_time) = self.start_time {
-            self.elapsed = start_time.elapsed();
+        if self.start_time.is_some() {
+            self.elapsed = self.elapsed_duration();
             self.is_paused = true;
             self.start_time = None;
         }
@@ -54,34 +54,36 @@ impl Timer {
         self.is_paused = false;
     }
 
-    // Get the current elapsed time in milliseconds
-    pub fn elapsed_ms(&self) -> u128 {
+    // Get the current elapsed duration
+    pub fn elapsed_duration(&self) -> Duration {
         if let Some(start_time) = self.start_time {
             if self.is_paused {
-                self.elapsed.as_millis()
+                self.elapsed
             } else {
-                start_time.elapsed().as_millis()
+                start_time.elapsed()
             }
         } else {
-            self.elapsed.as_millis()
+            self.elapsed
         }
     }
 
     // Get the current elapsed time in milliseconds
+    pub fn elapsed_ms(&self) -> u128 {
+        self.elapsed_duration().as_millis()
+    }
+
+    // Get the current elapsed time in microseconds
     pub fn elapsed_micro(&self) -> u128 {
-        if let Some(start_time) = self.start_time {
-            if self.is_paused {
-                self.elapsed.as_micros()
-            } else {
-                start_time.elapsed().as_micros()
-            }
-        } else {
-            self.elapsed.as_micros()
-        }
+        self.elapsed_duration().as_micros()
     }
 
     // Get the current elapsed time in seconds as f32
     pub fn elapsed_seconds_f32(&self) -> f32 {
-        self.elapsed_micro() as f32 / 1_000_000.0
+        self.elapsed_duration().as_secs_f32()
+    }
+
+    // Get the current elapsed time in seconds as f64
+    pub fn elapsed_seconds_f64(&self) -> f64 {
+        self.elapsed_duration().as_secs_f64()
     }
 }
