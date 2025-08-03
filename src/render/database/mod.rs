@@ -24,20 +24,18 @@ pub struct MeshResource {
 }
 
 pub struct Database {
-    ctx: *mut dashi::Context,
     base_path: String,
     geometry: HashMap<String, MeshResource>,
     /// Map of texture names to optionally loaded handles. If a handle is
     /// `None` the texture has been registered but not yet loaded.
     textures: HashMap<String, Option<Handle<koji::Texture>>>,
-    fonts: HashMap<String, TTFont>,
+    _fonts: HashMap<String, TTFont>,
 }
 
-// The database wraps a raw pointer to the rendering context but loading models
-// and images only touches filesystem data structures. It is therefore safe to
-// send across threads as long as external synchronization (like a `Mutex`) is
-// used.
-unsafe impl Send for Database {}
+// Loading models and images only touches filesystem data structures. It is
+// therefore safe to send the database across threads as long as external
+// synchronization (like a `Mutex`) is used.
+
 
 impl Database {
     pub fn base_path(&self) -> &str {
@@ -111,10 +109,9 @@ impl Database {
 
         Ok(Database {
             base_path: base_path.to_string(),
-            ctx,
             geometry,
             textures,
-            fonts,
+            _fonts: fonts,
         })
     }
 
@@ -288,11 +285,10 @@ mod tests {
     // Helper to construct a minimal database without a real GPU context.
     fn make_db(path: &str) -> Database {
         Database {
-            ctx: std::ptr::null_mut(),
             base_path: path.to_string(),
             geometry: HashMap::new(),
             textures: HashMap::new(),
-            fonts: HashMap::new(),
+            _fonts: HashMap::new(),
         }
     }
 
@@ -394,7 +390,7 @@ mod tests {
         let db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
         assert!(db.textures.contains_key("img"));
         assert!(db.geometry.contains_key("model"));
-        assert!(db.fonts.contains_key("font"));
+        assert!(db._fonts.contains_key("font"));
         drop(db);
         ctx.destroy();
     }
