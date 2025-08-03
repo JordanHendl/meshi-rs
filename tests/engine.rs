@@ -1,3 +1,4 @@
+use glam::Mat4;
 use meshi::render::database::geometry_primitives::{CubePrimitiveInfo, SpherePrimitiveInfo};
 use meshi::*;
 use std::ffi::CString;
@@ -13,6 +14,12 @@ fn main() {
     let engine = unsafe { meshi_make_engine(&info) };
     assert!(!engine.is_null());
     let render = unsafe { meshi_get_graphics_system(engine) };
+    unsafe {
+        meshi_gfx_set_camera(render, &Mat4::IDENTITY);
+        meshi_gfx_set_projection(render, &Mat4::IDENTITY);
+        meshi_gfx_capture_mouse(render, 1);
+        meshi_gfx_capture_mouse(render, 0);
+    }
     let cube_info = CubePrimitiveInfo { size: 1.0 };
     unsafe { meshi_gfx_create_cube_ex(render, &cube_info) };
     let sphere_info = SpherePrimitiveInfo {
