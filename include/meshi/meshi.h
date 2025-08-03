@@ -38,6 +38,16 @@ float meshi_update(struct MeshiEngine* engine);
 struct RenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
 struct AudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
 
+// Audio
+struct Handle meshi_audio_create_source(struct AudioEngine* audio, const char* path);
+void meshi_audio_destroy_source(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_play(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_pause(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_stop(struct AudioEngine* audio, struct Handle h);
+void meshi_audio_set_looping(struct AudioEngine* audio, struct Handle h, int32_t looping);
+void meshi_audio_set_volume(struct AudioEngine* audio, struct Handle h, float volume);
+void meshi_audio_set_pitch(struct AudioEngine* audio, struct Handle h, float pitch);
+
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);
 struct Handle meshi_gfx_create_cube(struct RenderEngine* render);
