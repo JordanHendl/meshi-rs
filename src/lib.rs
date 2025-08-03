@@ -42,8 +42,12 @@ impl MeshiEngine {
         if info.application_name.is_null() || info.application_location.is_null() {
             return None;
         }
-        let appname = unsafe { CStr::from_ptr(info.application_name) }.to_str().ok()?;
-        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }.to_str().ok()?;
+        let appname = unsafe { CStr::from_ptr(info.application_name) }
+            .to_str()
+            .ok()?;
+        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }
+            .to_str()
+            .ok()?;
 
         if appdir.is_empty() {
             appdir = ".";
@@ -68,12 +72,13 @@ impl MeshiEngine {
 
     fn update(&mut self) -> f32 {
         self.frame_timer.stop();
-        let dt = self.frame_timer.elapsed_seconds_f32();
+        let dt = self.frame_timer.elapsed_duration();
         self.frame_timer.start();
-        self.render.update(dt);
-        self.physics.update(dt);
+        let dt_secs = dt.as_secs_f32();
+        self.render.update(dt_secs);
+        self.physics.update(dt_secs);
 
-        dt
+        dt_secs
     }
 }
 
@@ -94,8 +99,7 @@ pub extern "C" fn meshi_make_engine(info: *const MeshiEngineInfo) -> *mut MeshiE
         // completes the builder.
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     if info.is_null() {
         return std::ptr::null_mut();
@@ -449,7 +453,7 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     info: *const physics::ActorStatus,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || info.is_null() {
         return 0;
     }
@@ -471,7 +475,7 @@ pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     out_status: *mut physics::ActorStatus,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || out_status.is_null() {
         return 0;
     }
@@ -492,13 +496,11 @@ pub extern "C" fn meshi_physx_set_collision_shape(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     shape: *const CollisionShape,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || shape.is_null() {
         return 0;
     }
-    if unsafe { &mut *physics }
-        .set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape })
-    {
+    if unsafe { &mut *physics }.set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape }) {
         1
     } else {
         0
