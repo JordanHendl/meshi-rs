@@ -49,6 +49,7 @@ void meshi_gfx_capture_mouse(struct RenderEngine* render, int32_t value);
 
 // Physics
 struct PhysicsSimulation* meshi_get_physics_system(struct MeshiEngine* engine);
+void meshi_physx_set_gravity(struct PhysicsSimulation* physics, float gravity_mps);
 struct Handle meshi_physx_create_material(struct PhysicsSimulation* physics, const struct MaterialInfo* info);
 void meshi_physx_release_material(struct PhysicsSimulation* physics, const struct Handle* h);
 struct Handle meshi_physx_create_rigid_body(struct PhysicsSimulation* physics, const struct RigidBodyInfo* info);

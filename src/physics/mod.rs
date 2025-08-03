@@ -4,8 +4,28 @@ use std::collections::{HashMap, HashSet};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Environment parameters for the physics simulation.
+///
+/// Gravity defaults to Earth's gravity (`-9.8`). It can be customized by
+/// constructing an [`EnvironmentInfo`] with a different value:
+///
+/// ```
+/// use meshi::physics::{EnvironmentInfo, PhysicsSimulation, SimulationInfo};
+///
+/// let mut info = SimulationInfo::default();
+/// info.environment = EnvironmentInfo::new(-3.7); // roughly moon gravity
+/// let _sim = PhysicsSimulation::new(&info);
+/// ```
 pub struct EnvironmentInfo {
-    gravity_mps: f32,
+    /// Gravitational acceleration in meters per second squared.
+    pub gravity_mps: f32,
+}
+
+impl EnvironmentInfo {
+    /// Create a new [`EnvironmentInfo`] with the provided gravity value.
+    pub fn new(gravity_mps: f32) -> Self {
+        Self { gravity_mps }
+    }
 }
 
 impl Default for EnvironmentInfo {
@@ -174,6 +194,11 @@ impl PhysicsSimulation {
         s
     }
 
+    /// Set the global gravitational acceleration in meters per second squared.
+    pub fn set_gravity(&mut self, gravity_mps: f32) {
+        self.info.environment.gravity_mps = gravity_mps;
+    }
+
     pub fn update(&mut self, dt: f32) {
         let dt = vec3(dt, dt, dt);
         self.rigid_bodies.for_each_occupied_mut(|r| {
@@ -206,7 +231,11 @@ impl PhysicsSimulation {
             let rb = self.rigid_bodies.get_ref(h).unwrap();
             max_radius = max_radius.max(rb.shape.radius);
         }
-        let cell_size = if max_radius > 0.0 { max_radius * 2.0 } else { 1.0 };
+        let cell_size = if max_radius > 0.0 {
+            max_radius * 2.0
+        } else {
+            1.0
+        };
 
         // Populate the grid
         let mut grid: HashMap<(i32, i32, i32), Vec<Handle<RigidBody>>> = HashMap::new();
@@ -341,11 +370,7 @@ impl PhysicsSimulation {
             .push(info.amt);
     }
 
-    pub fn set_rigid_body_transform(
-        &mut self,
-        h: Handle<RigidBody>,
-        info: &ActorStatus,
-    ) -> bool {
+    pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) -> bool {
         if !h.valid() {
             return false;
         }
