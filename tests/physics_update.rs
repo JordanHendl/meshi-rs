@@ -11,8 +11,12 @@ fn physics_update_applies_gravity_and_damping() {
     let dt = 1.0f32;
     sim.update(dt);
 
-    let status = sim.get_rigid_body_status(rb);
-    let velocity = sim.get_rigid_body_velocity(rb);
+    let status = sim
+        .get_rigid_body_status(rb)
+        .expect("rigid body should be valid");
+    let velocity = sim
+        .get_rigid_body_velocity(rb)
+        .expect("rigid body should be valid");
 
     let g = -9.8f32;
     let friction = MaterialInfo::default().dynamic_friction_m;
