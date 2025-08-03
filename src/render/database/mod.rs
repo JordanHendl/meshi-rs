@@ -267,7 +267,11 @@ mod tests {
         let model_name = write_triangle_gltf(dir.path());
 
         // Font
+    #[cfg(target_os = "windows")]
+        let font_src = "C:/Windows/Fonts/arial.ttf";
+    #[cfg(target_os = "linux")]
         let font_src = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
         let font_dest = dir.path().join("font.ttf");
         std::fs::copy(font_src, &font_dest).unwrap();
 

@@ -62,6 +62,16 @@ jobs:
         with:
           path: artifacts
 
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Create header archives
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          tar -czf artifacts/meshi-c-headers.tar.gz -C include meshi
+          (cd include && zip -r ../artifacts/meshi-c-headers.zip meshi)
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
@@ -70,3 +80,5 @@ jobs:
           files: |
             artifacts/meshi-ubuntu-latest/meshi.so
             artifacts/meshi-windows-latest/meshi.dll
+            artifacts/meshi-c-headers.tar.gz
+            artifacts/meshi-c-headers.zip

@@ -110,7 +110,7 @@ pub struct RenderEngine {
 
 enum Backend {
     Canvas(canvas::CanvasRenderer),
-    Graph(graph::GraphBackend),
+    Graph(graph::GraphRenderer),
 }
 
 #[allow(dead_code)]
@@ -123,6 +123,11 @@ impl RenderEngine {
 
         info!("Initializing Render Engine with device {}", device);
 
+        let cfg = config::RenderEngineConfig {
+            scene_cfg_path: Some(format!("{}/koji.json", info.application_path)),
+            database_path: Some(format!("{}/database", info.application_path)),
+        };
+
         let backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
@@ -130,13 +135,8 @@ impl RenderEngine {
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");
-                Backend::Graph(graph::GraphBackend::new())
+                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone()))
             }
-        };
-
-        let cfg = config::RenderEngineConfig {
-            scene_cfg_path: Some(format!("{}/koji.json", info.application_path)),
-            database_path: Some(format!("{}/database", info.application_path)),
         };
 
         // The GPU context that holds all the data.
@@ -380,7 +380,7 @@ impl RenderEngine {
         if let (Some(ctx), Some(display)) = (self.ctx.as_mut(), self.display.as_mut()) {
             match &mut self.backend {
                 Backend::Canvas(r) => r.render(ctx, display, &self.mesh_objects),
-                Backend::Graph(_) => {}
+                Backend::Graph(r) => r.render(ctx, display, &self.mesh_objects),
             }
         }
     }
