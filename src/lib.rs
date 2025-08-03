@@ -79,7 +79,7 @@ impl MeshiEngine {
         self.frame_timer.start();
         let dt_secs = dt.as_secs_f32();
         self.render.update(dt_secs);
-        self.physics.update(dt_secs);
+        let _ = self.physics.update(dt_secs);
 
         dt_secs
     }
@@ -460,7 +460,7 @@ pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
     if physics.is_null() || h.is_null() || info.is_null() {
         return;
     }
-    unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
+    let _ = unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
 /// Set the position and rotation of a rigid body.
