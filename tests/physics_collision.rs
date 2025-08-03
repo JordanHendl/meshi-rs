@@ -15,7 +15,7 @@ fn spheres_generate_contact() {
         ..Default::default()
     });
 
-    sim.update(0.0);
+    sim.update(0.0).unwrap();
     let contacts = sim.get_contacts();
     assert!(contacts
         .iter()
@@ -36,7 +36,7 @@ fn many_spheres_generate_expected_contacts() {
         bodies.push(rb);
     }
 
-    sim.update(0.0);
+    sim.update(0.0).unwrap();
     let contacts = sim.get_contacts();
     assert_eq!(contacts.len(), count - 1);
     for i in 0..(count - 1) {

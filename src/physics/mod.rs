@@ -171,6 +171,11 @@ impl From<&RigidBody> for ActorStatus {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicsError {
+    InvalidHandle,
+}
 pub struct PhysicsSimulation {
     info: SimulationInfo,
     materials: Pool<Material>,
@@ -193,30 +198,35 @@ impl PhysicsSimulation {
         s.default_material = default;
         s
     }
-
+  
     /// Set the global gravitational acceleration in meters per second squared.
     pub fn set_gravity(&mut self, gravity_mps: f32) {
         self.info.environment.gravity_mps = gravity_mps;
     }
+  
+    pub fn update(&mut self, dt: f32) -> Result<(), PhysicsError> {
+        let dt_vec = vec3(dt, dt, dt);
+        let mut had_invalid = false;
 
-    pub fn update(&mut self, dt: f32) {
-        let dt = vec3(dt, dt, dt);
         self.rigid_bodies.for_each_occupied_mut(|r| {
-            let mat = self.materials.get_ref(r.material).unwrap();
-            if r.has_gravity == 1 {
-                r.forces
-                    .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt);
+            if let Some(mat) = self.materials.get_ref(r.material) {
+                if r.has_gravity == 1 {
+                    r.forces
+                        .push(vec3(0.0, self.info.environment.gravity_mps, 0.0) * dt_vec);
+                }
+
+                let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
+                r.velocity += total_force;
+                r.forces.clear();
+
+                let adj_velocity = r.velocity * dt_vec;
+                let pos = r.position;
+                r.position = pos + adj_velocity;
+
+                r.dampen_velocity(mat, &dt_vec);
+            } else {
+                had_invalid = true;
             }
-
-            let total_force = r.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
-            r.velocity += total_force;
-            r.forces.clear();
-
-            let adj_velocity = r.velocity * dt;
-            let pos = r.position;
-            r.position = pos + adj_velocity;
-
-            r.dampen_velocity(mat, &dt);
         });
 
         // Collision detection and resolution using a simple spatial grid
@@ -228,8 +238,11 @@ impl PhysicsSimulation {
         // Determine a cell size based on the largest radius
         let mut max_radius = 0.0f32;
         for &h in &handles {
-            let rb = self.rigid_bodies.get_ref(h).unwrap();
-            max_radius = max_radius.max(rb.shape.radius);
+            if let Some(rb) = self.rigid_bodies.get_ref(h) {
+                max_radius = max_radius.max(rb.shape.radius);
+            } else {
+                had_invalid = true;
+            }
         }
         let cell_size = if max_radius > 0.0 {
             max_radius * 2.0
@@ -240,23 +253,37 @@ impl PhysicsSimulation {
         // Populate the grid
         let mut grid: HashMap<(i32, i32, i32), Vec<Handle<RigidBody>>> = HashMap::new();
         for &h in &handles {
-            let rb = self.rigid_bodies.get_ref(h).unwrap();
-            let cell = (
-                (rb.position.x / cell_size).floor() as i32,
-                (rb.position.y / cell_size).floor() as i32,
-                (rb.position.z / cell_size).floor() as i32,
-            );
-            grid.entry(cell).or_default().push(h);
+            if let Some(rb) = self.rigid_bodies.get_ref(h) {
+                let cell = (
+                    (rb.position.x / cell_size).floor() as i32,
+                    (rb.position.y / cell_size).floor() as i32,
+                    (rb.position.z / cell_size).floor() as i32,
+                );
+                grid.entry(cell).or_default().push(h);
+            } else {
+                had_invalid = true;
+            }
         }
 
         // Helper closure to process a potential pair
         let mut process_pair = |ha: Handle<RigidBody>, hb: Handle<RigidBody>| {
-            let a_pos = self.rigid_bodies.get_ref(ha).unwrap().position;
-            let b_pos = self.rigid_bodies.get_ref(hb).unwrap().position;
-            let a_vel = self.rigid_bodies.get_ref(ha).unwrap().velocity;
-            let b_vel = self.rigid_bodies.get_ref(hb).unwrap().velocity;
-            let a_rad = self.rigid_bodies.get_ref(ha).unwrap().shape.radius;
-            let b_rad = self.rigid_bodies.get_ref(hb).unwrap().shape.radius;
+            let (a_pos, a_vel, a_rad, b_pos, b_vel, b_rad) = match (
+                self.rigid_bodies.get_ref(ha),
+                self.rigid_bodies.get_ref(hb),
+            ) {
+                (Some(a), Some(b)) => (
+                    a.position,
+                    a.velocity,
+                    a.shape.radius,
+                    b.position,
+                    b.velocity,
+                    b.shape.radius,
+                ),
+                _ => {
+                    had_invalid = true;
+                    return;
+                }
+            };
 
             let delta = b_pos - a_pos;
             let dist = delta.length();
@@ -275,15 +302,19 @@ impl PhysicsSimulation {
                     b_vel_new -= impulse;
                 }
 
-                {
-                    let a_mut = self.rigid_bodies.get_mut_ref(ha).unwrap();
+                if let Some(a_mut) = self.rigid_bodies.get_mut_ref(ha) {
                     a_mut.position = a_pos - correction;
                     a_mut.velocity = a_vel_new;
+                } else {
+                    had_invalid = true;
+                    return;
                 }
-                {
-                    let b_mut = self.rigid_bodies.get_mut_ref(hb).unwrap();
+                if let Some(b_mut) = self.rigid_bodies.get_mut_ref(hb) {
                     b_mut.position = b_pos + correction;
                     b_mut.velocity = b_vel_new;
+                } else {
+                    had_invalid = true;
+                    return;
                 }
 
                 self.contacts.push(ContactInfo {
@@ -339,6 +370,12 @@ impl PhysicsSimulation {
                 }
             }
         }
+
+        if had_invalid {
+            Err(PhysicsError::InvalidHandle)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn create_material(&mut self, info: &MaterialInfo) -> Handle<Material> {
@@ -362,12 +399,20 @@ impl PhysicsSimulation {
         self.rigid_bodies.release(h);
     }
 
-    pub fn apply_rigid_body_force(&mut self, h: Handle<RigidBody>, info: &ForceApplyInfo) {
-        self.rigid_bodies
-            .get_mut_ref(h)
-            .unwrap()
-            .forces
-            .push(info.amt);
+    pub fn apply_rigid_body_force(
+        &mut self,
+        h: Handle<RigidBody>,
+        info: &ForceApplyInfo,
+    ) -> Result<(), PhysicsError> {
+        if !h.valid() {
+            return Err(PhysicsError::InvalidHandle);
+        }
+        if let Some(rb) = self.rigid_bodies.get_mut_ref(h) {
+            rb.forces.push(info.amt);
+            Ok(())
+        } else {
+            Err(PhysicsError::InvalidHandle)
+        }
     }
 
     pub fn set_rigid_body_transform(&mut self, h: Handle<RigidBody>, info: &ActorStatus) -> bool {

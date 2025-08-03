@@ -79,7 +79,7 @@ impl MeshiEngine {
         self.frame_timer.start();
         let dt_secs = dt.as_secs_f32();
         self.render.update(dt_secs);
-        self.physics.update(dt_secs);
+        let _ = self.physics.update(dt_secs);
 
         dt_secs
     }
@@ -329,6 +329,22 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
     unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
 }
 
+/// Update the properties for a directional light.
+///
+/// # Safety
+/// `render` and `info` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_directional_light_info(
+    render: *mut RenderEngine,
+    h: Handle<DirectionalLight>,
+    info: *const DirectionalLightInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+    unsafe { &mut *render }.set_directional_light_info(h, unsafe { &*info });
+}
+
 /// Set the world-to-camera transform used for rendering.
 ///
 /// # Safety
@@ -457,7 +473,7 @@ pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
     if physics.is_null() || h.is_null() || info.is_null() {
         return;
     }
-    unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
+    let _ = unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
 /// Set the position and rotation of a rigid body.

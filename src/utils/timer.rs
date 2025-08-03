@@ -5,7 +5,6 @@ pub struct Timer {
     is_paused: bool,
 }
 
-#[allow(dead_code)]
 impl Timer {
     // Create a new timer instance
     pub fn new() -> Timer {
@@ -18,14 +17,14 @@ impl Timer {
 
     // Start the timer
     pub fn start(&mut self) {
-        if self.start_time.is_none() {
-            self.start_time = Some(Instant::now());
-        } else if self.is_paused {
+        if self.is_paused {
             // Resume from where it was paused
             self.start_time = Some(Instant::now() - self.elapsed);
             self.is_paused = false;
         } else {
+            // Start or restart the timer
             self.start_time = Some(Instant::now());
+            self.elapsed = Duration::new(0, 0);
         }
     }
 

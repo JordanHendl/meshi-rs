@@ -43,6 +43,7 @@ struct Handle meshi_gfx_create_triangle(struct RenderEngine* render);
 void meshi_gfx_set_renderable_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
 struct Handle meshi_gfx_create_directional_light(struct RenderEngine* render, const struct DirectionalLightInfo* info);
 void meshi_gfx_set_directional_light_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
+void meshi_gfx_set_directional_light_info(struct RenderEngine* render, struct Handle h, const struct DirectionalLightInfo* info);
 void meshi_gfx_set_camera(struct RenderEngine* render, const struct Mat4* transform);
 void meshi_gfx_set_projection(struct RenderEngine* render, const struct Mat4* transform);
 void meshi_gfx_capture_mouse(struct RenderEngine* render, int32_t value);
