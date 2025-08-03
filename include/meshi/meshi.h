@@ -16,6 +16,7 @@ struct MeshObject;
 struct DirectionalLightInfo;
 struct DirectionalLight;
 struct Mat4;
+struct Vec3;
 struct PhysicsSimulation;
 struct MaterialInfo;
 struct RigidBodyInfo;
@@ -50,6 +51,7 @@ void meshi_gfx_capture_mouse(struct RenderEngine* render, int32_t value);
 
 // Physics
 struct PhysicsSimulation* meshi_get_physics_system(struct MeshiEngine* engine);
+void meshi_physx_set_gravity(struct PhysicsSimulation* physics, float gravity_mps);
 struct Handle meshi_physx_create_material(struct PhysicsSimulation* physics, const struct MaterialInfo* info);
 void meshi_physx_release_material(struct PhysicsSimulation* physics, const struct Handle* h);
 struct Handle meshi_physx_create_rigid_body(struct PhysicsSimulation* physics, const struct RigidBodyInfo* info);
@@ -59,6 +61,8 @@ int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, 
 int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
 int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
 size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
+struct CollisionShape meshi_physx_collision_shape_sphere(float radius);
+struct CollisionShape meshi_physx_collision_shape_box(struct Vec3 dimensions);
 
 #ifdef __cplusplus
 } // extern "C"
