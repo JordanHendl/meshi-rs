@@ -3,7 +3,7 @@ mod object;
 pub mod physics;
 pub mod render;
 mod utils;
-use audio::{AudioEngine, AudioEngineInfo};
+use audio::{AudioEngine, AudioEngineInfo, AudioSource};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
 use object::{FFIMeshObjectInfo, MeshObject};
@@ -402,6 +402,94 @@ pub extern "C" fn meshi_get_audio_system(engine: *mut MeshiEngine) -> *mut Audio
         return std::ptr::null_mut();
     }
     unsafe { &mut (*engine).audio }
+}
+
+/// Create an audio source from a file path.
+#[no_mangle]
+pub extern "C" fn meshi_audio_create_source(
+    audio: *mut AudioEngine,
+    path: *const c_char,
+) -> Handle<AudioSource> {
+    if audio.is_null() || path.is_null() {
+        return Handle::default();
+    }
+    let p = unsafe { CStr::from_ptr(path) }.to_str().unwrap_or("");
+    unsafe { &mut *audio }.create_source(p)
+}
+
+/// Destroy an audio source and free its resources.
+#[no_mangle]
+pub extern "C" fn meshi_audio_destroy_source(audio: *mut AudioEngine, h: Handle<AudioSource>) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.destroy_source(h);
+}
+
+/// Begin playback for an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_play(audio: *mut AudioEngine, h: Handle<AudioSource>) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.play(h);
+}
+
+/// Pause playback for an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_pause(audio: *mut AudioEngine, h: Handle<AudioSource>) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.pause(h);
+}
+
+/// Stop playback for an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_stop(audio: *mut AudioEngine, h: Handle<AudioSource>) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.stop(h);
+}
+
+/// Set whether an audio source loops when played.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_looping(
+    audio: *mut AudioEngine,
+    h: Handle<AudioSource>,
+    looping: i32,
+) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_looping(h, looping != 0);
+}
+
+/// Adjust the playback volume for an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_volume(
+    audio: *mut AudioEngine,
+    h: Handle<AudioSource>,
+    volume: c_float,
+) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_volume(h, volume as f32);
+}
+
+/// Adjust the playback pitch for an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_pitch(
+    audio: *mut AudioEngine,
+    h: Handle<AudioSource>,
+    pitch: c_float,
+) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_pitch(h, pitch as f32);
 }
 
 ////////////////////////////////////////////
