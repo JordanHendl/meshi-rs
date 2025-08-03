@@ -22,6 +22,7 @@ pub enum RenderError {
     ContextCreation,
     DisplayCreation,
     Database(DatabaseError),
+    Gpu(dashi::GPUError),
 }
 
 impl fmt::Display for RenderError {
@@ -31,6 +32,7 @@ impl fmt::Display for RenderError {
             RenderError::ContextCreation => write!(f, "failed to create GPU context"),
             RenderError::DisplayCreation => write!(f, "failed to create display"),
             RenderError::Database(err) => write!(f, "database error: {err}"),
+            RenderError::Gpu(err) => write!(f, "gpu error: {err:?}"),
         }
     }
 }
@@ -47,6 +49,12 @@ impl std::error::Error for RenderError {
 impl From<DatabaseError> for RenderError {
     fn from(value: DatabaseError) -> Self {
         RenderError::Database(value)
+    }
+}
+
+impl From<dashi::GPUError> for RenderError {
+    fn from(value: dashi::GPUError) -> Self {
+        RenderError::Gpu(value)
     }
 }
 
@@ -379,7 +387,11 @@ impl RenderEngine {
 
         if let (Some(ctx), Some(display)) = (self.ctx.as_mut(), self.display.as_mut()) {
             match &mut self.backend {
-                Backend::Canvas(r) => r.render(ctx, display, &self.mesh_objects),
+                Backend::Canvas(r) => {
+                    if let Err(e) = r.render(ctx, display, &self.mesh_objects) {
+                        warn!("render error: {}", e);
+                    }
+                }
                 Backend::Graph(r) => r.render(ctx, display, &self.mesh_objects),
             }
         }
