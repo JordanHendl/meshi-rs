@@ -29,7 +29,10 @@ fn main() {
         rotation: Quat::IDENTITY,
     };
     unsafe {
-        assert_eq!(meshi_physx_set_rigid_body_transform(physics, &rb, &new_status), 1);
+        assert_eq!(
+            meshi_physx_set_rigid_body_transform(physics, &rb, &new_status),
+            1
+        );
     }
     let mut out = ActorStatus::default();
     unsafe {
@@ -37,6 +40,10 @@ fn main() {
     }
     assert_eq!(out.position, new_status.position);
     assert_eq!(out.rotation, new_status.rotation);
+
+    // Newly added FFI: retrieve rigid body velocity
+    let vel = unsafe { meshi_physx_get_rigid_body_velocity(physics, &rb) };
+    assert_eq!(vel, Vec3::ZERO);
 
     unsafe {
         meshi_physx_release_rigid_body(physics, &rb);
