@@ -6,7 +6,9 @@ use dashi::utils::Handle;
 use glam::Mat4;
 use object::{FFIMeshObjectInfo, MeshObject};
 use physics::{CollisionShape, ContactInfo, ForceApplyInfo, PhysicsSimulation};
-use render::{DirectionalLight, DirectionalLightInfo, RenderEngine, RenderEngineInfo};
+use render::{
+    DirectionalLight, DirectionalLightInfo, RenderBackend, RenderEngine, RenderEngineInfo,
+};
 use std::ffi::*;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -42,8 +44,12 @@ impl MeshiEngine {
         if info.application_name.is_null() || info.application_location.is_null() {
             return None;
         }
-        let appname = unsafe { CStr::from_ptr(info.application_name) }.to_str().ok()?;
-        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }.to_str().ok()?;
+        let appname = unsafe { CStr::from_ptr(info.application_name) }
+            .to_str()
+            .ok()?;
+        let mut appdir = unsafe { CStr::from_ptr(info.application_location) }
+            .to_str()
+            .ok()?;
 
         if appdir.is_empty() {
             appdir = ".";
@@ -58,6 +64,7 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
+                backend: RenderBackend::Canvas,
             })
             .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
@@ -94,8 +101,7 @@ pub extern "C" fn meshi_make_engine(info: *const MeshiEngineInfo) -> *mut MeshiE
         // completes the builder.
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     if info.is_null() {
         return std::ptr::null_mut();
@@ -449,7 +455,7 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     info: *const physics::ActorStatus,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || info.is_null() {
         return 0;
     }
@@ -471,7 +477,7 @@ pub extern "C" fn meshi_physx_get_rigid_body_status(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     out_status: *mut physics::ActorStatus,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || out_status.is_null() {
         return 0;
     }
@@ -492,13 +498,11 @@ pub extern "C" fn meshi_physx_set_collision_shape(
     physics: *mut PhysicsSimulation,
     h: *const Handle<physics::RigidBody>,
     shape: *const CollisionShape,
-    ) -> i32 {
+) -> i32 {
     if physics.is_null() || h.is_null() || shape.is_null() {
         return 0;
     }
-    if unsafe { &mut *physics }
-        .set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape })
-    {
+    if unsafe { &mut *physics }.set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape }) {
         1
     } else {
         0
