@@ -3,9 +3,9 @@ pub mod physics;
 pub mod render;
 mod utils;
 use dashi::utils::Handle;
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use object::{FFIMeshObjectInfo, MeshObject};
-use physics::{CollisionShape, ContactInfo, ForceApplyInfo, PhysicsSimulation};
+use physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, PhysicsSimulation};
 use render::{
     DirectionalLight, DirectionalLightInfo, RenderBackend, RenderEngine, RenderEngineInfo,
 };
@@ -531,6 +531,24 @@ pub extern "C" fn meshi_physx_get_contacts(
         std::ptr::copy_nonoverlapping(contacts.as_ptr(), out_contacts, count);
     }
     count
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_collision_shape_sphere(radius: f32) -> CollisionShape {
+    CollisionShape {
+        dimensions: Vec3::ZERO,
+        radius,
+        shape_type: CollisionShapeType::Sphere,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_collision_shape_box(dimensions: Vec3) -> CollisionShape {
+    CollisionShape {
+        dimensions,
+        radius: 0.0,
+        shape_type: CollisionShapeType::Box,
+    }
 }
 
 #[cfg(test)]
