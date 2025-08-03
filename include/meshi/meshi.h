@@ -54,9 +54,9 @@ void meshi_physx_release_material(struct PhysicsSimulation* physics, const struc
 struct Handle meshi_physx_create_rigid_body(struct PhysicsSimulation* physics, const struct RigidBodyInfo* info);
 void meshi_physx_release_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h);
 void meshi_physx_apply_force_to_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h, const struct ForceApplyInfo* info);
-void meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, const struct Handle* h, const struct ActorStatus* info);
-void meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
-void meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
+int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, const struct Handle* h, const struct ActorStatus* info);
+int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
+int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
 size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
 
 #ifdef __cplusplus

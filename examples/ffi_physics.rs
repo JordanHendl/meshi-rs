@@ -19,11 +19,11 @@ fn main() {
         rotation: Quat::IDENTITY,
     };
     unsafe {
-        meshi_physx_set_rigid_body_transform(physics, &rb, &status);
+        let _ = meshi_physx_set_rigid_body_transform(physics, &rb, &status);
     }
     let mut out = ActorStatus::default();
     unsafe {
-        meshi_physx_get_rigid_body_status(physics, &rb, &mut out);
+        let _ = meshi_physx_get_rigid_body_status(physics, &rb, &mut out);
     }
     println!(
         "Rigid body position: {} {} {}",

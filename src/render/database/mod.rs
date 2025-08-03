@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::fs;
 pub mod images;
 use images::*;
-mod material;
-use material::*;
 pub mod geometry;
 use geometry::*;
 pub mod font;
@@ -25,13 +23,6 @@ pub struct MeshResource {
     pub num_indices: usize,
 }
 
-#[allow(dead_code)]
-struct Defaults {
-    //    image: Handle<koji::Texture>,
-    //    material: Handle<koji::Material>,
-}
-
-#[allow(dead_code)]
 pub struct Database {
     ctx: *mut dashi::Context,
     base_path: String,
@@ -39,9 +30,7 @@ pub struct Database {
     /// Map of texture names to optionally loaded handles. If a handle is
     /// `None` the texture has been registered but not yet loaded.
     textures: HashMap<String, Option<Handle<koji::Texture>>>,
-    //    materials: HashMap<String, Handle<miso::Material>>,
-    //    fonts: HashMap<String, FontResource>,
-    //    defaults: Defaults,
+    fonts: HashMap<String, TTFont>,
 }
 
 // The database wraps a raw pointer to the rendering context but loading models
@@ -57,133 +46,76 @@ impl Database {
 
     pub fn new(base_path: &str, ctx: &mut dashi::Context) -> Result<Self> {
         info!("Loading Database {}", format!("{}/db.json", base_path));
-        let _json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
-        //        let info: json::Database = serde_json::from_str(&json_data)?;
-        //
-        //        let images_cfg = load_db_images(base_path, &info);
-        //        let fonts_cfg = load_db_ttfs(&info);
-        //        let geometry_cfg = load_db_geometries(base_path, &info);
-        //        let material_cfg = load_db_materials(base_path, &info);
-        //
-        //        let images = match images_cfg {
-        //            Some(cfg) => cfg.into(),
-        //            None => HashMap::default(),
-        //        };
-        //
-        //        let materials = match material_cfg {
-        //            Some(cfg) => cfg.into(),
-        //            None => HashMap::default(),
-        //        };
-        //
-        //        let fonts = match fonts_cfg {
-        //            Some(cfg) => cfg.into(),
-        //            None => HashMap::default(),
-        //        };
-        //
-        //        let mut geometry = match geometry_cfg {
-        //            Some(cfg) => cfg.into(),
-        //            None => HashMap::default(),
-        //        };
 
-        //        geometry.insert(
-        //            "MESHI_TRIANGLE".to_string(),
-        //            GeometryResource {
-        //                cfg: json::GeometryEntry {
-        //                    name: "MESHI".to_string(),
-        //                    path: "".to_string(),
-        //                },
-        //                loaded: Some(geometry_primitives::make_triangle(
-        //                    &Default::default(),
-        //                    ctx,
-        ////                    scene,
-        //                )),
-        //            },
-        //        );
-        //
-        //        geometry.insert(
-        //            "MESHI_CUBE".to_string(),
-        //            GeometryResource {
-        //                cfg: json::GeometryEntry {
-        //                    name: "MESHI".to_string(),
-        //                    path: "".to_string(),
-        //                },
-        //                loaded: Some(geometry_primitives::make_cube(
-        //                    &Default::default(),
-        //                    ctx,
-        //                    scene,
-        //                )),
-        //            },
-        //        );
-        //
-        //        geometry.insert(
-        //            "MESHI_SPHERE".to_string(),
-        //            GeometryResource {
-        //                cfg: json::GeometryEntry {
-        //                    name: "MESHI".to_string(),
-        //                    path: "".to_string(),
-        //                },
-        //                loaded: Some(geometry_primitives::make_sphere(
-        //                    &Default::default(),
-        //                    ctx,
-        //                    scene,
-        //                )),
-        //            },
-        //        );
-        //
-        //        let default_texture = ImageResource::load_default_image(ctx, scene);
-        //
-        //        info!("Registering default material..");
-        //        let default_material = scene.register_material(&MaterialInfo {
-        //            name: "DEFAULT".to_string(),
-        //            //passes: vec!["ALL".to_string()],
-        //            passes: vec!["non-transparent".to_string()],
-        //            base_color: default_texture,
-        //            normal: Default::default(),
-        //            ..Default::default()
-        //        });
+        let json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
+        let info: json::Database = serde_json::from_str(&json_data)?;
 
-        let geometry = load_primitives(ctx);
+        let mut geometry = load_primitives(ctx);
 
         let mut textures = HashMap::new();
         textures.insert("DEFAULT".to_string(), Some(Handle::default()));
 
-        let db = Database {
+        if let Some(images_file) = info.images {
+            let images_path = format!("{}/{}", base_path, images_file);
+            let images_json = fs::read_to_string(&images_path)?;
+            let images_cfg: json::Image = serde_json::from_str(&images_json)?;
+            for img in images_cfg.images {
+                let path = format!("{}/{}", base_path, img.path);
+                load_image_from_path(&path).map_err(|_| {
+                    Error::LoadingError(LoadingError {
+                        entry: img.name.clone(),
+                        path: path.clone(),
+                    })
+                })?;
+                textures.insert(img.name, None);
+            }
+        }
+
+        if let Some(geo_file) = info.geometry {
+            let geo_path = format!("{}/{}", base_path, geo_file);
+            let geo_json = fs::read_to_string(&geo_path)?;
+            let geo_cfg: json::Geometry = serde_json::from_str(&geo_json)?;
+            for model in geo_cfg.geometry {
+                let path = format!("{}/{}", base_path, model.path);
+                parse_gltf(&path).map_err(|_| {
+                    Error::LoadingError(LoadingError {
+                        entry: model.name.clone(),
+                        path: path.clone(),
+                    })
+                })?;
+                geometry.entry(model.name.clone()).or_insert(MeshResource {
+                    name: model.name,
+                    ..Default::default()
+                });
+            }
+        }
+
+        let mut fonts = HashMap::new();
+        if let Some(font_file) = info.ttf {
+            let font_path = format!("{}/{}", base_path, font_file);
+            let font_json = fs::read_to_string(&font_path)?;
+            let font_cfg: json::TTF = serde_json::from_str(&font_json)?;
+            for f in font_cfg.fonts {
+                let path = format!("{}/{}", base_path, f.path);
+                fs::read(&path).map_err(|_| {
+                    Error::LoadingError(LoadingError {
+                        entry: f.name.clone(),
+                        path: path.clone(),
+                    })
+                })?;
+                let glyphs: Vec<char> = f.glyphs.unwrap_or_default().chars().collect();
+                let font = TTFont::new(&path, 256, 256, f.size as f32, &glyphs);
+                fonts.insert(f.name, font);
+            }
+        }
+
+        Ok(Database {
             base_path: base_path.to_string(),
             ctx,
             geometry,
             textures,
-        };
-
-        //       let ptr: *mut Database = &mut db;
-
-        //       // Models HAVE to be loaded before materials, as they add materials.
-        //       for (_name, mut model) in geometry {
-        //           debug!("Attempting to load model {}...", model.cfg.name);
-        //           if model.loaded.is_none() {
-        //               model.load(base_path, ctx, scene, unsafe { &mut *ptr });
-        //           }
-
-        //           if let Some(m) = model.loaded {
-        //               debug!("Success!");
-        //               for mesh in m.meshes {
-        //                   debug!("Making mesh {}.{} available", model.cfg.name, mesh.name);
-        //                   db.geometry
-        //                       .insert(format!("{}.{}", model.cfg.name, mesh.name), mesh);
-        //               }
-        //           } else {
-        //               debug!("Failed!");
-        //           }
-        //       }
-
-        //       // Images MUST be parsed before materials, as this loads images if they are used.
-        //       for (name, mut m) in materials {
-        //           m.load(scene, unsafe { &mut *ptr });
-        //           if let Some(mat) = m.loaded {
-        //               db.materials.insert(name, mat);
-        //           }
-        //       }
-
-        Ok(db)
+            fonts,
+        })
     }
 
     /// Load a model file referenced by `name` into the database.
@@ -221,32 +153,6 @@ impl Database {
         Ok(())
     }
 
-    //   fn insert_material(&mut self, name: &str, mat: Handle<koji::Material>) {
-    //       if self.materials.get(name).is_none() {
-    //           self.materials.insert(name.to_string(), mat);
-    //       }
-    //   }
-
-    //   pub(crate) fn register_texture_from_bytes(&mut self, name: &str, data: &[u8]) {
-    //       debug!(
-    //           "Registering embedded GLTF model texture from bytes {}..",
-    //           name
-    //       );
-    //       let image = unsafe {
-    //           ImageResource::load_from_uri(name, data, &mut *self.ctx, &mut *self.scene)
-    //       };
-    //       self.images.insert(
-    //           name.to_string(),
-    //           ImageResource {
-    //               cfg: json::ImageEntry {
-    //                   name: name.to_string(),
-    //                   path: Default::default(),
-    //               },
-    //               loaded: Some(image),
-    //           },
-    //       );
-    //   }
-
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
         match self.textures.get_mut(name) {
             Some(entry) => {
@@ -280,43 +186,6 @@ impl Database {
             })),
         }
     }
-    //        if let Some(thing) = self.images.get_mut(name) {
-    //            if thing.loaded.is_none() {
-    //                unsafe { thing.load_rgba8(&self.base_path, &mut *self.ctx, &mut *self.scene) };
-    //            }
-    //
-    //            if thing.loaded.is_none() {
-    //                return Err(Error::LoadingError(LoadingError {
-    //                    entry: thing.cfg.name.clone(),
-    //                    path: thing.cfg.path.clone(),
-    //                }));
-    //            } else {
-    //                return Ok(thing.loaded.as_ref().unwrap().clone());
-    //            }
-    //        }
-    //
-    //        return Err(Error::LookupError(LookupError {
-    //            entry: name.to_string(),
-    //        }));
-    //    }
-
-    //    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<miso::Material>, Error> {
-    //        todo!()
-    //        if let Some(thing) = self.materials.get(name) {
-    //            return Ok(*thing);
-    //        } else {
-    //            debug!("Unable to fetch material {}. Returning default...", name);
-    //            return Ok(self.defaults.material);
-    //        }
-
-    //    pub fn fetch_mesh(&mut self, name: &str) -> Result<MeshResource, Error> {
-    //        if let Some(thing) = self.geometry.get_mut(name) {
-    //            return Ok(thing.clone());
-    //        }
-    //
-    //        debug!("Unable to fetch model {}. Returning default sphere", name);
-    //        return Ok(self.geometry.get("MESHI.CUBE").unwrap().clone());
-    //    }
 }
 
 #[cfg(test)]
@@ -333,6 +202,7 @@ mod tests {
             base_path: path.to_string(),
             geometry: HashMap::new(),
             textures: HashMap::new(),
+            fonts: HashMap::new(),
         }
     }
 
@@ -357,5 +227,139 @@ mod tests {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
         }
+    }
+
+    // Build a minimal triangle glTF asset in `dir` and return the glTF file name.
+    fn write_triangle_gltf(dir: &std::path::Path) -> String {
+        let bin_path = dir.join("data.bin");
+        let mut bin = Vec::new();
+        for f in [
+            0.0f32, 0.0, 0.0, // v0
+            1.0, 0.0, 0.0, // v1
+            0.0, 1.0, 0.0, // v2
+        ] {
+            bin.extend_from_slice(&f.to_le_bytes());
+        }
+        for i in [0u16, 1, 2] {
+            bin.extend_from_slice(&i.to_le_bytes());
+        }
+        std::fs::write(&bin_path, &bin).unwrap();
+
+        let gltf = format!(
+            "{{\n  \"asset\": {{ \"version\": \"2.0\" }},\n  \"scenes\": [{{ \"nodes\": [0] }}],\n  \"scene\": 0,\n  \"nodes\": [{{ \"mesh\": 0 }}],\n  \"meshes\": [{{ \"primitives\": [{{ \"attributes\": {{ \"POSITION\": 0 }}, \"indices\": 1 }}] }}],\n  \"buffers\": [{{ \"uri\": \"data.bin\", \"byteLength\": {} }}],\n  \"bufferViews\": [{{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 36 }}, {{ \"buffer\": 0, \"byteOffset\": 36, \"byteLength\": 6 }}],\n  \"accessors\": [{{ \"bufferView\": 0, \"componentType\": 5126, \"count\": 3, \"type\": \"VEC3\", \"min\": [0.0,0.0,0.0], \"max\": [1.0,1.0,0.0] }}, {{ \"bufferView\": 1, \"componentType\": 5123, \"count\": 3, \"type\": \"SCALAR\" }}]\n}}",
+            bin.len()
+        );
+        let gltf_path = dir.join("model.gltf");
+        std::fs::write(&gltf_path, gltf).unwrap();
+        "model.gltf".to_string()
+    }
+
+    #[test]
+    fn database_new_loads_resources() {
+        let dir = tempdir().unwrap();
+
+        // Image
+        let img_path = dir.path().join("img.png");
+        let img = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]));
+        img.save(&img_path).unwrap();
+
+        // Model
+        let model_name = write_triangle_gltf(dir.path());
+
+        // Font
+        let font_src = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+        let font_dest = dir.path().join("font.ttf");
+        std::fs::copy(font_src, &font_dest).unwrap();
+
+        // Configuration files
+        std::fs::write(
+            dir.path().join("images.json"),
+            "{\"images\":[{\"name\":\"img\",\"path\":\"img.png\"}]}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("geometry.json"),
+            format!(
+                "{{\"geometry\":[{{\"name\":\"model\",\"path\":\"{}\"}}]}}",
+                model_name
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("ttf.json"),
+            "{\"fonts\":[{\"name\":\"font\",\"path\":\"font.ttf\",\"size\":16.0}]}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("db.json"),
+            "{\"images\":\"images.json\",\"geometry\":\"geometry.json\",\"ttf\":\"ttf.json\"}",
+        )
+        .unwrap();
+
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
+        assert!(db.textures.contains_key("img"));
+        assert!(db.geometry.contains_key("model"));
+        assert!(db.fonts.contains_key("font"));
+        drop(db);
+        ctx.destroy();
+    }
+
+    #[test]
+    fn database_new_missing_image() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("images.json"),
+            "{\"images\":[{\"name\":\"img\",\"path\":\"missing.png\"}]}",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("db.json"), "{\"images\":\"images.json\"}").unwrap();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        match Database::new(dir.path().to_str().unwrap(), &mut ctx) {
+            Ok(_) => panic!("expected error"),
+            Err(Error::LoadingError(e)) => assert_eq!(e.entry, "img"),
+            Err(other) => panic!("unexpected error: {:?}", other),
+        }
+        ctx.destroy();
+    }
+
+    #[test]
+    fn database_new_missing_model() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("geometry.json"),
+            "{\"geometry\":[{\"name\":\"model\",\"path\":\"missing.gltf\"}]}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("db.json"),
+            "{\"geometry\":\"geometry.json\"}",
+        )
+        .unwrap();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        match Database::new(dir.path().to_str().unwrap(), &mut ctx) {
+            Ok(_) => panic!("expected error"),
+            Err(Error::LoadingError(e)) => assert_eq!(e.entry, "model"),
+            Err(other) => panic!("unexpected error: {:?}", other),
+        }
+        ctx.destroy();
+    }
+
+    #[test]
+    fn database_new_missing_font() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("ttf.json"),
+            "{\"fonts\":[{\"name\":\"font\",\"path\":\"missing.ttf\",\"size\":12.0}]}",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("db.json"), "{\"ttf\":\"ttf.json\"}").unwrap();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        match Database::new(dir.path().to_str().unwrap(), &mut ctx) {
+            Ok(_) => panic!("expected error"),
+            Err(Error::LoadingError(e)) => assert_eq!(e.entry, "font"),
+            Err(other) => panic!("unexpected error: {:?}", other),
+        }
+        ctx.destroy();
     }
 }
