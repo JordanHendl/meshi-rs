@@ -1,5 +1,5 @@
 pub mod error;
-use dashi::{utils::Handle, Buffer};
+use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, MemoryVisibility};
 use tracing::info;
 
 pub use error::*;
@@ -121,20 +121,110 @@ impl Database {
     /// Load a model file referenced by `name` into the database.
     ///
     /// The model path is resolved relative to the database base path. The
-    /// model is considered loaded once the file exists and is readable. The
-    /// currently stubbed implementation simply registers the model name so
-    /// that it can be retrieved later by tests or callers.
+    /// model is parsed using [`gltf`] and the first mesh primitive is uploaded
+    /// to GPU buffers so it can be rendered.
     pub fn load_model(&mut self, name: &str) -> Result<()> {
+        use glam::{IVec4, Vec2, Vec4};
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct Vertex {
+            position: Vec4,
+            normal: Vec4,
+            tex_coords: Vec2,
+            joint_ids: IVec4,
+            joints: Vec4,
+            color: Vec4,
+        }
+
         let path = format!("{}/{}", self.base_path, name);
-        // Ensure the file exists and is valid glTF.
-        parse_gltf(&path).map_err(|e| e.to_string())?;
-        // Register the model in the geometry map if not already present.
-        self.geometry
-            .entry(name.to_string())
-            .or_insert(MeshResource {
-                name: name.to_string(),
+        // Import the glTF file and associated buffers.
+        let (doc, buffers, _images) = gltf::import(&path).map_err(|e| e.to_string())?;
+        let mesh = doc.meshes().next().ok_or_else(|| {
+            Error::LoadingError(LoadingError {
+                entry: name.to_string(),
+                path: path.clone(),
+            })
+        })?;
+        let primitive = mesh.primitives().next().ok_or_else(|| {
+            Error::LoadingError(LoadingError {
+                entry: name.to_string(),
+                path: path.clone(),
+            })
+        })?;
+
+        let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+        let positions: Vec<[f32; 3]> = reader
+            .read_positions()
+            .ok_or_else(|| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?
+            .collect();
+        let indices: Vec<u32> = reader
+            .read_indices()
+            .ok_or_else(|| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?
+            .into_u32()
+            .collect();
+
+        let mut verts = Vec::with_capacity(positions.len());
+        for p in positions {
+            verts.push(Vertex {
+                position: Vec4::new(p[0], p[1], p[2], 1.0),
                 ..Default::default()
             });
+        }
+
+        // Upload data to GPU buffers.
+        let ctx = unsafe { &mut *self.ctx };
+        let vertices = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{name} vertices"),
+                byte_size: (std::mem::size_of::<Vertex>() * verts.len()) as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::VERTEX,
+                initial_data: Some(unsafe { verts.as_slice().align_to::<u8>().1 }),
+            })
+            .map_err(|_| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?;
+
+        let indices_buf = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{name} indices"),
+                byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::INDEX,
+                initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
+            })
+            .map_err(|_| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?;
+
+        self.geometry.insert(
+            name.to_string(),
+            MeshResource {
+                name: name.to_string(),
+                vertices,
+                num_vertices: verts.len(),
+                indices: indices_buf,
+                num_indices: indices.len(),
+            },
+        );
+
         Ok(())
     }
 
@@ -267,9 +357,9 @@ mod tests {
         let model_name = write_triangle_gltf(dir.path());
 
         // Font
-    #[cfg(target_os = "windows")]
+        #[cfg(target_os = "windows")]
         let font_src = "C:/Windows/Fonts/arial.ttf";
-    #[cfg(target_os = "linux")]
+        #[cfg(target_os = "linux")]
         let font_src = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
         let font_dest = dir.path().join("font.ttf");

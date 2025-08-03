@@ -39,6 +39,22 @@ cargo run --example ffi_init
 
 Replace `ffi_init` with `ffi_physics` to explore the physics example.
 
+The `simple_render` example opens a windowed `RenderEngine`, loads a small
+model and texture from the `database/` folder, and renders a few frames to the
+display. Only `model.gltf` is included in the repository; add `albedo.png` and
+`data.bin` beside it before running:
+
+```bash
+cargo run --example simple_render
+```
+
+Pass `graph` as an argument to use the experimental graph backend instead of
+the default canvas backend:
+
+```bash
+cargo run --example simple_render -- graph
+```
+
 To adjust a directional light's color or intensity at runtime via FFI:
 
 ```rust
