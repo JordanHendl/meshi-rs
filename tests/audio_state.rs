@@ -15,4 +15,7 @@ fn audio_state_transitions() {
 
     audio.stop(h);
     assert_eq!(audio.get_state(h), Some(PlaybackState::Stopped));
+
+    // Avoid dropping the audio engine to prevent backend teardown issues during tests.
+    std::mem::forget(audio);
 }

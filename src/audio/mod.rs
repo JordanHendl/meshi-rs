@@ -1,14 +1,22 @@
 use dashi::utils::{Handle, Pool};
 use glam::{Mat4, Vec3};
 
-use std::{collections::VecDeque, ffi::c_void, fs::File, io::Read};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use std::{
+    collections::{HashMap, VecDeque},
+    ffi::c_void,
+    fs::File,
+    io::{BufReader, Read},
+};
 use tracing::info;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
 pub enum AudioBackend {
     #[default]
     Dummy,
+    Cpal,
+    Rodio,
 }
 
 #[repr(C)]
@@ -60,6 +68,13 @@ pub struct AudioEngine {
     music_bus: Handle<Bus>,
     effects_bus: Handle<Bus>,
     finished_callbacks: Vec<(FinishedCallback, *mut c_void)>,
+    rodio: Option<RodioContext>,
+    sinks: HashMap<Handle<AudioSource>, Sink>,
+}
+
+struct RodioContext {
+    _stream: OutputStream,
+    handle: OutputStreamHandle,
 }
 
 impl AudioEngine {
@@ -73,8 +88,24 @@ impl AudioEngine {
         let music_bus = buses.insert(Bus::new(Some(master_bus))).unwrap_or_default();
         let effects_bus = buses.insert(Bus::new(Some(master_bus))).unwrap_or_default();
 
+        let mut info_copy = *info;
+        let rodio = if info.backend == AudioBackend::Rodio {
+            match OutputStream::try_default() {
+                Ok((stream, handle)) => Some(RodioContext {
+                    _stream: stream,
+                    handle,
+                }),
+                Err(_) => {
+                    info_copy.backend = AudioBackend::Dummy;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
-            info: *info,
+            info: info_copy,
             listener_transform: Mat4::IDENTITY,
             listener_velocity: Vec3::ZERO,
             sources: Default::default(),
@@ -84,6 +115,8 @@ impl AudioEngine {
             music_bus,
             effects_bus,
             finished_callbacks: Vec::new(),
+            rodio,
+            sinks: HashMap::new(),
         }
     }
 
@@ -93,7 +126,14 @@ impl AudioEngine {
             .unwrap_or_default()
     }
 
+    pub fn backend(&self) -> AudioBackend {
+        self.info.backend
+    }
+
     pub fn destroy_source(&mut self, h: Handle<AudioSource>) {
+        if let Some(sink) = self.sinks.remove(&h) {
+            sink.stop();
+        }
         self.sources.release(h);
     }
 
@@ -106,24 +146,72 @@ impl AudioEngine {
     }
 
     pub fn play(&mut self, h: Handle<AudioSource>) {
-        if let Some(s) = self.get_source_mut(h) {
+        let rodio_handle = if self.info.backend == AudioBackend::Rodio {
+            self.rodio.as_ref().map(|ctx| ctx.handle.clone())
+        } else {
+            None
+        };
+
+        let mut path = String::new();
+        let mut volume = 1.0f32;
+        let mut pitch = 1.0f32;
+        let has_source = if let Some(s) = self.get_source_mut(h) {
             s.state = PlaybackState::Playing;
+            path = s.path.clone();
+            volume = s.volume;
+            pitch = s.pitch;
+            true
+        } else {
+            false
+        };
+        if !has_source {
+            return;
+        }
+
+        if let Some(handle) = rodio_handle {
+            if !self.sinks.contains_key(&h) {
+                if let Ok(file) = File::open(&path) {
+                    if let Ok(decoder) = Decoder::new(BufReader::new(file)) {
+                        if let Ok(sink) = Sink::try_new(&handle) {
+                            sink.append(decoder);
+                            sink.set_volume(volume);
+                            sink.set_speed(pitch);
+                            self.sinks.insert(h, sink);
+                        }
+                    }
+                }
+            } else if let Some(sink) = self.sinks.get(&h) {
+                sink.play();
+            }
         }
     }
 
     pub fn pause(&mut self, h: Handle<AudioSource>) {
-        if let Some(s) = self.get_source_mut(h) {
-            s.state = PlaybackState::Paused;
+        {
+            if let Some(s) = self.get_source_mut(h) {
+                s.state = PlaybackState::Paused;
+            }
+        }
+        if let Some(sink) = self.sinks.get(&h) {
+            sink.pause();
         }
     }
 
     pub fn stop(&mut self, h: Handle<AudioSource>) {
-        if let Some(s) = self.get_source_mut(h) {
-            let was_playing = s.state == PlaybackState::Playing;
-            s.state = PlaybackState::Stopped;
-            if was_playing {
-                self.notify_finished(h);
+        let was_playing = {
+            if let Some(s) = self.get_source_mut(h) {
+                let wp = s.state == PlaybackState::Playing;
+                s.state = PlaybackState::Stopped;
+                wp
+            } else {
+                false
             }
+        };
+        if let Some(sink) = self.sinks.remove(&h) {
+            sink.stop();
+        }
+        if was_playing {
+            self.notify_finished(h);
         }
     }
 
@@ -134,14 +222,24 @@ impl AudioEngine {
     }
 
     pub fn set_volume(&mut self, h: Handle<AudioSource>, volume: f32) {
-        if let Some(s) = self.get_source_mut(h) {
-            s.volume = volume;
+        {
+            if let Some(s) = self.get_source_mut(h) {
+                s.volume = volume;
+            }
+        }
+        if let Some(sink) = self.sinks.get(&h) {
+            sink.set_volume(volume);
         }
     }
 
     pub fn set_pitch(&mut self, h: Handle<AudioSource>, pitch: f32) {
-        if let Some(s) = self.get_source_mut(h) {
-            s.pitch = pitch;
+        {
+            if let Some(s) = self.get_source_mut(h) {
+                s.pitch = pitch;
+            }
+        }
+        if let Some(sink) = self.sinks.get(&h) {
+            sink.set_speed(pitch);
         }
     }
 
@@ -197,28 +295,43 @@ impl AudioEngine {
         let listener_pos = self.listener_transform.transform_point3(Vec3::ZERO);
         let listener_vel = self.listener_velocity;
         let buses_ptr: *const Pool<Bus> = &self.buses;
-        self.sources.for_each_occupied_mut(|s| {
-            let src_pos = s.transform.transform_point3(Vec3::ZERO);
-            let dir = listener_pos - src_pos;
-            let dist = dir.length();
-            let dir_norm = if dist > 0.0 { dir / dist } else { Vec3::ZERO };
+        let mut handles = Vec::new();
+        self.sources
+            .for_each_occupied_handle_mut(|h| handles.push(h));
+        for h in handles {
+            if let Some(s) = self.sources.get_mut_ref(h) {
+                let src_pos = s.transform.transform_point3(Vec3::ZERO);
+                let dir = listener_pos - src_pos;
+                let dist = dir.length();
+                let dir_norm = if dist > 0.0 { dir / dist } else { Vec3::ZERO };
 
-            // Simple inverse-distance attenuation.
-            let attenuation = 1.0 / (1.0 + dist);
-            let bus_volume = unsafe { compute_bus_volume(&*buses_ptr, s.bus) };
-            s.effective_volume = s.volume * bus_volume * attenuation;
+                // Simple inverse-distance attenuation.
+                let attenuation = 1.0 / (1.0 + dist);
+                let bus_volume = unsafe { compute_bus_volume(&*buses_ptr, s.bus) };
+                s.effective_volume = s.volume * bus_volume * attenuation;
 
-            // Doppler effect using the relative velocity along the line-of-sight.
-            let rel_vel = (s.velocity - listener_vel).dot(dir_norm);
-            const SPEED_OF_SOUND: f32 = 343.0; // meters per second
-            let denom = SPEED_OF_SOUND - rel_vel;
-            let doppler = if denom.abs() > f32::EPSILON {
-                (SPEED_OF_SOUND) / denom
-            } else {
-                1.0
-            };
-            s.effective_pitch = s.pitch * doppler;
-        });
+                // Doppler effect using the relative velocity along the line-of-sight.
+                let rel_vel = (s.velocity - listener_vel).dot(dir_norm);
+                const SPEED_OF_SOUND: f32 = 343.0; // meters per second
+                let denom = SPEED_OF_SOUND - rel_vel;
+                let doppler = if denom.abs() > f32::EPSILON {
+                    (SPEED_OF_SOUND) / denom
+                } else {
+                    1.0
+                };
+                s.effective_pitch = s.pitch * doppler;
+
+                if let Some(sink) = self.sinks.get(&h) {
+                    sink.set_volume(s.effective_volume);
+                    sink.set_speed(s.effective_pitch);
+                    match s.state {
+                        PlaybackState::Playing => sink.play(),
+                        PlaybackState::Paused => sink.pause(),
+                        PlaybackState::Stopped => {}
+                    }
+                }
+            }
+        }
     }
 
     fn notify_finished(&self, h: Handle<AudioSource>) {
