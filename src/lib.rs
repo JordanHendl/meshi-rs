@@ -806,6 +806,7 @@ pub extern "C" fn meshi_physx_collision_shape_sphere(radius: f32) -> CollisionSh
     CollisionShape {
         dimensions: Vec3::ZERO,
         radius,
+        half_height: 0.0,
         shape_type: CollisionShapeType::Sphere,
     }
 }
@@ -815,7 +816,21 @@ pub extern "C" fn meshi_physx_collision_shape_box(dimensions: Vec3) -> Collision
     CollisionShape {
         dimensions,
         radius: 0.0,
+        half_height: 0.0,
         shape_type: CollisionShapeType::Box,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_collision_shape_capsule(
+    half_height: f32,
+    radius: f32,
+) -> CollisionShape {
+    CollisionShape {
+        dimensions: Vec3::ZERO,
+        radius,
+        half_height,
+        shape_type: CollisionShapeType::Capsule,
     }
 }
 

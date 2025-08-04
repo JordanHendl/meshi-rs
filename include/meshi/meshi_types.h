@@ -229,11 +229,13 @@ struct MeshiForceApplyInfo {
 enum class MeshiCollisionShapeType : std::uint32_t {
     Sphere = 0,
     Box = 1,
+    Capsule = 2,
 };
 
 struct alignas(16) MeshiCollisionShape {
     MeshiVec3 dimensions;
     float radius;
+    float half_height;
     MeshiCollisionShapeType shape_type;
 };
 
