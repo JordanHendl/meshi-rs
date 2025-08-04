@@ -1,5 +1,5 @@
 pub mod error;
-use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, MemoryVisibility};
+use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, Context, MemoryVisibility};
 use tracing::info;
 
 pub use error::*;
@@ -289,6 +289,7 @@ mod tests {
         Database {
             base_path: path.to_string(),
             geometry: HashMap::new(),
+            ctx: std::ptr::null_mut(),
             textures: HashMap::new(),
             _fonts: HashMap::new(),
         }
