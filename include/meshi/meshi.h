@@ -53,6 +53,15 @@ size_t meshi_audio_update_stream(
     struct Handle h,
     uint8_t* out_samples,
     size_t max);
+void meshi_audio_set_source_transform(
+    struct AudioEngine* audio,
+    struct Handle h,
+    const struct Mat4* transform,
+    struct Vec3 velocity);
+void meshi_audio_set_listener_transform(
+    struct AudioEngine* audio,
+    const struct Mat4* transform,
+    struct Vec3 velocity);
 
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);
