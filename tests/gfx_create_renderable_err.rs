@@ -1,6 +1,6 @@
 use dashi::utils::Handle;
 use glam::Mat4;
-use meshi::*;
+use meshi::{*, render::RenderBackend};
 use std::ffi::CString;
 
 #[test]
@@ -11,6 +11,7 @@ fn invalid_info_returns_default_handle() {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     assert!(!engine.is_null());
