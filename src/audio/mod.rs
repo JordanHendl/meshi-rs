@@ -1,9 +1,5 @@
 use dashi::utils::{Handle, Pool};
-use std::{
-    collections::VecDeque,
-    fs::File,
-    io::{Read},
-};
+use std::{collections::VecDeque, fs::File, io::Read};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,6 +60,10 @@ impl AudioEngine {
 
     fn get_source_mut(&mut self, h: Handle<AudioSource>) -> Option<&mut AudioSource> {
         self.sources.get_mut_ref(h)
+    }
+
+    pub fn get_state(&self, h: Handle<AudioSource>) -> Option<PlaybackState> {
+        self.sources.get_ref(h).map(|s| s.state)
     }
 
     pub fn play(&mut self, h: Handle<AudioSource>) {
