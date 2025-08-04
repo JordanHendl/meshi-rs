@@ -4,6 +4,7 @@ use glam::Mat4;
 use tracing::info;
 
 use std::ffi::{c_char, CStr};
+use std::fmt;
 
 #[repr(C)]
 pub struct FFIMeshObjectInfo {
@@ -18,26 +19,69 @@ pub struct MeshObjectInfo {
     pub transform: glam::Mat4,
 }
 
-impl From<&FFIMeshObjectInfo> for MeshObjectInfo {
-    fn from(value: &FFIMeshObjectInfo) -> Self {
+#[derive(Debug)]
+pub enum Error {
+    InvalidString,
+    Database(database::Error),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidString => write!(f, "invalid string pointer"),
+            Error::Database(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Database(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<database::Error> for Error {
+    fn from(value: database::Error) -> Self {
+        Error::Database(value)
+    }
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(_: std::str::Utf8Error) -> Self {
+        Error::InvalidString
+    }
+}
+
+impl TryFrom<&FFIMeshObjectInfo> for MeshObjectInfo {
+    type Error = Error;
+
+    fn try_from(value: &FFIMeshObjectInfo) -> Result<Self, Self::Error> {
         unsafe {
-            let mesh = CStr::from_ptr(value.mesh).to_str().unwrap_or_default();
-            let mut material = CStr::from_ptr(value.material).to_str().unwrap_or_default();
+            if value.mesh.is_null() || value.material.is_null() {
+                return Err(Error::InvalidString);
+            }
+
+            let mesh = CStr::from_ptr(value.mesh).to_str()?;
+            let mut material = CStr::from_ptr(value.material).to_str()?;
 
             if material.is_empty() {
                 material = mesh;
             }
-            Self {
+
+            Ok(Self {
                 mesh,
                 material,
                 transform: value.transform,
-            }
+            })
         }
     }
 }
 
 impl MeshObjectInfo {
-    pub fn make_object(&self, db: &mut Database) -> Result<MeshObject, database::Error> {
+    pub fn make_object(&self, db: &mut Database) -> Result<MeshObject, Error> {
         info!(
             "Registering Mesh Renderable {}||{}",
             self.mesh, self.material

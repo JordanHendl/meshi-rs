@@ -26,6 +26,7 @@ void meshi_audio_destroy_source(struct MeshiAudioEngine* audio, MeshiAudioSource
 void meshi_audio_play(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
 void meshi_audio_pause(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
 void meshi_audio_stop(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+MeshiPlaybackState meshi_audio_get_state(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
 void meshi_audio_set_looping(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, int32_t looping);
 void meshi_audio_set_volume(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float volume);
 void meshi_audio_set_pitch(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float pitch);

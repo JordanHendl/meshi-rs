@@ -35,7 +35,9 @@ fn main() {
         material: tex.as_ptr(),
         transform: Mat4::IDENTITY,
     };
-    render.register_mesh_object(&info);
+    render
+        .register_mesh_object(&info)
+        .expect("failed to register mesh object");
 
     // Run a small render loop to display the scene.
     for _ in 0..120 {

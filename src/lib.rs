@@ -31,6 +31,8 @@ pub struct MeshiEngineInfo {
     pub application_location: *const c_char,
     /// Whether to run without creating a window (0 = windowed, 1 = headless).
     pub headless: i32,
+    /// Backend to use for rendering.
+    pub render_backend: RenderBackend,
 }
 
 /// Primary engine instance returned by [`meshi_make_engine`].
@@ -71,7 +73,7 @@ impl MeshiEngine {
                 application_path: appdir.to_string(),
                 scene_info: None,
                 headless: info.headless != 0,
-                backend: RenderBackend::Canvas,
+                backend: info.render_backend,
             })
             .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
@@ -138,6 +140,7 @@ pub extern "C" fn meshi_make_engine_headless(
         application_name,
         application_location,
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     meshi_make_engine(&info)
 }
@@ -219,7 +222,10 @@ pub extern "C" fn meshi_gfx_create_renderable(
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.register_mesh_object(unsafe { &*info })
+    match unsafe { &mut *render }.register_mesh_object(unsafe { &*info }) {
+        Ok(handle) => handle,
+        Err(_) => Handle::default(),
+    }
 }
 
 #[no_mangle]

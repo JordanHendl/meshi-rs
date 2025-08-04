@@ -36,10 +36,16 @@ struct MeshiDirectionalLight;
 struct MeshiMaterial;
 struct MeshiRigidBody;
 
+enum class MeshiRenderBackend : std::uint32_t {
+    Canvas = 0,
+    Graph = 1,
+};
+
 struct MeshiEngineInfo {
     const char* application_name;
     const char* application_location;
     std::int32_t headless;
+    MeshiRenderBackend render_backend;
 };
 
 struct MeshiFFIMeshObjectInfo {
@@ -230,6 +236,12 @@ enum class MeshiCollisionShapeType : std::uint32_t {
     Sphere = 0,
     Box = 1,
     Capsule = 2,
+};
+
+enum class MeshiPlaybackState : std::uint32_t {
+    Stopped = 0,
+    Playing = 1,
+    Paused = 2,
 };
 
 struct alignas(16) MeshiCollisionShape {
