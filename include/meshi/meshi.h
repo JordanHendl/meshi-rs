@@ -48,6 +48,7 @@ void meshi_gfx_set_camera(struct MeshiRenderEngine* render, const MeshiMat4* tra
 void meshi_gfx_set_projection(struct MeshiRenderEngine* render, const MeshiMat4* transform);
 void meshi_gfx_capture_mouse(struct MeshiRenderEngine* render, int32_t value);
 
+
 // Physics
 struct MeshiPhysicsSimulation* meshi_get_physics_system(struct MeshiEngine* engine);
 void meshi_physx_set_gravity(struct MeshiPhysicsSimulation* physics, float gravity_mps);
