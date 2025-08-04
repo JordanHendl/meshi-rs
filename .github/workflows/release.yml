@@ -61,6 +61,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: meshi-*
+          merge-multiple: true
 
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -78,7 +80,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: "${{ github.event.inputs.tag }}"
           files: |
-            artifacts/meshi-ubuntu-latest/meshi.so
-            artifacts/meshi-windows-latest/meshi.dll
+            artifacts/meshi.so
+            artifacts/meshi.dll
             artifacts/meshi-c-headers.tar.gz
             artifacts/meshi-c-headers.zip
