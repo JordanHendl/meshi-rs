@@ -1,4 +1,4 @@
-use meshi::render::DirectionalLightInfo;
+use meshi::render::{DirectionalLightInfo, RenderBackend};
 use meshi::*;
 use std::ffi::CString;
 
@@ -9,6 +9,7 @@ fn main() {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     let render = unsafe { meshi_get_graphics_system(engine) };

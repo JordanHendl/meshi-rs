@@ -82,6 +82,7 @@ pub struct CameraInfo<'a> {
     pub projection: Mat4,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub enum RenderBackend {
     #[default]
