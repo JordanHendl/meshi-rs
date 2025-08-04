@@ -3,7 +3,7 @@ mod object;
 pub mod physics;
 pub mod render;
 mod utils;
-use audio::{AudioEngine, AudioEngineInfo, AudioSource, StreamingSource};
+use audio::{AudioEngine, AudioEngineInfo, AudioSource, PlaybackState, StreamingSource};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
 pub use object::FFIMeshObjectInfo;
@@ -453,6 +453,20 @@ pub extern "C" fn meshi_audio_stop(audio: *mut AudioEngine, h: Handle<AudioSourc
         return;
     }
     unsafe { &mut *audio }.stop(h);
+}
+
+/// Get the current playback state of an audio source.
+#[no_mangle]
+pub extern "C" fn meshi_audio_get_state(
+    audio: *mut AudioEngine,
+    h: Handle<AudioSource>,
+) -> PlaybackState {
+    if audio.is_null() {
+        return PlaybackState::Stopped;
+    }
+    unsafe { &mut *audio }
+        .get_state(h)
+        .unwrap_or(PlaybackState::Stopped)
 }
 
 /// Set whether an audio source loops when played.
