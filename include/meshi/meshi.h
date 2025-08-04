@@ -47,6 +47,12 @@ void meshi_audio_stop(struct AudioEngine* audio, struct Handle h);
 void meshi_audio_set_looping(struct AudioEngine* audio, struct Handle h, int32_t looping);
 void meshi_audio_set_volume(struct AudioEngine* audio, struct Handle h, float volume);
 void meshi_audio_set_pitch(struct AudioEngine* audio, struct Handle h, float pitch);
+struct Handle meshi_audio_create_stream(struct AudioEngine* audio, const char* path);
+size_t meshi_audio_update_stream(
+    struct AudioEngine* audio,
+    struct Handle h,
+    uint8_t* out_samples,
+    size_t max);
 
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);

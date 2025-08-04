@@ -1,4 +1,9 @@
 use dashi::utils::{Handle, Pool};
+use std::{
+    collections::VecDeque,
+    fs::File,
+    io::{Read},
+};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -31,6 +36,7 @@ impl Default for AudioEngineInfo {
 pub struct AudioEngine {
     info: AudioEngineInfo,
     sources: Pool<AudioSource>,
+    streams: Pool<StreamingSource>,
 }
 
 impl AudioEngine {
@@ -42,6 +48,7 @@ impl AudioEngine {
         Self {
             info: *info,
             sources: Default::default(),
+            streams: Default::default(),
         }
     }
 
@@ -94,6 +101,26 @@ impl AudioEngine {
             s.pitch = pitch;
         }
     }
+
+    pub fn create_stream(&mut self, path: &str) -> Handle<StreamingSource> {
+        if let Some(stream) = StreamingSource::new(path) {
+            self.streams.insert(stream).unwrap_or_default()
+        } else {
+            Handle::default()
+        }
+    }
+
+    pub fn update_stream(&mut self, h: Handle<StreamingSource>, out: &mut [u8]) -> usize {
+        if let Some(stream) = self.streams.get_mut_ref(h) {
+            stream.pop_into(out)
+        } else {
+            0
+        }
+    }
+
+    pub fn update(&mut self, _dt: f32) {
+        self.streams.for_each_occupied_mut(|s| s.refill());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,5 +150,58 @@ impl AudioSource {
             pitch: 1.0,
             state: PlaybackState::Stopped,
         }
+    }
+}
+
+const STREAM_CHUNK: usize = 4096;
+
+pub struct StreamingSource {
+    #[allow(dead_code)]
+    path: String,
+    file: File,
+    buffer: VecDeque<u8>,
+    finished: bool,
+}
+
+impl StreamingSource {
+    fn new(path: &str) -> Option<Self> {
+        let file = File::open(path).ok()?;
+        Some(Self {
+            path: path.to_string(),
+            file,
+            buffer: VecDeque::new(),
+            finished: false,
+        })
+    }
+
+    fn refill(&mut self) {
+        if self.finished {
+            return;
+        }
+        let mut temp = [0u8; STREAM_CHUNK];
+        match self.file.read(&mut temp) {
+            Ok(0) => {
+                self.finished = true;
+            }
+            Ok(n) => {
+                self.buffer.extend(&temp[..n]);
+            }
+            Err(_) => {
+                self.finished = true;
+            }
+        }
+    }
+
+    fn pop_into(&mut self, out: &mut [u8]) -> usize {
+        let mut count = 0;
+        while count < out.len() {
+            if let Some(v) = self.buffer.pop_front() {
+                out[count] = v;
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count
     }
 }

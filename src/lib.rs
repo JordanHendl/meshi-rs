@@ -3,7 +3,7 @@ mod object;
 pub mod physics;
 pub mod render;
 mod utils;
-use audio::{AudioEngine, AudioEngineInfo, AudioSource};
+use audio::{AudioEngine, AudioEngineInfo, AudioSource, StreamingSource};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
 use object::{FFIMeshObjectInfo, MeshObject};
@@ -84,6 +84,7 @@ impl MeshiEngine {
         let dt_secs = dt.as_secs_f32();
         self.render.update(dt_secs);
         let _ = self.physics.update(dt_secs);
+        self.audio.update(dt_secs);
 
         dt_secs
     }
@@ -490,6 +491,35 @@ pub extern "C" fn meshi_audio_set_pitch(
         return;
     }
     unsafe { &mut *audio }.set_pitch(h, pitch as f32);
+}
+
+/// Create a streaming audio source from a file path.
+#[no_mangle]
+pub extern "C" fn meshi_audio_create_stream(
+    audio: *mut AudioEngine,
+    path: *const c_char,
+) -> Handle<StreamingSource> {
+    if audio.is_null() || path.is_null() {
+        return Handle::default();
+    }
+    let p = unsafe { CStr::from_ptr(path) }.to_str().unwrap_or("");
+    unsafe { &mut *audio }.create_stream(p)
+}
+
+/// Fill `out_samples` with data from the streaming source, returning the
+/// number of bytes written.
+#[no_mangle]
+pub extern "C" fn meshi_audio_update_stream(
+    audio: *mut AudioEngine,
+    h: Handle<StreamingSource>,
+    out_samples: *mut u8,
+    max: usize,
+) -> usize {
+    if audio.is_null() || out_samples.is_null() {
+        return 0;
+    }
+    let slice = unsafe { std::slice::from_raw_parts_mut(out_samples, max) };
+    unsafe { &mut *audio }.update_stream(h, slice)
 }
 
 ////////////////////////////////////////////
