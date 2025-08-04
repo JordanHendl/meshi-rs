@@ -37,6 +37,10 @@ path = "examples/ffi_init.rs"
 name = "ffi_physics"
 path = "examples/ffi_physics.rs"
 
+[[example]]
+name = "simple_render"
+path = "examples/simple_render.rs"
+
 [[test]]
 name = "engine"
 path = "tests/engine.rs"

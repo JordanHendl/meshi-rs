@@ -6,7 +6,8 @@ mod utils;
 use audio::{AudioEngine, AudioEngineInfo, AudioSource, StreamingSource};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
-use object::{FFIMeshObjectInfo, MeshObject};
+pub use object::FFIMeshObjectInfo;
+use object::MeshObject;
 use physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, PhysicsSimulation};
 use render::{
     DirectionalLight, DirectionalLightInfo, RenderBackend, RenderEngine, RenderEngineInfo,
