@@ -3,7 +3,10 @@ mod object;
 pub mod physics;
 pub mod render;
 mod utils;
-use audio::{AudioEngine, AudioEngineInfo, AudioSource, PlaybackState, StreamingSource};
+use audio::{
+    AudioEngine, AudioEngineInfo, AudioSource, Bus, FinishedCallback, PlaybackState,
+    StreamingSource,
+};
 use dashi::utils::Handle;
 use glam::{Mat4, Vec3};
 pub use object::FFIMeshObjectInfo;
@@ -568,6 +571,32 @@ pub extern "C" fn meshi_audio_update_stream(
     }
     let slice = unsafe { std::slice::from_raw_parts_mut(out_samples, max) };
     unsafe { &mut *audio }.update_stream(h, slice)
+}
+
+/// Set the volume for an audio bus.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_bus_volume(
+    audio: *mut AudioEngine,
+    h: Handle<Bus>,
+    volume: c_float,
+) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_bus_volume(h, volume as f32);
+}
+
+/// Register a callback invoked when a source finishes playback.
+#[no_mangle]
+pub extern "C" fn meshi_audio_register_finished_callback(
+    audio: *mut AudioEngine,
+    user_data: *mut c_void,
+    cb: FinishedCallback,
+) {
+    if audio.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.register_finished_callback(cb, user_data);
 }
 
 ////////////////////////////////////////////
