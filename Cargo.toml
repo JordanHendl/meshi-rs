@@ -22,7 +22,11 @@ unzip3 = "1.0.0"
 base64 = "0.22.1"
 winit = "0.26"
 rayon = "1.10"
-rodio = "0.17"
+rodio = { version = "0.17", optional = true }
+
+[features]
+default = []
+rodio_backend = ["rodio"]
 
 [dev-dependencies]
 tempfile = "3"
@@ -46,6 +50,7 @@ path = "examples/simple_render.rs"
 [[example]]
 name = "audio_playback"
 path = "examples/audio_playback.rs"
+required-features = ["rodio_backend"]
 
 [[test]]
 name = "engine"

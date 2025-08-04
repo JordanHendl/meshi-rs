@@ -1,14 +1,17 @@
 use dashi::utils::{Handle, Pool};
 use glam::{Mat4, Vec3};
 
-use std::{
-    collections::VecDeque,
-    ffi::c_void,
-    fs::File,
-    io::{BufReader, Read},
-};
+use std::{collections::VecDeque, ffi::c_void, fs::File, io::Read};
+#[cfg(feature = "rodio_backend")]
+use std::io::BufReader;
+#[cfg(feature = "rodio_backend")]
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use tracing::info;
+
+#[cfg(not(feature = "rodio_backend"))]
+type OutputStream = ();
+#[cfg(not(feature = "rodio_backend"))]
+type OutputStreamHandle = ();
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[repr(C)]
@@ -84,6 +87,7 @@ impl AudioEngine {
         let effects_bus = buses.insert(Bus::new(Some(master_bus))).unwrap_or_default();
 
         let mut info_copy = *info;
+        #[cfg(feature = "rodio_backend")]
         let (rodio_stream, rodio_handle) = if info.backend == AudioBackend::Rodio {
             match OutputStream::try_default() {
                 Ok((stream, handle)) => (Some(stream), Some(handle)),
@@ -94,6 +98,14 @@ impl AudioEngine {
                 }
             }
         } else {
+            (None, None)
+        };
+        #[cfg(not(feature = "rodio_backend"))]
+        let (rodio_stream, rodio_handle) = {
+            if info.backend == AudioBackend::Rodio {
+                info!("Rodio backend requested but feature disabled; falling back to Dummy");
+                info_copy.backend = AudioBackend::Dummy;
+            }
             (None, None)
         };
 
@@ -124,8 +136,9 @@ impl AudioEngine {
     }
 
     pub fn destroy_source(&mut self, h: Handle<AudioSource>) {
-        if let Some(s) = self.sources.get_mut_ref(h) {
-            if self.info.backend == AudioBackend::Rodio {
+        if self.info.backend == AudioBackend::Rodio {
+            #[cfg(feature = "rodio_backend")]
+            if let Some(s) = self.sources.get_mut_ref(h) {
                 if let Some(sink) = s.sink.take() {
                     sink.stop();
                 }
@@ -143,24 +156,29 @@ impl AudioEngine {
     }
 
     pub fn play(&mut self, h: Handle<AudioSource>) {
+        #[cfg(feature = "rodio_backend")]
         let backend = self.info.backend;
-        let handle_opt = self.rodio_handle.clone();
+        #[cfg(feature = "rodio_backend")]
+        let handle_clone = self.rodio_handle.clone();
         if let Some(s) = self.get_source_mut(h) {
-            if backend == AudioBackend::Rodio {
-                if let Some(handle) = handle_opt {
-                    if let Ok(file) = File::open(&s.path) {
-                        if let Ok(decoder) = Decoder::new(BufReader::new(file)) {
-                            if let Some(sink) = Sink::try_new(&handle).ok() {
-                                if s.looping {
-                                    sink.append(decoder.repeat_infinite());
-                                } else {
-                                    sink.append(decoder);
+            #[cfg(feature = "rodio_backend")]
+            {
+                if backend == AudioBackend::Rodio {
+                    if let Some(handle) = handle_clone {
+                        if let Ok(file) = File::open(&s.path) {
+                            if let Ok(decoder) = Decoder::new(BufReader::new(file)) {
+                                if let Some(sink) = Sink::try_new(&handle).ok() {
+                                    if s.looping {
+                                        sink.append(decoder.repeat_infinite());
+                                    } else {
+                                        sink.append(decoder);
+                                    }
+                                    sink.set_volume(s.volume);
+                                    sink.play();
+                                    s.sink = Some(sink);
+                                    s.state = PlaybackState::Playing;
+                                    return;
                                 }
-                                sink.set_volume(s.volume);
-                                sink.play();
-                                s.sink = Some(sink);
-                                s.state = PlaybackState::Playing;
-                                return;
                             }
                         }
                     }
@@ -171,8 +189,10 @@ impl AudioEngine {
     }
 
     pub fn pause(&mut self, h: Handle<AudioSource>) {
+        #[cfg(feature = "rodio_backend")]
         let backend = self.info.backend;
         if let Some(s) = self.get_source_mut(h) {
+            #[cfg(feature = "rodio_backend")]
             if backend == AudioBackend::Rodio {
                 if let Some(sink) = &s.sink {
                     sink.pause();
@@ -183,8 +203,10 @@ impl AudioEngine {
     }
 
     pub fn stop(&mut self, h: Handle<AudioSource>) {
+        #[cfg(feature = "rodio_backend")]
         let backend = self.info.backend;
         if let Some(s) = self.get_source_mut(h) {
+            #[cfg(feature = "rodio_backend")]
             if backend == AudioBackend::Rodio {
                 if let Some(sink) = s.sink.take() {
                     sink.stop();
@@ -205,9 +227,11 @@ impl AudioEngine {
     }
 
     pub fn set_volume(&mut self, h: Handle<AudioSource>, volume: f32) {
+        #[cfg(feature = "rodio_backend")]
         let backend = self.info.backend;
         if let Some(s) = self.get_source_mut(h) {
             s.volume = volume;
+            #[cfg(feature = "rodio_backend")]
             if backend == AudioBackend::Rodio {
                 if let Some(sink) = &s.sink {
                     sink.set_volume(volume);
@@ -326,7 +350,10 @@ pub struct AudioSource {
     effective_volume: f32,
     effective_pitch: f32,
     bus: Handle<Bus>,
+    #[cfg(feature = "rodio_backend")]
     sink: Option<Sink>,
+    #[cfg(not(feature = "rodio_backend"))]
+    sink: Option<()>,
 }
 
 impl AudioSource {
