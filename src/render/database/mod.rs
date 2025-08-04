@@ -26,6 +26,7 @@ pub struct MeshResource {
 pub struct Database {
     base_path: String,
     geometry: HashMap<String, MeshResource>,
+    ctx: *mut Context,
     /// Map of texture names to optionally loaded handles. If a handle is
     /// `None` the texture has been registered but not yet loaded.
     textures: HashMap<String, Option<Handle<koji::Texture>>>,
@@ -111,6 +112,7 @@ impl Database {
             base_path: base_path.to_string(),
             geometry,
             textures,
+            ctx, 
             _fonts: fonts,
         })
     }
