@@ -1,6 +1,6 @@
 use glam::{Quat, Vec3};
 use meshi::physics::{ActorStatus, RigidBodyInfo};
-use meshi::*;
+use meshi::{render::RenderBackend, *};
 use std::ffi::CString;
 
 fn main() {
@@ -10,6 +10,7 @@ fn main() {
         application_name: app.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     let physics = unsafe { meshi_get_physics_system(engine) };

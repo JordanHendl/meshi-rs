@@ -1,5 +1,8 @@
 use glam::Mat4;
-use meshi::render::database::geometry_primitives::{CubePrimitiveInfo, SpherePrimitiveInfo};
+use meshi::render::{
+    database::geometry_primitives::{CubePrimitiveInfo, SpherePrimitiveInfo},
+    RenderBackend,
+};
 use meshi::*;
 use std::ffi::CString;
 
@@ -10,6 +13,7 @@ fn main() {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     assert!(!engine.is_null());

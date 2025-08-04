@@ -1,6 +1,6 @@
 use glam::{Mat4, Quat, Vec3};
 use meshi::physics::{ActorStatus, RigidBodyInfo};
-use meshi::render::database::geometry_primitives::CubePrimitiveInfo;
+use meshi::render::{database::geometry_primitives::CubePrimitiveInfo, RenderBackend};
 use meshi::*;
 use std::ffi::CString;
 
@@ -11,6 +11,7 @@ fn main() {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
 
