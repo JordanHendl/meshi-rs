@@ -508,6 +508,39 @@ pub extern "C" fn meshi_audio_set_pitch(
     unsafe { &mut *audio }.set_pitch(h, pitch as f32);
 }
 
+/// Set the transform and velocity of an audio source.
+///
+/// # Safety
+/// `audio` and `transform` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_source_transform(
+    audio: *mut AudioEngine,
+    h: Handle<AudioSource>,
+    transform: *const Mat4,
+    velocity: Vec3,
+) {
+    if audio.is_null() || transform.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_source_transform(h, unsafe { &*transform }, velocity);
+}
+
+/// Set the listener transform and velocity for 3D audio calculations.
+///
+/// # Safety
+/// `audio` and `transform` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_audio_set_listener_transform(
+    audio: *mut AudioEngine,
+    transform: *const Mat4,
+    velocity: Vec3,
+) {
+    if audio.is_null() || transform.is_null() {
+        return;
+    }
+    unsafe { &mut *audio }.set_listener_transform(unsafe { &*transform }, velocity);
+}
+
 /// Create a streaming audio source from a file path.
 #[no_mangle]
 pub extern "C" fn meshi_audio_create_stream(

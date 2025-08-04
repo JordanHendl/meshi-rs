@@ -1,4 +1,6 @@
 use dashi::utils::{Handle, Pool};
+use glam::{Mat4, Vec3};
+
 use std::{collections::VecDeque, fs::File, io::Read};
 use tracing::info;
 
@@ -31,6 +33,8 @@ impl Default for AudioEngineInfo {
 #[allow(dead_code)]
 pub struct AudioEngine {
     info: AudioEngineInfo,
+    listener_transform: Mat4,
+    listener_velocity: Vec3,
     sources: Pool<AudioSource>,
     streams: Pool<StreamingSource>,
 }
@@ -43,6 +47,8 @@ impl AudioEngine {
         );
         Self {
             info: *info,
+            listener_transform: Mat4::IDENTITY,
+            listener_velocity: Vec3::ZERO,
             sources: Default::default(),
             streams: Default::default(),
         }
@@ -102,6 +108,23 @@ impl AudioEngine {
         }
     }
 
+    pub fn set_source_transform(
+        &mut self,
+        h: Handle<AudioSource>,
+        transform: &Mat4,
+        velocity: Vec3,
+    ) {
+        if let Some(s) = self.get_source_mut(h) {
+            s.transform = *transform;
+            s.velocity = velocity;
+        }
+    }
+
+    pub fn set_listener_transform(&mut self, transform: &Mat4, velocity: Vec3) {
+        self.listener_transform = *transform;
+        self.listener_velocity = velocity;
+    }
+
     pub fn create_stream(&mut self, path: &str) -> Handle<StreamingSource> {
         if let Some(stream) = StreamingSource::new(path) {
             self.streams.insert(stream).unwrap_or_default()
@@ -120,6 +143,34 @@ impl AudioEngine {
 
     pub fn update(&mut self, _dt: f32) {
         self.streams.for_each_occupied_mut(|s| s.refill());
+        self.mix();
+    }
+
+    fn mix(&mut self) {
+        let listener_pos = self.listener_transform.transform_point3(Vec3::ZERO);
+        let listener_vel = self.listener_velocity;
+
+        self.sources.for_each_occupied_mut(|s| {
+            let src_pos = s.transform.transform_point3(Vec3::ZERO);
+            let dir = listener_pos - src_pos;
+            let dist = dir.length();
+            let dir_norm = if dist > 0.0 { dir / dist } else { Vec3::ZERO };
+
+            // Simple inverse-distance attenuation.
+            let attenuation = 1.0 / (1.0 + dist);
+            s.effective_volume = s.volume * attenuation;
+
+            // Doppler effect using the relative velocity along the line-of-sight.
+            let rel_vel = (s.velocity - listener_vel).dot(dir_norm);
+            const SPEED_OF_SOUND: f32 = 343.0; // meters per second
+            let denom = SPEED_OF_SOUND - rel_vel;
+            let doppler = if denom.abs() > f32::EPSILON {
+                (SPEED_OF_SOUND) / denom
+            } else {
+                1.0
+            };
+            s.effective_pitch = s.pitch * doppler;
+        });
     }
 }
 
@@ -139,6 +190,10 @@ pub struct AudioSource {
     volume: f32,
     pitch: f32,
     state: PlaybackState,
+    transform: Mat4,
+    velocity: Vec3,
+    effective_volume: f32,
+    effective_pitch: f32,
 }
 
 impl AudioSource {
@@ -149,6 +204,10 @@ impl AudioSource {
             volume: 1.0,
             pitch: 1.0,
             state: PlaybackState::Stopped,
+            transform: Mat4::IDENTITY,
+            velocity: Vec3::ZERO,
+            effective_volume: 1.0,
+            effective_pitch: 1.0,
         }
     }
 }
