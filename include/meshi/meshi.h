@@ -14,6 +14,8 @@ struct RenderEngine;
 struct AudioEngine;
 struct FFIMeshObjectInfo;
 struct MeshObject;
+struct CubePrimitiveInfo;
+struct SpherePrimitiveInfo;
 struct DirectionalLightInfo;
 struct DirectionalLight;
 struct Mat4;
@@ -57,10 +59,14 @@ size_t meshi_audio_update_stream(
 // Graphics
 struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);
 struct Handle meshi_gfx_create_cube(struct RenderEngine* render);
+struct Handle meshi_gfx_create_cube_ex(struct RenderEngine* render, const struct CubePrimitiveInfo* info);
 struct Handle meshi_gfx_create_sphere(struct RenderEngine* render);
+struct Handle meshi_gfx_create_sphere_ex(struct RenderEngine* render, const struct SpherePrimitiveInfo* info);
 struct Handle meshi_gfx_create_triangle(struct RenderEngine* render);
+void meshi_gfx_release_mesh_object(struct RenderEngine* render, const struct Handle* h);
 void meshi_gfx_set_renderable_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
 struct Handle meshi_gfx_create_directional_light(struct RenderEngine* render, const struct DirectionalLightInfo* info);
+void meshi_gfx_release_directional_light(struct RenderEngine* render, const struct Handle* h);
 void meshi_gfx_set_directional_light_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
 void meshi_gfx_set_directional_light_info(struct RenderEngine* render, struct Handle h, const struct DirectionalLightInfo* info);
 void meshi_gfx_set_camera(struct RenderEngine* render, const struct Mat4* transform);
