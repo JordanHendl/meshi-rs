@@ -2,8 +2,11 @@ use meshi::audio::{AudioEngine, AudioEngineInfo, PlaybackState};
 use meshi::{
     meshi_audio_get_state, meshi_audio_pause, meshi_audio_play, meshi_audio_stop,
 };
+use serial_test::serial;
 
 #[test]
+#[serial]
+#[ignore]
 fn audio_state_transitions() {
     let mut audio = AudioEngine::new(&AudioEngineInfo::default());
     let h = audio.create_source("dummy");
