@@ -36,10 +36,16 @@ struct MeshiDirectionalLight;
 struct MeshiMaterial;
 struct MeshiRigidBody;
 
+enum class MeshiRenderBackend : std::uint32_t {
+    Canvas = 0,
+    Graph = 1,
+};
+
 struct MeshiEngineInfo {
     const char* application_name;
     const char* application_location;
     std::int32_t headless;
+    MeshiRenderBackend render_backend;
 };
 
 struct MeshiFFIMeshObjectInfo {
