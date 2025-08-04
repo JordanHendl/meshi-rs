@@ -1,7 +1,7 @@
 use dashi::utils::{Handle, Pool};
 use glam::{Mat4, Vec3};
 
-use std::{collections::VecDeque, fs::File, io::Read};
+use std::{collections::VecDeque, ffi::c_void, fs::File, io::Read};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -30,6 +30,24 @@ impl Default for AudioEngineInfo {
 }
 
 #[repr(C)]
+pub struct Bus {
+    volume: f32,
+    parent: Option<Handle<Bus>>,
+}
+
+impl Bus {
+    fn new(parent: Option<Handle<Bus>>) -> Self {
+        Self {
+            volume: 1.0,
+            parent,
+        }
+    }
+}
+
+pub type BusHandle = Handle<Bus>;
+pub type FinishedCallback = extern "C" fn(Handle<AudioSource>, *mut c_void);
+
+#[repr(C)]
 #[allow(dead_code)]
 pub struct AudioEngine {
     info: AudioEngineInfo,
@@ -37,6 +55,11 @@ pub struct AudioEngine {
     listener_velocity: Vec3,
     sources: Pool<AudioSource>,
     streams: Pool<StreamingSource>,
+    buses: Pool<Bus>,
+    master_bus: Handle<Bus>,
+    music_bus: Handle<Bus>,
+    effects_bus: Handle<Bus>,
+    finished_callbacks: Vec<(FinishedCallback, *mut c_void)>,
 }
 
 impl AudioEngine {
@@ -45,18 +68,28 @@ impl AudioEngine {
             "Initializing Audio Engine: {} Hz, {} channels",
             info.sample_rate, info.channels
         );
+        let mut buses = Pool::default();
+        let master_bus = buses.insert(Bus::new(None)).unwrap_or_default();
+        let music_bus = buses.insert(Bus::new(Some(master_bus))).unwrap_or_default();
+        let effects_bus = buses.insert(Bus::new(Some(master_bus))).unwrap_or_default();
+
         Self {
             info: *info,
             listener_transform: Mat4::IDENTITY,
             listener_velocity: Vec3::ZERO,
             sources: Default::default(),
             streams: Default::default(),
+            buses,
+            master_bus,
+            music_bus,
+            effects_bus,
+            finished_callbacks: Vec::new(),
         }
     }
 
     pub fn create_source(&mut self, path: &str) -> Handle<AudioSource> {
         self.sources
-            .insert(AudioSource::new(path))
+            .insert(AudioSource::new(path, self.effects_bus))
             .unwrap_or_default()
     }
 
@@ -86,7 +119,11 @@ impl AudioEngine {
 
     pub fn stop(&mut self, h: Handle<AudioSource>) {
         if let Some(s) = self.get_source_mut(h) {
+            let was_playing = s.state == PlaybackState::Playing;
             s.state = PlaybackState::Stopped;
+            if was_playing {
+                self.notify_finished(h);
+            }
         }
     }
 
@@ -106,6 +143,16 @@ impl AudioEngine {
         if let Some(s) = self.get_source_mut(h) {
             s.pitch = pitch;
         }
+    }
+
+    pub fn set_bus_volume(&mut self, h: Handle<Bus>, volume: f32) {
+        if let Some(b) = self.buses.get_mut_ref(h) {
+            b.volume = volume;
+        }
+    }
+
+    pub fn register_finished_callback(&mut self, cb: FinishedCallback, user_data: *mut c_void) {
+        self.finished_callbacks.push((cb, user_data));
     }
 
     pub fn set_source_transform(
@@ -149,7 +196,7 @@ impl AudioEngine {
     fn mix(&mut self) {
         let listener_pos = self.listener_transform.transform_point3(Vec3::ZERO);
         let listener_vel = self.listener_velocity;
-
+        let buses_ptr: *const Pool<Bus> = &self.buses;
         self.sources.for_each_occupied_mut(|s| {
             let src_pos = s.transform.transform_point3(Vec3::ZERO);
             let dir = listener_pos - src_pos;
@@ -158,7 +205,8 @@ impl AudioEngine {
 
             // Simple inverse-distance attenuation.
             let attenuation = 1.0 / (1.0 + dist);
-            s.effective_volume = s.volume * attenuation;
+            let bus_volume = unsafe { compute_bus_volume(&*buses_ptr, s.bus) };
+            s.effective_volume = s.volume * bus_volume * attenuation;
 
             // Doppler effect using the relative velocity along the line-of-sight.
             let rel_vel = (s.velocity - listener_vel).dot(dir_norm);
@@ -171,6 +219,12 @@ impl AudioEngine {
             };
             s.effective_pitch = s.pitch * doppler;
         });
+    }
+
+    fn notify_finished(&self, h: Handle<AudioSource>) {
+        for (cb, data) in &self.finished_callbacks {
+            cb(h, *data);
+        }
     }
 }
 
@@ -194,10 +248,11 @@ pub struct AudioSource {
     velocity: Vec3,
     effective_volume: f32,
     effective_pitch: f32,
+    bus: Handle<Bus>,
 }
 
 impl AudioSource {
-    fn new(path: &str) -> Self {
+    fn new(path: &str, bus: Handle<Bus>) -> Self {
         Self {
             path: path.to_string(),
             looping: false,
@@ -208,6 +263,7 @@ impl AudioSource {
             velocity: Vec3::ZERO,
             effective_volume: 1.0,
             effective_pitch: 1.0,
+            bus,
         }
     }
 }
@@ -220,6 +276,18 @@ pub struct StreamingSource {
     file: File,
     buffer: VecDeque<u8>,
     finished: bool,
+}
+
+fn compute_bus_volume(buses: &Pool<Bus>, h: Handle<Bus>) -> f32 {
+    if let Some(bus) = buses.get_ref(h) {
+        if let Some(parent) = bus.parent {
+            bus.volume * compute_bus_volume(buses, parent)
+        } else {
+            bus.volume
+        }
+    } else {
+        1.0
+    }
 }
 
 impl StreamingSource {

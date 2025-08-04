@@ -263,4 +263,5 @@ using MeshiDirectionalLightHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;
 using MeshiAudioSourceHandle = MeshiHandle;
+using MeshiAudioBusHandle = MeshiHandle;
 

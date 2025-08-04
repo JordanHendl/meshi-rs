@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef void (*MeshiEventCallback)(struct MeshiEvent*, void*);
+typedef void (*MeshiAudioFinishedCallback)(MeshiAudioSourceHandle, void*);
 
 // Engine
 struct MeshiEngine* meshi_make_engine(const struct MeshiEngineInfo* info);
@@ -43,6 +44,8 @@ void meshi_audio_set_listener_transform(
     struct AudioEngine* audio,
     const struct Mat4* transform,
     struct Vec3 velocity);
+void meshi_audio_set_bus_volume(struct MeshiAudioEngine* audio, MeshiAudioBusHandle h, float volume);
+void meshi_audio_register_finished_callback(struct MeshiAudioEngine* audio, void* user_data, MeshiAudioFinishedCallback cb);
 
 // Graphics
 MeshiMeshObjectHandle meshi_gfx_create_renderable(struct MeshiRenderEngine* render, const MeshiFFIMeshObjectInfo* info);
