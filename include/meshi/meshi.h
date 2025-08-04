@@ -78,6 +78,7 @@ int32_t meshi_physx_set_collision_shape(struct MeshiPhysicsSimulation* physics, 
 size_t meshi_physx_get_contacts(struct MeshiPhysicsSimulation* physics, MeshiContactInfo* out_contacts, size_t max);
 MeshiCollisionShape meshi_physx_collision_shape_sphere(float radius);
 MeshiCollisionShape meshi_physx_collision_shape_box(MeshiVec3 dimensions);
+MeshiCollisionShape meshi_physx_collision_shape_capsule(float half_height, float radius);
 
 #ifdef __cplusplus
 } // extern "C"

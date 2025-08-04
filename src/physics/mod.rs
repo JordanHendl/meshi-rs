@@ -66,6 +66,7 @@ pub enum CollisionShapeType {
     #[default]
     Sphere = 0,
     Box = 1,
+    Capsule = 2,
 }
 
 #[repr(C)]
@@ -75,6 +76,8 @@ pub struct CollisionShape {
     pub dimensions: Vec3,
     /// Radius for sphere shapes. For boxes this value is ignored.
     pub radius: f32,
+    /// Half height for capsule shapes. Ignored for other shapes.
+    pub half_height: f32,
     pub shape_type: CollisionShapeType,
 }
 
@@ -83,6 +86,7 @@ impl Default for CollisionShape {
         Self {
             shape_type: CollisionShapeType::Sphere,
             radius: 1.0,
+            half_height: 1.0,
             dimensions: Vec3::ONE,
         }
     }
@@ -194,6 +198,104 @@ fn collide_sphere_box(
     }
 }
 
+fn closest_point_on_segment(p: Vec3, a: Vec3, b: Vec3) -> Vec3 {
+    let ab = b - a;
+    let t = (p - a).dot(ab) / ab.length_squared();
+    a + ab * t.clamp(0.0, 1.0)
+}
+
+fn collide_capsule_sphere(
+    cap_pos: Vec3,
+    half_height: f32,
+    radius: f32,
+    sphere_pos: Vec3,
+    sphere_radius: f32,
+) -> Option<(Vec3, f32)> {
+    let a = cap_pos + vec3(0.0, -half_height, 0.0);
+    let b = cap_pos + vec3(0.0, half_height, 0.0);
+    let closest = closest_point_on_segment(sphere_pos, a, b);
+    let delta = sphere_pos - closest;
+    let dist = delta.length();
+    let penetration = radius + sphere_radius - dist;
+    if penetration > 0.0 {
+        let normal = if dist > 0.0 { delta / dist } else { Vec3::Y };
+        Some((normal, penetration))
+    } else {
+        None
+    }
+}
+
+fn collide_capsule_capsule(
+    a_pos: Vec3,
+    a_half: f32,
+    a_radius: f32,
+    b_pos: Vec3,
+    b_half: f32,
+    b_radius: f32,
+) -> Option<(Vec3, f32)> {
+    let a_min = a_pos.y - a_half;
+    let a_max = a_pos.y + a_half;
+    let b_min = b_pos.y - b_half;
+    let b_max = b_pos.y + b_half;
+
+    let (ya, yb) = if a_max < b_min {
+        (a_max, b_min)
+    } else if b_max < a_min {
+        (a_min, b_max)
+    } else {
+        let y = (a_min.max(b_min) + a_max.min(b_max)) * 0.5;
+        (y, y)
+    };
+
+    let pa = vec3(a_pos.x, ya, a_pos.z);
+    let pb = vec3(b_pos.x, yb, b_pos.z);
+    let delta = pb - pa;
+    let dist = delta.length();
+    let penetration = a_radius + b_radius - dist;
+    if penetration > 0.0 {
+        let normal = if dist > 0.0 { delta / dist } else { Vec3::Z };
+        Some((normal, penetration))
+    } else {
+        None
+    }
+}
+
+fn collide_capsule_box(
+    cap_pos: Vec3,
+    half_height: f32,
+    radius: f32,
+    box_pos: Vec3,
+    box_half: Vec3,
+) -> Option<(Vec3, f32)> {
+    let seg_min = cap_pos.y - half_height;
+    let seg_max = cap_pos.y + half_height;
+    let box_min = box_pos - box_half;
+    let box_max = box_pos + box_half;
+
+    let closest_x = cap_pos.x.clamp(box_min.x, box_max.x);
+    let closest_z = cap_pos.z.clamp(box_min.z, box_max.z);
+    let closest_y = if seg_max < box_min.y {
+        box_min.y
+    } else if seg_min > box_max.y {
+        box_max.y
+    } else {
+        cap_pos.y.clamp(box_min.y, box_max.y)
+    };
+
+    let axis_y = closest_y.clamp(seg_min, seg_max);
+    let capsule_point = vec3(cap_pos.x, axis_y, cap_pos.z);
+    let box_point = vec3(closest_x, closest_y, closest_z);
+    let delta = capsule_point - box_point;
+    let dist_sq = delta.length_squared();
+    if dist_sq < radius * radius {
+        let dist = dist_sq.sqrt();
+        let normal = if dist > 0.0 { -(delta / dist) } else { Vec3::Y };
+        Some((normal, radius - dist))
+    } else {
+        None
+    }
+}
+
 impl From<&RigidBodyInfo> for RigidBody {
     fn from(value: &RigidBodyInfo) -> Self {
         RigidBody {
@@ -242,12 +344,12 @@ impl PhysicsSimulation {
         s.default_material = default;
         s
     }
-  
+
     /// Set the global gravitational acceleration in meters per second squared.
     pub fn set_gravity(&mut self, gravity_mps: f32) {
         self.info.environment.gravity_mps = gravity_mps;
     }
-  
+
     pub fn update(&mut self, dt: f32) -> Result<(), PhysicsError> {
         let dt_vec = vec3(dt, dt, dt);
         let mut had_invalid = false;
@@ -282,12 +384,13 @@ impl PhysicsSimulation {
         // Determine a cell size based on the largest radius
         let mut max_radius = 0.0f32;
         for &h in &handles {
-           if let Some(rb) = self.rigid_bodies.get_ref(h) {
-             let r = match rb.shape.shape_type {
-                CollisionShapeType::Sphere => rb.shape.radius,
-                CollisionShapeType::Box => rb.shape.dimensions.max_element() * 0.5,
-              };
-              max_radius = max_radius.max(r);
+            if let Some(rb) = self.rigid_bodies.get_ref(h) {
+                let r = match rb.shape.shape_type {
+                    CollisionShapeType::Sphere => rb.shape.radius,
+                    CollisionShapeType::Box => rb.shape.dimensions.max_element() * 0.5,
+                    CollisionShapeType::Capsule => rb.shape.radius + rb.shape.half_height,
+                };
+                max_radius = max_radius.max(r);
             } else {
                 had_invalid = true;
             }
@@ -367,6 +470,62 @@ impl PhysicsSimulation {
                     if let Some((normal, penetration)) =
                         collide_sphere_box(b_pos, b_shape.radius, a_pos, a_shape.dimensions * 0.5)
                     {
+                        result = Some((-normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Capsule, CollisionShapeType::Capsule) => {
+                    if let Some((normal, penetration)) = collide_capsule_capsule(
+                        a_pos,
+                        a_shape.half_height,
+                        a_shape.radius,
+                        b_pos,
+                        b_shape.half_height,
+                        b_shape.radius,
+                    ) {
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Capsule, CollisionShapeType::Sphere) => {
+                    if let Some((normal, penetration)) = collide_capsule_sphere(
+                        a_pos,
+                        a_shape.half_height,
+                        a_shape.radius,
+                        b_pos,
+                        b_shape.radius,
+                    ) {
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Sphere, CollisionShapeType::Capsule) => {
+                    if let Some((normal, penetration)) = collide_capsule_sphere(
+                        b_pos,
+                        b_shape.half_height,
+                        b_shape.radius,
+                        a_pos,
+                        a_shape.radius,
+                    ) {
+                        result = Some((-normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Capsule, CollisionShapeType::Box) => {
+                    if let Some((normal, penetration)) = collide_capsule_box(
+                        a_pos,
+                        a_shape.half_height,
+                        a_shape.radius,
+                        b_pos,
+                        b_shape.dimensions * 0.5,
+                    ) {
+                        result = Some((normal, penetration));
+                    }
+                }
+                (CollisionShapeType::Box, CollisionShapeType::Capsule) => {
+                    if let Some((normal, penetration)) = collide_capsule_box(
+                        b_pos,
+                        b_shape.half_height,
+                        b_shape.radius,
+                        a_pos,
+                        a_shape.dimensions * 0.5,
+                    ) {
                         result = Some((-normal, penetration));
                     }
                 }

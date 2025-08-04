@@ -235,6 +235,7 @@ struct MeshiForceApplyInfo {
 enum class MeshiCollisionShapeType : std::uint32_t {
     Sphere = 0,
     Box = 1,
+    Capsule = 2,
 };
 
 enum class MeshiPlaybackState : std::uint32_t {
@@ -246,6 +247,7 @@ enum class MeshiPlaybackState : std::uint32_t {
 struct alignas(16) MeshiCollisionShape {
     MeshiVec3 dimensions;
     float radius;
+    float half_height;
     MeshiCollisionShapeType shape_type;
 };
 
