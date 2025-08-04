@@ -8,26 +8,7 @@
 extern "C" {
 #endif
 
-struct MeshiEngine;
-struct MeshiEngineInfo;
-struct RenderEngine;
-struct AudioEngine;
-struct FFIMeshObjectInfo;
-struct MeshObject;
-struct DirectionalLightInfo;
-struct DirectionalLight;
-struct Mat4;
-struct Vec3;
-struct PhysicsSimulation;
-struct MaterialInfo;
-struct RigidBodyInfo;
-struct ForceApplyInfo;
-struct ActorStatus;
-struct CollisionShape;
-struct ContactInfo;
-struct Event;
-
-typedef void (*MeshiEventCallback)(struct Event*, void*);
+typedef void (*MeshiEventCallback)(struct MeshiEvent*, void*);
 
 // Engine
 struct MeshiEngine* meshi_make_engine(const struct MeshiEngineInfo* info);
@@ -35,54 +16,54 @@ struct MeshiEngine* meshi_make_engine_headless(const char* application_name, con
 void meshi_destroy_engine(struct MeshiEngine* engine);
 void meshi_register_event_callback(struct MeshiEngine* engine, void* user_data, MeshiEventCallback cb);
 float meshi_update(struct MeshiEngine* engine);
-struct RenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
-struct AudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
+struct MeshiRenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
+struct MeshiAudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
 
 // Audio
-struct Handle meshi_audio_create_source(struct AudioEngine* audio, const char* path);
-void meshi_audio_destroy_source(struct AudioEngine* audio, struct Handle h);
-void meshi_audio_play(struct AudioEngine* audio, struct Handle h);
-void meshi_audio_pause(struct AudioEngine* audio, struct Handle h);
-void meshi_audio_stop(struct AudioEngine* audio, struct Handle h);
-void meshi_audio_set_looping(struct AudioEngine* audio, struct Handle h, int32_t looping);
-void meshi_audio_set_volume(struct AudioEngine* audio, struct Handle h, float volume);
-void meshi_audio_set_pitch(struct AudioEngine* audio, struct Handle h, float pitch);
-struct Handle meshi_audio_create_stream(struct AudioEngine* audio, const char* path);
+MeshiAudioSourceHandle meshi_audio_create_source(struct MeshiAudioEngine* audio, const char* path);
+void meshi_audio_destroy_source(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+void meshi_audio_play(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+void meshi_audio_pause(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+void meshi_audio_stop(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+void meshi_audio_set_looping(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, int32_t looping);
+void meshi_audio_set_volume(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float volume);
+void meshi_audio_set_pitch(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float pitch);
+MeshiAudioSourceHandle meshi_audio_create_stream(struct MeshiAudioEngine* audio, const char* path);
 size_t meshi_audio_update_stream(
-    struct AudioEngine* audio,
-    struct Handle h,
+    struct MeshiAudioEngine* audio,
+    MeshiAudioSourceHandle h,
     uint8_t* out_samples,
     size_t max);
 
 // Graphics
-struct Handle meshi_gfx_create_renderable(struct RenderEngine* render, const struct FFIMeshObjectInfo* info);
-struct Handle meshi_gfx_create_cube(struct RenderEngine* render);
-struct Handle meshi_gfx_create_sphere(struct RenderEngine* render);
-struct Handle meshi_gfx_create_triangle(struct RenderEngine* render);
-void meshi_gfx_set_renderable_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
-struct Handle meshi_gfx_create_directional_light(struct RenderEngine* render, const struct DirectionalLightInfo* info);
-void meshi_gfx_set_directional_light_transform(struct RenderEngine* render, struct Handle h, const struct Mat4* transform);
-void meshi_gfx_set_directional_light_info(struct RenderEngine* render, struct Handle h, const struct DirectionalLightInfo* info);
-void meshi_gfx_set_camera(struct RenderEngine* render, const struct Mat4* transform);
-void meshi_gfx_set_projection(struct RenderEngine* render, const struct Mat4* transform);
-void meshi_gfx_capture_mouse(struct RenderEngine* render, int32_t value);
+MeshiMeshObjectHandle meshi_gfx_create_renderable(struct MeshiRenderEngine* render, const MeshiFFIMeshObjectInfo* info);
+MeshiMeshObjectHandle meshi_gfx_create_cube(struct MeshiRenderEngine* render);
+MeshiMeshObjectHandle meshi_gfx_create_sphere(struct MeshiRenderEngine* render);
+MeshiMeshObjectHandle meshi_gfx_create_triangle(struct MeshiRenderEngine* render);
+void meshi_gfx_set_renderable_transform(struct MeshiRenderEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
+MeshiDirectionalLightHandle meshi_gfx_create_directional_light(struct MeshiRenderEngine* render, const MeshiDirectionalLightInfo* info);
+void meshi_gfx_set_directional_light_transform(struct MeshiRenderEngine* render, MeshiDirectionalLightHandle h, const MeshiMat4* transform);
+void meshi_gfx_set_directional_light_info(struct MeshiRenderEngine* render, MeshiDirectionalLightHandle h, const MeshiDirectionalLightInfo* info);
+void meshi_gfx_set_camera(struct MeshiRenderEngine* render, const MeshiMat4* transform);
+void meshi_gfx_set_projection(struct MeshiRenderEngine* render, const MeshiMat4* transform);
+void meshi_gfx_capture_mouse(struct MeshiRenderEngine* render, int32_t value);
 
 // Physics
-struct PhysicsSimulation* meshi_get_physics_system(struct MeshiEngine* engine);
-void meshi_physx_set_gravity(struct PhysicsSimulation* physics, float gravity_mps);
-struct Handle meshi_physx_create_material(struct PhysicsSimulation* physics, const struct MaterialInfo* info);
-void meshi_physx_release_material(struct PhysicsSimulation* physics, const struct Handle* h);
-struct Handle meshi_physx_create_rigid_body(struct PhysicsSimulation* physics, const struct RigidBodyInfo* info);
-void meshi_physx_release_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h);
-void meshi_physx_apply_force_to_rigid_body(struct PhysicsSimulation* physics, const struct Handle* h, const struct ForceApplyInfo* info);
-int32_t meshi_physx_set_rigid_body_transform(struct PhysicsSimulation* physics, const struct Handle* h, const struct ActorStatus* info);
-int32_t meshi_physx_get_rigid_body_status(struct PhysicsSimulation* physics, const struct Handle* h, struct ActorStatus* out_status);
+struct MeshiPhysicsSimulation* meshi_get_physics_system(struct MeshiEngine* engine);
+void meshi_physx_set_gravity(struct MeshiPhysicsSimulation* physics, float gravity_mps);
+MeshiMaterialHandle meshi_physx_create_material(struct MeshiPhysicsSimulation* physics, const MeshiMaterialInfo* info);
+void meshi_physx_release_material(struct MeshiPhysicsSimulation* physics, const MeshiMaterialHandle* h);
+MeshiRigidBodyHandle meshi_physx_create_rigid_body(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyInfo* info);
+void meshi_physx_release_rigid_body(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h);
+void meshi_physx_apply_force_to_rigid_body(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiForceApplyInfo* info);
+int32_t meshi_physx_set_rigid_body_transform(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiActorStatus* info);
+int32_t meshi_physx_get_rigid_body_status(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, MeshiActorStatus* out_status);
 // Returns the current velocity of a rigid body or a zero vector on failure.
-struct Vec3 meshi_physx_get_rigid_body_velocity(struct PhysicsSimulation* physics, const struct Handle* h);
-int32_t meshi_physx_set_collision_shape(struct PhysicsSimulation* physics, const struct Handle* h, const struct CollisionShape* shape);
-size_t meshi_physx_get_contacts(struct PhysicsSimulation* physics, struct ContactInfo* out_contacts, size_t max);
-struct CollisionShape meshi_physx_collision_shape_sphere(float radius);
-struct CollisionShape meshi_physx_collision_shape_box(struct Vec3 dimensions);
+MeshiVec3 meshi_physx_get_rigid_body_velocity(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h);
+int32_t meshi_physx_set_collision_shape(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiCollisionShape* shape);
+size_t meshi_physx_get_contacts(struct MeshiPhysicsSimulation* physics, MeshiContactInfo* out_contacts, size_t max);
+MeshiCollisionShape meshi_physx_collision_shape_sphere(float radius);
+MeshiCollisionShape meshi_physx_collision_shape_box(MeshiVec3 dimensions);
 
 #ifdef __cplusplus
 } // extern "C"

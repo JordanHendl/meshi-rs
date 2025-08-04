@@ -29,6 +29,7 @@ struct MeshiMat4 {
 
 struct MeshiEngine;
 struct MeshiRenderEngine;
+struct MeshiAudioEngine;
 struct MeshiPhysicsSimulation;
 struct MeshiMeshObject;
 struct MeshiDirectionalLight;
