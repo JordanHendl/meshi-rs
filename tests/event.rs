@@ -1,5 +1,8 @@
 use glam::vec2;
-use meshi::render::event::{from_winit_event, Event, EventSource, EventType, KeyCode};
+use meshi::render::{
+    event::{from_winit_event, Event, EventSource, EventType, KeyCode},
+    RenderBackend,
+};
 use meshi::*;
 use std::ffi::{c_void, CString};
 use std::sync::{
@@ -7,8 +10,8 @@ use std::sync::{
     Arc,
 };
 use winit::event::{
-    DeviceEvent, ElementState, Event as WEvent, KeyboardInput, MouseScrollDelta, TouchPhase, VirtualKeyCode, WindowEvent,
-    ModifiersState,
+    DeviceEvent, ElementState, Event as WEvent, KeyboardInput, ModifiersState, MouseScrollDelta,
+    TouchPhase, VirtualKeyCode, WindowEvent,
 };
 
 extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
@@ -17,7 +20,6 @@ extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
 }
 
 fn main() {
-
     // Test conversion from winit events
     let window_id: winit::window::WindowId = unsafe { std::mem::zeroed() };
 
@@ -38,7 +40,10 @@ fn main() {
 
     let resize_event = WEvent::WindowEvent {
         window_id,
-        event: WindowEvent::Resized(winit::dpi::PhysicalSize { width: 800, height: 600 }),
+        event: WindowEvent::Resized(winit::dpi::PhysicalSize {
+            width: 800,
+            height: 600,
+        }),
     };
     let ev = from_winit_event(&resize_event).expect("resize");
     assert_eq!(ev.event_type(), EventType::Motion2D);
@@ -46,7 +51,10 @@ fn main() {
     let size = unsafe { ev.motion2d() };
     assert_eq!(size, vec2(800.0, 600.0));
 
-    let close_event = WEvent::WindowEvent { window_id, event: WindowEvent::CloseRequested };
+    let close_event = WEvent::WindowEvent {
+        window_id,
+        event: WindowEvent::CloseRequested,
+    };
     let ev = from_winit_event(&close_event).expect("close");
     assert_eq!(ev.event_type(), EventType::Quit);
     assert_eq!(ev.source(), EventSource::Window);
@@ -101,7 +109,10 @@ fn main() {
 
     let motion_event = WEvent::DeviceEvent {
         device_id,
-        event: DeviceEvent::Motion { axis: 0, value: 0.5 },
+        event: DeviceEvent::Motion {
+            axis: 0,
+            value: 0.5,
+        },
     };
     let ev = from_winit_event(&motion_event).expect("gamepad motion");
     assert_eq!(ev.event_type(), EventType::Joystick);
@@ -113,13 +124,14 @@ fn main() {
     if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
         return;
     }
-  
+
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
         headless: 1,
+        render_backend: RenderBackend::Canvas,
     };
     let engine = unsafe { meshi_make_engine(&info) };
     let counter = Arc::new(AtomicUsize::new(0));
