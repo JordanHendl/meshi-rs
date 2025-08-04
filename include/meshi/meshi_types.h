@@ -231,6 +231,12 @@ enum class MeshiCollisionShapeType : std::uint32_t {
     Box = 1,
 };
 
+enum class MeshiPlaybackState : std::uint32_t {
+    Stopped = 0,
+    Playing = 1,
+    Paused = 2,
+};
+
 struct alignas(16) MeshiCollisionShape {
     MeshiVec3 dimensions;
     float radius;
