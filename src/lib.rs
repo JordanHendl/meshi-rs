@@ -222,7 +222,10 @@ pub extern "C" fn meshi_gfx_create_renderable(
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.register_mesh_object(unsafe { &*info })
+    match unsafe { &mut *render }.register_mesh_object(unsafe { &*info }) {
+        Ok(handle) => handle,
+        Err(_) => Handle::default(),
+    }
 }
 
 #[no_mangle]

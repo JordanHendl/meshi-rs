@@ -8,7 +8,9 @@ use database::{Database, Error as DatabaseError};
 use glam::{Mat4, Vec4};
 use tracing::{info, warn};
 
-use crate::object::{FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget};
+use crate::object::{
+    Error as MeshObjectError, FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget,
+};
 use crate::render::database::geometry_primitives::{self, CubePrimitiveInfo, SpherePrimitiveInfo};
 mod canvas;
 pub mod config;
@@ -242,12 +244,13 @@ impl RenderEngine {
         self.directional_lights.release(handle);
     }
 
-    pub fn register_mesh_object(&mut self, info: &FFIMeshObjectInfo) -> Handle<MeshObject> {
-        let info: MeshObjectInfo = info.into();
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+    pub fn register_mesh_object(
+        &mut self,
+        info: &FFIMeshObjectInfo,
+    ) -> Result<Handle<MeshObject>, MeshObjectError> {
+        let info = MeshObjectInfo::try_from(info)?;
+        let object = info.make_object(&mut self.database)?;
+        Ok(self.mesh_objects.insert(object).unwrap())
     }
 
     pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
