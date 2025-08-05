@@ -573,7 +573,11 @@ impl RenderEngine {
                         warn!("render error: {}", e);
                     }
                 }
-                Backend::Graph(r) => r.render(ctx, display, &self.mesh_objects),
+                Backend::Graph(r) => {
+                    if let Err(e) = r.render(ctx, display, &self.mesh_objects) {
+                        warn!("render error: {}", e);
+                    }
+                }
             }
         }
     }
