@@ -1,9 +1,16 @@
 use dashi::utils::{Handle, Pool};
 use glam::{Mat4, Vec3};
 
-use std::{collections::VecDeque, ffi::c_void, fs::File, io::Read};
-use std::io::BufReader;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use std::io::BufReader;
+use std::{
+    collections::VecDeque,
+    ffi::c_void,
+    fs::File,
+    io::{self, Read},
+    sync::mpsc::{channel, Receiver, TryRecvError},
+    thread,
+};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -262,7 +269,11 @@ impl AudioEngine {
     }
 
     pub fn update(&mut self, _dt: f32) {
-        self.streams.for_each_occupied_mut(|s| s.refill());
+        self.streams.for_each_occupied_mut(|s| {
+            if let Err(e) = s.refill() {
+                info!("Streaming read error: {}", e);
+            }
+        });
         self.mix();
     }
 
@@ -348,9 +359,9 @@ const STREAM_CHUNK: usize = 4096;
 pub struct StreamingSource {
     #[allow(dead_code)]
     path: String,
-    file: File,
     buffer: VecDeque<u8>,
     finished: bool,
+    rx: Receiver<io::Result<Vec<u8>>>,
 }
 
 fn compute_bus_volume(buses: &Pool<Bus>, h: Handle<Bus>) -> f32 {
@@ -368,30 +379,66 @@ fn compute_bus_volume(buses: &Pool<Bus>, h: Handle<Bus>) -> f32 {
 impl StreamingSource {
     fn new(path: &str) -> Option<Self> {
         let file = File::open(path).ok()?;
+        let (tx, rx) = channel::<io::Result<Vec<u8>>>();
+        thread::spawn(move || {
+            let mut file = file;
+            loop {
+                let mut temp = vec![0u8; STREAM_CHUNK];
+                match file.read(&mut temp) {
+                    Ok(0) => {
+                        let _ = tx.send(Ok(Vec::new()));
+                        break;
+                    }
+                    Ok(n) => {
+                        temp.truncate(n);
+                        if tx.send(Ok(temp)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
         Some(Self {
             path: path.to_string(),
-            file,
             buffer: VecDeque::new(),
             finished: false,
+            rx,
         })
     }
 
-    fn refill(&mut self) {
+    fn refill(&mut self) -> io::Result<()> {
         if self.finished {
-            return;
+            return Ok(());
         }
-        let mut temp = [0u8; STREAM_CHUNK];
-        match self.file.read(&mut temp) {
-            Ok(0) => {
-                self.finished = true;
-            }
-            Ok(n) => {
-                self.buffer.extend(&temp[..n]);
-            }
-            Err(_) => {
-                self.finished = true;
+
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(chunk)) => {
+                    if chunk.is_empty() {
+                        self.finished = true;
+                        break;
+                    } else {
+                        self.buffer.extend(chunk);
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.finished = true;
+                    return Err(e);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.finished = true;
+                    break;
+                }
             }
         }
+
+        Ok(())
     }
 
     fn pop_into(&mut self, out: &mut [u8]) -> usize {

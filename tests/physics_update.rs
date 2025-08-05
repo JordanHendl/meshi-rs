@@ -1,3 +1,4 @@
+use glam::Vec3;
 use meshi::physics::{MaterialInfo, PhysicsSimulation, RigidBodyInfo, SimulationInfo};
 
 #[test]
@@ -25,4 +26,25 @@ fn physics_update_applies_gravity_and_damping() {
 
     assert!((status.position.y - expected_position_y).abs() < 1e-5);
     assert!((velocity.y - expected_velocity_y).abs() < 1e-5);
+}
+
+#[test]
+fn static_friction_stops_motion() {
+    let mut sim = PhysicsSimulation::new(&SimulationInfo::default());
+    let mat = sim.create_material(&MaterialInfo {
+        dynamic_friction_m: 0.0,
+        static_friction_m: 1.0,
+        restitution: 0.0,
+    });
+    let rb = sim.create_rigid_body(&RigidBodyInfo {
+        material: mat,
+        initial_velocity: Vec3::splat(0.5),
+        has_gravity: 0,
+        ..Default::default()
+    });
+    sim.update(1.0).unwrap();
+    let velocity = sim
+        .get_rigid_body_velocity(rb)
+        .expect("rigid body should be valid");
+    assert!(velocity.length_squared() == 0.0);
 }
