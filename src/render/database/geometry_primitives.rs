@@ -25,7 +25,10 @@ impl Default for CubePrimitiveInfo {
     }
 }
 
-pub fn make_cube(info: &CubePrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_cube(
+    info: &CubePrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let size = info.size;
 
     let cvertices: [Vertex; 8] = [
@@ -107,34 +110,30 @@ pub fn make_cube(info: &CubePrimitiveInfo, ctx: &mut dashi::Context) -> MeshReso
         4, 5, 1, 1, 0, 4,
     ];
 
-    let vertices = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cube Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * cvertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { cvertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertices = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cube Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * cvertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { cvertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let indices = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cube Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let indices = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cube Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Cube Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "CUBE".to_string(),
         vertices,
         num_vertices: cvertices.len(),
         indices,
         num_indices: INDICES.len(),
-    }
+    })
 }
 
 #[repr(C)]
@@ -148,7 +147,10 @@ impl Default for TrianglePrimitiveInfo {
     }
 }
 
-pub fn make_triangle(info: &TrianglePrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_triangle(
+    info: &TrianglePrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let size = info.size;
     let tvertices: [Vertex; 3] = [
         Vertex {
@@ -179,34 +181,30 @@ pub fn make_triangle(info: &TrianglePrimitiveInfo, ctx: &mut dashi::Context) -> 
 
     const INDICES: [u32; 3] = [0, 1, 2];
 
-    let vertices = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Triangle Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * tvertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { tvertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertices = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Triangle Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * tvertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { tvertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let indices = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Triangle Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let indices = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Triangle Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Triangle Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "TRIANGLE".to_string(),
         vertices,
         num_vertices: tvertices.len(),
         indices,
         num_indices: INDICES.len(),
-    }
+    })
 }
 
 #[repr(C)]
@@ -226,7 +224,10 @@ impl Default for SpherePrimitiveInfo {
     }
 }
 
-pub fn make_sphere(info: &SpherePrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_sphere(
+    info: &SpherePrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let SpherePrimitiveInfo {
         radius,
         segments,
@@ -270,34 +271,30 @@ pub fn make_sphere(info: &SpherePrimitiveInfo, ctx: &mut dashi::Context) -> Mesh
         }
     }
 
-    let vertex_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Sphere Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertex_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Sphere Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let index_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Sphere Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let index_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Sphere Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Sphere Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "SPHERE".to_string(),
         vertices: vertex_buffer,
         num_vertices: vertices.len(),
         indices: index_buffer,
         num_indices: indices.len(),
-    }
+    })
 }
 
 #[repr(C)]
@@ -317,7 +314,10 @@ impl Default for CylinderPrimitiveInfo {
     }
 }
 
-pub fn make_cylinder(info: &CylinderPrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_cylinder(
+    info: &CylinderPrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let CylinderPrimitiveInfo {
         radius,
         height,
@@ -428,34 +428,30 @@ pub fn make_cylinder(info: &CylinderPrimitiveInfo, ctx: &mut dashi::Context) -> 
         indices.push(current);
     }
 
-    let vertex_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cylinder Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertex_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cylinder Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let index_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cylinder Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let index_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cylinder Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Cylinder Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "CYLINDER".to_string(),
         vertices: vertex_buffer,
         num_vertices: vertices.len(),
         indices: index_buffer,
         num_indices: indices.len(),
-    }
+    })
 }
 
 #[repr(C)]
@@ -469,7 +465,10 @@ impl Default for PlanePrimitiveInfo {
     }
 }
 
-pub fn make_plane(info: &PlanePrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_plane(
+    info: &PlanePrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let size = info.size;
 
     let vertices: [Vertex; 4] = [
@@ -509,34 +508,30 @@ pub fn make_plane(info: &PlanePrimitiveInfo, ctx: &mut dashi::Context) -> MeshRe
 
     const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
 
-    let vertex_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Plane Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertex_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Plane Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let index_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Plane Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let index_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Plane Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * INDICES.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { INDICES.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Plane Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "PLANE".to_string(),
         vertices: vertex_buffer,
         num_vertices: vertices.len(),
         indices: index_buffer,
         num_indices: INDICES.len(),
-    }
+    })
 }
 
 #[repr(C)]
@@ -556,7 +551,10 @@ impl Default for ConePrimitiveInfo {
     }
 }
 
-pub fn make_cone(info: &ConePrimitiveInfo, ctx: &mut dashi::Context) -> MeshResource {
+pub fn make_cone(
+    info: &ConePrimitiveInfo,
+    ctx: &mut dashi::Context,
+) -> Result<MeshResource, dashi::GPUError> {
     let ConePrimitiveInfo {
         radius,
         height,
@@ -629,32 +627,28 @@ pub fn make_cone(info: &ConePrimitiveInfo, ctx: &mut dashi::Context) -> MeshReso
         indices.push(current);
     }
 
-    let vertex_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cone Vertices".to_string(),
-            byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::VERTEX,
-            initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let vertex_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cone Vertices".to_string(),
+        byte_size: (std::mem::size_of::<Vertex>() * vertices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::VERTEX,
+        initial_data: Some(unsafe { vertices.as_slice().align_to::<u8>().1 }),
+    })?;
 
-    let index_buffer = ctx
-        .make_buffer(&BufferInfo {
-            debug_name: &"Cone Indices".to_string(),
-            byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
-            visibility: MemoryVisibility::Gpu,
-            usage: BufferUsage::INDEX,
-            initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
-        })
-        .unwrap();
+    let index_buffer = ctx.make_buffer(&BufferInfo {
+        debug_name: &"Cone Indices".to_string(),
+        byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
+        visibility: MemoryVisibility::Gpu,
+        usage: BufferUsage::INDEX,
+        initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
+    })?;
 
     info!("Registering Default Cone Mesh..");
-    MeshResource {
+    Ok(MeshResource {
         name: "CONE".to_string(),
         vertices: vertex_buffer,
         num_vertices: vertices.len(),
         indices: index_buffer,
         num_indices: indices.len(),
-    }
+    })
 }

@@ -4,7 +4,7 @@ use dashi::{
     utils::{Handle, Pool},
     *,
 };
-use database::{Database, Error as DatabaseError};
+use database::{Database, Error as DatabaseError, MeshResource};
 use glam::{Mat4, Vec4};
 use tracing::{info, warn};
 
@@ -296,7 +296,10 @@ impl RenderEngine {
 
     pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cube(info, ctx);
+        let mesh = geometry_primitives::make_cube(info, ctx).unwrap_or_else(|e| {
+            warn!("failed to create cube primitive: {:?}", e);
+            MeshResource::default()
+        });
         let material = self
             .database
             .fetch_material("DEFAULT")
@@ -349,7 +352,10 @@ impl RenderEngine {
 
     pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_sphere(info, ctx);
+        let mesh = geometry_primitives::make_sphere(info, ctx).unwrap_or_else(|e| {
+            warn!("failed to create sphere primitive: {:?}", e);
+            MeshResource::default()
+        });
         let material = self
             .database
             .fetch_material("DEFAULT")
@@ -380,7 +386,10 @@ impl RenderEngine {
 
     pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cylinder(info, ctx);
+        let mesh = geometry_primitives::make_cylinder(info, ctx).unwrap_or_else(|e| {
+            warn!("failed to create cylinder primitive: {:?}", e);
+            MeshResource::default()
+        });
         let material = self
             .database
             .fetch_material("DEFAULT")
@@ -411,7 +420,10 @@ impl RenderEngine {
 
     pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_plane(info, ctx);
+        let mesh = geometry_primitives::make_plane(info, ctx).unwrap_or_else(|e| {
+            warn!("failed to create plane primitive: {:?}", e);
+            MeshResource::default()
+        });
         let material = self
             .database
             .fetch_material("DEFAULT")
@@ -442,7 +454,10 @@ impl RenderEngine {
 
     pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cone(info, ctx);
+        let mesh = geometry_primitives::make_cone(info, ctx).unwrap_or_else(|e| {
+            warn!("failed to create cone primitive: {:?}", e);
+            MeshResource::default()
+        });
         let material = self
             .database
             .fetch_material("DEFAULT")
