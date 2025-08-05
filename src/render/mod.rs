@@ -273,14 +273,20 @@ impl RenderEngine {
                     "failed to create mesh object '{}': {}; falling back to default material",
                     info.mesh, e
                 );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
@@ -291,16 +297,31 @@ impl RenderEngine {
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let ctx = match self.ctx.as_mut() {
+            Some(ctx) => ctx,
+            None => {
+                warn!("render context not initialized");
+                return Handle::default();
+            }
+        };
         let mesh = geometry_primitives::make_cube(info, ctx);
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
+        let material = match self.database.fetch_material("DEFAULT") {
+            Ok(mat) => mat,
+            Err(err) => {
+                warn!("failed to fetch default material: {err}");
+                return Handle::default();
+            }
+        };
         let target = MeshTarget {
             mesh: mesh.clone(),
             material,
@@ -310,7 +331,13 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object");
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_sphere(&mut self) -> Handle<MeshObject> {
@@ -326,14 +353,20 @@ impl RenderEngine {
                     "failed to create mesh object '{}': {}; falling back to default material",
                     info.mesh, e
                 );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
@@ -344,16 +377,31 @@ impl RenderEngine {
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let ctx = match self.ctx.as_mut() {
+            Some(ctx) => ctx,
+            None => {
+                warn!("render context not initialized");
+                return Handle::default();
+            }
+        };
         let mesh = geometry_primitives::make_sphere(info, ctx);
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
+        let material = match self.database.fetch_material("DEFAULT") {
+            Ok(mat) => mat,
+            Err(err) => {
+                warn!("failed to fetch default material: {err}");
+                return Handle::default();
+            }
+        };
         let target = MeshTarget {
             mesh: mesh.clone(),
             material,
@@ -363,7 +411,13 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object");
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_cylinder(&mut self) -> Handle<MeshObject> {
@@ -372,19 +426,62 @@ impl RenderEngine {
             material: "MESHI_CYLINDER",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        let object = match info.make_object(&mut self.database) {
+            Ok(obj) => obj,
+            Err(e) => {
+                warn!(
+                    "failed to create mesh object '{}': {}; falling back to default material",
+                    info.mesh, e
+                );
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
+                MeshObject {
+                    targets: vec![MeshTarget {
+                        mesh: mesh.clone(),
+                        material,
+                    }],
+                    mesh,
+                    transform: info.transform,
+                }
+            }
+        };
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let ctx = match self.ctx.as_mut() {
+            Some(ctx) => ctx,
+            None => {
+                warn!("render context not initialized");
+                return Handle::default();
+            }
+        };
         let mesh = geometry_primitives::make_cylinder(info, ctx);
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
+        let material = match self.database.fetch_material("DEFAULT") {
+            Ok(mat) => mat,
+            Err(err) => {
+                warn!("failed to fetch default material: {err}");
+                return Handle::default();
+            }
+        };
         let target = MeshTarget {
             mesh: mesh.clone(),
             material,
@@ -394,7 +491,13 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object");
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_plane(&mut self) -> Handle<MeshObject> {
@@ -403,19 +506,62 @@ impl RenderEngine {
             material: "MESHI_PLANE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        let object = match info.make_object(&mut self.database) {
+            Ok(obj) => obj,
+            Err(e) => {
+                warn!(
+                    "failed to create mesh object '{}': {}; falling back to default material",
+                    info.mesh, e
+                );
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
+                MeshObject {
+                    targets: vec![MeshTarget {
+                        mesh: mesh.clone(),
+                        material,
+                    }],
+                    mesh,
+                    transform: info.transform,
+                }
+            }
+        };
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let ctx = match self.ctx.as_mut() {
+            Some(ctx) => ctx,
+            None => {
+                warn!("render context not initialized");
+                return Handle::default();
+            }
+        };
         let mesh = geometry_primitives::make_plane(info, ctx);
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
+        let material = match self.database.fetch_material("DEFAULT") {
+            Ok(mat) => mat,
+            Err(err) => {
+                warn!("failed to fetch default material: {err}");
+                return Handle::default();
+            }
+        };
         let target = MeshTarget {
             mesh: mesh.clone(),
             material,
@@ -425,7 +571,13 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object");
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_cone(&mut self) -> Handle<MeshObject> {
@@ -434,19 +586,62 @@ impl RenderEngine {
             material: "MESHI_CONE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        let object = match info.make_object(&mut self.database) {
+            Ok(obj) => obj,
+            Err(e) => {
+                warn!(
+                    "failed to create mesh object '{}': {}; falling back to default material",
+                    info.mesh, e
+                );
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
+                MeshObject {
+                    targets: vec![MeshTarget {
+                        mesh: mesh.clone(),
+                        material,
+                    }],
+                    mesh,
+                    transform: info.transform,
+                }
+            }
+        };
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let ctx = match self.ctx.as_mut() {
+            Some(ctx) => ctx,
+            None => {
+                warn!("render context not initialized");
+                return Handle::default();
+            }
+        };
         let mesh = geometry_primitives::make_cone(info, ctx);
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
+        let material = match self.database.fetch_material("DEFAULT") {
+            Ok(mat) => mat,
+            Err(err) => {
+                warn!("failed to fetch default material: {err}");
+                return Handle::default();
+            }
+        };
         let target = MeshTarget {
             mesh: mesh.clone(),
             material,
@@ -456,7 +651,13 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object");
+                Handle::default()
+            }
+        }
     }
 
     pub fn create_triangle(&mut self) -> Handle<MeshObject> {
@@ -472,14 +673,20 @@ impl RenderEngine {
                     "failed to create mesh object '{}': {}; falling back to default material",
                     info.mesh, e
                 );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
+                let mesh = match self.database.fetch_mesh(info.mesh) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        warn!("failed to fetch mesh '{}': {err}", info.mesh);
+                        return Handle::default();
+                    }
+                };
+                let material = match self.database.fetch_material("DEFAULT") {
+                    Ok(mat) => mat,
+                    Err(err) => {
+                        warn!("failed to fetch default material: {err}");
+                        return Handle::default();
+                    }
+                };
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
@@ -490,7 +697,13 @@ impl RenderEngine {
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        match self.mesh_objects.insert(object) {
+            Some(handle) => handle,
+            None => {
+                warn!("failed to insert mesh object '{}'", info.mesh);
+                Handle::default()
+            }
+        }
     }
 
     pub fn set_mesh_object_transform(
