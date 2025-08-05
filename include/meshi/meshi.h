@@ -52,6 +52,9 @@ void meshi_audio_register_finished_callback(struct MeshiAudioEngine* audio, void
 MeshiMeshObjectHandle meshi_gfx_create_renderable(struct MeshiRenderEngine* render, const MeshiFFIMeshObjectInfo* info);
 MeshiMeshObjectHandle meshi_gfx_create_cube(struct MeshiRenderEngine* render);
 MeshiMeshObjectHandle meshi_gfx_create_sphere(struct MeshiRenderEngine* render);
+MeshiMeshObjectHandle meshi_gfx_create_cylinder(struct MeshiRenderEngine* render);
+MeshiMeshObjectHandle meshi_gfx_create_plane(struct MeshiRenderEngine* render);
+MeshiMeshObjectHandle meshi_gfx_create_cone(struct MeshiRenderEngine* render);
 MeshiMeshObjectHandle meshi_gfx_create_triangle(struct MeshiRenderEngine* render);
 void meshi_gfx_set_renderable_transform(struct MeshiRenderEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
 MeshiDirectionalLightHandle meshi_gfx_create_directional_light(struct MeshiRenderEngine* render, const MeshiDirectionalLightInfo* info);

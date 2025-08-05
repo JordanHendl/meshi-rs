@@ -1,6 +1,9 @@
 use glam::Mat4;
 use meshi::render::{
-    database::geometry_primitives::{CubePrimitiveInfo, SpherePrimitiveInfo},
+    database::geometry_primitives::{
+        ConePrimitiveInfo, CubePrimitiveInfo, CylinderPrimitiveInfo, PlanePrimitiveInfo,
+        SpherePrimitiveInfo,
+    },
     RenderBackend,
 };
 use meshi::*;
@@ -32,5 +35,19 @@ fn main() {
         rings: 8,
     };
     unsafe { meshi_gfx_create_sphere_ex(render, &sphere_info) };
+    let cylinder_info = CylinderPrimitiveInfo {
+        radius: 1.0,
+        height: 2.0,
+        segments: 8,
+    };
+    unsafe { meshi_gfx_create_cylinder_ex(render, &cylinder_info) };
+    let plane_info = PlanePrimitiveInfo { size: 1.0 };
+    unsafe { meshi_gfx_create_plane_ex(render, &plane_info) };
+    let cone_info = ConePrimitiveInfo {
+        radius: 1.0,
+        height: 2.0,
+        segments: 8,
+    };
+    unsafe { meshi_gfx_create_cone_ex(render, &cone_info) };
     unsafe { meshi_update(engine) };
 }
