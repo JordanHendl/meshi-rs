@@ -1,7 +1,7 @@
 use crate::render::database::{self, Database, MeshResource};
 use dashi::utils::Handle;
 use glam::Mat4;
-use tracing::info;
+use tracing::{info, warn};
 
 use std::ffi::{c_char, CStr};
 use std::fmt;
@@ -88,10 +88,10 @@ impl MeshObjectInfo {
         );
 
         let mesh = db.fetch_mesh(self.mesh)?;
-        let material = match db.fetch_material(self.material) {
-            Ok(mat) => mat,
-            Err(_) => db.fetch_material("DEFAULT")?,
-        };
+        let material = db.fetch_material(self.material).map_err(|e| {
+            warn!("failed to fetch material '{}': {}", self.material, e);
+            e
+        })?;
 
         let targets = vec![MeshTarget {
             mesh: mesh.clone(),
