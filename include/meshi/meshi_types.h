@@ -226,6 +226,8 @@ struct MeshiEvent {
 
 struct MeshiMaterialInfo {
     float dynamic_friction_m;
+    float static_friction_m;
+    float restitution;
 };
 
 struct MeshiForceApplyInfo {

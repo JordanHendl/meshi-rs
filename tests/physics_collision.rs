@@ -1,6 +1,7 @@
 use glam::Vec3;
 use meshi::physics::{
-    CollisionShape, CollisionShapeType, PhysicsSimulation, RigidBodyInfo, SimulationInfo,
+    CollisionShape, CollisionShapeType, ForceApplyInfo, MaterialInfo, PhysicsSimulation,
+    RigidBodyInfo, SimulationInfo,
 };
 
 #[test]
@@ -162,4 +163,49 @@ fn capsule_and_sphere_generate_contact() {
     assert!(contacts.iter().any(|c| {
         (c.a == capsule_rb && c.b == sphere_rb) || (c.a == sphere_rb && c.b == capsule_rb)
     }));
+}
+
+#[test]
+fn restitution_swaps_velocities() {
+    let mut sim = PhysicsSimulation::new(&SimulationInfo::default());
+    let mat = sim.create_material(&MaterialInfo {
+        dynamic_friction_m: 0.0,
+        static_friction_m: 0.0,
+        restitution: 1.0,
+    });
+    let rb1 = sim.create_rigid_body(&RigidBodyInfo {
+        material: mat,
+        initial_position: Vec3::new(-1.0, 0.0, 0.0),
+        has_gravity: 0,
+        ..Default::default()
+    });
+    let rb2 = sim.create_rigid_body(&RigidBodyInfo {
+        material: mat,
+        initial_position: Vec3::new(1.1, 0.0, 0.0),
+        has_gravity: 0,
+        ..Default::default()
+    });
+    sim.apply_rigid_body_force(
+        rb1,
+        &ForceApplyInfo {
+            amt: Vec3::new(1.0, 0.0, 0.0),
+        },
+    )
+    .unwrap();
+    sim.apply_rigid_body_force(
+        rb2,
+        &ForceApplyInfo {
+            amt: Vec3::new(-1.0, 0.0, 0.0),
+        },
+    )
+    .unwrap();
+    sim.update(1.0).unwrap();
+    let v1 = sim
+        .get_rigid_body_velocity(rb1)
+        .expect("rigid body should be valid");
+    let v2 = sim
+        .get_rigid_body_velocity(rb2)
+        .expect("rigid body should be valid");
+    assert!((v1.x + 1.0).abs() < 1e-5);
+    assert!((v2.x - 1.0).abs() < 1e-5);
 }
