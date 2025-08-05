@@ -1,5 +1,8 @@
 use glam::{Mat4, Vec4};
-use meshi::render::{database::geometry_primitives::CubePrimitiveInfo, DirectionalLightInfo};
+use meshi::render::{
+    database::geometry_primitives::{CubePrimitiveInfo, CylinderPrimitiveInfo},
+    DirectionalLightInfo,
+};
 use meshi::*;
 use std::ffi::CString;
 
@@ -11,6 +14,13 @@ fn main() {
     let info = CubePrimitiveInfo { size: 2.0 };
     let cube = unsafe { meshi_gfx_create_cube_ex(render, &info) };
     unsafe { meshi_gfx_set_renderable_transform(render, cube, &Mat4::IDENTITY) };
+    let cyl_info = CylinderPrimitiveInfo {
+        radius: 1.0,
+        height: 2.0,
+        segments: 16,
+    };
+    let cylinder = unsafe { meshi_gfx_create_cylinder_ex(render, &cyl_info) };
+    unsafe { meshi_gfx_set_renderable_transform(render, cylinder, &Mat4::IDENTITY) };
 
     let light_info = DirectionalLightInfo {
         direction: Vec4::new(0.0, -1.0, 0.0, 0.0),

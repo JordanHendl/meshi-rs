@@ -25,6 +25,18 @@ pub fn load_primitives(ctx: &mut Context) -> HashMap<String, MeshResource> {
         "MESHI_SPHERE".to_string(),
         geometry_primitives::make_sphere(&Default::default(), ctx),
     );
+    geometry.insert(
+        "MESHI_CYLINDER".to_string(),
+        geometry_primitives::make_cylinder(&Default::default(), ctx),
+    );
+    geometry.insert(
+        "MESHI_PLANE".to_string(),
+        geometry_primitives::make_plane(&Default::default(), ctx),
+    );
+    geometry.insert(
+        "MESHI_CONE".to_string(),
+        geometry_primitives::make_cone(&Default::default(), ctx),
+    );
     geometry
 }
 

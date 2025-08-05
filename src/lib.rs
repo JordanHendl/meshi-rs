@@ -267,6 +267,63 @@ pub extern "C" fn meshi_gfx_create_sphere_ex(
 }
 
 #[no_mangle]
+pub extern "C" fn meshi_gfx_create_cylinder(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_cylinder()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cylinder_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::CylinderPrimitiveInfo,
+) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_cylinder_ex(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_plane(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_plane()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_plane_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::PlanePrimitiveInfo,
+) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_plane_ex(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cone(render: *mut RenderEngine) -> Handle<MeshObject> {
+    if render.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_cone()
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_cone_ex(
+    render: *mut RenderEngine,
+    info: *const render::database::geometry_primitives::ConePrimitiveInfo,
+) -> Handle<MeshObject> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut *render }.create_cone_ex(unsafe { &*info })
+}
+
+#[no_mangle]
 pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
     if render.is_null() {
         return Handle::default();

@@ -11,7 +11,10 @@ use tracing::{info, warn};
 use crate::object::{
     Error as MeshObjectError, FFIMeshObjectInfo, MeshObject, MeshObjectInfo, MeshTarget,
 };
-use crate::render::database::geometry_primitives::{self, CubePrimitiveInfo, SpherePrimitiveInfo};
+use crate::render::database::geometry_primitives::{
+    self, ConePrimitiveInfo, CubePrimitiveInfo, CylinderPrimitiveInfo, PlanePrimitiveInfo,
+    SpherePrimitiveInfo,
+};
 mod canvas;
 pub mod config;
 pub mod database;
@@ -303,6 +306,99 @@ impl RenderEngine {
     pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
         let mesh = geometry_primitives::make_sphere(info, ctx);
+        let material = self
+            .database
+            .fetch_material("DEFAULT")
+            .expect("failed to fetch default material");
+        let target = MeshTarget {
+            mesh: mesh.clone(),
+            material,
+        };
+        let object = MeshObject {
+            targets: vec![target],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_cylinder(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_CYLINDER",
+            material: "MESHI_CYLINDER",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
+        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let mesh = geometry_primitives::make_cylinder(info, ctx);
+        let material = self
+            .database
+            .fetch_material("DEFAULT")
+            .expect("failed to fetch default material");
+        let target = MeshTarget {
+            mesh: mesh.clone(),
+            material,
+        };
+        let object = MeshObject {
+            targets: vec![target],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_plane(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_PLANE",
+            material: "MESHI_PLANE",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
+        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let mesh = geometry_primitives::make_plane(info, ctx);
+        let material = self
+            .database
+            .fetch_material("DEFAULT")
+            .expect("failed to fetch default material");
+        let target = MeshTarget {
+            mesh: mesh.clone(),
+            material,
+        };
+        let object = MeshObject {
+            targets: vec![target],
+            mesh,
+            transform: Mat4::IDENTITY,
+        };
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_cone(&mut self) -> Handle<MeshObject> {
+        let info = MeshObjectInfo {
+            mesh: "MESHI_CONE",
+            material: "MESHI_CONE",
+            transform: Mat4::IDENTITY,
+        };
+        let object = info
+            .make_object(&mut self.database)
+            .expect("failed to create mesh object");
+        self.mesh_objects.insert(object).unwrap()
+    }
+
+    pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
+        let ctx = self.ctx.as_mut().expect("render context not initialized");
+        let mesh = geometry_primitives::make_cone(info, ctx);
         let material = self
             .database
             .fetch_material("DEFAULT")
