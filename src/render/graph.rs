@@ -1,6 +1,7 @@
 use dashi::{utils::Pool, Attachment, DrawIndexed, Format, RenderPassBegin, SubmitInfo};
 use koji::{render_graph::io, Canvas, CanvasBuilder, RenderGraph};
 
+use super::RenderError;
 use crate::object::MeshObject;
 
 /// A renderer that executes a frame graph described by `koji`.
@@ -29,23 +30,21 @@ impl GraphRenderer {
         ctx: &mut dashi::Context,
         display: &mut dashi::Display,
         mesh_objects: &Pool<MeshObject>,
-    ) {
-        // Build a simple canvas on first use.
-        let canvas = self.canvas.get_or_insert_with(|| {
-            CanvasBuilder::new()
+    ) -> Result<(), RenderError> {
+        if self.canvas.is_none() {
+            let canvas = CanvasBuilder::new()
                 .color_attachment("color", Format::RGBA8)
-                .build(ctx)
-                .expect("failed to build canvas")
-        });
-
-        // Execute the parsed graph if present.
-        if let Some(graph) = &mut self.graph {
-            let _ = graph.execute(ctx);
+                .build(ctx)?;
+            self.canvas = Some(canvas);
         }
 
-        let (img, acquire_sem, _idx, _sub_opt) = ctx
-            .acquire_new_image(display)
-            .expect("failed to acquire image");
+        let canvas = self.canvas.as_mut().unwrap();
+
+        if let Some(graph) = &mut self.graph {
+            graph.execute(ctx)?;
+        }
+
+        let (img, acquire_sem, _idx, _sub_opt) = ctx.acquire_new_image(display)?;
         canvas.target_mut().colors[0].attachment.img = img;
 
         let target = canvas.target();
@@ -54,41 +53,40 @@ impl GraphRenderer {
             attachments.push(depth.attachment);
         }
 
-        let mut cmd = ctx
-            .begin_command_list(&Default::default())
-            .expect("begin command list");
+        let mut cmd = ctx.begin_command_list(&Default::default())?;
 
-        cmd.begin_render_pass(&RenderPassBegin {
-            render_pass: canvas.render_pass(),
-            viewport: Default::default(),
-            attachments: &attachments,
-        })
-        .expect("begin render pass");
+        let result: Result<(), RenderError> = (|| {
+            cmd.begin_render_pass(&RenderPassBegin {
+                render_pass: canvas.render_pass(),
+                viewport: Default::default(),
+                attachments: &attachments,
+            })?;
 
-        mesh_objects.for_each_occupied(|obj| {
-            cmd.draw_indexed(DrawIndexed {
-                vertices: obj.mesh.vertices,
-                indices: obj.mesh.indices,
-                index_count: obj.mesh.num_indices as u32,
-                ..Default::default()
+            mesh_objects.for_each_occupied(|obj| {
+                cmd.draw_indexed(DrawIndexed {
+                    vertices: obj.mesh.vertices,
+                    indices: obj.mesh.indices,
+                    index_count: obj.mesh.num_indices as u32,
+                    ..Default::default()
+                });
             });
-        });
 
-        // ensure render pass closed
-        let _ = cmd.end_drawing();
+            cmd.end_drawing()?;
 
-        let fence = ctx
-            .submit(
+            let fence = ctx.submit(
                 &mut cmd,
                 &SubmitInfo {
                     wait_sems: &[acquire_sem],
                     signal_sems: &[],
                 },
-            )
-            .expect("submit");
+            )?;
 
-        let _ = ctx.wait(fence);
-        let _ = ctx.present_display(display, &[]);
+            ctx.wait(fence)?;
+            ctx.present_display(display, &[])?;
+            Ok(())
+        })();
+
         ctx.destroy_cmd_list(cmd);
+        result
     }
 }
