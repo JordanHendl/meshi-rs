@@ -1,5 +1,3 @@
-#![cfg(feature = "rodio_backend")]
-
 use meshi::audio::{AudioBackend, AudioEngine, AudioEngineInfo};
 use serial_test::serial;
 use std::{path::Path, thread::sleep, time::Duration};
