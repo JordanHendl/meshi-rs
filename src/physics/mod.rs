@@ -44,12 +44,16 @@ pub struct SimulationInfo {
 #[derive(Clone, Copy)]
 pub struct MaterialInfo {
     pub dynamic_friction_m: f32,
+    pub static_friction_m: f32,
+    pub restitution: f32,
 }
 
 impl Default for MaterialInfo {
     fn default() -> Self {
         Self {
             dynamic_friction_m: 5.0,
+            static_friction_m: 5.0,
+            restitution: 0.0,
         }
     }
 }
@@ -57,7 +61,7 @@ impl Default for MaterialInfo {
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct ForceApplyInfo {
-    amt: Vec3,
+    pub amt: Vec3,
 }
 
 #[repr(C)]
@@ -139,7 +143,11 @@ pub struct RigidBody {
 impl RigidBody {
     pub fn dampen_velocity(&mut self, mat: &Material, dt: &Vec3) {
         let dfc = mat.info.dynamic_friction_m;
-        self.velocity = self.velocity - (vec3(dfc, dfc, dfc) * dt);
+        self.velocity -= vec3(dfc, dfc, dfc) * *dt;
+        let threshold = mat.info.static_friction_m * dt.x;
+        if self.velocity.length() < threshold {
+            self.velocity = Vec3::ZERO;
+        }
     }
 }
 
@@ -426,6 +434,8 @@ impl PhysicsSimulation {
             let b_vel = b_ref.velocity;
             let a_shape = a_ref.shape;
             let b_shape = b_ref.shape;
+            let a_mat = self.materials.get_ref(a_ref.material).unwrap();
+            let b_mat = self.materials.get_ref(b_ref.material).unwrap();
 
             let mut result: Option<(Vec3, f32)> = None;
 
@@ -538,9 +548,11 @@ impl PhysicsSimulation {
                 let mut a_vel_new = a_vel;
                 let mut b_vel_new = b_vel;
                 if vel_along_normal < 0.0 {
-                    let impulse = normal * vel_along_normal;
-                    a_vel_new += impulse;
-                    b_vel_new -= impulse;
+                    let restitution = (a_mat.info.restitution + b_mat.info.restitution) * 0.5;
+                    let j = -vel_along_normal * (1.0 + restitution) * 0.5;
+                    let impulse = normal * j;
+                    a_vel_new -= impulse;
+                    b_vel_new += impulse;
                 }
 
                 if let Some(a_mut) = self.rigid_bodies.get_mut_ref(ha) {
