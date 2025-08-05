@@ -20,6 +20,14 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use utils::timer::Timer;
 
+macro_rules! return_if_null {
+    ($ret:expr, $($ptr:expr),+ $(,)?) => {
+        if $( $ptr.is_null() )||* {
+            return $ret;
+        }
+    };
+}
+
 #[repr(C)]
 /// Information used to create a [`MeshiEngine`].
 ///
@@ -219,9 +227,7 @@ pub extern "C" fn meshi_gfx_create_renderable(
     render: *mut RenderEngine,
     info: *const FFIMeshObjectInfo,
 ) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
+    return_if_null!(Handle::default(), render, info);
     match unsafe { &mut *render }.register_mesh_object(unsafe { &*info }) {
         Ok(handle) => handle,
         Err(_) => Handle::default(),
@@ -241,9 +247,7 @@ pub extern "C" fn meshi_gfx_create_cube_ex(
     render: *mut RenderEngine,
     info: *const render::database::geometry_primitives::CubePrimitiveInfo,
 ) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
+    return_if_null!(Handle::default(), render, info);
     unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
 }
 
