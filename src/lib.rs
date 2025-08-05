@@ -233,7 +233,10 @@ pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<Mes
     if render.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.create_cube()
+    match unsafe { &mut *render }.create_cube() {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]
@@ -244,7 +247,10 @@ pub extern "C" fn meshi_gfx_create_cube_ex(
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
+    match unsafe { &mut *render }.create_cube_ex(unsafe { &*info }) {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]
@@ -252,7 +258,10 @@ pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<M
     if render.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.create_sphere()
+    match unsafe { &mut *render }.create_sphere() {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]
@@ -263,7 +272,10 @@ pub extern "C" fn meshi_gfx_create_sphere_ex(
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
+    match unsafe { &mut *render }.create_sphere_ex(unsafe { &*info }) {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]
@@ -271,7 +283,10 @@ pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle
     if render.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.create_triangle()
+    match unsafe { &mut *render }.create_triangle() {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]
@@ -315,7 +330,10 @@ pub extern "C" fn meshi_gfx_create_directional_light(
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+    match unsafe { &mut *render }.register_directional_light(unsafe { &*info }) {
+        Some(handle) => handle,
+        None => Handle::default(),
+    }
 }
 
 #[no_mangle]

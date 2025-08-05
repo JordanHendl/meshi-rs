@@ -212,12 +212,12 @@ impl RenderEngine {
     pub fn register_directional_light(
         &mut self,
         info: &DirectionalLightInfo,
-    ) -> Handle<DirectionalLight> {
+    ) -> Option<Handle<DirectionalLight>> {
         let light = DirectionalLight {
             transform: Mat4::IDENTITY,
             info: *info,
         };
-        self.directional_lights.insert(light).unwrap()
+        self.directional_lights.insert(light)
     }
 
     pub fn set_directional_light_transform(
@@ -250,14 +250,16 @@ impl RenderEngine {
     ) -> Result<Handle<MeshObject>, MeshObjectError> {
         let info = MeshObjectInfo::try_from(info)?;
         let object = info.make_object(&mut self.database)?;
-        Ok(self.mesh_objects.insert(object).unwrap())
+        self.mesh_objects
+            .insert(object)
+            .ok_or(MeshObjectError::PoolFull)
     }
 
     pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
         self.mesh_objects.release(handle);
     }
 
-    pub fn create_cube(&mut self) -> Handle<MeshObject> {
+    pub fn create_cube(&mut self) -> Option<Handle<MeshObject>> {
         let info = MeshObjectInfo {
             mesh: "MESHI_CUBE",
             material: "MESHI_CUBE",
@@ -266,10 +268,10 @@ impl RenderEngine {
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        self.mesh_objects.insert(object)
     }
 
-    pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
+    pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Option<Handle<MeshObject>> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
         let mesh = geometry_primitives::make_cube(info, ctx);
         let material = self
@@ -285,10 +287,10 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        self.mesh_objects.insert(object)
     }
 
-    pub fn create_sphere(&mut self) -> Handle<MeshObject> {
+    pub fn create_sphere(&mut self) -> Option<Handle<MeshObject>> {
         let info = MeshObjectInfo {
             mesh: "MESHI_SPHERE",
             material: "MESHI_SPHERE",
@@ -297,10 +299,10 @@ impl RenderEngine {
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        self.mesh_objects.insert(object)
     }
 
-    pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
+    pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Option<Handle<MeshObject>> {
         let ctx = self.ctx.as_mut().expect("render context not initialized");
         let mesh = geometry_primitives::make_sphere(info, ctx);
         let material = self
@@ -316,10 +318,10 @@ impl RenderEngine {
             mesh,
             transform: Mat4::IDENTITY,
         };
-        self.mesh_objects.insert(object).unwrap()
+        self.mesh_objects.insert(object)
     }
 
-    pub fn create_triangle(&mut self) -> Handle<MeshObject> {
+    pub fn create_triangle(&mut self) -> Option<Handle<MeshObject>> {
         let info = MeshObjectInfo {
             mesh: "MESHI_TRIANGLE",
             material: "MESHI_TRIANGLE",
@@ -328,7 +330,7 @@ impl RenderEngine {
         let object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        self.mesh_objects.insert(object)
     }
 
     pub fn set_mesh_object_transform(

@@ -23,6 +23,7 @@ pub struct MeshObjectInfo {
 pub enum Error {
     InvalidString,
     Database(database::Error),
+    PoolFull,
 }
 
 impl fmt::Display for Error {
@@ -30,6 +31,7 @@ impl fmt::Display for Error {
         match self {
             Error::InvalidString => write!(f, "invalid string pointer"),
             Error::Database(err) => err.fmt(f),
+            Error::PoolFull => write!(f, "object pool full"),
         }
     }
 }
