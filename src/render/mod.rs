@@ -28,6 +28,8 @@ pub enum RenderError {
     DisplayCreation,
     Database(DatabaseError),
     Gpu(dashi::GPUError),
+    GraphConfig(std::io::Error),
+    GraphParse(serde_json::Error),
 }
 
 impl fmt::Display for RenderError {
@@ -38,6 +40,12 @@ impl fmt::Display for RenderError {
             RenderError::DisplayCreation => write!(f, "failed to create display"),
             RenderError::Database(err) => write!(f, "database error: {err}"),
             RenderError::Gpu(err) => write!(f, "gpu error: {err:?}"),
+            RenderError::GraphConfig(err) => {
+                write!(f, "failed to read graph config: {err}")
+            }
+            RenderError::GraphParse(err) => {
+                write!(f, "failed to parse graph config: {err}")
+            }
         }
     }
 }
@@ -46,6 +54,8 @@ impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RenderError::Database(err) => Some(err),
+            RenderError::GraphConfig(err) => Some(err),
+            RenderError::GraphParse(err) => Some(err),
             _ => None,
         }
     }
@@ -60,6 +70,18 @@ impl From<DatabaseError> for RenderError {
 impl From<dashi::GPUError> for RenderError {
     fn from(value: dashi::GPUError) -> Self {
         RenderError::Gpu(value)
+    }
+}
+
+impl From<std::io::Error> for RenderError {
+    fn from(value: std::io::Error) -> Self {
+        RenderError::GraphConfig(value)
+    }
+}
+
+impl From<serde_json::Error> for RenderError {
+    fn from(value: serde_json::Error) -> Self {
+        RenderError::GraphParse(value)
     }
 }
 
@@ -156,7 +178,7 @@ impl RenderEngine {
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");
-                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone()))
+                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone())?)
             }
         };
 
