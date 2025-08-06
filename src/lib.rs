@@ -2,6 +2,7 @@ pub mod audio;
 mod object;
 pub mod physics;
 pub mod render;
+pub mod streaming;
 mod utils;
 use audio::{
     AudioEngine, AudioEngineInfo, AudioSource, Bus, FinishedCallback, PlaybackState,
