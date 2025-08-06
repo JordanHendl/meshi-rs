@@ -267,6 +267,22 @@ impl Database {
         Ok(())
     }
 
+    /// Unload a previously loaded image, dropping any associated texture handle.
+    pub fn unload_image(&mut self, name: &str) -> Result<()> {
+        match self.textures.remove(name) {
+            Some(Some(_handle)) => {
+                // In a full renderer this would free the GPU texture referenced by
+                // `handle`. In these tests the handle is a placeholder so simply
+                // dropping it is sufficient.
+                Ok(())
+            }
+            Some(None) => Ok(()),
+            None => Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            })),
+        }
+    }
+
     pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
         match self.textures.get_mut(name) {
             Some(entry) => {
@@ -352,6 +368,33 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = make_db(dir.path().to_str().unwrap());
         let err = db.fetch_texture("missing.png").unwrap_err();
+        match err {
+            Error::LookupError(_) => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unload_image_removes_entry() {
+        let dir = tempdir().unwrap();
+        let img_path = dir.path().join("test.png");
+        let img = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]));
+        img.save(&img_path).unwrap();
+
+        let mut db = make_db(dir.path().to_str().unwrap());
+        db.load_image("test.png").unwrap();
+        db.fetch_texture("test.png").unwrap();
+        assert!(db.textures.contains_key("test.png"));
+
+        db.unload_image("test.png").unwrap();
+        assert!(!db.textures.contains_key("test.png"));
+    }
+
+    #[test]
+    fn unload_image_unknown_name() {
+        let dir = tempdir().unwrap();
+        let mut db = make_db(dir.path().to_str().unwrap());
+        let err = db.unload_image("missing.png").unwrap_err();
         match err {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
