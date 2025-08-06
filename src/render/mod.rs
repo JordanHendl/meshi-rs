@@ -283,7 +283,7 @@ impl RenderEngine {
                 );
                 let mesh = self
                     .database
-                    .fetch_mesh(info.mesh)
+                    .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
@@ -339,7 +339,7 @@ impl RenderEngine {
                 );
                 let mesh = self
                     .database
-                    .fetch_mesh(info.mesh)
+                    .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
@@ -497,7 +497,7 @@ impl RenderEngine {
                 );
                 let mesh = self
                     .database
-                    .fetch_mesh(info.mesh)
+                    .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
