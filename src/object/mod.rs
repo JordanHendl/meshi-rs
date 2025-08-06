@@ -87,7 +87,7 @@ impl MeshObjectInfo {
             self.mesh, self.material
         );
 
-        let mesh = db.fetch_mesh(self.mesh)?;
+        let mesh = db.fetch_mesh(self.mesh, true)?;
         let material = db.fetch_material(self.material).map_err(|e| {
             warn!("failed to fetch material '{}': {}", self.material, e);
             e
