@@ -42,7 +42,10 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp target/release/meshi.dll artifacts/meshi.dll
+            cp target/release/meshi.dll artifacts/
+            cp target/release/meshi.dll.lib artifacts/
+            (cd artifacts && powershell -Command "Compress-Archive -Path meshi.dll,meshi.dll.lib -DestinationPath meshi-windows.zip")
+            rm artifacts/meshi.dll artifacts/meshi.dll.lib
           else
             cp target/release/libmeshi.so artifacts/meshi.so
           fi
@@ -81,6 +84,6 @@ jobs:
           name: "${{ github.event.inputs.tag }}"
           files: |
             artifacts/meshi.so
-            artifacts/meshi.dll
+            artifacts/meshi-windows.zip
             artifacts/meshi-c-headers.tar.gz
             artifacts/meshi-c-headers.zip
