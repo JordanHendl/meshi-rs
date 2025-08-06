@@ -68,6 +68,12 @@ pub struct SceneInfo<'a> {
     pub images: &'a [&'a str],
 }
 
+#[derive(Default, Debug)]
+pub struct SceneLoadErrors {
+    pub models: Vec<String>,
+    pub images: Vec<String>,
+}
+
 #[derive(Default, Clone, Copy)]
 #[repr(C)]
 pub struct DirectionalLightInfo {
@@ -120,6 +126,7 @@ pub struct RenderEngine {
     camera: Mat4,
     projection: Mat4,
     backend: Backend,
+    scene_load_errors: SceneLoadErrors,
 }
 
 enum Backend {
@@ -207,6 +214,7 @@ impl RenderEngine {
             camera: Mat4::IDENTITY,
             projection: Mat4::IDENTITY,
             backend,
+            scene_load_errors: SceneLoadErrors::default(),
         };
 
         Ok(s)
@@ -610,28 +618,40 @@ impl RenderEngine {
     }
 
     /// Load the resources referenced by `SceneInfo` into the renderer's
-    /// database. Models and images that fail to load will return an error so
-    /// callers can react accordingly.
+    /// database. Models and images that fail to load are logged and recorded
+    /// so the caller can query them later, but they do not abort rendering.
     pub fn set_scene(&mut self, info: &SceneInfo) -> Result<(), database::Error> {
-        let mut results = Vec::new();
+        self.scene_load_errors = SceneLoadErrors::default();
 
         for m in info.models {
-            let res = self.database.load_model(m);
-            if let Err(ref e) = res {
+            if let Err(e) = self.database.load_model(m) {
                 warn!("Failed to load model {}: {}", m, e);
+                self.scene_load_errors.models.push((*m).to_string());
             }
-            results.push(res);
         }
 
         for i in info.images {
-            let res = self.database.load_image(i);
-            if let Err(ref e) = res {
+            if let Err(e) = self.database.load_image(i) {
                 warn!("Failed to load image {}: {}", i, e);
+                self.scene_load_errors.images.push((*i).to_string());
             }
-            results.push(res);
         }
 
-        results.into_iter().collect::<Result<(), _>>()
+        if !self.scene_load_errors.models.is_empty() || !self.scene_load_errors.images.is_empty() {
+            warn!(
+                "Scene loaded with {} model and {} image errors",
+                self.scene_load_errors.models.len(),
+                self.scene_load_errors.images.len()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Retrieve the list of resources that failed to load during the last
+    /// `set_scene` call.
+    pub fn scene_load_errors(&self) -> &SceneLoadErrors {
+        &self.scene_load_errors
     }
 }
 
