@@ -37,7 +37,6 @@ pub struct Database {
 // therefore safe to send the database across threads as long as external
 // synchronization (like a `Mutex`) is used.
 
-
 impl Database {
     pub fn base_path(&self) -> &str {
         &self.base_path
@@ -112,17 +111,14 @@ impl Database {
             base_path: base_path.to_string(),
             geometry,
             textures,
-            ctx, 
+            ctx,
             _fonts: fonts,
         })
     }
 
-    /// Load a model file referenced by `name` into the database.
-    ///
-    /// The model path is resolved relative to the database base path. The
-    /// model is parsed using [`gltf`] and the first mesh primitive is uploaded
-    /// to GPU buffers so it can be rendered.
-    pub fn load_model(&mut self, name: &str) -> Result<()> {
+    /// Internal helper to synchronously load a model from disk and upload it to
+    /// GPU buffers.
+    fn load_model_sync(base_path: &str, ctx: *mut Context, name: &str) -> Result<MeshResource> {
         use glam::{IVec4, Vec2, Vec4};
 
         #[repr(C)]
@@ -136,7 +132,7 @@ impl Database {
             color: Vec4,
         }
 
-        let path = format!("{}/{}", self.base_path, name);
+        let path = format!("{}/{}", base_path, name);
         // Import the glTF file and associated buffers.
         let (doc, buffers, _images) = gltf::import(&path).map_err(|e| e.to_string())?;
         let mesh = doc.meshes().next().ok_or_else(|| {
@@ -182,7 +178,7 @@ impl Database {
         }
 
         // Upload data to GPU buffers.
-        let ctx = unsafe { &mut *self.ctx };
+        let ctx = unsafe { &mut *ctx };
         let vertices = ctx
             .make_buffer(&BufferInfo {
                 debug_name: &format!("{name} vertices"),
@@ -213,18 +209,47 @@ impl Database {
                 })
             })?;
 
-        self.geometry.insert(
-            name.to_string(),
-            MeshResource {
-                name: name.to_string(),
-                vertices,
-                num_vertices: verts.len(),
-                indices: indices_buf,
-                num_indices: indices.len(),
-            },
-        );
+        Ok(MeshResource {
+            name: name.to_string(),
+            vertices,
+            num_vertices: verts.len(),
+            indices: indices_buf,
+            num_indices: indices.len(),
+        })
+    }
 
+    /// Load a model file referenced by `name` into the database.
+    ///
+    /// The model path is resolved relative to the database base path. The
+    /// model is parsed using [`gltf`] and the first mesh primitive is uploaded
+    /// to GPU buffers so it can be rendered.
+    pub fn load_model(&mut self, name: &str) -> Result<()> {
+        let mesh = Self::load_model_sync(&self.base_path, self.ctx, name)?;
+        self.geometry.insert(name.to_string(), mesh);
         Ok(())
+    }
+
+    /// Spawn a thread to load a model and upload its data to GPU buffers.
+    ///
+    /// The returned [`JoinHandle`] resolves to the loaded [`MeshResource`].
+    pub fn load_model_async(&self, name: &str) -> std::thread::JoinHandle<Result<MeshResource>> {
+        let base = self.base_path.clone();
+        let ctx = self.ctx as usize;
+        let name = name.to_string();
+        std::thread::spawn(move || {
+            let ctx = ctx as *mut Context;
+            Self::load_model_sync(&base, ctx, &name)
+        })
+    }
+
+    /// Unload a previously loaded model, dropping its GPU buffers.
+    pub fn unload_model(&mut self, name: &str) -> Result<()> {
+        match self.geometry.remove(name) {
+            Some(_) => Ok(()),
+            None => Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            })),
+        }
     }
 
     /// Load an image file referenced by `name` into the database.
@@ -267,12 +292,27 @@ impl Database {
         self.fetch_texture(name)
     }
 
-    pub fn fetch_mesh(&self, name: &str) -> Result<MeshResource> {
+    /// Retrieve a mesh by name, optionally loading it on demand.
+    pub fn fetch_mesh(&mut self, name: &str, wait: bool) -> Result<MeshResource> {
         match self.geometry.get(name) {
             Some(mesh) => Ok(mesh.clone()),
-            None => Err(Error::LookupError(LookupError {
-                entry: name.to_string(),
-            })),
+            None => {
+                if wait {
+                    let handle = self.load_model_async(name);
+                    let mesh = handle.join().map_err(|_| {
+                        Error::LoadingError(LoadingError {
+                            entry: name.to_string(),
+                            path: "thread panic".to_string(),
+                        })
+                    })??;
+                    self.geometry.insert(name.to_string(), mesh.clone());
+                    Ok(mesh)
+                } else {
+                    Err(Error::LookupError(LookupError {
+                        entry: name.to_string(),
+                    }))
+                }
+            }
         }
     }
 }

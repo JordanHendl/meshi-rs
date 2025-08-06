@@ -70,3 +70,15 @@ warm.intensity = 0.5;
 unsafe { meshi_gfx_set_directional_light_info(render, light, &warm) };
 ```
 
+## Resource database
+
+The rendering database now supports asynchronous model loading. Call
+`load_model_async(name)` to spawn a loader thread that parses the glTF file and
+uploads vertex and index data to GPU buffers. The returned `JoinHandle`
+resolves to a `MeshResource` that can be stored or rendered once complete.
+
+Loaded models can be removed with `unload_model(name)`, which drops their GPU
+buffers and frees associated memory. Additionally, `fetch_mesh` now accepts a
+`wait: bool` flag. When `wait` is `true` and the mesh is not yet resident, the
+database will load it synchronously before returning.
+
