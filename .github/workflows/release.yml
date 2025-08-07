@@ -47,8 +47,11 @@ jobs:
             cp target/release/meshi.dll.lib artifacts/
             (cd artifacts && powershell -Command "Compress-Archive -Path meshi.dll,meshi.dll.lib -DestinationPath meshi-windows.zip")
             rm artifacts/meshi.dll artifacts/meshi.dll.lib
+            ls artifacts/
           else
             cp target/release/libmeshi.so artifacts/meshi.so
+            ls .
+            ls artifacts/
           fi
 
       - name: Upload artifact
@@ -77,6 +80,8 @@ jobs:
           mkdir -p artifacts
           tar -czf artifacts/meshi-c-headers.tar.gz -C include meshi
           (cd include && zip -r ../artifacts/meshi-c-headers.zip meshi)
+          ls artifacts/
+          ls .
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
