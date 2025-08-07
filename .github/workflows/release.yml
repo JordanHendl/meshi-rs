@@ -101,10 +101,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: "${{ github.event.inputs.tag }}"
           files: |
-            /tmp/artifacts/meshi-ubuntu-latest
-            /tmp/artifacts/meshi-ubuntu-latest/meshi.so
-            /tmp/artifacts/meshi-windows-latest/meshi.dll
-            /tmp/artifacts/meshi-windows-latest
-            /tmp/artifacts/meshi-windows-latest/meshi-windows.zip
+            /tmp/artifacts/meshi.so
+            /tmp/artifacts/meshi-windows.zip
             artifacts/meshi-c-headers.tar.gz
             artifacts/meshi-c-headers.zip
