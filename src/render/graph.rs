@@ -3,6 +3,7 @@ use koji::{render_graph::io, Canvas, CanvasBuilder, RenderGraph};
 
 use super::RenderError;
 use crate::object::MeshObject;
+use tracing::warn;
 
 /// A renderer that executes a frame graph described by `koji`.
 ///
@@ -15,14 +16,23 @@ pub struct GraphRenderer {
 }
 
 impl GraphRenderer {
-    pub fn new(scene_cfg_path: Option<String>) -> Self {
-        let graph = scene_cfg_path
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|d| io::from_json(&d).ok());
-        Self {
+    pub fn new(scene_cfg_path: Option<String>) -> Result<Self, RenderError> {
+        let graph = if let Some(path) = scene_cfg_path {
+            let data = std::fs::read_to_string(&path).map_err(|e| {
+                warn!("failed to read scene config {path}: {e}");
+                RenderError::GraphConfig(e)
+            })?;
+            Some(io::from_json(&data).map_err(|e| {
+                warn!("failed to parse scene config {path}: {e}");
+                RenderError::GraphParse(e)
+            })?)
+        } else {
+            None
+        };
+        Ok(Self {
             graph,
             canvas: None,
-        }
+        })
     }
 
     pub fn render(
