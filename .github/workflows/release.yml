@@ -47,9 +47,11 @@ jobs:
             cp target/release/meshi.dll.lib artifacts/
             (cd artifacts && powershell -Command "Compress-Archive -Path meshi.dll,meshi.dll.lib -DestinationPath meshi-windows.zip")
             rm artifacts/meshi.dll artifacts/meshi.dll.lib
+            echo 1
             ls artifacts/
           else
             cp target/release/libmeshi.so artifacts/meshi.so
+            echo 2
             ls .
             ls artifacts/
           fi
@@ -80,6 +82,7 @@ jobs:
           mkdir -p artifacts
           tar -czf artifacts/meshi-c-headers.tar.gz -C include meshi
           (cd include && zip -r ../artifacts/meshi-c-headers.zip meshi)
+          echo 3
           ls artifacts/
           ls .
 
@@ -89,6 +92,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: "${{ github.event.inputs.tag }}"
           files: |
+            artifacts/meshi*
             artifacts/meshi-ubuntu-latest.zip
             artifacts/meshi-windows-latest.zip
             artifacts/meshi-c-headers.tar.gz
