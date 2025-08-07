@@ -5,7 +5,7 @@ use dashi::{
     *,
 };
 use database::{Database, Error as DatabaseError, MeshResource};
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use tracing::{info, warn};
 
 use crate::object::{
@@ -15,6 +15,7 @@ use crate::render::database::geometry_primitives::{
     self, ConePrimitiveInfo, CubePrimitiveInfo, CylinderPrimitiveInfo, PlanePrimitiveInfo,
     SpherePrimitiveInfo,
 };
+use crate::streaming::StreamingManager;
 mod canvas;
 pub mod config;
 pub mod database;
@@ -127,6 +128,7 @@ pub struct RenderEngine {
     projection: Mat4,
     backend: Backend,
     scene_load_errors: SceneLoadErrors,
+    streaming: Option<StreamingManager>,
 }
 
 enum Backend {
@@ -215,6 +217,7 @@ impl RenderEngine {
             projection: Mat4::IDENTITY,
             backend,
             scene_load_errors: SceneLoadErrors::default(),
+            streaming: None,
         };
 
         Ok(s)
@@ -574,6 +577,15 @@ impl RenderEngine {
             }
         }
 
+        if let Some(mut mgr) = self.streaming.take() {
+            let player_pos = self.camera_position();
+            let db_ptr = &mut self.database as *mut Database;
+            unsafe {
+                mgr.update(player_pos, &mut *db_ptr, self);
+            }
+            self.streaming = Some(mgr);
+        }
+
         if let (Some(ctx), Some(display)) = (self.ctx.as_mut(), self.display.as_mut()) {
             match &mut self.backend {
                 Backend::Canvas(r) => {
@@ -605,6 +617,14 @@ impl RenderEngine {
     }
     pub fn set_camera(&mut self, camera: &Mat4) {
         self.camera = *camera;
+    }
+
+    pub fn camera_position(&self) -> Vec3 {
+        self.camera.w_axis.truncate()
+    }
+
+    pub fn set_streaming_manager(&mut self, mgr: StreamingManager) {
+        self.streaming = Some(mgr);
     }
     pub fn set_event_cb(
         &mut self,
