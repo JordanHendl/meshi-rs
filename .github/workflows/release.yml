@@ -60,7 +60,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: meshi*
+          name: meshi-${{ matrix.os }}
           path: artifacts/*
 
   release:
@@ -80,7 +80,6 @@ jobs:
       - name: Create header archives
         shell: bash
         run: |
-          mkdir -p artifacts
           tar -czf artifacts/meshi-c-headers.tar.gz -C include meshi
           (cd include && zip -r ../artifacts/meshi-c-headers.zip meshi)
           echo 3
@@ -94,8 +93,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: "${{ github.event.inputs.tag }}"
           files: |
-            artifacts/meshi*
-            artifacts/meshi-ubuntu-latest.zip
+            artifacts/meshi-ubuntu-latest.ziP
             artifacts/meshi-windows-latest.zip
             artifacts/meshi-c-headers.tar.gz
             artifacts/meshi-c-headers.zip
