@@ -67,13 +67,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: meshi*
-          merge-multiple: true
-
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -91,6 +84,13 @@ jobs:
           ls artifacts/
           echo 3.5
           ls .
+          
+    - name: Download-artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: meshi*
+          merge-multiple: true
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
