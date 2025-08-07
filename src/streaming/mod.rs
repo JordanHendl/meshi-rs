@@ -24,14 +24,24 @@ impl AABB {
 pub struct Region {
     pub bounds: AABB,
     pub objects: Vec<MeshObjectInfo>,
+    mesh_cstrings: Vec<CString>,
+    material_cstrings: Vec<CString>,
     handles: Vec<Handle<MeshObject>>,
 }
 
 impl Region {
     pub fn new(bounds: AABB, objects: Vec<MeshObjectInfo>) -> Self {
+        let mut mesh_cstrings = Vec::with_capacity(objects.len());
+        let mut material_cstrings = Vec::with_capacity(objects.len());
+        for obj in &objects {
+            mesh_cstrings.push(CString::new(obj.mesh).unwrap());
+            material_cstrings.push(CString::new(obj.material).unwrap());
+        }
         Self {
             bounds,
             objects,
+            mesh_cstrings,
+            material_cstrings,
             handles: Vec::new(),
         }
     }
@@ -104,12 +114,10 @@ impl StreamingManager {
         {
             if let Some(region) = self.regions.get_mut(idx) {
                 region.handles.clear();
-                for obj in &region.objects {
-                    let mesh_c = CString::new(obj.mesh).unwrap();
-                    let material_c = CString::new(obj.material).unwrap();
+                for (i, obj) in region.objects.iter().enumerate() {
                     let ffi_info = FFIMeshObjectInfo {
-                        mesh: mesh_c.as_ptr(),
-                        material: material_c.as_ptr(),
+                        mesh: region.mesh_cstrings[i].as_ptr(),
+                        material: region.material_cstrings[i].as_ptr(),
                         transform: obj.transform,
                     };
                     match renderer.register_mesh_object(&ffi_info) {
