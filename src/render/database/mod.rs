@@ -497,33 +497,29 @@ mod tests {
 
     #[test]
     fn load_model_sync_supports_selectors() {
-        let dir = tempdir().unwrap();
-        let model = write_triangle_gltf(dir.path());
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
+        let base = base.to_str().unwrap();
         let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
 
-        // Loading by mesh name succeeds.
-        Database::load_model_sync(
-            dir.path().to_str().unwrap(),
-            &mut ctx,
-            &format!("{model}#mesh0"),
-        )
-        .expect("failed to load mesh by name");
+        // Loading by mesh name defaults to the first primitive.
+        Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1")
+            .expect("failed to load mesh by name");
+
+        // Loading by mesh name and primitive index succeeds.
+        Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/1")
+            .expect("failed to load primitive by name");
+
+        // Loading by mesh index and primitive index succeeds.
+        Database::load_model_sync(base, &mut ctx, "selector.gltf#1/1")
+            .expect("failed to load primitive by index");
 
         // Invalid mesh index should error.
-        assert!(Database::load_model_sync(
-            dir.path().to_str().unwrap(),
-            &mut ctx,
-            &format!("{model}#1"),
-        )
-        .is_err());
+        assert!(Database::load_model_sync(base, &mut ctx, "selector.gltf#2").is_err());
 
         // Invalid primitive index should error.
-        assert!(Database::load_model_sync(
-            dir.path().to_str().unwrap(),
-            &mut ctx,
-            &format!("{model}#/1"),
-        )
-        .is_err());
+        assert!(
+            Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/5").is_err()
+        );
 
         ctx.destroy();
     }
