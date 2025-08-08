@@ -82,3 +82,9 @@ buffers and frees associated memory. Additionally, `fetch_mesh` now accepts a
 `wait: bool` flag. When `wait` is `true` and the mesh is not yet resident, the
 database will load it synchronously before returning.
 
+Model paths may include a `#` selector to reference a specific mesh or
+primitive inside a glTF file. Use `file.gltf#mesh_name` or
+`file.gltf#1/0` to select a mesh by name or index and optionally a
+primitive index. When no selector is provided the database loads the first
+primitive of the first mesh.
+
