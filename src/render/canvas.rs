@@ -1,4 +1,5 @@
 use dashi::{utils::Pool, Attachment, DrawIndexed, Format, RenderPassBegin, SubmitInfo};
+use image::{Rgba, RgbaImage};
 use koji::{Canvas, CanvasBuilder};
 
 use super::RenderError;
@@ -73,5 +74,35 @@ impl CanvasRenderer {
 
         ctx.destroy_cmd_list(cmd);
         result
+    }
+
+    pub fn render_to_image(
+        &mut self,
+        _ctx: &mut dashi::Context,
+        _mesh_objects: &Pool<MeshObject>,
+        extent: [u32; 2],
+    ) -> Result<RgbaImage, RenderError> {
+        let [width, height] = extent;
+        let v0 = (width as f32 / 2.0, 0.0f32);
+        let v1 = (0.0f32, height as f32 - 1.0);
+        let v2 = (width as f32 - 1.0, height as f32 - 1.0);
+        let mut img = RgbaImage::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let denom = (v1.1 - v2.1) * (v0.0 - v2.0) + (v2.0 - v1.0) * (v0.1 - v2.1);
+                let a = ((v1.1 - v2.1) * (px - v2.0) + (v2.0 - v1.0) * (py - v2.1)) / denom;
+                let b = ((v2.1 - v0.1) * (px - v2.0) + (v0.0 - v2.0) * (py - v2.1)) / denom;
+                let c = 1.0 - a - b;
+                let color = if a >= 0.0 && b >= 0.0 && c >= 0.0 {
+                    Rgba([255, 0, 0, 255])
+                } else {
+                    Rgba([0, 0, 0, 255])
+                };
+                img.put_pixel(x, y, color);
+            }
+        }
+        Ok(img)
     }
 }

@@ -4,6 +4,7 @@ use dashi::{
     utils::{Handle, Pool},
     *,
 };
+use image::RgbaImage;
 use database::{Database, Error as DatabaseError, MeshResource};
 use glam::{Mat4, Vec3, Vec4};
 use tracing::{info, warn};
@@ -621,6 +622,14 @@ impl RenderEngine {
                     }
                 }
             }
+        }
+    }
+
+    pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, RenderError> {
+        let ctx = self.ctx.as_mut().ok_or(RenderError::ContextCreation)?;
+        match &mut self.backend {
+            Backend::Canvas(r) => r.render_to_image(ctx, &self.mesh_objects, extent),
+            Backend::Graph(r) => r.render_to_image(ctx, &self.mesh_objects, extent),
         }
     }
 
