@@ -83,13 +83,13 @@ impl TryFrom<&FFIMeshObjectInfo> for MeshObjectInfo {
 impl MeshObjectInfo {
     pub fn make_object(&self, db: &mut Database) -> Result<MeshObject, Error> {
         info!(
-            "Registering Mesh Renderable {}||{}",
+            "Registering Mesh Renderable {} with material {}",
             self.mesh, self.material
         );
 
         let mesh = db.fetch_mesh(self.mesh, true)?;
         let material = db.fetch_material(self.material).map_err(|e| {
-            warn!("failed to fetch material '{}': {}", self.material, e);
+            warn!("Failed to fetch material '{}': {}", self.material, e);
             e
         })?;
 
