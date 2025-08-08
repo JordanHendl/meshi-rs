@@ -76,7 +76,10 @@ impl Database {
             let geo_json = fs::read_to_string(&geo_path)?;
             let geo_cfg: json::Geometry = serde_json::from_str(&geo_json)?;
             for model in geo_cfg.geometry {
-                let path = format!("{}/{}", base_path, model.path);
+                // Geometry paths may include a mesh/primitive selector after a
+                // `#` character. Strip it so the glTF file can be validated.
+                let file = model.path.split('#').next().unwrap();
+                let path = format!("{}/{}", base_path, file);
                 parse_gltf(&path).map_err(|_| {
                     Error::LoadingError(LoadingError {
                         entry: model.name.clone(),
@@ -122,6 +125,11 @@ impl Database {
 
     /// Internal helper to synchronously load a model from disk and upload it to
     /// GPU buffers.
+    ///
+    /// `name` may include a selector suffix such as `file.gltf#mesh` or
+    /// `file.gltf#mesh/1` to target a specific mesh and primitive inside the
+    /// glTF file. Mesh selectors may be either a string name or a zero-based
+    /// index. The primitive index defaults to `0` if omitted.
     fn load_model_sync(base_path: &str, ctx: *mut Context, name: &str) -> Result<MeshResource> {
         use glam::{IVec4, Vec2, Vec4};
 
@@ -136,21 +144,52 @@ impl Database {
             color: Vec4,
         }
 
-        let path = format!("{}/{}", base_path, name);
+        // Allow selectors like `file.gltf#mesh` or `file.gltf#1/2` to target a
+        // specific mesh and primitive within the glTF. Anything before `#` is
+        // treated as the file path.
+        let (file, selector) = if let Some((f, sel)) = name.split_once('#') {
+            (f, Some(sel))
+        } else {
+            (name, None)
+        };
+        let path = format!("{}/{}", base_path, file);
+
         // Import the glTF file and associated buffers.
         let (doc, buffers, _images) = gltf::import(&path).map_err(|e| e.to_string())?;
-        let mesh = doc.meshes().next().ok_or_else(|| {
-            Error::LoadingError(LoadingError {
-                entry: name.to_string(),
-                path: path.clone(),
-            })
-        })?;
-        let primitive = mesh.primitives().next().ok_or_else(|| {
-            Error::LoadingError(LoadingError {
-                entry: name.to_string(),
-                path: path.clone(),
-            })
-        })?;
+
+        // Resolve the requested mesh and primitive.
+        let primitive = {
+            // Split primitive index from mesh selector if provided.
+            let (mesh_sel, prim_sel) = selector
+                .map(|s| s.split_once('/').unwrap_or((s, "0")))
+                .unwrap_or(("", "0"));
+
+            let mesh = if mesh_sel.is_empty() {
+                doc.meshes().next()
+            } else if let Ok(idx) = mesh_sel.parse::<usize>() {
+                doc.meshes().nth(idx)
+            } else {
+                doc.meshes()
+                    .find(|m| m.name().map_or(false, |n| n == mesh_sel))
+            };
+
+            let mesh = mesh.ok_or_else(|| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?;
+
+            let prim_index = prim_sel.parse::<usize>().unwrap_or(0);
+            let primitive = mesh.primitives().nth(prim_index).ok_or_else(|| {
+                Error::LoadingError(LoadingError {
+                    entry: name.to_string(),
+                    path: path.clone(),
+                })
+            })?;
+
+            primitive
+        };
 
         let reader = primitive.reader(|b| Some(&buffers[b.index()]));
         let positions: Vec<[f32; 3]> = reader
@@ -224,9 +263,11 @@ impl Database {
 
     /// Load a model file referenced by `name` into the database.
     ///
-    /// The model path is resolved relative to the database base path. The
-    /// model is parsed using [`gltf`] and the first mesh primitive is uploaded
-    /// to GPU buffers so it can be rendered.
+    /// The model path is resolved relative to the database base path. An
+    /// optional `#mesh[/primitive]` selector may be included to target a
+    /// specific mesh and primitive within the glTF file. The model is parsed
+    /// using [`gltf`] and the requested primitive is uploaded to GPU buffers so
+    /// it can be rendered.
     pub fn load_model(&mut self, name: &str) -> Result<()> {
         let mesh = Self::load_model_sync(&self.base_path, self.ctx, name)?;
         info!("Registered geometry asset: {}", name);
@@ -446,12 +487,45 @@ mod tests {
         std::fs::write(&bin_path, &bin).unwrap();
 
         let gltf = format!(
-            "{{\n  \"asset\": {{ \"version\": \"2.0\" }},\n  \"scenes\": [{{ \"nodes\": [0] }}],\n  \"scene\": 0,\n  \"nodes\": [{{ \"mesh\": 0 }}],\n  \"meshes\": [{{ \"primitives\": [{{ \"attributes\": {{ \"POSITION\": 0 }}, \"indices\": 1 }}] }}],\n  \"buffers\": [{{ \"uri\": \"data.bin\", \"byteLength\": {} }}],\n  \"bufferViews\": [{{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 36 }}, {{ \"buffer\": 0, \"byteOffset\": 36, \"byteLength\": 6 }}],\n  \"accessors\": [{{ \"bufferView\": 0, \"componentType\": 5126, \"count\": 3, \"type\": \"VEC3\", \"min\": [0.0,0.0,0.0], \"max\": [1.0,1.0,0.0] }}, {{ \"bufferView\": 1, \"componentType\": 5123, \"count\": 3, \"type\": \"SCALAR\" }}]\n}}",
+            "{{\n  \"asset\": {{ \"version\": \"2.0\" }},\n  \"scenes\": [{{ \"nodes\": [0] }}],\n  \"scene\": 0,\n  \"nodes\": [{{ \"mesh\": 0 }}],\n  \"meshes\": [{{ \"name\": \"mesh0\", \"primitives\": [{{ \"attributes\": {{ \"POSITION\": 0 }}, \"indices\": 1 }}] }}],\n  \"buffers\": [{{ \"uri\": \"data.bin\", \"byteLength\": {} }}],\n  \"bufferViews\": [{{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 36 }}, {{ \"buffer\": 0, \"byteOffset\": 36, \"byteLength\": 6 }}],\n  \"accessors\": [{{ \"bufferView\": 0, \"componentType\": 5126, \"count\": 3, \"type\": \"VEC3\", \"min\": [0.0,0.0,0.0], \"max\": [1.0,1.0,0.0] }}, {{ \"bufferView\": 1, \"componentType\": 5123, \"count\": 3, \"type\": \"SCALAR\" }}]\n}}",
             bin.len()
         );
         let gltf_path = dir.join("model.gltf");
         std::fs::write(&gltf_path, gltf).unwrap();
         "model.gltf".to_string()
+    }
+
+    #[test]
+    fn load_model_sync_supports_selectors() {
+        let dir = tempdir().unwrap();
+        let model = write_triangle_gltf(dir.path());
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+
+        // Loading by mesh name succeeds.
+        Database::load_model_sync(
+            dir.path().to_str().unwrap(),
+            &mut ctx,
+            &format!("{model}#mesh0"),
+        )
+        .expect("failed to load mesh by name");
+
+        // Invalid mesh index should error.
+        assert!(Database::load_model_sync(
+            dir.path().to_str().unwrap(),
+            &mut ctx,
+            &format!("{model}#1"),
+        )
+        .is_err());
+
+        // Invalid primitive index should error.
+        assert!(Database::load_model_sync(
+            dir.path().to_str().unwrap(),
+            &mut ctx,
+            &format!("{model}#/1"),
+        )
+        .is_err());
+
+        ctx.destroy();
     }
 
     #[test]
@@ -484,7 +558,7 @@ mod tests {
         std::fs::write(
             dir.path().join("geometry.json"),
             format!(
-                "{{\"geometry\":[{{\"name\":\"model\",\"path\":\"{}\"}}]}}",
+                "{{\"geometry\":[{{\"name\":\"model\",\"path\":\"{}#mesh0\"}}]}}",
                 model_name
             ),
         )
