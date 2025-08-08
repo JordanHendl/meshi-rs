@@ -26,7 +26,11 @@ pub struct Materials {
 
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct GeometryEntry {
+    /// Name used to reference this mesh.
     pub name: String,
+    /// Path to a glTF file relative to the database root. A `#mesh` or
+    /// `#mesh/primitive` suffix may be appended to target a specific mesh and
+    /// primitive within the file.
     pub path: String,
 }
 

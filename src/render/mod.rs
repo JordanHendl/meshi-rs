@@ -4,9 +4,9 @@ use dashi::{
     utils::{Handle, Pool},
     *,
 };
-use image::RgbaImage;
 use database::{Database, Error as DatabaseError, MeshResource};
 use glam::{Mat4, Vec3, Vec4};
+use image::RgbaImage;
 use tracing::{info, warn};
 
 use crate::object::{
@@ -547,6 +547,15 @@ impl RenderEngine {
         handle: Handle<MeshObject>,
         transform: &glam::Mat4,
     ) {
+        if !handle.valid() {
+            info!(
+                "Attempted to set transform for invalid mesh object handle (slot: {}, generation: {})",
+                handle.slot,
+                handle.generation
+            );
+            return;
+        }
+
         match self.mesh_objects.get_mut_ref(handle) {
             Some(obj) => {
                 obj.transform = *transform;
