@@ -88,10 +88,16 @@ impl MeshObjectInfo {
         );
 
         let mesh = db.fetch_mesh(self.mesh, true)?;
-        let material = db.fetch_material(self.material).map_err(|e| {
-            warn!("Failed to fetch material '{}': {}", self.material, e);
-            e
-        })?;
+        let material = match db.fetch_material(self.material) {
+            Ok(mat) => mat,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch material '{}': {}; falling back to default",
+                    self.material, e
+                );
+                db.fetch_material("DEFAULT")?
+            }
+        };
 
         let targets = vec![MeshTarget {
             mesh: mesh.clone(),
@@ -117,4 +123,31 @@ pub struct MeshObject {
     pub targets: Vec<MeshTarget>,
     pub mesh: MeshResource,
     pub transform: Mat4,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::database::Database;
+    use dashi::{utils::Handle, Context};
+    use tempfile::tempdir;
+
+    #[test]
+    fn missing_material_falls_back_to_default() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("db.json"), "{}").unwrap();
+        let mut ctx = Context::headless(&Default::default()).unwrap();
+        let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
+
+        let info = MeshObjectInfo {
+            mesh: "MESHI_CUBE",
+            material: "NON_EXISTENT",
+            transform: Mat4::IDENTITY,
+        };
+
+        let obj = info.make_object(&mut db).unwrap();
+        assert_eq!(obj.targets.len(), 1);
+        assert_eq!(obj.targets[0].material, Handle::default());
+        ctx.destroy();
+    }
 }
