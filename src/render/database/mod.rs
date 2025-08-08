@@ -1,6 +1,6 @@
 pub mod error;
 use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, Context, MemoryVisibility};
-use tracing::info;
+use tracing::{error, info};
 
 pub use error::*;
 pub mod json;
@@ -52,6 +52,7 @@ impl Database {
 
         let mut textures = HashMap::new();
         textures.insert("DEFAULT".to_string(), Some(Handle::default()));
+        info!("Registered texture asset: DEFAULT");
 
         if let Some(images_file) = info.images {
             let images_path = format!("{}/{}", base_path, images_file);
@@ -65,6 +66,7 @@ impl Database {
                         path: path.clone(),
                     })
                 })?;
+                info!("Registered image asset: {}", img.name);
                 textures.insert(img.name, None);
             }
         }
@@ -81,6 +83,7 @@ impl Database {
                         path: path.clone(),
                     })
                 })?;
+                info!("Registered geometry asset: {}", model.name);
                 geometry.entry(model.name.clone()).or_insert(MeshResource {
                     name: model.name,
                     ..Default::default()
@@ -103,6 +106,7 @@ impl Database {
                 })?;
                 let glyphs: Vec<char> = f.glyphs.unwrap_or_default().chars().collect();
                 let font = TTFont::new(&path, 256, 256, f.size as f32, &glyphs);
+                info!("Registered font asset: {}", f.name);
                 fonts.insert(f.name, font);
             }
         }
@@ -225,6 +229,7 @@ impl Database {
     /// to GPU buffers so it can be rendered.
     pub fn load_model(&mut self, name: &str) -> Result<()> {
         let mesh = Self::load_model_sync(&self.base_path, self.ctx, name)?;
+        info!("Registered geometry asset: {}", name);
         self.geometry.insert(name.to_string(), mesh);
         Ok(())
     }
@@ -263,6 +268,7 @@ impl Database {
         }
         let path = format!("{}/{}", self.base_path, name);
         load_image_from_path(&path)?;
+        info!("Registered image asset: {}", name);
         self.textures.insert(name.to_string(), None);
         Ok(())
     }
@@ -310,26 +316,37 @@ impl Database {
 
     /// Retrieve a mesh by name, optionally loading it on demand.
     pub fn fetch_mesh(&mut self, name: &str, wait: bool) -> Result<MeshResource> {
-        match self.geometry.get(name) {
-            Some(mesh) => Ok(mesh.clone()),
-            None => {
-                if wait {
-                    let handle = self.load_model_async(name);
-                    let mesh = handle.join().map_err(|_| {
-                        Error::LoadingError(LoadingError {
-                            entry: name.to_string(),
-                            path: "thread panic".to_string(),
-                        })
-                    })??;
+        if let Some(mesh) = self.geometry.get(name) {
+            return Ok(mesh.clone());
+        }
+
+        if wait {
+            let handle = self.load_model_async(name);
+            match handle.join() {
+                Ok(Ok(mesh)) => {
+                    info!("Registered geometry asset: {}", name);
                     self.geometry.insert(name.to_string(), mesh.clone());
-                    Ok(mesh)
-                } else {
-                    Err(Error::LookupError(LookupError {
-                        entry: name.to_string(),
-                    }))
+                    return Ok(mesh);
+                }
+                Ok(Err(e)) => {
+                    error!("Failed to load mesh {}: {}; defaulting to cube", name, e);
+                }
+                Err(_) => {
+                    error!(
+                        "Thread panic while loading mesh {}; defaulting to cube",
+                        name
+                    );
                 }
             }
+        } else {
+            error!("Mesh {} not found; defaulting to cube primitive", name);
         }
+
+        self.geometry.get("MESHI_CUBE").cloned().ok_or_else(|| {
+            Error::LookupError(LookupError {
+                entry: "MESHI_CUBE".to_string(),
+            })
+        })
     }
 }
 
@@ -399,6 +416,17 @@ mod tests {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
         }
+    }
+
+    #[test]
+    fn fetch_mesh_missing_defaults_to_cube() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("db.json"), "{}").unwrap();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
+        let mesh = db.fetch_mesh("missing_model.gltf", false).unwrap();
+        assert_eq!(mesh.name, "CUBE");
+        ctx.destroy();
     }
 
     // Build a minimal triangle glTF asset in `dir` and return the glTF file name.
