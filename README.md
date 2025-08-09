@@ -86,7 +86,9 @@ Model paths may include a `#` selector to reference a specific mesh or
 primitive inside a glTF file. Use `file.gltf#mesh_name` or
 `file.gltf#1/0` to select a mesh by name or index and optionally a
 primitive index. When no selector is provided the database loads the first
-primitive of the first mesh.
+primitive of the first mesh. Each mesh primitive is also registered using
+its numeric indices, allowing the user interface to reference submeshes as
+`model.gltf#mesh/prim`.
 
 Materials are registered through a `materials.json` file referenced by
 `db.json`. Each material entry assigns a name and optional texture slots,
