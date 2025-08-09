@@ -113,17 +113,33 @@ impl Database {
                 // `#` character. Strip it so the glTF file can be validated.
                 let file = model.path.split('#').next().unwrap();
                 let path = format!("{}/{}", base_path, file);
-                parse_gltf(&path).map_err(|_| {
+                let doc = parse_gltf(&path).map_err(|_| {
                     Error::LoadingError(LoadingError {
                         entry: model.name.clone(),
                         path: path.clone(),
                     })
                 })?;
+
+                // Register the base model name so it can still be referenced
+                // without a mesh/primitive selector.
                 info!("Registered geometry asset: {}", model.name);
                 geometry.entry(model.name.clone()).or_insert(MeshResource {
-                    name: model.name,
+                    name: model.name.clone(),
                     ..Default::default()
                 });
+
+                // Expose each mesh primitive as a selectable submesh using the
+                // `model#mesh/primitive` naming convention.
+                for (mesh_idx, mesh) in doc.meshes().enumerate() {
+                    for (prim_idx, _prim) in mesh.primitives().enumerate() {
+                        let sub_name = format!("{}#{}/{}", model.name, mesh_idx, prim_idx);
+                        info!("Registered geometry asset: {}", sub_name);
+                        geometry.entry(sub_name.clone()).or_insert(MeshResource {
+                            name: sub_name,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         }
 
@@ -606,9 +622,7 @@ mod tests {
         assert!(Database::load_model_sync(base, &mut ctx, "selector.gltf#2").is_err());
 
         // Invalid primitive index should error.
-        assert!(
-            Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/5").is_err()
-        );
+        assert!(Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/5").is_err());
 
         ctx.destroy();
     }
