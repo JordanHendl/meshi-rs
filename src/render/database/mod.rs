@@ -1,5 +1,6 @@
 pub mod error;
-use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, Context, MemoryVisibility};
+use dashi::{utils::Handle, Buffer, Context};
+use glam::{IVec4, Vec2, Vec4};
 use tracing::{error, info};
 
 pub use error::*;
@@ -16,13 +17,26 @@ pub mod font;
 pub mod geometry_primitives;
 pub use font::*;
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Vertex {
+    pub position: Vec4,
+    pub normal: Vec4,
+    pub tex_coords: Vec2,
+    pub joint_ids: IVec4,
+    pub joints: Vec4,
+    pub color: Vec4,
+}
+
 #[derive(Default, Clone)]
 pub struct MeshResource {
     pub name: String,
-    pub vertices: Handle<Buffer>,
+    pub vertices: Vec<Vertex>,
     pub num_vertices: usize,
-    pub indices: Handle<Buffer>,
+    pub indices: Vec<u32>,
     pub num_indices: usize,
+    pub vertex_buffer: Option<Handle<Buffer>>,
+    pub index_buffer: Option<Handle<Buffer>>,
 }
 
 pub struct Database {
@@ -173,26 +187,16 @@ impl Database {
         })
     }
 
-    /// Internal helper to synchronously load a model from disk and upload it to
-    /// GPU buffers.
+        /// Internal helper to synchronously load a model from disk.
     ///
     /// `name` may include a selector suffix such as `file.gltf#mesh` or
     /// `file.gltf#mesh/1` to target a specific mesh and primitive inside the
     /// glTF file. Mesh selectors may be either a string name or a zero-based
     /// index. The primitive index defaults to `0` if omitted.
     fn load_model_sync(base_path: &str, ctx: *mut Context, name: &str) -> Result<MeshResource> {
-        use glam::{IVec4, Vec2, Vec4};
-
-        #[repr(C)]
-        #[derive(Clone, Copy, Default)]
-        struct Vertex {
-            position: Vec4,
-            normal: Vec4,
-            tex_coords: Vec2,
-            joint_ids: IVec4,
-            joints: Vec4,
-            color: Vec4,
-        }
+        // GPU context is currently unused. Mesh data is kept on the CPU and can
+        // be uploaded later if needed.
+        let _ = ctx;
 
         // Allow selectors like `file.gltf#mesh` or `file.gltf#1/2` to target a
         // specific mesh and primitive within the glTF. Anything before `#` is
@@ -219,8 +223,7 @@ impl Database {
             } else if let Ok(idx) = mesh_sel.parse::<usize>() {
                 doc.meshes().nth(idx)
             } else {
-                doc.meshes()
-                    .find(|m| m.name().map_or(false, |n| n == mesh_sel))
+                doc.meshes().find(|m| m.name().map_or(false, |n| n == mesh_sel))
             };
 
             let mesh = mesh.ok_or_else(|| {
@@ -263,54 +266,25 @@ impl Database {
             .collect();
 
         let mut verts = Vec::with_capacity(positions.len());
-        for p in positions {
+        for p in &positions {
             verts.push(Vertex {
                 position: Vec4::new(p[0], p[1], p[2], 1.0),
                 ..Default::default()
             });
         }
 
-        // Upload data to GPU buffers.
-        let ctx = unsafe { &mut *ctx };
-        let vertices = ctx
-            .make_buffer(&BufferInfo {
-                debug_name: &format!("{name} vertices"),
-                byte_size: (std::mem::size_of::<Vertex>() * verts.len()) as u32,
-                visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::VERTEX,
-                initial_data: Some(unsafe { verts.as_slice().align_to::<u8>().1 }),
-            })
-            .map_err(|_| {
-                Error::LoadingError(LoadingError {
-                    entry: name.to_string(),
-                    path: path.clone(),
-                })
-            })?;
-
-        let indices_buf = ctx
-            .make_buffer(&BufferInfo {
-                debug_name: &format!("{name} indices"),
-                byte_size: (std::mem::size_of::<u32>() * indices.len()) as u32,
-                visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::INDEX,
-                initial_data: Some(unsafe { indices.as_slice().align_to::<u8>().1 }),
-            })
-            .map_err(|_| {
-                Error::LoadingError(LoadingError {
-                    entry: name.to_string(),
-                    path: path.clone(),
-                })
-            })?;
-
+        let num_vertices = positions.len();
+        let num_indices = indices.len();
         Ok(MeshResource {
             name: name.to_string(),
-            vertices,
-            num_vertices: verts.len(),
-            indices: indices_buf,
-            num_indices: indices.len(),
+            vertices: verts,
+            num_vertices,
+            indices,
+            num_indices,
+            vertex_buffer: None,
+            index_buffer: None,
         })
     }
-
     /// Load a model file referenced by `name` into the database.
     ///
     /// The model path is resolved relative to the database base path. An
