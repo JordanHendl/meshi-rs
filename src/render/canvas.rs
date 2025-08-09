@@ -1,6 +1,6 @@
 use super::RenderError;
 use crate::object::MeshObject;
-use dashi::Format;
+use dashi::{BufferInfo, Format};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex};
@@ -24,19 +24,23 @@ impl CanvasRenderer {
     ) -> Result<(), RenderError> {
         if self.renderer.is_none() {
             let [width, height] = if let Some(extent) = self.extent {
+                println!("wtf2? i{} {}", extent[0], extent[1]);
                 extent
             } else if let Some(display) = display {
                 let p = display.winit_window().inner_size();
+                    println!("wtf? {} {}", p.width, p.height);
                 [p.width, p.height]
             } else {
-                [1, 1]
+                [1024, 1024]
             };
 
+            println!("a {} {}", width, height);
             let canvas = CanvasBuilder::new()
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
 
+            println!("b");
             let mut renderer = Renderer::with_canvas(width, height, ctx, canvas.clone())?;
 
             let vert = inline_spirv!(
@@ -54,6 +58,7 @@ impl CanvasRenderer {
                 frag
             );
 
+            println!("c");
             let pso = PipelineBuilder::new(ctx, "canvas_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
@@ -61,9 +66,11 @@ impl CanvasRenderer {
                 .build_with_resources(renderer.resources())
                 .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
 
+            println!("d");
             renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
 
             self.renderer = Some(renderer);
+            println!("e");
         }
         Ok(())
     }
@@ -86,7 +93,7 @@ impl CanvasRenderer {
             joints: [f32; 4],
             color: [f32; 4],
         }
-
+        
         let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
         let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
             .iter()

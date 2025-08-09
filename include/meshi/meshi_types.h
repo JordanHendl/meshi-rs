@@ -42,16 +42,16 @@ enum class MeshiRenderBackend : std::uint32_t {
 };
 
 struct MeshiEngineInfo {
-    const char* application_name;
-    const char* application_location;
+    const char* application_name = nullptr;
+    const char* application_location = nullptr;
     std::int32_t headless;
     MeshiRenderBackend render_backend;
-    const std::uint32_t* canvas_extent;
+    const std::uint32_t* canvas_extent = nullptr;
 };
 
 struct MeshiFFIMeshObjectInfo {
-    const char* mesh;
-    const char* material;
+    const char* mesh = nullptr;
+    const char* material = nullptr;
     MeshiMat4 transform;
 };
 
