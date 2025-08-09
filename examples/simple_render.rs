@@ -28,8 +28,8 @@ fn main() {
     render.set_scene(&scene).expect("scene loading failed");
 
     // Register the loaded mesh for drawing using its associated texture.
-    let mesh = CString::new("model.gltf").unwrap();
-    let tex = CString::new("albedo.png").unwrap();
+    let mesh = CString::new("model.gltf").unwrap_or_default();
+    let tex = CString::new("albedo.png").unwrap_or_default();
     let info = FFIMeshObjectInfo {
         mesh: mesh.as_ptr(),
         material: tex.as_ptr(),

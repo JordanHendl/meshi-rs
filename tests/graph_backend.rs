@@ -10,7 +10,11 @@ fn render_triangle(backend: RenderBackend) -> RgbaImage {
     let db_dir = base.join("database");
     std::fs::create_dir(&db_dir).unwrap();
     std::fs::write(db_dir.join("db.json"), "{}".as_bytes()).unwrap();
-    std::fs::write(base.join("koji.json"), "{\"nodes\":[],\"edges\":[]}".as_bytes()).unwrap();
+    std::fs::write(
+        base.join("koji.json"),
+        "{\"nodes\":[],\"edges\":[]}".as_bytes(),
+    )
+    .unwrap();
 
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: base.to_str().unwrap().into(),
@@ -20,7 +24,10 @@ fn render_triangle(backend: RenderBackend) -> RgbaImage {
     })
     .expect("renderer init");
 
-    let scene_info = SceneInfo { models: &[], images: &[] };
+    let scene_info = SceneInfo {
+        models: &[],
+        images: &[],
+    };
     render.set_scene(&scene_info).expect("scene load");
 
     render.create_triangle();
@@ -34,4 +41,3 @@ fn graph_backend_matches_canvas() {
     let graph = render_triangle(RenderBackend::Graph);
     assert_eq!(canvas.as_raw(), graph.as_raw());
 }
-

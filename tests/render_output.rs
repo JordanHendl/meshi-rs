@@ -33,7 +33,11 @@ fn run_backend(backend: RenderBackend) {
     let db_dir = base.join("database");
     std::fs::create_dir(&db_dir).unwrap();
     std::fs::write(db_dir.join("db.json"), "{}".as_bytes()).unwrap();
-    std::fs::write(base.join("koji.json"), "{\"nodes\":[],\"edges\":[]}".as_bytes()).unwrap();
+    std::fs::write(
+        base.join("koji.json"),
+        "{\"nodes\":[],\"edges\":[]}".as_bytes(),
+    )
+    .unwrap();
 
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: base.to_str().unwrap().into(),
@@ -44,9 +48,7 @@ fn run_backend(backend: RenderBackend) {
     .expect("renderer init");
 
     render.create_triangle();
-    let img = render
-        .render_to_image(EXTENT)
-        .expect("render to image");
+    let img = render.render_to_image(EXTENT).expect("render to image");
     let expected = expected_triangle(EXTENT[0], EXTENT[1]);
     assert_eq!(img.as_raw(), expected.as_raw());
 }

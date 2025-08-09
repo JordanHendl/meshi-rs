@@ -517,9 +517,7 @@ mod tests {
         assert!(Database::load_model_sync(base, &mut ctx, "selector.gltf#2").is_err());
 
         // Invalid primitive index should error.
-        assert!(
-            Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/5").is_err()
-        );
+        assert!(Database::load_model_sync(base, &mut ctx, "selector.gltf#Mesh1/5").is_err());
 
         ctx.destroy();
     }

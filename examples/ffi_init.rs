@@ -7,8 +7,8 @@ use meshi::*;
 use std::ffi::CString;
 
 fn main() {
-    let app = CString::new("Example").unwrap();
-    let loc = CString::new(".").unwrap();
+    let app = CString::new("Example").unwrap_or_default();
+    let loc = CString::new(".").unwrap_or_default();
     let engine = unsafe { meshi_make_engine_headless(app.as_ptr(), loc.as_ptr()) };
     let render = unsafe { meshi_get_graphics_system(engine) };
     let info = CubePrimitiveInfo { size: 2.0 };

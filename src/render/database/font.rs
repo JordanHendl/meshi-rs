@@ -51,7 +51,7 @@ impl TTFont {
                     let px = i % metrics.width;
                     let py = i / metrics.width;
                     let x = (cursor_x as usize) + px;
-                    let y = (cursor_y  as i32) as usize + py;
+                    let y = (cursor_y as i32) as usize + py;
 
                     bitmap[y * width as usize + x] = pixel;
                 }
