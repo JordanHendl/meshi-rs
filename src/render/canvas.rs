@@ -1,6 +1,7 @@
 use dashi::{utils::Pool, Attachment, DrawIndexed, Format, RenderPassBegin, SubmitInfo};
 use image::{Rgba, RgbaImage};
 use koji::{Canvas, CanvasBuilder};
+use winit::dpi::PhysicalSize;
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -21,7 +22,10 @@ impl CanvasRenderer {
         mesh_objects: &Pool<MeshObject>,
     ) -> Result<(), RenderError> {
         if self.canvas.is_none() {
+            println!("aaa");
+            let p = display.winit_window().inner_size();
             let canvas = CanvasBuilder::new()
+                .extent([p.width, p.height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
             self.canvas = Some(canvas);
