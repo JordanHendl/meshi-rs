@@ -1,13 +1,12 @@
-use dashi::utils::Handle;
 use super::json;
 use std::collections::HashMap;
 
-/// A material entry from the database and its lazily loaded handle.
+/// A material entry from the database and its load state.
 #[derive(Clone, Default)]
 pub struct MaterialResource {
     pub cfg: json::MaterialEntry,
-    /// GPU handle for this material's base color texture, loaded on demand.
-    pub loaded: Option<Handle<koji::Texture>>,
+    /// Whether the material's GPU resources have been registered.
+    pub loaded: bool,
 }
 
 impl From<json::Materials> for HashMap<String, MaterialResource> {
@@ -18,7 +17,7 @@ impl From<json::Materials> for HashMap<String, MaterialResource> {
                 m.name.clone(),
                 MaterialResource {
                     cfg: m,
-                    loaded: None,
+                    loaded: false,
                 },
             );
         }

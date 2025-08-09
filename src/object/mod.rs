@@ -1,5 +1,4 @@
 use crate::render::database::{self, Database, MeshResource};
-use dashi::utils::Handle;
 use glam::Mat4;
 use tracing::{info, warn};
 
@@ -88,20 +87,19 @@ impl MeshObjectInfo {
         );
 
         let mesh = db.fetch_mesh(self.mesh, true)?;
-        let material = match db.fetch_material(self.material) {
-            Ok(mat) => mat,
-            Err(e) => {
-                warn!(
-                    "Failed to fetch material '{}': {}; falling back to default",
-                    self.material, e
-                );
-                db.fetch_material("DEFAULT")?
-            }
+        let material = if db.material_exists(self.material) {
+            self.material
+        } else {
+            warn!(
+                "Failed to find material '{}'; falling back to default",
+                self.material
+            );
+            "DEFAULT"
         };
 
         let targets = vec![MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: material.to_string(),
         }];
 
         Ok(MeshObject {
@@ -116,7 +114,7 @@ impl MeshObjectInfo {
 #[derive(Default, Clone)]
 pub struct MeshTarget {
     pub mesh: MeshResource,
-    pub material: Handle<koji::Texture>,
+    pub material: String,
 }
 
 #[derive(Default)]
@@ -131,7 +129,7 @@ pub struct MeshObject {
 mod tests {
     use super::*;
     use crate::render::database::Database;
-    use dashi::{utils::Handle, Context};
+    use dashi::Context;
     use tempfile::tempdir;
 
     #[test]
@@ -149,7 +147,7 @@ mod tests {
 
         let obj = info.make_object(&mut db).unwrap();
         assert_eq!(obj.targets.len(), 1);
-        assert_eq!(obj.targets[0].material, Handle::default());
+        assert_eq!(obj.targets[0].material, "DEFAULT");
         ctx.destroy();
     }
 }

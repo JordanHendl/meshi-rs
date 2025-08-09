@@ -69,13 +69,19 @@ impl GraphRenderer {
                 "#,
                 frag
             );
+            let renderer_ptr: *mut Renderer = &mut renderer;
+            let output = unsafe { (*renderer_ptr).graph().output("swapchain") };
+            let res_ptr = unsafe { (*renderer_ptr).resources() as *mut _ };
             let mut pso = PipelineBuilder::new(ctx, "graph_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
-                .render_pass(renderer.graph().output("swapchain"))
-                .build();
-            let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
-            renderer.register_material_pipeline("graph_pso", pso, bgr);
+                .render_pass(output)
+                .build_with_resources(unsafe { &mut *res_ptr })
+                .unwrap();
+            let bgr = pso
+                .create_bind_groups(unsafe { &mut *res_ptr })
+                .unwrap();
+            unsafe { (*renderer_ptr).register_material_pipeline("graph_pso", pso, bgr) };
             self.renderer = Some(renderer);
             self.graph_json = None;
         }
@@ -118,8 +124,13 @@ impl GraphRenderer {
         let indices = raw_indices[..obj.mesh.num_indices].to_vec();
         ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
 
+        let material_id = obj
+            .targets
+            .get(0)
+            .map(|t| t.material.clone())
+            .unwrap_or_else(|| "graph_pso".to_string());
         let mesh = StaticMesh {
-            material_id: "graph_pso".to_string(),
+            material_id: material_id.clone(),
             vertices,
             indices: Some(indices),
             vertex_buffer: None,
@@ -128,7 +139,7 @@ impl GraphRenderer {
         };
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.register_static_mesh(mesh, None, "graph_pso".into());
+            renderer.register_static_mesh(mesh, None, material_id);
         }
 
         let idx = self.next_mesh;

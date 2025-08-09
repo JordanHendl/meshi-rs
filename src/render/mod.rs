@@ -342,14 +342,10 @@ impl RenderEngine {
                     .database
                     .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
-                        material,
+                        material: "DEFAULT".to_string(),
                     }],
                     mesh,
                     transform: info.transform,
@@ -368,13 +364,9 @@ impl RenderEngine {
             warn!("failed to create cube primitive: {:?}", e);
             MeshResource::default()
         });
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: "DEFAULT".to_string(),
         };
         let object = MeshObject {
             targets: vec![target],
@@ -404,14 +396,10 @@ impl RenderEngine {
                     .database
                     .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
-                        material,
+                        material: "DEFAULT".to_string(),
                     }],
                     mesh,
                     transform: info.transform,
@@ -430,13 +418,9 @@ impl RenderEngine {
             warn!("failed to create sphere primitive: {:?}", e);
             MeshResource::default()
         });
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: "DEFAULT".to_string(),
         };
         let object = MeshObject {
             targets: vec![target],
@@ -470,13 +454,9 @@ impl RenderEngine {
             warn!("failed to create cylinder primitive: {:?}", e);
             MeshResource::default()
         });
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: "DEFAULT".to_string(),
         };
         let object = MeshObject {
             targets: vec![target],
@@ -510,13 +490,9 @@ impl RenderEngine {
             warn!("failed to create plane primitive: {:?}", e);
             MeshResource::default()
         });
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: "DEFAULT".to_string(),
         };
         let object = MeshObject {
             targets: vec![target],
@@ -550,13 +526,9 @@ impl RenderEngine {
             warn!("failed to create cone primitive: {:?}", e);
             MeshResource::default()
         });
-        let material = self
-            .database
-            .fetch_material("DEFAULT")
-            .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
-            material,
+            material: "DEFAULT".to_string(),
         };
         let object = MeshObject {
             targets: vec![target],
@@ -586,14 +558,10 @@ impl RenderEngine {
                     .database
                     .fetch_mesh(info.mesh, true)
                     .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
                         mesh: mesh.clone(),
-                        material,
+                        material: "DEFAULT".to_string(),
                     }],
                     mesh,
                     transform: info.transform,
