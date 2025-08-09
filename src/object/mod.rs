@@ -88,14 +88,14 @@ impl MeshObjectInfo {
         );
 
         let mesh = db.fetch_mesh(self.mesh, true)?;
-        let material = match db.fetch_material(self.material) {
+        let material = match db.fetch_material(self.material, None) {
             Ok(mat) => mat,
             Err(e) => {
                 warn!(
                     "Failed to fetch material '{}': {}; falling back to default",
                     self.material, e
                 );
-                db.fetch_material("DEFAULT")?
+                db.fetch_material("DEFAULT", None)?
             }
         };
 
