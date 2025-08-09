@@ -1,4 +1,3 @@
-use dashi::utils::Pool;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex};
@@ -16,7 +15,7 @@ use tracing::warn;
 pub struct GraphRenderer {
     graph_json: Option<String>,
     renderer: Option<Renderer>,
-    meshes_registered: bool,
+    next_mesh: usize,
 }
 
 impl GraphRenderer {
@@ -32,18 +31,21 @@ impl GraphRenderer {
         } else {
             None
         };
-        Ok(Self { graph_json, renderer: None, meshes_registered: false })
+        Ok(Self { graph_json, renderer: None, next_mesh: 0 })
     }
 
-    pub fn render(
+    fn init(
         &mut self,
         ctx: &mut dashi::Context,
-        display: &mut dashi::Display,
-        mesh_objects: &Pool<MeshObject>,
+        display: Option<&mut dashi::Display>,
     ) -> Result<(), RenderError> {
         if self.renderer.is_none() {
-            let p = display.winit_window().inner_size();
-            let (width, height) = (p.width, p.height);
+            let (width, height) = if let Some(display) = display {
+                let p = display.winit_window().inner_size();
+                (p.width, p.height)
+            } else {
+                (1, 1)
+            };
 
             let graph = if let Some(json) = &self.graph_json {
                 io::from_json(json).map_err(RenderError::GraphParse)?
@@ -77,54 +79,117 @@ impl GraphRenderer {
             self.renderer = Some(renderer);
             self.graph_json = None;
         }
+        Ok(())
+    }
 
-        let renderer = self.renderer.as_mut().unwrap();
+    pub fn register_mesh(
+        &mut self,
+        ctx: &mut dashi::Context,
+        display: Option<&mut dashi::Display>,
+        obj: &MeshObject,
+    ) -> Result<usize, RenderError> {
+        self.init(ctx, display)?;
 
-        if !self.meshes_registered {
-            mesh_objects.for_each_occupied(|_obj| {
-                let mesh = StaticMesh {
-                    material_id: "graph_pso".to_string(),
-                    vertices: vec![
-                        Vertex {
-                            position: [-0.5, -0.5, 0.0],
-                            normal: [0.0, 0.0, 1.0],
-                            tangent: [1.0, 0.0, 0.0, 1.0],
-                            uv: [0.0, 0.0],
-                            color: [1.0, 1.0, 1.0, 1.0],
-                        },
-                        Vertex {
-                            position: [0.5, -0.5, 0.0],
-                            normal: [0.0, 0.0, 1.0],
-                            tangent: [1.0, 0.0, 0.0, 1.0],
-                            uv: [1.0, 0.0],
-                            color: [1.0, 1.0, 1.0, 1.0],
-                        },
-                        Vertex {
-                            position: [0.0, 0.5, 0.0],
-                            normal: [0.0, 0.0, 1.0],
-                            tangent: [1.0, 0.0, 0.0, 1.0],
-                            uv: [0.5, 1.0],
-                            color: [1.0, 1.0, 1.0, 1.0],
-                        },
-                    ],
-                    indices: None,
-                    vertex_buffer: None,
-                    index_buffer: None,
-                    index_count: 0,
-                };
-                renderer.register_static_mesh(mesh, None, "graph_pso".into());
-            });
-            self.meshes_registered = true;
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MeshVertex {
+            position: [f32; 4],
+            normal: [f32; 4],
+            tex_coords: [f32; 2],
+            joint_ids: [i32; 4],
+            joints: [f32; 4],
+            color: [f32; 4],
         }
 
-        renderer.present_frame()?;
+        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
+        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+            .iter()
+            .map(|v| Vertex {
+                position: [v.position[0], v.position[1], v.position[2]],
+                normal: [v.normal[0], v.normal[1], v.normal[2]],
+                tangent: [0.0, 0.0, 0.0, 0.0],
+                uv: [v.tex_coords[0], v.tex_coords[1]],
+                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+            })
+            .collect();
+        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
+
+        let raw_indices: &[u32] = ctx.map_buffer(obj.mesh.indices).expect("map indices");
+        let indices = raw_indices[..obj.mesh.num_indices].to_vec();
+        ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
+
+        let mesh = StaticMesh {
+            material_id: "graph_pso".to_string(),
+            vertices,
+            indices: Some(indices),
+            vertex_buffer: None,
+            index_buffer: None,
+            index_count: 0,
+        };
+
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.register_static_mesh(mesh, None, "graph_pso".into());
+        }
+
+        let idx = self.next_mesh;
+        self.next_mesh += 1;
+        Ok(idx)
+    }
+
+    pub fn update_mesh(
+        &mut self,
+        ctx: &mut dashi::Context,
+        idx: usize,
+        obj: &MeshObject,
+    ) {
+        if self.init(ctx, None).is_err() {
+            return;
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MeshVertex {
+            position: [f32; 4],
+            normal: [f32; 4],
+            tex_coords: [f32; 2],
+            joint_ids: [i32; 4],
+            joints: [f32; 4],
+            color: [f32; 4],
+        }
+
+        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
+        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+            .iter()
+            .map(|v| Vertex {
+                position: [v.position[0], v.position[1], v.position[2]],
+                normal: [v.normal[0], v.normal[1], v.normal[2]],
+                tangent: [0.0, 0.0, 0.0, 0.0],
+                uv: [v.tex_coords[0], v.tex_coords[1]],
+                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+            })
+            .collect();
+        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
+
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.update_static_mesh(idx, &vertices);
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        ctx: &mut dashi::Context,
+        display: Option<&mut dashi::Display>,
+    ) -> Result<(), RenderError> {
+        self.init(ctx, display)?;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.present_frame()?;
+        }
         Ok(())
     }
 
     pub fn render_to_image(
         &mut self,
         _ctx: &mut dashi::Context,
-        _mesh_objects: &Pool<MeshObject>,
         extent: [u32; 2],
     ) -> Result<RgbaImage, RenderError> {
         let [width, height] = extent;

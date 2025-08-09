@@ -288,11 +288,41 @@ impl RenderEngine {
     ) -> Result<Handle<MeshObject>, MeshObjectError> {
         let info = MeshObjectInfo::try_from(info)?;
         let object = info.make_object(&mut self.database)?;
-        Ok(self.mesh_objects.insert(object).unwrap())
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        Ok(handle)
     }
 
     pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
         self.mesh_objects.release(handle);
+    }
+
+    fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
+        if let Some(ctx) = self.ctx.as_mut() {
+            if let Some(obj) = self.mesh_objects.get_mut_ref(handle) {
+                let display = self.display.as_mut();
+                let res = match &mut self.backend {
+                    Backend::Canvas(r) => r.register_mesh(ctx, display, obj),
+                    Backend::Graph(r) => r.register_mesh(ctx, display, obj),
+                };
+                if let Ok(idx) = res {
+                    obj.renderer_handle = Some(idx);
+                }
+            }
+        }
+    }
+
+    fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
+        if let Some(ctx) = self.ctx.as_mut() {
+            if let Some(obj) = self.mesh_objects.get_ref(handle) {
+                if let Some(idx) = obj.renderer_handle {
+                    match &mut self.backend {
+                        Backend::Canvas(r) => r.update_mesh(ctx, idx, obj),
+                        Backend::Graph(r) => r.update_mesh(ctx, idx, obj),
+                    }
+                }
+            }
+        }
     }
 
     pub fn create_cube(&mut self) -> Handle<MeshObject> {
@@ -323,10 +353,13 @@ impl RenderEngine {
                     }],
                     mesh,
                     transform: info.transform,
+                    renderer_handle: None,
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
@@ -347,8 +380,11 @@ impl RenderEngine {
             targets: vec![target],
             mesh,
             transform: Mat4::IDENTITY,
+            renderer_handle: None,
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_sphere(&mut self) -> Handle<MeshObject> {
@@ -379,10 +415,13 @@ impl RenderEngine {
                     }],
                     mesh,
                     transform: info.transform,
+                    renderer_handle: None,
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
@@ -403,8 +442,11 @@ impl RenderEngine {
             targets: vec![target],
             mesh,
             transform: Mat4::IDENTITY,
+            renderer_handle: None,
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_cylinder(&mut self) -> Handle<MeshObject> {
@@ -413,10 +455,13 @@ impl RenderEngine {
             material: "MESHI_CYLINDER",
             transform: Mat4::IDENTITY,
         };
-        let object = info
+        let mut object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        object.renderer_handle = None;
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
@@ -437,8 +482,11 @@ impl RenderEngine {
             targets: vec![target],
             mesh,
             transform: Mat4::IDENTITY,
+            renderer_handle: None,
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_plane(&mut self) -> Handle<MeshObject> {
@@ -447,10 +495,13 @@ impl RenderEngine {
             material: "MESHI_PLANE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
+        let mut object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        object.renderer_handle = None;
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
@@ -471,8 +522,11 @@ impl RenderEngine {
             targets: vec![target],
             mesh,
             transform: Mat4::IDENTITY,
+            renderer_handle: None,
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_cone(&mut self) -> Handle<MeshObject> {
@@ -481,10 +535,13 @@ impl RenderEngine {
             material: "MESHI_CONE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
+        let mut object = info
             .make_object(&mut self.database)
             .expect("failed to create mesh object");
-        self.mesh_objects.insert(object).unwrap()
+        object.renderer_handle = None;
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
@@ -505,8 +562,11 @@ impl RenderEngine {
             targets: vec![target],
             mesh,
             transform: Mat4::IDENTITY,
+            renderer_handle: None,
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn create_triangle(&mut self) -> Handle<MeshObject> {
@@ -537,10 +597,13 @@ impl RenderEngine {
                     }],
                     mesh,
                     transform: info.transform,
+                    renderer_handle: None,
                 }
             }
         };
-        self.mesh_objects.insert(object).unwrap()
+        let handle = self.mesh_objects.insert(object).unwrap();
+        self.register_mesh_with_renderer(handle);
+        handle
     }
 
     pub fn set_mesh_object_transform(
@@ -572,6 +635,8 @@ impl RenderEngine {
                 );
             }
         }
+        // After transform update, refresh GPU mesh
+        self.update_mesh_with_renderer(handle);
     }
 
     pub fn update(&mut self, _delta_time: f32) {
@@ -619,15 +684,16 @@ impl RenderEngine {
             self.streaming = Some(mgr);
         }
 
-        if let (Some(ctx), Some(display)) = (self.ctx.as_mut(), self.display.as_mut()) {
+        if let Some(ctx) = self.ctx.as_mut() {
+            let display = self.display.as_mut();
             match &mut self.backend {
                 Backend::Canvas(r) => {
-                    if let Err(e) = r.render(ctx, display, &self.mesh_objects) {
+                    if let Err(e) = r.render(ctx, display) {
                         warn!("render error: {}", e);
                     }
                 }
                 Backend::Graph(r) => {
-                    if let Err(e) = r.render(ctx, display, &self.mesh_objects) {
+                    if let Err(e) = r.render(ctx, display) {
                         warn!("render error: {}", e);
                     }
                 }
@@ -638,8 +704,8 @@ impl RenderEngine {
     pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, RenderError> {
         let ctx = self.ctx.as_mut().ok_or(RenderError::ContextCreation)?;
         match &mut self.backend {
-            Backend::Canvas(r) => r.render_to_image(ctx, &self.mesh_objects, extent),
-            Backend::Graph(r) => r.render_to_image(ctx, &self.mesh_objects, extent),
+            Backend::Canvas(r) => r.render_to_image(ctx, extent),
+            Backend::Graph(r) => r.render_to_image(ctx, extent),
         }
     }
 

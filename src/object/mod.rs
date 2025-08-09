@@ -108,6 +108,7 @@ impl MeshObjectInfo {
             targets,
             mesh,
             transform: self.transform,
+            renderer_handle: None,
         })
     }
 }
@@ -123,6 +124,7 @@ pub struct MeshObject {
     pub targets: Vec<MeshTarget>,
     pub mesh: MeshResource,
     pub transform: Mat4,
+    pub renderer_handle: Option<usize>,
 }
 
 #[cfg(test)]

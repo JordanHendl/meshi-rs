@@ -1,36 +1,35 @@
 use super::RenderError;
 use crate::object::MeshObject;
-use dashi::{utils::Pool, Format};
+use dashi::Format;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
-use koji::renderer::{Renderer, StaticMesh};
+use koji::renderer::{Renderer, StaticMesh, Vertex};
 use koji::{CanvasBuilder, PipelineBuilder};
 
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
     renderer: Option<Renderer>,
+    next_mesh: usize,
 }
 
 impl CanvasRenderer {
     pub fn new(extent: Option<[u32; 2]>) -> Self {
-        Self {
-            extent,
-            renderer: None,
-        }
+        Self { extent, renderer: None, next_mesh: 0 }
     }
 
-    pub fn render(
+    fn init(
         &mut self,
         ctx: &mut dashi::Context,
-        display: &mut dashi::Display,
-        mesh_objects: &Pool<MeshObject>,
+        display: Option<&mut dashi::Display>,
     ) -> Result<(), RenderError> {
         if self.renderer.is_none() {
             let [width, height] = if let Some(extent) = self.extent {
                 extent
-            } else {
+            } else if let Some(display) = display {
                 let p = display.winit_window().inner_size();
                 [p.width, p.height]
+            } else {
+                [1, 1]
             };
 
             let canvas = CanvasBuilder::new()
@@ -64,61 +63,119 @@ impl CanvasRenderer {
 
             renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
 
-            #[repr(C)]
-            #[derive(Clone, Copy)]
-            struct MeshVertex {
-                position: [f32; 4],
-                normal: [f32; 4],
-                tex_coords: [f32; 2],
-                joint_ids: [i32; 4],
-                joints: [f32; 4],
-                color: [f32; 4],
-            }
-
-            mesh_objects.for_each_occupied(|obj| {
-                let raw_vertices: &[MeshVertex] =
-                    ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
-                let vertices: Vec<koji::renderer::Vertex> = raw_vertices[..obj.mesh.num_vertices]
-                    .iter()
-                    .map(|v| koji::renderer::Vertex {
-                        position: [v.position[0], v.position[1], v.position[2]],
-                        normal: [v.normal[0], v.normal[1], v.normal[2]],
-                        tangent: [0.0, 0.0, 0.0, 0.0],
-                        uv: [v.tex_coords[0], v.tex_coords[1]],
-                        color: [v.color[0], v.color[1], v.color[2], v.color[3]],
-                    })
-                    .collect();
-                ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
-
-                let raw_indices: &[u32] = ctx.map_buffer(obj.mesh.indices).expect("map indices");
-                let indices = raw_indices[..obj.mesh.num_indices].to_vec();
-                ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
-
-                let mesh = StaticMesh {
-                    material_id: String::new(),
-                    vertices,
-                    indices: Some(indices),
-                    vertex_buffer: None,
-                    index_buffer: None,
-                    index_count: 0,
-                };
-                renderer.register_static_mesh(mesh, None, "color".into());
-            });
-
             self.renderer = Some(renderer);
         }
+        Ok(())
+    }
 
+    pub fn register_mesh(
+        &mut self,
+        ctx: &mut dashi::Context,
+        display: Option<&mut dashi::Display>,
+        obj: &MeshObject,
+    ) -> Result<usize, RenderError> {
+        self.init(ctx, display)?;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MeshVertex {
+            position: [f32; 4],
+            normal: [f32; 4],
+            tex_coords: [f32; 2],
+            joint_ids: [i32; 4],
+            joints: [f32; 4],
+            color: [f32; 4],
+        }
+
+        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
+        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+            .iter()
+            .map(|v| Vertex {
+                position: [v.position[0], v.position[1], v.position[2]],
+                normal: [v.normal[0], v.normal[1], v.normal[2]],
+                tangent: [0.0, 0.0, 0.0, 0.0],
+                uv: [v.tex_coords[0], v.tex_coords[1]],
+                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+            })
+            .collect();
+        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
+
+        let raw_indices: &[u32] = ctx.map_buffer(obj.mesh.indices).expect("map indices");
+        let indices = raw_indices[..obj.mesh.num_indices].to_vec();
+        ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
+
+        let mesh = StaticMesh {
+            material_id: String::new(),
+            vertices,
+            indices: Some(indices),
+            vertex_buffer: None,
+            index_buffer: None,
+            index_count: 0,
+        };
+
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.register_static_mesh(mesh, None, "color".into());
+        }
+
+        let idx = self.next_mesh;
+        self.next_mesh += 1;
+        Ok(idx)
+    }
+
+    pub fn update_mesh(
+        &mut self,
+        ctx: &mut dashi::Context,
+        idx: usize,
+        obj: &MeshObject,
+    ) {
+        if self.init(ctx, None).is_err() {
+            return;
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MeshVertex {
+            position: [f32; 4],
+            normal: [f32; 4],
+            tex_coords: [f32; 2],
+            joint_ids: [i32; 4],
+            joints: [f32; 4],
+            color: [f32; 4],
+        }
+
+        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
+        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+            .iter()
+            .map(|v| Vertex {
+                position: [v.position[0], v.position[1], v.position[2]],
+                normal: [v.normal[0], v.normal[1], v.normal[2]],
+                tangent: [0.0, 0.0, 0.0, 0.0],
+                uv: [v.tex_coords[0], v.tex_coords[1]],
+                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+            })
+            .collect();
+        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
+
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.update_static_mesh(idx, &vertices);
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        ctx: &mut dashi::Context,
+        display: Option<&mut dashi::Display>,
+    ) -> Result<(), RenderError> {
+        self.init(ctx, display)?;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.present_frame()?;
         }
-
         Ok(())
     }
 
     pub fn render_to_image(
         &mut self,
         _ctx: &mut dashi::Context,
-        _mesh_objects: &Pool<MeshObject>,
         extent: [u32; 2],
     ) -> Result<RgbaImage, RenderError> {
         let [width, height] = extent;
