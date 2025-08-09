@@ -1,9 +1,10 @@
 use super::RenderError;
 use crate::object::MeshObject;
-use dashi::{BufferInfo, Format};
+use crate::render::database::Vertex as MeshVertex;
+use dashi::Format;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
-use koji::renderer::{Renderer, StaticMesh, Vertex};
+use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{CanvasBuilder, PipelineBuilder};
 
 pub struct CanvasRenderer {
@@ -83,33 +84,18 @@ impl CanvasRenderer {
     ) -> Result<usize, RenderError> {
         self.init(ctx, display)?;
 
-        #[repr(C)]
-        #[derive(Clone, Copy)]
-        struct MeshVertex {
-            position: [f32; 4],
-            normal: [f32; 4],
-            tex_coords: [f32; 2],
-            joint_ids: [i32; 4],
-            joints: [f32; 4],
-            color: [f32; 4],
-        }
-        
-        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
-        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+        let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
-            .map(|v| Vertex {
-                position: [v.position[0], v.position[1], v.position[2]],
-                normal: [v.normal[0], v.normal[1], v.normal[2]],
+            .map(|v: &MeshVertex| KojiVertex {
+                position: [v.position.x, v.position.y, v.position.z],
+                normal: [v.normal.x, v.normal.y, v.normal.z],
                 tangent: [0.0, 0.0, 0.0, 0.0],
-                uv: [v.tex_coords[0], v.tex_coords[1]],
-                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+                uv: [v.tex_coords.x, v.tex_coords.y],
+                color: [v.color.x, v.color.y, v.color.z, v.color.w],
             })
             .collect();
-        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
 
-        let raw_indices: &[u32] = ctx.map_buffer(obj.mesh.indices).expect("map indices");
-        let indices = raw_indices[..obj.mesh.num_indices].to_vec();
-        ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
+        let indices = obj.mesh.indices[..obj.mesh.num_indices].to_vec();
 
         let mesh = StaticMesh {
             material_id: String::new(),
@@ -139,29 +125,16 @@ impl CanvasRenderer {
             return;
         }
 
-        #[repr(C)]
-        #[derive(Clone, Copy)]
-        struct MeshVertex {
-            position: [f32; 4],
-            normal: [f32; 4],
-            tex_coords: [f32; 2],
-            joint_ids: [i32; 4],
-            joints: [f32; 4],
-            color: [f32; 4],
-        }
-
-        let raw_vertices: &[MeshVertex] = ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
-        let vertices: Vec<Vertex> = raw_vertices[..obj.mesh.num_vertices]
+        let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
-            .map(|v| Vertex {
-                position: [v.position[0], v.position[1], v.position[2]],
-                normal: [v.normal[0], v.normal[1], v.normal[2]],
+            .map(|v: &MeshVertex| KojiVertex {
+                position: [v.position.x, v.position.y, v.position.z],
+                normal: [v.normal.x, v.normal.y, v.normal.z],
                 tangent: [0.0, 0.0, 0.0, 0.0],
-                uv: [v.tex_coords[0], v.tex_coords[1]],
-                color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+                uv: [v.tex_coords.x, v.tex_coords.y],
+                color: [v.color.x, v.color.y, v.color.z, v.color.w],
             })
             .collect();
-        ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
 
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.update_static_mesh(idx, &vertices);
