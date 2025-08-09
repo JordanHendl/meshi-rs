@@ -1190,6 +1190,7 @@ dependencies = [
  "glam",
  "gltf",
  "image 0.24.9",
+ "inline-spirv",
  "koji",
  "rayon",
  "rodio",
