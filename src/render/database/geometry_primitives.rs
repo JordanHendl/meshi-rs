@@ -1,4 +1,4 @@
-use crate::render::database::{MeshResource, Vertex};
+use crate::render::database::{PrimitiveMesh, Vertex};
 use glam::{IVec4, Vec2, Vec4};
 use tracing::info;
 
@@ -13,10 +13,7 @@ impl Default for CubePrimitiveInfo {
     }
 }
 
-pub fn make_cube(
-    info: &CubePrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_cube(info: &CubePrimitiveInfo) -> PrimitiveMesh {
     let size = info.size;
 
     let cvertices: [Vertex; 8] = [
@@ -102,15 +99,7 @@ pub fn make_cube(
     let indices = INDICES.to_vec();
 
     info!("Registering Default Cube Mesh..");
-    Ok(MeshResource {
-        name: "CUBE".to_string(),
-        vertices,
-        num_vertices: cvertices.len(),
-        indices,
-        num_indices: INDICES.len(),
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }
 
 #[repr(C)]
@@ -124,10 +113,7 @@ impl Default for TrianglePrimitiveInfo {
     }
 }
 
-pub fn make_triangle(
-    info: &TrianglePrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_triangle(info: &TrianglePrimitiveInfo) -> PrimitiveMesh {
     let size = info.size;
     let tvertices: [Vertex; 3] = [
         Vertex {
@@ -162,15 +148,7 @@ pub fn make_triangle(
     let indices = INDICES.to_vec();
 
     info!("Registering Default Triangle Mesh..");
-    Ok(MeshResource {
-        name: "TRIANGLE".to_string(),
-        vertices,
-        num_vertices: tvertices.len(),
-        indices,
-        num_indices: INDICES.len(),
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }
 
 #[repr(C)]
@@ -190,10 +168,7 @@ impl Default for SpherePrimitiveInfo {
     }
 }
 
-pub fn make_sphere(
-    info: &SpherePrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_sphere(info: &SpherePrimitiveInfo) -> PrimitiveMesh {
     let SpherePrimitiveInfo {
         radius,
         segments,
@@ -237,18 +212,8 @@ pub fn make_sphere(
         }
     }
 
-    let num_vertices = vertices.len();
-    let num_indices = indices.len();
     info!("Registering Default Sphere Mesh..");
-    Ok(MeshResource {
-        name: "SPHERE".to_string(),
-        vertices,
-        num_vertices,
-        indices,
-        num_indices,
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }
 
 #[repr(C)]
@@ -268,10 +233,7 @@ impl Default for CylinderPrimitiveInfo {
     }
 }
 
-pub fn make_cylinder(
-    info: &CylinderPrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_cylinder(info: &CylinderPrimitiveInfo) -> PrimitiveMesh {
     let CylinderPrimitiveInfo {
         radius,
         height,
@@ -382,18 +344,8 @@ pub fn make_cylinder(
         indices.push(current);
     }
 
-    let num_vertices = vertices.len();
-    let num_indices = indices.len();
     info!("Registering Default Cylinder Mesh..");
-    Ok(MeshResource {
-        name: "CYLINDER".to_string(),
-        vertices,
-        num_vertices,
-        indices,
-        num_indices,
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }
 
 #[repr(C)]
@@ -407,10 +359,7 @@ impl Default for PlanePrimitiveInfo {
     }
 }
 
-pub fn make_plane(
-    info: &PlanePrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_plane(info: &PlanePrimitiveInfo) -> PrimitiveMesh {
     let size = info.size;
 
     let vertex_arr: [Vertex; 4] = [
@@ -453,18 +402,8 @@ pub fn make_plane(
     let vertices = vertex_arr.to_vec();
     let indices = INDICES.to_vec();
 
-    let num_vertices = vertices.len();
-    let num_indices = indices.len();
     info!("Registering Default Plane Mesh..");
-    Ok(MeshResource {
-        name: "PLANE".to_string(),
-        vertices,
-        num_vertices,
-        indices,
-        num_indices,
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }
 
 #[repr(C)]
@@ -484,10 +423,7 @@ impl Default for ConePrimitiveInfo {
     }
 }
 
-pub fn make_cone(
-    info: &ConePrimitiveInfo,
-    _ctx: &mut dashi::Context,
-) -> Result<MeshResource, dashi::GPUError> {
+pub fn make_cone(info: &ConePrimitiveInfo) -> PrimitiveMesh {
     let ConePrimitiveInfo {
         radius,
         height,
@@ -560,16 +496,6 @@ pub fn make_cone(
         indices.push(current);
     }
 
-    let num_vertices = vertices.len();
-    let num_indices = indices.len();
     info!("Registering Default Cone Mesh..");
-    Ok(MeshResource {
-        name: "CONE".to_string(),
-        vertices,
-        num_vertices,
-        indices,
-        num_indices,
-        vertex_buffer: None,
-        index_buffer: None,
-    })
+    PrimitiveMesh { vertices, indices }
 }

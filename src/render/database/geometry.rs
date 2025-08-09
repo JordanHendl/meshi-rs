@@ -4,57 +4,43 @@ use std::path::Path;
 use gltf::Gltf;
 
 use super::{geometry_primitives, MeshResource};
-use dashi::Context;
-use tracing::warn;
 
 /// Load the default set of mesh primitives into a map keyed by their names.
 ///
 /// The database uses this during initialization so tests can rely on a small
 /// library of meshes (triangle, cube and sphere) without hitting the file
 /// system.
-pub fn load_primitives(ctx: &mut Context) -> HashMap<String, MeshResource> {
+pub fn load_primitives() -> HashMap<String, MeshResource> {
     let mut geometry = HashMap::new();
+    let tri = geometry_primitives::make_triangle(&Default::default());
     geometry.insert(
         "MESHI_TRIANGLE".to_string(),
-        geometry_primitives::make_triangle(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate triangle primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("TRIANGLE", tri),
     );
+    let cube = geometry_primitives::make_cube(&Default::default());
     geometry.insert(
         "MESHI_CUBE".to_string(),
-        geometry_primitives::make_cube(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate cube primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("CUBE", cube),
     );
+    let sphere = geometry_primitives::make_sphere(&Default::default());
     geometry.insert(
         "MESHI_SPHERE".to_string(),
-        geometry_primitives::make_sphere(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate sphere primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("SPHERE", sphere),
     );
+    let cyl = geometry_primitives::make_cylinder(&Default::default());
     geometry.insert(
         "MESHI_CYLINDER".to_string(),
-        geometry_primitives::make_cylinder(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate cylinder primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("CYLINDER", cyl),
     );
+    let plane = geometry_primitives::make_plane(&Default::default());
     geometry.insert(
         "MESHI_PLANE".to_string(),
-        geometry_primitives::make_plane(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate plane primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("PLANE", plane),
     );
+    let cone = geometry_primitives::make_cone(&Default::default());
     geometry.insert(
         "MESHI_CONE".to_string(),
-        geometry_primitives::make_cone(&Default::default(), ctx).unwrap_or_else(|e| {
-            warn!("failed to allocate cone primitive: {:?}", e);
-            MeshResource::default()
-        }),
+        MeshResource::from_primitive("CONE", cone),
     );
     geometry
 }

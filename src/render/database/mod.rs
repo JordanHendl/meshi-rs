@@ -29,6 +29,12 @@ pub struct Vertex {
 }
 
 #[derive(Default, Clone)]
+pub struct PrimitiveMesh {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+}
+
+#[derive(Default, Clone)]
 pub struct MeshResource {
     pub name: String,
     pub vertices: Vec<Vertex>,
@@ -37,6 +43,22 @@ pub struct MeshResource {
     pub num_indices: usize,
     pub vertex_buffer: Option<Handle<Buffer>>,
     pub index_buffer: Option<Handle<Buffer>>,
+}
+
+impl MeshResource {
+    pub fn from_primitive(name: &str, primitive: PrimitiveMesh) -> Self {
+        let num_vertices = primitive.vertices.len();
+        let num_indices = primitive.indices.len();
+        MeshResource {
+            name: name.to_string(),
+            vertices: primitive.vertices,
+            num_vertices,
+            indices: primitive.indices,
+            num_indices,
+            vertex_buffer: None,
+            index_buffer: None,
+        }
+    }
 }
 
 pub struct Database {
@@ -66,7 +88,7 @@ impl Database {
         let json_data = fs::read_to_string(format!("{}/db.json", base_path))?;
         let info: json::Database = serde_json::from_str(&json_data)?;
 
-        let mut geometry = load_primitives(ctx);
+        let mut geometry = load_primitives();
 
         let mut textures = HashMap::new();
         textures.insert("DEFAULT".to_string(), Some(Handle::default()));
@@ -187,7 +209,7 @@ impl Database {
         })
     }
 
-        /// Internal helper to synchronously load a model from disk.
+    /// Internal helper to synchronously load a model from disk.
     ///
     /// `name` may include a selector suffix such as `file.gltf#mesh` or
     /// `file.gltf#mesh/1` to target a specific mesh and primitive inside the
@@ -223,7 +245,8 @@ impl Database {
             } else if let Ok(idx) = mesh_sel.parse::<usize>() {
                 doc.meshes().nth(idx)
             } else {
-                doc.meshes().find(|m| m.name().map_or(false, |n| n == mesh_sel))
+                doc.meshes()
+                    .find(|m| m.name().map_or(false, |n| n == mesh_sel))
             };
 
             let mesh = mesh.ok_or_else(|| {

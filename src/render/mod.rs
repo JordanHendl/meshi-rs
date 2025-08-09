@@ -313,7 +313,6 @@ impl RenderEngine {
     }
 
     fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
-
         println!("3");
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_ref(handle) {
@@ -365,11 +364,8 @@ impl RenderEngine {
     }
 
     pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cube(info, ctx).unwrap_or_else(|e| {
-            warn!("failed to create cube primitive: {:?}", e);
-            MeshResource::default()
-        });
+        let prim = geometry_primitives::make_cube(info);
+        let mesh = MeshResource::from_primitive("CUBE", prim);
         let material = self
             .database
             .fetch_material("DEFAULT", None)
@@ -427,11 +423,8 @@ impl RenderEngine {
     }
 
     pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_sphere(info, ctx).unwrap_or_else(|e| {
-            warn!("failed to create sphere primitive: {:?}", e);
-            MeshResource::default()
-        });
+        let prim = geometry_primitives::make_sphere(info);
+        let mesh = MeshResource::from_primitive("SPHERE", prim);
         let material = self
             .database
             .fetch_material("DEFAULT", None)
@@ -467,11 +460,8 @@ impl RenderEngine {
     }
 
     pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cylinder(info, ctx).unwrap_or_else(|e| {
-            warn!("failed to create cylinder primitive: {:?}", e);
-            MeshResource::default()
-        });
+        let prim = geometry_primitives::make_cylinder(info);
+        let mesh = MeshResource::from_primitive("CYLINDER", prim);
         let material = self
             .database
             .fetch_material("DEFAULT", None)
@@ -507,11 +497,8 @@ impl RenderEngine {
     }
 
     pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_plane(info, ctx).unwrap_or_else(|e| {
-            warn!("failed to create plane primitive: {:?}", e);
-            MeshResource::default()
-        });
+        let prim = geometry_primitives::make_plane(info);
+        let mesh = MeshResource::from_primitive("PLANE", prim);
         let material = self
             .database
             .fetch_material("DEFAULT", None)
@@ -547,11 +534,8 @@ impl RenderEngine {
     }
 
     pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
-        let ctx = self.ctx.as_mut().expect("render context not initialized");
-        let mesh = geometry_primitives::make_cone(info, ctx).unwrap_or_else(|e| {
-            warn!("failed to create cone primitive: {:?}", e);
-            MeshResource::default()
-        });
+        let prim = geometry_primitives::make_cone(info);
+        let mesh = MeshResource::from_primitive("CONE", prim);
         let material = self
             .database
             .fetch_material("DEFAULT", None)
@@ -637,7 +621,6 @@ impl RenderEngine {
                 );
             }
         }
-
 
         println!("2");
         // After transform update, refresh GPU mesh
