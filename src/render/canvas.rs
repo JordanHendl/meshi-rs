@@ -54,14 +54,14 @@ impl CanvasRenderer {
                 frag
             );
 
-            let pso = PipelineBuilder::new(ctx, "canvas_pso")
+            let mut pso = PipelineBuilder::new(ctx, "canvas_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
                 .render_pass((canvas.render_pass(), 0))
                 .build_with_resources(renderer.resources())
                 .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
-
-            renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
+            let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
+            renderer.register_pipeline_for_pass("main", pso, bgr);
 
             self.renderer = Some(renderer);
         }
@@ -104,8 +104,13 @@ impl CanvasRenderer {
         let indices = raw_indices[..obj.mesh.num_indices].to_vec();
         ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
 
+        let material_id = obj
+            .targets
+            .get(0)
+            .map(|t| t.material.clone())
+            .unwrap_or_default();
         let mesh = StaticMesh {
-            material_id: String::new(),
+            material_id: material_id.clone(),
             vertices,
             indices: Some(indices),
             vertex_buffer: None,
@@ -114,7 +119,7 @@ impl CanvasRenderer {
         };
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.register_static_mesh(mesh, None, "color".into());
+            renderer.register_static_mesh(mesh, None, material_id);
         }
 
         let idx = self.next_mesh;

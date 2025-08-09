@@ -1,6 +1,7 @@
 pub mod error;
 use dashi::{utils::Handle, Buffer, BufferInfo, BufferUsage, Context, MemoryVisibility};
 use tracing::{error, info};
+use koji::renderer::Renderer;
 
 pub use error::*;
 pub mod json;
@@ -29,10 +30,9 @@ pub struct Database {
     base_path: String,
     geometry: HashMap<String, MeshResource>,
     ctx: *mut Context,
-    /// Map of texture names to optionally loaded handles. If a handle is
-    /// `None` the texture has been registered but not yet loaded.
-    textures: HashMap<String, Option<Handle<koji::Texture>>>,
-    /// Map of material names to optionally loaded handles.
+    /// Map of texture names to a flag indicating whether GPU resources have been registered.
+    textures: HashMap<String, bool>,
+    /// Map of material names to their load state.
     materials: HashMap<String, MaterialResource>,
     _fonts: HashMap<String, TTFont>,
 }
@@ -46,6 +46,10 @@ impl Database {
         &self.base_path
     }
 
+    pub fn material_exists(&self, name: &str) -> bool {
+        self.materials.contains_key(name)
+    }
+
     pub fn new(base_path: &str, ctx: &mut dashi::Context) -> Result<Self> {
         info!("Loading Database {}", format!("{}/db.json", base_path));
 
@@ -55,7 +59,7 @@ impl Database {
         let mut geometry = load_primitives(ctx);
 
         let mut textures = HashMap::new();
-        textures.insert("DEFAULT".to_string(), Some(Handle::default()));
+        textures.insert("DEFAULT".to_string(), true);
         info!("Registered texture asset: DEFAULT");
 
         let mut materials = HashMap::new();
@@ -66,7 +70,7 @@ impl Database {
                     name: "DEFAULT".to_string(),
                     ..Default::default()
                 },
-                loaded: Some(Handle::default()),
+                loaded: true,
             },
         );
         info!("Registered material asset: DEFAULT");
@@ -84,7 +88,7 @@ impl Database {
                     })
                 })?;
                 info!("Registered image asset: {}", img.name);
-                textures.insert(img.name, None);
+                textures.insert(img.name, false);
             }
         }
 
@@ -98,7 +102,7 @@ impl Database {
                     mat.name.clone(),
                     MaterialResource {
                         cfg: mat,
-                        loaded: None,
+                        loaded: false,
                     },
                 );
             }
@@ -360,71 +364,74 @@ impl Database {
         let path = format!("{}/{}", self.base_path, name);
         load_image_from_path(&path)?;
         info!("Registered image asset: {}", name);
-        self.textures.insert(name.to_string(), None);
+        self.textures.insert(name.to_string(), false);
         Ok(())
     }
 
-    /// Unload a previously loaded image, dropping any associated texture handle.
+    /// Unload a previously loaded image, dropping any associated GPU resources.
     pub fn unload_image(&mut self, name: &str) -> Result<()> {
         match self.textures.remove(name) {
-            Some(Some(_handle)) => {
-                // In a full renderer this would free the GPU texture referenced by
-                // `handle`. In these tests the handle is a placeholder so simply
-                // dropping it is sufficient.
-                Ok(())
-            }
-            Some(None) => Ok(()),
+            Some(_) => Ok(()),
             None => Err(Error::LookupError(LookupError {
                 entry: name.to_string(),
             })),
         }
     }
 
-    pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
+    pub fn fetch_texture(
+        &mut self,
+        renderer: &mut Renderer,
+        name: &str,
+    ) -> Result<()> {
         match self.textures.get_mut(name) {
-            Some(entry) => {
-                if let Some(handle) = entry {
-                    return Ok(*handle);
+            Some(loaded) => {
+                if *loaded {
+                    return Ok(());
                 }
-
-                // Lazily load the texture data from disk. We only verify the
-                // image can be opened; conversion to a GPU texture is outside
-                // the scope of these tests so a default handle is returned.
                 let path = format!("{}/{}", self.base_path, name);
                 image::open(&path)?;
-                let handle = Handle::default();
-                *entry = Some(handle);
-                Ok(handle)
+                renderer.resources().register_combined(
+                    name,
+                    Handle::default(),
+                    Handle::default(),
+                    [1, 1],
+                    Handle::default(),
+                );
+                *loaded = true;
+                Ok(())
             }
             None => Err(Error::LookupError(LookupError {
                 entry: name.to_string(),
             })),
         }
     }
-    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
-        if let Some(handle) = self.materials.get(name).and_then(|m| m.loaded) {
-            return Ok(handle);
-        }
 
-        let tex_name = match self.materials.get(name) {
-            Some(mat) => mat.cfg.base_color.clone(),
-            None => {
-                return Err(Error::LookupError(LookupError {
-                    entry: name.to_string(),
-                }))
+    pub fn fetch_material(
+        &mut self,
+        renderer: &mut Renderer,
+        name: &str,
+    ) -> Result<String> {
+        let tex_name = if let Some(mat) = self.materials.get(name) {
+            if mat.loaded {
+                return Ok(name.to_string());
             }
+            mat.cfg.base_color.clone()
+        } else {
+            return Err(Error::LookupError(LookupError {
+                entry: name.to_string(),
+            }));
         };
 
-        let handle = match tex_name {
-            Some(tex) => self.fetch_texture(&tex)?,
-            None => Handle::default(),
-        };
-
-        if let Some(mat) = self.materials.get_mut(name) {
-            mat.loaded = Some(handle);
+        if let Some(tex) = tex_name {
+            self.fetch_texture(renderer, &tex)?;
         }
 
-        Ok(handle)
+        let ctx = unsafe { &mut *self.ctx };
+        renderer.resources().register_variable(name, ctx, 0u32);
+        if let Some(mat) = self.materials.get_mut(name) {
+            mat.loaded = true;
+        }
+        Ok(name.to_string())
     }
 
     /// Retrieve a mesh by name, optionally loading it on demand.
@@ -469,6 +476,8 @@ mod tests {
     use image::{Rgba, RgbaImage};
     use std::collections::HashMap;
     use tempfile::tempdir;
+    use koji::{CanvasBuilder, renderer::Renderer};
+    use dashi::Format;
 
     // Helper to construct a minimal database without a real GPU context.
     fn make_db(path: &str) -> Database {
@@ -491,18 +500,34 @@ mod tests {
 
         let mut db = make_db(dir.path().to_str().unwrap());
         db.load_image("test.png").unwrap();
-        assert!(db.fetch_texture("test.png").is_ok());
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let canvas = CanvasBuilder::new()
+            .extent([1, 1])
+            .color_attachment("color", Format::RGBA8)
+            .build(&mut ctx)
+            .unwrap();
+        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        assert!(db.fetch_texture(&mut renderer, "test.png").is_ok());
+        ctx.destroy();
     }
 
     #[test]
     fn fetch_texture_lookup_error() {
         let dir = tempdir().unwrap();
         let mut db = make_db(dir.path().to_str().unwrap());
-        let err = db.fetch_texture("missing.png").unwrap_err();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let canvas = CanvasBuilder::new()
+            .extent([1, 1])
+            .color_attachment("color", Format::RGBA8)
+            .build(&mut ctx)
+            .unwrap();
+        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        let err = db.fetch_texture(&mut renderer, "missing.png").unwrap_err();
         match err {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
         }
+        ctx.destroy();
     }
 
     #[test]
@@ -514,11 +539,19 @@ mod tests {
 
         let mut db = make_db(dir.path().to_str().unwrap());
         db.load_image("test.png").unwrap();
-        db.fetch_texture("test.png").unwrap();
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let canvas = CanvasBuilder::new()
+            .extent([1, 1])
+            .color_attachment("color", Format::RGBA8)
+            .build(&mut ctx)
+            .unwrap();
+        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        db.fetch_texture(&mut renderer, "test.png").unwrap();
         assert!(db.textures.contains_key("test.png"));
 
         db.unload_image("test.png").unwrap();
         assert!(!db.textures.contains_key("test.png"));
+        ctx.destroy();
     }
 
     #[test]
@@ -559,8 +592,14 @@ mod tests {
         .unwrap();
 
         let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let canvas = CanvasBuilder::new()
+            .extent([1, 1])
+            .color_attachment("color", Format::RGBA8)
+            .build(&mut ctx)
+            .unwrap();
+        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
         let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
-        assert!(db.fetch_material("mat").is_ok());
+        assert!(db.fetch_material(&mut renderer, "mat").is_ok());
         ctx.destroy();
     }
 
