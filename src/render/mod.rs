@@ -175,7 +175,7 @@ impl RenderEngine {
             database_path: Some(format!("{}/database", info.application_path)),
         };
 
-        let backend = match info.backend {
+        let mut backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
                 Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent))
@@ -199,20 +199,6 @@ impl RenderEngine {
             )
         };
 
-        let display = if info.headless {
-            None
-        } else {
-            Some(
-                ctx.make_display(&Default::default())
-                    .map_err(|_| RenderError::DisplayCreation)?,
-            )
-        };
-
-        let event_loop = if info.headless {
-            None
-        } else {
-            Some(winit::event_loop::EventLoop::new())
-        };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
         //            &mut ctx,
@@ -222,6 +208,18 @@ impl RenderEngine {
         //        ));
 
         let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
+
+        match &mut backend {
+            Backend::Canvas(r) => r.init(&mut ctx)?,
+            Backend::Graph(r) => r.init(&mut ctx)?,
+        }
+
+        let display = match &mut backend {
+            Backend::Canvas(r) => r.take_display(),
+            Backend::Graph(r) => r.take_display(),
+        };
+
+        let event_loop = None;
 
         //        let global_camera = scene.register_camera(&CameraInfo {
         //            pass: "ALL",
@@ -300,10 +298,9 @@ impl RenderEngine {
     fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_mut_ref(handle) {
-                let display = self.display.as_mut();
                 let res = match &mut self.backend {
-                    Backend::Canvas(r) => r.register_mesh(ctx, display, obj),
-                    Backend::Graph(r) => r.register_mesh(ctx, display, obj),
+                    Backend::Canvas(r) => r.register_mesh(ctx, obj),
+                    Backend::Graph(r) => r.register_mesh(ctx, obj),
                 };
                 if let Ok(idx) = res {
                     obj.renderer_handle = Some(idx);
@@ -313,7 +310,6 @@ impl RenderEngine {
     }
 
     fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
-        println!("3");
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_ref(handle) {
                 if let Some(idx) = obj.renderer_handle {
@@ -605,7 +601,6 @@ impl RenderEngine {
             );
             return;
         }
-        println!("1");
         match self.mesh_objects.get_mut_ref(handle) {
             Some(obj) => {
                 obj.transform = *transform;
@@ -622,7 +617,6 @@ impl RenderEngine {
             }
         }
 
-        println!("2");
         // After transform update, refresh GPU mesh
         self.update_mesh_with_renderer(handle);
     }
@@ -673,15 +667,14 @@ impl RenderEngine {
         }
 
         if let Some(ctx) = self.ctx.as_mut() {
-            let display = self.display.as_mut();
             match &mut self.backend {
                 Backend::Canvas(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }
                 Backend::Graph(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }

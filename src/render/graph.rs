@@ -1,9 +1,9 @@
+use bytemuck::cast_slice;
+use dashi::{BufferInfo, BufferUsage, MemoryVisibility};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{render_graph::io, PipelineBuilder, RenderGraph};
-use dashi::{BufferInfo, BufferUsage, MemoryVisibility};
-use bytemuck::cast_slice;
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -18,6 +18,7 @@ use tracing::warn;
 pub struct GraphRenderer {
     graph_json: Option<String>,
     renderer: Option<Renderer>,
+    display: Option<dashi::Display>,
     next_mesh: usize,
 }
 
@@ -34,16 +35,23 @@ impl GraphRenderer {
         } else {
             None
         };
-        Ok(Self { graph_json, renderer: None, next_mesh: 0 })
+        Ok(Self {
+            graph_json,
+            renderer: None,
+            display: None,
+            next_mesh: 0,
+        })
     }
 
-    fn init(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
+    pub fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
         if self.renderer.is_none() {
-            let (width, height) = if let Some(display) = display {
+            if self.display.is_none() {
+                if let Ok(d) = ctx.make_display(&Default::default()) {
+                    self.display = Some(d);
+                }
+            }
+
+            let (width, height) = if let Some(display) = self.display.as_ref() {
                 let p = display.winit_window().inner_size();
                 (p.width, p.height)
             } else {
@@ -90,13 +98,16 @@ impl GraphRenderer {
         Ok(())
     }
 
+    pub fn take_display(&mut self) -> Option<dashi::Display> {
+        self.display.take()
+    }
+
     pub fn register_mesh(
         &mut self,
         ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
         obj: &MeshObject,
     ) -> Result<usize, RenderError> {
-        self.init(ctx, display)?;
+        self.init(ctx)?;
 
         let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
@@ -141,7 +152,11 @@ impl GraphRenderer {
         let mesh = StaticMesh {
             material_id: "graph_pso".to_string(),
             vertices,
-            indices: if indices.is_empty() { None } else { Some(indices) },
+            indices: if indices.is_empty() {
+                None
+            } else {
+                Some(indices)
+            },
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
@@ -156,13 +171,8 @@ impl GraphRenderer {
         Ok(idx)
     }
 
-    pub fn update_mesh(
-        &mut self,
-        ctx: &mut dashi::Context,
-        idx: usize,
-        obj: &MeshObject,
-    ) {
-        if self.init(ctx, None).is_err() {
+    pub fn update_mesh(&mut self, ctx: &mut dashi::Context, idx: usize, obj: &MeshObject) {
+        if self.init(ctx).is_err() {
             return;
         }
 
@@ -182,12 +192,8 @@ impl GraphRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
-        self.init(ctx, display)?;
+    pub fn render(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
+        self.init(ctx)?;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.present_frame()?;
         }
