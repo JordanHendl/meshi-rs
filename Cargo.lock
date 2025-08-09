@@ -1039,7 +1039,7 @@ dependencies = [
 [[package]]
 name = "koji"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/koji?branch=main#9caeab7fda99266ce7897710bfa7e7766fd5bafd"
+source = "git+https://github.com/JordanHendl/koji?branch=main#22599e170104d332d7c244097d68838e1a152894"
 dependencies = [
  "bytemuck",
  "dashi",
