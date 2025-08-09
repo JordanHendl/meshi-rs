@@ -1,6 +1,11 @@
-use dashi::{utils::Pool, Attachment, DrawIndexed, Format, RenderPassBegin, SubmitInfo};
+use dashi::{utils::Pool, Attachment, DrawBegin, DrawIndexed, Format, SubmitInfo};
 use image::{Rgba, RgbaImage};
-use koji::{render_graph::io, Canvas, CanvasBuilder, RenderGraph};
+use inline_spirv::inline_spirv;
+use koji::renderer::Renderer;
+use koji::{
+    material::PSO, render_graph::io, Canvas, CanvasBuilder, PipelineBuilder, RenderGraph,
+    RenderPassBuilder,
+};
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -14,6 +19,8 @@ use tracing::warn;
 pub struct GraphRenderer {
     graph: Option<RenderGraph>,
     canvas: Option<Canvas>,
+    renderer: Option<Renderer>,
+    pipeline: Option<PSO>,
 }
 
 impl GraphRenderer {
@@ -33,6 +40,8 @@ impl GraphRenderer {
         Ok(Self {
             graph,
             canvas: None,
+            renderer: None,
+            pipeline: None,
         })
     }
 
@@ -43,9 +52,45 @@ impl GraphRenderer {
         mesh_objects: &Pool<MeshObject>,
     ) -> Result<(), RenderError> {
         if self.canvas.is_none() {
+            let p = display.winit_window().inner_size();
+            let (width, height) = (p.width, p.height);
+
+            let renderer = Renderer::with_render_pass(
+                width,
+                height,
+                ctx,
+                RenderPassBuilder::new()
+                    .color_attachment("color", Format::RGBA8)
+                    .subpass("main", ["color"], &[] as &[&str]),
+            )?;
+
             let canvas = CanvasBuilder::new()
+                .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
+
+            let vert = inline_spirv!(
+                r#"#version 450
+                layout(location=0) in vec4 position;
+                void main() { gl_Position = position; }
+                "#,
+                vert
+            );
+            let frag = inline_spirv!(
+                r#"#version 450
+                layout(location=0) out vec4 color;
+                void main() { color = vec4(1.0,1.0,1.0,1.0); }
+                "#,
+                frag
+            );
+            let pso = PipelineBuilder::new(ctx, "graph_pso")
+                .vertex_shader(vert)
+                .fragment_shader(frag)
+                .render_pass((canvas.render_pass(), 0))
+                .build();
+
+            self.pipeline = Some(pso);
+            self.renderer = Some(renderer);
             self.canvas = Some(canvas);
         }
 
@@ -67,11 +112,13 @@ impl GraphRenderer {
         let mut cmd = ctx.begin_command_list(&Default::default())?;
 
         let result: Result<(), RenderError> = (|| {
-            cmd.begin_render_pass(&RenderPassBegin {
-                render_pass: canvas.render_pass(),
+            let pso = self.pipeline.as_ref().unwrap();
+            let draw_begin = DrawBegin {
                 viewport: Default::default(),
+                pipeline: pso.pipeline,
                 attachments: &attachments,
-            })?;
+            };
+            cmd.begin_drawing(&draw_begin)?;
 
             mesh_objects.for_each_occupied(|obj| {
                 cmd.draw_indexed(DrawIndexed {
