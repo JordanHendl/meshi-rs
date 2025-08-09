@@ -1,25 +1,21 @@
 use super::RenderError;
 use crate::object::MeshObject;
-use dashi::{utils::Pool, Attachment, DrawBegin, DrawIndexed, Format, SubmitInfo};
+use dashi::{utils::Pool, Format};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
-use koji::renderer::Renderer;
-use koji::{material::PSO, Canvas, CanvasBuilder, PipelineBuilder, RenderPassBuilder};
+use koji::renderer::{Renderer, StaticMesh};
+use koji::{CanvasBuilder, PipelineBuilder};
 
 pub struct CanvasRenderer {
-    canvas: Option<Canvas>,
     extent: Option<[u32; 2]>,
     renderer: Option<Renderer>,
-    pipeline: Option<PSO>,
 }
 
 impl CanvasRenderer {
     pub fn new(extent: Option<[u32; 2]>) -> Self {
         Self {
-            canvas: None,
             extent,
             renderer: None,
-            pipeline: None,
         }
     }
 
@@ -29,7 +25,7 @@ impl CanvasRenderer {
         display: &mut dashi::Display,
         mesh_objects: &Pool<MeshObject>,
     ) -> Result<(), RenderError> {
-        if self.canvas.is_none() {
+        if self.renderer.is_none() {
             let [width, height] = if let Some(extent) = self.extent {
                 extent
             } else {
@@ -37,20 +33,12 @@ impl CanvasRenderer {
                 [p.width, p.height]
             };
 
-            // Create renderer and simple pipeline
-            let renderer = Renderer::with_render_pass(
-                width,
-                height,
-                ctx,
-                RenderPassBuilder::new()
-                    .color_attachment("color", Format::RGBA8)
-                    .subpass("main", ["color"], &[] as &[&str]),
-            )?;
-
             let canvas = CanvasBuilder::new()
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
+
+            let mut renderer = Renderer::with_canvas(width, height, ctx, canvas.clone())?;
 
             let vert = inline_spirv!(
                 r#"#version 450
@@ -71,61 +59,60 @@ impl CanvasRenderer {
                 .vertex_shader(vert)
                 .fragment_shader(frag)
                 .render_pass((canvas.render_pass(), 0))
-                .build();
+                .build_with_resources(renderer.resources())
+                .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
 
-            self.pipeline = Some(pso);
-            self.renderer = Some(renderer);
-            self.canvas = Some(canvas);
-        }
+            renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
 
-        let canvas = self.canvas.as_mut().unwrap();
-
-        let (img, acquire_sem, _idx, _sub_opt) = ctx.acquire_new_image(display)?;
-        canvas.target_mut().colors[0].attachment.img = img;
-
-        let target = canvas.target();
-        let mut attachments: Vec<Attachment> = target.colors.iter().map(|c| c.attachment).collect();
-        if let Some(depth) = &target.depth {
-            attachments.push(depth.attachment);
-        }
-
-        let mut cmd = ctx.begin_command_list(&Default::default())?;
-
-        let result: Result<(), RenderError> = (|| {
-            let pso = self.pipeline.as_ref().unwrap();
-            let draw_begin = DrawBegin {
-                viewport: Default::default(),
-                pipeline: pso.pipeline,
-                attachments: &attachments,
-            };
-            cmd.begin_drawing(&draw_begin)?;
+            #[repr(C)]
+            #[derive(Clone, Copy)]
+            struct MeshVertex {
+                position: [f32; 4],
+                normal: [f32; 4],
+                tex_coords: [f32; 2],
+                joint_ids: [i32; 4],
+                joints: [f32; 4],
+                color: [f32; 4],
+            }
 
             mesh_objects.for_each_occupied(|obj| {
-                cmd.draw_indexed(DrawIndexed {
-                    vertices: obj.mesh.vertices,
-                    indices: obj.mesh.indices,
-                    index_count: obj.mesh.num_indices as u32,
-                    ..Default::default()
-                });
+                let raw_vertices: &[MeshVertex] =
+                    ctx.map_buffer(obj.mesh.vertices).expect("map vertices");
+                let vertices: Vec<koji::renderer::Vertex> = raw_vertices[..obj.mesh.num_vertices]
+                    .iter()
+                    .map(|v| koji::renderer::Vertex {
+                        position: [v.position[0], v.position[1], v.position[2]],
+                        normal: [v.normal[0], v.normal[1], v.normal[2]],
+                        tangent: [0.0, 0.0, 0.0, 0.0],
+                        uv: [v.tex_coords[0], v.tex_coords[1]],
+                        color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+                    })
+                    .collect();
+                ctx.unmap_buffer(obj.mesh.vertices).expect("unmap vertices");
+
+                let raw_indices: &[u32] = ctx.map_buffer(obj.mesh.indices).expect("map indices");
+                let indices = raw_indices[..obj.mesh.num_indices].to_vec();
+                ctx.unmap_buffer(obj.mesh.indices).expect("unmap indices");
+
+                let mesh = StaticMesh {
+                    material_id: String::new(),
+                    vertices,
+                    indices: Some(indices),
+                    vertex_buffer: None,
+                    index_buffer: None,
+                    index_count: 0,
+                };
+                renderer.register_static_mesh(mesh, None, "color".into());
             });
 
-            cmd.end_drawing()?;
+            self.renderer = Some(renderer);
+        }
 
-            let fence = ctx.submit(
-                &mut cmd,
-                &SubmitInfo {
-                    wait_sems: &[acquire_sem],
-                    signal_sems: &[],
-                },
-            )?;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.present_frame()?;
+        }
 
-            ctx.wait(fence)?;
-            ctx.present_display(display, &[])?;
-            Ok(())
-        })();
-
-        ctx.destroy_cmd_list(cmd);
-        result
+        Ok(())
     }
 
     pub fn render_to_image(
