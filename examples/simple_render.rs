@@ -17,6 +17,7 @@ fn main() {
         scene_info: None,
         headless: false,
         backend,
+        canvas_extent: None,
     })
     .expect("failed to initialize renderer");
 

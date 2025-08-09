@@ -1,17 +1,26 @@
-use dashi::{utils::Pool, Attachment, DrawIndexed, Format, RenderPassBegin, SubmitInfo};
-use image::{Rgba, RgbaImage};
-use koji::{Canvas, CanvasBuilder};
-
 use super::RenderError;
 use crate::object::MeshObject;
+use dashi::{utils::Pool, Attachment, DrawBegin, DrawIndexed, Format, SubmitInfo};
+use image::{Rgba, RgbaImage};
+use inline_spirv::inline_spirv;
+use koji::renderer::Renderer;
+use koji::{material::PSO, Canvas, CanvasBuilder, PipelineBuilder, RenderPassBuilder};
 
 pub struct CanvasRenderer {
     canvas: Option<Canvas>,
+    extent: Option<[u32; 2]>,
+    renderer: Option<Renderer>,
+    pipeline: Option<PSO>,
 }
 
 impl CanvasRenderer {
-    pub fn new() -> Self {
-        Self { canvas: None }
+    pub fn new(extent: Option<[u32; 2]>) -> Self {
+        Self {
+            canvas: None,
+            extent,
+            renderer: None,
+            pipeline: None,
+        }
     }
 
     pub fn render(
@@ -21,9 +30,51 @@ impl CanvasRenderer {
         mesh_objects: &Pool<MeshObject>,
     ) -> Result<(), RenderError> {
         if self.canvas.is_none() {
+            let [width, height] = if let Some(extent) = self.extent {
+                extent
+            } else {
+                let p = display.winit_window().inner_size();
+                [p.width, p.height]
+            };
+
+            // Create renderer and simple pipeline
+            let renderer = Renderer::with_render_pass(
+                width,
+                height,
+                ctx,
+                RenderPassBuilder::new()
+                    .color_attachment("color", Format::RGBA8)
+                    .subpass("main", ["color"], &[] as &[&str]),
+            )?;
+
             let canvas = CanvasBuilder::new()
+                .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
+
+            let vert = inline_spirv!(
+                r#"#version 450
+                layout(location=0) in vec4 position;
+                void main() { gl_Position = position; }
+                "#,
+                vert
+            );
+            let frag = inline_spirv!(
+                r#"#version 450
+                layout(location=0) out vec4 color;
+                void main() { color = vec4(1.0,1.0,1.0,1.0); }
+                "#,
+                frag
+            );
+
+            let pso = PipelineBuilder::new(ctx, "canvas_pso")
+                .vertex_shader(vert)
+                .fragment_shader(frag)
+                .render_pass((canvas.render_pass(), 0))
+                .build();
+
+            self.pipeline = Some(pso);
+            self.renderer = Some(renderer);
             self.canvas = Some(canvas);
         }
 
@@ -41,11 +92,13 @@ impl CanvasRenderer {
         let mut cmd = ctx.begin_command_list(&Default::default())?;
 
         let result: Result<(), RenderError> = (|| {
-            cmd.begin_render_pass(&RenderPassBegin {
-                render_pass: canvas.render_pass(),
+            let pso = self.pipeline.as_ref().unwrap();
+            let draw_begin = DrawBegin {
                 viewport: Default::default(),
+                pipeline: pso.pipeline,
                 attachments: &attachments,
-            })?;
+            };
+            cmd.begin_drawing(&draw_begin)?;
 
             mesh_objects.for_each_occupied(|obj| {
                 cmd.draw_indexed(DrawIndexed {
@@ -56,7 +109,6 @@ impl CanvasRenderer {
                 });
             });
 
-            // ensure render pass closed
             cmd.end_drawing()?;
 
             let fence = ctx.submit(

@@ -13,6 +13,7 @@ fn set_transform_with_invalid_handle_does_nothing() {
         application_location: loc.as_ptr(),
         headless: 1,
         render_backend: RenderBackend::Canvas,
+        canvas_extent: std::ptr::null(),
     };
     let engine = unsafe { meshi_make_engine(&info) };
     assert!(!engine.is_null());

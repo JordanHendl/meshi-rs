@@ -50,6 +50,7 @@ fn main() {
         scene_info: None,
         headless: true,
         backend: RenderBackend::Canvas,
+        canvas_extent: None,
     })
     .expect("failed to initialize renderer");
 

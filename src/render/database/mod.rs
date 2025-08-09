@@ -10,6 +10,8 @@ pub mod images;
 use images::*;
 pub mod geometry;
 use geometry::*;
+pub mod material;
+use material::*;
 pub mod font;
 pub mod geometry_primitives;
 pub use font::*;
@@ -30,6 +32,8 @@ pub struct Database {
     /// Map of texture names to optionally loaded handles. If a handle is
     /// `None` the texture has been registered but not yet loaded.
     textures: HashMap<String, Option<Handle<koji::Texture>>>,
+    /// Map of material names to optionally loaded handles.
+    materials: HashMap<String, MaterialResource>,
     _fonts: HashMap<String, TTFont>,
 }
 
@@ -54,6 +58,19 @@ impl Database {
         textures.insert("DEFAULT".to_string(), Some(Handle::default()));
         info!("Registered texture asset: DEFAULT");
 
+        let mut materials = HashMap::new();
+        materials.insert(
+            "DEFAULT".to_string(),
+            MaterialResource {
+                cfg: json::MaterialEntry {
+                    name: "DEFAULT".to_string(),
+                    ..Default::default()
+                },
+                loaded: Some(Handle::default()),
+            },
+        );
+        info!("Registered material asset: DEFAULT");
+
         if let Some(images_file) = info.images {
             let images_path = format!("{}/{}", base_path, images_file);
             let images_json = fs::read_to_string(&images_path)?;
@@ -68,6 +85,22 @@ impl Database {
                 })?;
                 info!("Registered image asset: {}", img.name);
                 textures.insert(img.name, None);
+            }
+        }
+
+        if let Some(mat_file) = info.materials {
+            let mat_path = format!("{}/{}", base_path, mat_file);
+            let mat_json = fs::read_to_string(&mat_path)?;
+            let mat_cfg: json::Materials = serde_json::from_str(&mat_json)?;
+            for mat in mat_cfg.materials {
+                info!("Registered material asset: {}", mat.name);
+                materials.insert(
+                    mat.name.clone(),
+                    MaterialResource {
+                        cfg: mat,
+                        loaded: None,
+                    },
+                );
             }
         }
 
@@ -119,6 +152,7 @@ impl Database {
             geometry,
             textures,
             ctx,
+            materials,
             _fonts: fonts,
         })
     }
@@ -352,7 +386,29 @@ impl Database {
         }
     }
     pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
-        self.fetch_texture(name)
+        if let Some(handle) = self.materials.get(name).and_then(|m| m.loaded) {
+            return Ok(handle);
+        }
+
+        let tex_name = match self.materials.get(name) {
+            Some(mat) => mat.cfg.base_color.clone(),
+            None => {
+                return Err(Error::LookupError(LookupError {
+                    entry: name.to_string(),
+                }))
+            }
+        };
+
+        let handle = match tex_name {
+            Some(tex) => self.fetch_texture(&tex)?,
+            None => Handle::default(),
+        };
+
+        if let Some(mat) = self.materials.get_mut(name) {
+            mat.loaded = Some(handle);
+        }
+
+        Ok(handle)
     }
 
     /// Retrieve a mesh by name, optionally loading it on demand.
@@ -405,6 +461,7 @@ mod tests {
             geometry: HashMap::new(),
             ctx: std::ptr::null_mut(),
             textures: HashMap::new(),
+            materials: HashMap::new(),
             _fonts: HashMap::new(),
         }
     }
@@ -457,6 +514,38 @@ mod tests {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
         }
+    }
+
+    #[test]
+    fn fetch_material_success() {
+        let dir = tempdir().unwrap();
+
+        // Create an image that the material will reference.
+        let img_path = dir.path().join("mat.png");
+        let img = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]));
+        img.save(&img_path).unwrap();
+
+        // Write config files for images and materials.
+        std::fs::write(
+            dir.path().join("images.json"),
+            "{\"images\":[{\"name\":\"mat.png\",\"path\":\"mat.png\"}]}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("materials.json"),
+            "{\"materials\":[{\"name\":\"mat\",\"passes\":[],\"base_color\":\"mat.png\"}]}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("db.json"),
+            "{\"images\":\"images.json\",\"materials\":\"materials.json\"}",
+        )
+        .unwrap();
+
+        let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
+        let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
+        assert!(db.fetch_material("mat").is_ok());
+        ctx.destroy();
     }
 
     #[test]
@@ -558,13 +647,18 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
+            dir.path().join("materials.json"),
+            "{\"materials\":[{\"name\":\"mat\",\"passes\":[],\"base_color\":\"img\"}]}",
+        )
+        .unwrap();
+        std::fs::write(
             dir.path().join("ttf.json"),
             "{\"fonts\":[{\"name\":\"font\",\"path\":\"font.ttf\",\"size\":16.0}]}",
         )
         .unwrap();
         std::fs::write(
             dir.path().join("db.json"),
-            "{\"images\":\"images.json\",\"geometry\":\"geometry.json\",\"ttf\":\"ttf.json\"}",
+            "{\"images\":\"images.json\",\"geometry\":\"geometry.json\",\"materials\":\"materials.json\",\"ttf\":\"ttf.json\"}",
         )
         .unwrap();
 
@@ -572,6 +666,7 @@ mod tests {
         let db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
         assert!(db.textures.contains_key("img"));
         assert!(db.geometry.contains_key("model"));
+        assert!(db.materials.contains_key("mat"));
         assert!(db._fonts.contains_key("font"));
         drop(db);
         ctx.destroy();

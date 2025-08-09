@@ -88,3 +88,20 @@ primitive inside a glTF file. Use `file.gltf#mesh_name` or
 primitive index. When no selector is provided the database loads the first
 primitive of the first mesh.
 
+Materials are registered through a `materials.json` file referenced by
+`db.json`. Each material entry assigns a name and optional texture slots,
+allowing scenes to reference shared material definitions by name. For
+example:
+
+```json
+{
+  "materials": [
+    { "name": "mat", "passes": [], "base_color": "img" }
+  ]
+}
+```
+
+Calling `fetch_material("mat")` loads the referenced texture on demand and
+returns a handle. A `DEFAULT` material is always available and is used when a
+requested material is missing.
+
