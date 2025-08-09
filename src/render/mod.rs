@@ -131,6 +131,7 @@ pub struct RenderEngineInfo<'a> {
     pub scene_info: Option<SceneInfo<'a>>,
     pub headless: bool,
     pub backend: RenderBackend,
+    pub canvas_extent: Option<[u32; 2]>,
 }
 
 struct EventCallbackInfo {
@@ -177,7 +178,7 @@ impl RenderEngine {
         let backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
-                Backend::Canvas(canvas::CanvasRenderer::new())
+                Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent))
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");

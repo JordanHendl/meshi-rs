@@ -17,6 +17,7 @@ fn render_triangle(backend: RenderBackend) -> RgbaImage {
         scene_info: None,
         headless: true,
         backend,
+        canvas_extent: None,
     })
     .expect("renderer init");
 
