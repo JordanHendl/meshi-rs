@@ -1,7 +1,8 @@
 use super::RenderError;
 use crate::object::MeshObject;
 use crate::render::database::Vertex as MeshVertex;
-use dashi::Format;
+use dashi::{BufferInfo, BufferUsage, Format, MemoryVisibility};
+use bytemuck::cast_slice;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
@@ -95,12 +96,39 @@ impl CanvasRenderer {
             })
             .collect();
 
-        let indices = obj.mesh.indices[..obj.mesh.num_indices].to_vec();
+        let vertex_bytes = cast_slice(&vertices);
+        let _vertex_buffer = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "mesh_vertex_buffer",
+                byte_size: vertex_bytes.len() as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::VERTEX,
+                initial_data: Some(vertex_bytes),
+            })
+            .map_err(RenderError::Gpu)?;
 
+        let indices = obj.mesh.indices[..obj.mesh.num_indices].to_vec();
+        let _index_buffer = if !indices.is_empty() {
+            let index_bytes = cast_slice(&indices);
+            Some(
+                ctx.make_buffer(&BufferInfo {
+                    debug_name: "mesh_index_buffer",
+                    byte_size: index_bytes.len() as u32,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::INDEX,
+                    initial_data: Some(index_bytes),
+                })
+                .map_err(RenderError::Gpu)?,
+            )
+        } else {
+            None
+        };
+
+        // Register mesh with Koji renderer using CPU data (Koji handles upload).
         let mesh = StaticMesh {
             material_id: String::new(),
             vertices,
-            indices: Some(indices),
+            indices: if indices.is_empty() { None } else { Some(indices) },
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
