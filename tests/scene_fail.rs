@@ -14,6 +14,7 @@ fn records_missing_resources() {
         scene_info: None,
         headless: true,
         backend: RenderBackend::Canvas,
+        canvas_extent: None,
     })
     .unwrap();
 
