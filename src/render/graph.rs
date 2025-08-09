@@ -1,11 +1,8 @@
-use dashi::{utils::Pool, Attachment, DrawBegin, DrawIndexed, Format, SubmitInfo};
+use dashi::utils::Pool;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
-use koji::renderer::Renderer;
-use koji::{
-    material::PSO, render_graph::io, Canvas, CanvasBuilder, PipelineBuilder, RenderGraph,
-    RenderPassBuilder,
-};
+use koji::renderer::{Renderer, StaticMesh, Vertex};
+use koji::{render_graph::io, PipelineBuilder, RenderGraph};
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -14,35 +11,28 @@ use tracing::warn;
 /// A renderer that executes a frame graph described by `koji`.
 ///
 /// The graph description is loaded from a JSON file (typically `koji.json`).
-/// A simple canvas is created for drawing `MeshObject`s. The parsed graph is
-/// executed each frame before issuing draw calls.
+/// A simple pipeline is registered for drawing `MeshObject`s. The renderer
+/// handles graph execution when presenting frames.
 pub struct GraphRenderer {
-    graph: Option<RenderGraph>,
-    canvas: Option<Canvas>,
+    graph_json: Option<String>,
     renderer: Option<Renderer>,
-    pipeline: Option<PSO>,
+    meshes_registered: bool,
 }
 
 impl GraphRenderer {
     pub fn new(scene_cfg_path: Option<String>) -> Result<Self, RenderError> {
-        let graph = if let Some(path) = scene_cfg_path {
-            let data = std::fs::read_to_string(&path).map_err(|e| {
-                warn!("failed to read scene config {path}: {e}");
-                RenderError::GraphConfig(e)
-            })?;
-            Some(io::from_json(&data).map_err(|e| {
-                warn!("failed to parse scene config {path}: {e}");
-                RenderError::GraphParse(e)
-            })?)
+        let graph_json = if let Some(path) = scene_cfg_path {
+            match std::fs::read_to_string(&path) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    warn!("failed to read scene config {path}: {e}");
+                    return Err(RenderError::GraphConfig(e));
+                }
+            }
         } else {
             None
         };
-        Ok(Self {
-            graph,
-            canvas: None,
-            renderer: None,
-            pipeline: None,
-        })
+        Ok(Self { graph_json, renderer: None, meshes_registered: false })
     }
 
     pub fn render(
@@ -51,23 +41,17 @@ impl GraphRenderer {
         display: &mut dashi::Display,
         mesh_objects: &Pool<MeshObject>,
     ) -> Result<(), RenderError> {
-        if self.canvas.is_none() {
+        if self.renderer.is_none() {
             let p = display.winit_window().inner_size();
             let (width, height) = (p.width, p.height);
 
-            let renderer = Renderer::with_render_pass(
-                width,
-                height,
-                ctx,
-                RenderPassBuilder::new()
-                    .color_attachment("color", Format::RGBA8)
-                    .subpass("main", ["color"], &[] as &[&str]),
-            )?;
+            let graph = if let Some(json) = &self.graph_json {
+                io::from_json(json).map_err(RenderError::GraphParse)?
+            } else {
+                RenderGraph::new()
+            };
 
-            let canvas = CanvasBuilder::new()
-                .extent([width, height])
-                .color_attachment("color", Format::RGBA8)
-                .build(ctx)?;
+            let mut renderer = Renderer::with_graph(width, height, ctx, graph)?;
 
             let vert = inline_spirv!(
                 r#"#version 450
@@ -83,69 +67,58 @@ impl GraphRenderer {
                 "#,
                 frag
             );
-            let pso = PipelineBuilder::new(ctx, "graph_pso")
+            let mut pso = PipelineBuilder::new(ctx, "graph_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
-                .render_pass((canvas.render_pass(), 0))
+                .render_pass(renderer.graph().output("swapchain"))
                 .build();
-
-            self.pipeline = Some(pso);
+            let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
+            renderer.register_material_pipeline("graph_pso", pso, bgr);
             self.renderer = Some(renderer);
-            self.canvas = Some(canvas);
+            self.graph_json = None;
         }
 
-        let canvas = self.canvas.as_mut().unwrap();
+        let renderer = self.renderer.as_mut().unwrap();
 
-        if let Some(graph) = &mut self.graph {
-            graph.execute(ctx)?;
-        }
-
-        let (img, acquire_sem, _idx, _sub_opt) = ctx.acquire_new_image(display)?;
-        canvas.target_mut().colors[0].attachment.img = img;
-
-        let target = canvas.target();
-        let mut attachments: Vec<Attachment> = target.colors.iter().map(|c| c.attachment).collect();
-        if let Some(depth) = &target.depth {
-            attachments.push(depth.attachment);
-        }
-
-        let mut cmd = ctx.begin_command_list(&Default::default())?;
-
-        let result: Result<(), RenderError> = (|| {
-            let pso = self.pipeline.as_ref().unwrap();
-            let draw_begin = DrawBegin {
-                viewport: Default::default(),
-                pipeline: pso.pipeline,
-                attachments: &attachments,
-            };
-            cmd.begin_drawing(&draw_begin)?;
-
-            mesh_objects.for_each_occupied(|obj| {
-                cmd.draw_indexed(DrawIndexed {
-                    vertices: obj.mesh.vertices,
-                    indices: obj.mesh.indices,
-                    index_count: obj.mesh.num_indices as u32,
-                    ..Default::default()
-                });
+        if !self.meshes_registered {
+            mesh_objects.for_each_occupied(|_obj| {
+                let mesh = StaticMesh {
+                    material_id: "graph_pso".to_string(),
+                    vertices: vec![
+                        Vertex {
+                            position: [-0.5, -0.5, 0.0],
+                            normal: [0.0, 0.0, 1.0],
+                            tangent: [1.0, 0.0, 0.0, 1.0],
+                            uv: [0.0, 0.0],
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        },
+                        Vertex {
+                            position: [0.5, -0.5, 0.0],
+                            normal: [0.0, 0.0, 1.0],
+                            tangent: [1.0, 0.0, 0.0, 1.0],
+                            uv: [1.0, 0.0],
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        },
+                        Vertex {
+                            position: [0.0, 0.5, 0.0],
+                            normal: [0.0, 0.0, 1.0],
+                            tangent: [1.0, 0.0, 0.0, 1.0],
+                            uv: [0.5, 1.0],
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        },
+                    ],
+                    indices: None,
+                    vertex_buffer: None,
+                    index_buffer: None,
+                    index_count: 0,
+                };
+                renderer.register_static_mesh(mesh, None, "graph_pso".into());
             });
+            self.meshes_registered = true;
+        }
 
-            cmd.end_drawing()?;
-
-            let fence = ctx.submit(
-                &mut cmd,
-                &SubmitInfo {
-                    wait_sems: &[acquire_sem],
-                    signal_sems: &[],
-                },
-            )?;
-
-            ctx.wait(fence)?;
-            ctx.present_display(display, &[])?;
-            Ok(())
-        })();
-
-        ctx.destroy_cmd_list(cmd);
-        result
+        renderer.present_frame()?;
+        Ok(())
     }
 
     pub fn render_to_image(
