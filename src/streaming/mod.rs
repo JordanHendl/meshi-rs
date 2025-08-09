@@ -34,8 +34,14 @@ impl Region {
         let mut mesh_cstrings = Vec::with_capacity(objects.len());
         let mut material_cstrings = Vec::with_capacity(objects.len());
         for obj in &objects {
-            mesh_cstrings.push(CString::new(obj.mesh).unwrap());
-            material_cstrings.push(CString::new(obj.material).unwrap());
+            mesh_cstrings.push(CString::new(obj.mesh).unwrap_or_else(|e| {
+                warn!("invalid mesh name '{}': {}", obj.mesh, e);
+                CString::default()
+            }));
+            material_cstrings.push(CString::new(obj.material).unwrap_or_else(|e| {
+                warn!("invalid material name '{}': {}", obj.material, e);
+                CString::default()
+            }));
         }
         Self {
             bounds,
