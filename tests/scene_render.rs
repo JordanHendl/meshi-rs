@@ -39,8 +39,9 @@ fn run_backend(backend: RenderBackend) {
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: base.to_str().unwrap().into(),
         scene_info: None,
-        headless: true,
+       headless: true,
         backend,
+        canvas_extent: None,
     })
     .expect("renderer init");
 
