@@ -286,7 +286,7 @@ impl RenderEngine {
         info: &FFIMeshObjectInfo,
     ) -> Result<Handle<MeshObject>, MeshObjectError> {
         let info = MeshObjectInfo::try_from(info)?;
-        let object = info.make_object(&mut self.database)?;
+        let object = info.make_object(&mut self.database);
         Ok(self.mesh_objects.insert(object).unwrap())
     }
 
@@ -300,31 +300,7 @@ impl RenderEngine {
             material: "MESHI_CUBE",
             transform: Mat4::IDENTITY,
         };
-        let object = match info.make_object(&mut self.database) {
-            Ok(obj) => obj,
-            Err(e) => {
-                warn!(
-                    "failed to create mesh object '{}': {}; falling back to default material",
-                    info.mesh, e
-                );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh, true)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
-                MeshObject {
-                    targets: vec![MeshTarget {
-                        mesh: mesh.clone(),
-                        material,
-                    }],
-                    mesh,
-                    transform: info.transform,
-                }
-            }
-        };
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -356,31 +332,7 @@ impl RenderEngine {
             material: "MESHI_SPHERE",
             transform: Mat4::IDENTITY,
         };
-        let object = match info.make_object(&mut self.database) {
-            Ok(obj) => obj,
-            Err(e) => {
-                warn!(
-                    "failed to create mesh object '{}': {}; falling back to default material",
-                    info.mesh, e
-                );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh, true)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
-                MeshObject {
-                    targets: vec![MeshTarget {
-                        mesh: mesh.clone(),
-                        material,
-                    }],
-                    mesh,
-                    transform: info.transform,
-                }
-            }
-        };
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -412,9 +364,7 @@ impl RenderEngine {
             material: "MESHI_CYLINDER",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -446,9 +396,7 @@ impl RenderEngine {
             material: "MESHI_PLANE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -480,9 +428,7 @@ impl RenderEngine {
             material: "MESHI_CONE",
             transform: Mat4::IDENTITY,
         };
-        let object = info
-            .make_object(&mut self.database)
-            .expect("failed to create mesh object");
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 
@@ -514,31 +460,7 @@ impl RenderEngine {
             material: "MESHI_TRIANGLE",
             transform: Mat4::IDENTITY,
         };
-        let object = match info.make_object(&mut self.database) {
-            Ok(obj) => obj,
-            Err(e) => {
-                warn!(
-                    "failed to create mesh object '{}': {}; falling back to default material",
-                    info.mesh, e
-                );
-                let mesh = self
-                    .database
-                    .fetch_mesh(info.mesh, true)
-                    .expect("failed to fetch mesh");
-                let material = self
-                    .database
-                    .fetch_material("DEFAULT")
-                    .expect("failed to fetch default material");
-                MeshObject {
-                    targets: vec![MeshTarget {
-                        mesh: mesh.clone(),
-                        material,
-                    }],
-                    mesh,
-                    transform: info.transform,
-                }
-            }
-        };
+        let object = info.make_object(&mut self.database);
         self.mesh_objects.insert(object).unwrap()
     }
 

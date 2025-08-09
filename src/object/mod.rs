@@ -1,4 +1,4 @@
-use crate::render::database::{self, Database, MeshResource};
+use crate::render::database::{Database, MeshResource};
 use dashi::utils::Handle;
 use glam::Mat4;
 use tracing::{info, warn};
@@ -22,14 +22,12 @@ pub struct MeshObjectInfo {
 #[derive(Debug)]
 pub enum Error {
     InvalidString,
-    Database(database::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidString => write!(f, "invalid string pointer"),
-            Error::Database(err) => err.fmt(f),
         }
     }
 }
@@ -37,15 +35,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Database(err) => Some(err),
             _ => None,
         }
-    }
-}
-
-impl From<database::Error> for Error {
-    fn from(value: database::Error) -> Self {
-        Error::Database(value)
     }
 }
 
@@ -81,13 +72,26 @@ impl TryFrom<&FFIMeshObjectInfo> for MeshObjectInfo {
 }
 
 impl MeshObjectInfo {
-    pub fn make_object(&self, db: &mut Database) -> Result<MeshObject, Error> {
+    pub fn make_object(&self, db: &mut Database) -> MeshObject {
         info!(
             "Registering Mesh Renderable {} with material {}",
             self.mesh, self.material
         );
 
-        let mesh = db.fetch_mesh(self.mesh, true)?;
+        let mesh = match db.fetch_mesh(self.mesh, true) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch mesh '{}': {}; falling back to default",
+                    self.mesh, e
+                );
+                db.fetch_mesh("MESHI_CUBE", true).unwrap_or_else(|e| {
+                    warn!("Failed to fetch default mesh: {}; using placeholder", e);
+                    MeshResource::default()
+                })
+            }
+        };
+
         let material = match db.fetch_material(self.material) {
             Ok(mat) => mat,
             Err(e) => {
@@ -95,7 +99,10 @@ impl MeshObjectInfo {
                     "Failed to fetch material '{}': {}; falling back to default",
                     self.material, e
                 );
-                db.fetch_material("DEFAULT")?
+                db.fetch_material("DEFAULT").unwrap_or_else(|e| {
+                    warn!("Failed to fetch default material: {}; using placeholder", e);
+                    Handle::default()
+                })
             }
         };
 
@@ -104,11 +111,11 @@ impl MeshObjectInfo {
             material,
         }];
 
-        Ok(MeshObject {
+        MeshObject {
             targets,
             mesh,
             transform: self.transform,
-        })
+        }
     }
 }
 
@@ -145,7 +152,7 @@ mod tests {
             transform: Mat4::IDENTITY,
         };
 
-        let obj = info.make_object(&mut db).unwrap();
+        let obj = info.make_object(&mut db);
         assert_eq!(obj.targets.len(), 1);
         assert_eq!(obj.targets[0].material, Handle::default());
         ctx.destroy();
