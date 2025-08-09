@@ -362,6 +362,13 @@ pub extern "C" fn meshi_gfx_set_renderable_transform(
     if render.is_null() || transform.is_null() {
         return;
     }
+    if !h.valid() {
+        info!(
+            "Attempted to set transform for invalid mesh object handle (slot: {}, generation: {})",
+            h.slot, h.generation
+        );
+        return;
+    }
     unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
 }
 
