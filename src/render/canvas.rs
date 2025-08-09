@@ -1,8 +1,8 @@
 use super::RenderError;
 use crate::object::MeshObject;
 use crate::render::database::Vertex as MeshVertex;
-use dashi::{BufferInfo, BufferUsage, Format, MemoryVisibility};
 use bytemuck::cast_slice;
+use dashi::{BufferInfo, BufferUsage, Format, MemoryVisibility};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
@@ -11,38 +11,42 @@ use koji::{CanvasBuilder, PipelineBuilder};
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
     renderer: Option<Renderer>,
+    display: Option<dashi::Display>,
     next_mesh: usize,
 }
 
 impl CanvasRenderer {
     pub fn new(extent: Option<[u32; 2]>) -> Self {
-        Self { extent, renderer: None, next_mesh: 0 }
+        Self {
+            extent,
+            renderer: None,
+            display: None,
+            next_mesh: 0,
+        }
     }
 
-    fn init(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
+    pub fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
         if self.renderer.is_none() {
+            if self.display.is_none() {
+                if let Ok(d) = ctx.make_display(&Default::default()) {
+                    self.display = Some(d);
+                }
+            }
+
             let [width, height] = if let Some(extent) = self.extent {
-                println!("wtf2? i{} {}", extent[0], extent[1]);
                 extent
-            } else if let Some(display) = display {
+            } else if let Some(display) = self.display.as_ref() {
                 let p = display.winit_window().inner_size();
-                    println!("wtf? {} {}", p.width, p.height);
                 [p.width, p.height]
             } else {
                 [1024, 1024]
             };
 
-            println!("a {} {}", width, height);
             let canvas = CanvasBuilder::new()
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
 
-            println!("b");
             let mut renderer = Renderer::with_canvas(width, height, ctx, canvas.clone())?;
 
             let vert = inline_spirv!(
@@ -60,7 +64,6 @@ impl CanvasRenderer {
                 frag
             );
 
-            println!("c");
             let pso = PipelineBuilder::new(ctx, "canvas_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
@@ -68,22 +71,37 @@ impl CanvasRenderer {
                 .build_with_resources(renderer.resources())
                 .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
 
-            println!("d");
             renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
 
             self.renderer = Some(renderer);
-            println!("e");
         }
         Ok(())
+    }
+
+    pub fn display(&mut self) -> Option<&mut dashi::Display> {
+        self.display.as_mut()
+    }
+
+    pub fn event_loop(&mut self) -> Option<&mut winit::event_loop::EventLoop<()>> {
+        self.display.as_mut().map(|d| d.winit_event_loop())
+    }
+
+    pub fn take_display(&mut self) -> Option<dashi::Display> {
+        self.display.take()
+    }
+
+    /// Release renderer resources prior to GPU context destruction.
+    pub fn destroy(&mut self) {
+        // Dropping the renderer frees GPU allocations it owns.
+        self.renderer.take();
     }
 
     pub fn register_mesh(
         &mut self,
         ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
         obj: &MeshObject,
     ) -> Result<usize, RenderError> {
-        self.init(ctx, display)?;
+        self.init(ctx)?;
 
         let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
@@ -128,7 +146,11 @@ impl CanvasRenderer {
         let mesh = StaticMesh {
             material_id: String::new(),
             vertices,
-            indices: if indices.is_empty() { None } else { Some(indices) },
+            indices: if indices.is_empty() {
+                None
+            } else {
+                Some(indices)
+            },
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
@@ -143,13 +165,8 @@ impl CanvasRenderer {
         Ok(idx)
     }
 
-    pub fn update_mesh(
-        &mut self,
-        ctx: &mut dashi::Context,
-        idx: usize,
-        obj: &MeshObject,
-    ) {
-        if self.init(ctx, None).is_err() {
+    pub fn update_mesh(&mut self, ctx: &mut dashi::Context, idx: usize, obj: &MeshObject) {
+        if self.init(ctx).is_err() {
             return;
         }
 
@@ -169,12 +186,8 @@ impl CanvasRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
-        self.init(ctx, display)?;
+    pub fn render(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
+        self.init(ctx)?;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.present_frame()?;
         }
