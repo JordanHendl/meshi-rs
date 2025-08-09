@@ -346,7 +346,7 @@ impl RenderEngine {
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
-                    .fetch_material("DEFAULT")
+                    .fetch_material("DEFAULT", None)
                     .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
@@ -372,7 +372,7 @@ impl RenderEngine {
         });
         let material = self
             .database
-            .fetch_material("DEFAULT")
+            .fetch_material("DEFAULT", None)
             .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
@@ -408,7 +408,7 @@ impl RenderEngine {
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
-                    .fetch_material("DEFAULT")
+                    .fetch_material("DEFAULT", None)
                     .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
@@ -434,7 +434,7 @@ impl RenderEngine {
         });
         let material = self
             .database
-            .fetch_material("DEFAULT")
+            .fetch_material("DEFAULT", None)
             .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
@@ -474,7 +474,7 @@ impl RenderEngine {
         });
         let material = self
             .database
-            .fetch_material("DEFAULT")
+            .fetch_material("DEFAULT", None)
             .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
@@ -514,7 +514,7 @@ impl RenderEngine {
         });
         let material = self
             .database
-            .fetch_material("DEFAULT")
+            .fetch_material("DEFAULT", None)
             .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
@@ -554,7 +554,7 @@ impl RenderEngine {
         });
         let material = self
             .database
-            .fetch_material("DEFAULT")
+            .fetch_material("DEFAULT", None)
             .expect("failed to fetch default material");
         let target = MeshTarget {
             mesh: mesh.clone(),
@@ -590,7 +590,7 @@ impl RenderEngine {
                     .expect("failed to fetch mesh");
                 let material = self
                     .database
-                    .fetch_material("DEFAULT")
+                    .fetch_material("DEFAULT", None)
                     .expect("failed to fetch default material");
                 MeshObject {
                     targets: vec![MeshTarget {
@@ -763,7 +763,7 @@ impl RenderEngine {
         }
 
         for i in info.images {
-            if let Err(e) = self.database.load_image(i) {
+            if let Err(e) = self.database.load_image(i, None) {
                 warn!("Failed to load image {}: {}", i, e);
                 self.scene_load_errors.images.push((*i).to_string());
             }

@@ -327,12 +327,25 @@ impl Database {
     /// The image path is resolved relative to the database base path. The
     /// image is decoded using the `image` crate to ensure it is valid. Loaded
     /// image names are tracked so subsequent calls are inexpensive.
-    pub fn load_image(&mut self, name: &str) -> Result<()> {
+    pub fn load_image(
+        &mut self,
+        name: &str,
+        mut renderer: Option<&mut koji::renderer::Renderer>,
+    ) -> Result<()> {
         if self.textures.contains_key(name) {
             return Ok(());
         }
         let path = format!("{}/{}", self.base_path, name);
         load_image_from_path(&path)?;
+        if let Some(r) = renderer.as_mut() {
+            r.resources().register_combined(
+                name,
+                Handle::default(),
+                Handle::default(),
+                [1, 1],
+                Handle::default(),
+            );
+        }
         info!("Registered image asset: {}", name);
         self.textures.insert(name.to_string(), None);
         Ok(())
@@ -354,7 +367,11 @@ impl Database {
         }
     }
 
-    pub fn fetch_texture(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
+    pub fn fetch_texture(
+        &mut self,
+        name: &str,
+        mut renderer: Option<&mut koji::renderer::Renderer>,
+    ) -> Result<Handle<koji::Texture>> {
         match self.textures.get_mut(name) {
             Some(entry) => {
                 if let Some(handle) = entry {
@@ -367,6 +384,15 @@ impl Database {
                 let path = format!("{}/{}", self.base_path, name);
                 image::open(&path)?;
                 let handle = Handle::default();
+                if let Some(r) = renderer.as_mut() {
+                    r.resources().register_combined(
+                        name,
+                        Handle::default(),
+                        Handle::default(),
+                        [1, 1],
+                        Handle::default(),
+                    );
+                }
                 *entry = Some(handle);
                 Ok(handle)
             }
@@ -375,7 +401,11 @@ impl Database {
             })),
         }
     }
-    pub fn fetch_material(&mut self, name: &str) -> Result<Handle<koji::Texture>> {
+    pub fn fetch_material(
+        &mut self,
+        name: &str,
+        mut renderer: Option<&mut koji::renderer::Renderer>,
+    ) -> Result<Handle<koji::Texture>> {
         if let Some(handle) = self.materials.get(name).and_then(|m| m.loaded) {
             return Ok(handle);
         }
@@ -390,9 +420,18 @@ impl Database {
         };
 
         let handle = match tex_name {
-            Some(tex) => self.fetch_texture(&tex)?,
+            Some(tex) => {
+                let tex_renderer = renderer.as_deref_mut();
+                self.fetch_texture(&tex, tex_renderer)?
+            }
             None => Handle::default(),
         };
+
+        if let Some(r) = renderer.as_deref_mut() {
+            let ctx = unsafe { &mut *self.ctx };
+            r.resources()
+                .register_variable(format!("mat_{}", name), ctx, [1.0_f32; 4]);
+        }
 
         if let Some(mat) = self.materials.get_mut(name) {
             mat.loaded = Some(handle);
@@ -464,15 +503,15 @@ mod tests {
         img.save(&img_path).unwrap();
 
         let mut db = make_db(dir.path().to_str().unwrap());
-        db.load_image("test.png").unwrap();
-        assert!(db.fetch_texture("test.png").is_ok());
+        db.load_image("test.png", None).unwrap();
+        assert!(db.fetch_texture("test.png", None).is_ok());
     }
 
     #[test]
     fn fetch_texture_lookup_error() {
         let dir = tempdir().unwrap();
         let mut db = make_db(dir.path().to_str().unwrap());
-        let err = db.fetch_texture("missing.png").unwrap_err();
+        let err = db.fetch_texture("missing.png", None).unwrap_err();
         match err {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
@@ -487,8 +526,8 @@ mod tests {
         img.save(&img_path).unwrap();
 
         let mut db = make_db(dir.path().to_str().unwrap());
-        db.load_image("test.png").unwrap();
-        db.fetch_texture("test.png").unwrap();
+        db.load_image("test.png", None).unwrap();
+        db.fetch_texture("test.png", None).unwrap();
         assert!(db.textures.contains_key("test.png"));
 
         db.unload_image("test.png").unwrap();
@@ -534,7 +573,7 @@ mod tests {
 
         let mut ctx = dashi::Context::headless(&Default::default()).unwrap();
         let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
-        assert!(db.fetch_material("mat").is_ok());
+        assert!(db.fetch_material("mat", None).is_ok());
         ctx.destroy();
     }
 

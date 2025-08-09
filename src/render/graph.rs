@@ -70,11 +70,16 @@ impl GraphRenderer {
                 "#,
                 frag
             );
+            let (pass, _) = renderer
+                .graph()
+                .render_pass_for_output("swapchain")
+                .expect("missing swapchain output");
             let mut pso = PipelineBuilder::new(ctx, "graph_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
-                .render_pass(renderer.graph().output("swapchain"))
-                .build();
+                .render_pass((pass, 0))
+                .build_with_resources(renderer.resources())
+                .unwrap();
             let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
             renderer.register_material_pipeline("graph_pso", pso, bgr);
             self.renderer = Some(renderer);
