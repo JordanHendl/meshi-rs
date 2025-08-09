@@ -58,6 +58,7 @@ where
         scene_info: None,
         headless: true,
         backend,
+        canvas_extent: None,
     })
     .expect("renderer init");
 

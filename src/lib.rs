@@ -42,6 +42,8 @@ pub struct MeshiEngineInfo {
     pub headless: i32,
     /// Backend to use for rendering.
     pub render_backend: RenderBackend,
+    /// Optional extent to override the default canvas size.
+    pub canvas_extent: *const u32,
 }
 
 /// Primary engine instance returned by [`meshi_make_engine`].
@@ -83,6 +85,14 @@ impl MeshiEngine {
                 scene_info: None,
                 headless: info.headless != 0,
                 backend: info.render_backend,
+                canvas_extent: if info.canvas_extent.is_null() {
+                    None
+                } else {
+                    Some(unsafe { [
+                        *info.canvas_extent,
+                        *info.canvas_extent.add(1),
+                    ] })
+                },
             })
             .expect("failed to initialize render engine"),
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
@@ -150,6 +160,7 @@ pub extern "C" fn meshi_make_engine_headless(
         application_location,
         headless: 1,
         render_backend: RenderBackend::Canvas,
+        canvas_extent: std::ptr::null(),
     };
     meshi_make_engine(&info)
 }
