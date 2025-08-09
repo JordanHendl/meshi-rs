@@ -477,7 +477,7 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::tempdir;
     use koji::{CanvasBuilder, renderer::Renderer};
-    use dashi::Format;
+    use dashi::{Format, GPUError};
 
     // Helper to construct a minimal database without a real GPU context.
     fn make_db(path: &str) -> Database {
@@ -506,8 +506,16 @@ mod tests {
             .color_attachment("color", Format::RGBA8)
             .build(&mut ctx)
             .unwrap();
-        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        let mut renderer = match Renderer::with_canvas(1, 1, &mut ctx, canvas) {
+            Ok(r) => r,
+            Err(GPUError::HeadlessDisplayNotSupported) => {
+                ctx.destroy();
+                return;
+            }
+            Err(e) => panic!("unexpected error: {:?}", e),
+        };
         assert!(db.fetch_texture(&mut renderer, "test.png").is_ok());
+        drop(renderer);
         ctx.destroy();
     }
 
@@ -521,12 +529,20 @@ mod tests {
             .color_attachment("color", Format::RGBA8)
             .build(&mut ctx)
             .unwrap();
-        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        let mut renderer = match Renderer::with_canvas(1, 1, &mut ctx, canvas) {
+            Ok(r) => r,
+            Err(GPUError::HeadlessDisplayNotSupported) => {
+                ctx.destroy();
+                return;
+            }
+            Err(e) => panic!("unexpected error: {:?}", e),
+        };
         let err = db.fetch_texture(&mut renderer, "missing.png").unwrap_err();
         match err {
             Error::LookupError(_) => {}
             other => panic!("unexpected error: {:?}", other),
         }
+        drop(renderer);
         ctx.destroy();
     }
 
@@ -545,12 +561,20 @@ mod tests {
             .color_attachment("color", Format::RGBA8)
             .build(&mut ctx)
             .unwrap();
-        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        let mut renderer = match Renderer::with_canvas(1, 1, &mut ctx, canvas) {
+            Ok(r) => r,
+            Err(GPUError::HeadlessDisplayNotSupported) => {
+                ctx.destroy();
+                return;
+            }
+            Err(e) => panic!("unexpected error: {:?}", e),
+        };
         db.fetch_texture(&mut renderer, "test.png").unwrap();
         assert!(db.textures.contains_key("test.png"));
 
         db.unload_image("test.png").unwrap();
         assert!(!db.textures.contains_key("test.png"));
+        drop(renderer);
         ctx.destroy();
     }
 
@@ -597,9 +621,17 @@ mod tests {
             .color_attachment("color", Format::RGBA8)
             .build(&mut ctx)
             .unwrap();
-        let mut renderer = Renderer::with_canvas(1, 1, &mut ctx, canvas).unwrap();
+        let mut renderer = match Renderer::with_canvas(1, 1, &mut ctx, canvas) {
+            Ok(r) => r,
+            Err(GPUError::HeadlessDisplayNotSupported) => {
+                ctx.destroy();
+                return;
+            }
+            Err(e) => panic!("unexpected error: {:?}", e),
+        };
         let mut db = Database::new(dir.path().to_str().unwrap(), &mut ctx).unwrap();
         assert!(db.fetch_material(&mut renderer, "mat").is_ok());
+        drop(renderer);
         ctx.destroy();
     }
 
