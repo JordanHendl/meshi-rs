@@ -141,18 +141,16 @@ struct EventCallbackInfo {
 
 #[allow(dead_code)]
 pub struct RenderEngine {
-    ctx: Option<Box<gpu::Context>>,
-    display: Option<gpu::Display>,
-    event_loop: Option<winit::event_loop::EventLoop<()>>,
+    backend: Backend,
     database: Database,
     event_cb: Option<EventCallbackInfo>,
     mesh_objects: Pool<MeshObject>,
     directional_lights: Pool<DirectionalLight>,
     camera: Mat4,
     projection: Mat4,
-    backend: Backend,
     scene_load_errors: SceneLoadErrors,
     streaming: Option<StreamingManager>,
+    ctx: Option<Box<gpu::Context>>,
 }
 
 enum Backend {
@@ -175,7 +173,7 @@ impl RenderEngine {
             database_path: Some(format!("{}/database", info.application_path)),
         };
 
-        let backend = match info.backend {
+        let mut backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
                 Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent))
@@ -199,20 +197,6 @@ impl RenderEngine {
             )
         };
 
-        let display = if info.headless {
-            None
-        } else {
-            Some(
-                ctx.make_display(&Default::default())
-                    .map_err(|_| RenderError::DisplayCreation)?,
-            )
-        };
-
-        let event_loop = if info.headless {
-            None
-        } else {
-            Some(winit::event_loop::EventLoop::new())
-        };
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
         //            &mut ctx,
@@ -223,6 +207,11 @@ impl RenderEngine {
 
         let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
 
+        match &mut backend {
+            Backend::Canvas(r) => r.init(&mut ctx)?,
+            Backend::Graph(r) => r.init(&mut ctx)?,
+        }
+
         //        let global_camera = scene.register_camera(&CameraInfo {
         //            pass: "ALL",
         //            transform: Default::default(),
@@ -230,18 +219,16 @@ impl RenderEngine {
         //        });
 
         let s = Self {
-            ctx: Some(ctx),
-            display,
-            event_loop,
+            backend,
             database,
             event_cb: None,
             mesh_objects: Default::default(),
             directional_lights: Default::default(),
             camera: Mat4::IDENTITY,
             projection: Mat4::IDENTITY,
-            backend,
             scene_load_errors: SceneLoadErrors::default(),
             streaming: None,
+            ctx: Some(ctx),
         };
 
         Ok(s)
@@ -300,10 +287,9 @@ impl RenderEngine {
     fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_mut_ref(handle) {
-                let display = self.display.as_mut();
                 let res = match &mut self.backend {
-                    Backend::Canvas(r) => r.register_mesh(ctx, display, obj),
-                    Backend::Graph(r) => r.register_mesh(ctx, display, obj),
+                    Backend::Canvas(r) => r.register_mesh(ctx, obj),
+                    Backend::Graph(r) => r.register_mesh(ctx, obj),
                 };
                 if let Ok(idx) = res {
                     obj.renderer_handle = Some(idx);
@@ -313,7 +299,6 @@ impl RenderEngine {
     }
 
     fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
-        println!("3");
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_ref(handle) {
                 if let Some(idx) = obj.renderer_handle {
@@ -605,7 +590,6 @@ impl RenderEngine {
             );
             return;
         }
-        println!("1");
         match self.mesh_objects.get_mut_ref(handle) {
             Some(obj) => {
                 obj.transform = *transform;
@@ -622,7 +606,6 @@ impl RenderEngine {
             }
         }
 
-        println!("2");
         // After transform update, refresh GPU mesh
         self.update_mesh_with_renderer(handle);
     }
@@ -635,17 +618,12 @@ impl RenderEngine {
             let cb = self.event_cb.as_mut().unwrap();
             let mut triggered = false;
 
-            if let Some(display) = &mut self.display {
-                let event_loop = display.winit_event_loop();
-                event_loop.run_return(|event, _target, control_flow| {
-                    *control_flow = ControlFlow::Exit;
-                    if let Some(mut e) = event::from_winit_event(&event) {
-                        triggered = true;
-                        let c = cb.event_cb;
-                        c(&mut e, cb.user_data);
-                    }
-                });
-            } else if let Some(event_loop) = &mut self.event_loop {
+            let event_loop = match &mut self.backend {
+                Backend::Canvas(r) => r.event_loop(),
+                Backend::Graph(r) => r.event_loop(),
+            };
+
+            if let Some(event_loop) = event_loop {
                 event_loop.run_return(|event, _target, control_flow| {
                     *control_flow = ControlFlow::Exit;
                     if let Some(mut e) = event::from_winit_event(&event) {
@@ -673,15 +651,14 @@ impl RenderEngine {
         }
 
         if let Some(ctx) = self.ctx.as_mut() {
-            let display = self.display.as_mut();
             match &mut self.backend {
                 Backend::Canvas(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }
                 Backend::Graph(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }
@@ -702,12 +679,25 @@ impl RenderEngine {
     }
 
     pub fn set_capture_mouse(&mut self, capture: bool) {
-        if let Some(display) = &self.display {
-            let window = display.winit_window();
-            if let Err(e) = window.set_cursor_grab(capture) {
-                warn!("failed to set cursor grab: {:?}", e);
+        match &mut self.backend {
+            Backend::Canvas(r) => {
+                if let Some(display) = r.display() {
+                    let window = display.winit_window();
+                    if let Err(e) = window.set_cursor_grab(capture) {
+                        warn!("failed to set cursor grab: {:?}", e);
+                    }
+                    window.set_cursor_visible(!capture);
+                }
             }
-            window.set_cursor_visible(!capture);
+            Backend::Graph(r) => {
+                if let Some(display) = r.display() {
+                    let window = display.winit_window();
+                    if let Err(e) = window.set_cursor_grab(capture) {
+                        warn!("failed to set cursor grab: {:?}", e);
+                    }
+                    window.set_cursor_visible(!capture);
+                }
+            }
         }
     }
     pub fn set_camera(&mut self, camera: &Mat4) {
@@ -772,13 +762,29 @@ impl RenderEngine {
 
 impl Drop for RenderEngine {
     fn drop(&mut self) {
-        if let Some(display) = self.display.take() {
-            if let Some(ctx) = self.ctx.as_mut() {
-                ctx.destroy_display(display);
+        if let Some(mut ctx) = self.ctx.take() {
+            match &mut self.backend {
+                Backend::Canvas(r) => {
+                    r.destroy();
+                    if let Some(display) = r.take_display() {
+                        ctx.destroy_display(display);
+                    }
+                }
+                Backend::Graph(r) => {
+                    r.destroy();
+                    if let Some(display) = r.take_display() {
+                        ctx.destroy_display(display);
+                    }
+                }
             }
-        }
-        if let Some(ctx) = self.ctx.take() {
-            ctx.destroy();
+            // Drop engine-managed GPU resources while the context is alive.
+            self.mesh_objects = Pool::default();
+            self.directional_lights = Pool::default();
+            self.database.destroy();
+            ctx.sync_current_device();
+            ctx.clean_up();
+            // Context intentionally left to drop without explicit destroy to
+            // avoid VMA assertions if third-party resources linger.
         }
     }
 }
