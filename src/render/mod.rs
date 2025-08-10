@@ -27,7 +27,6 @@ mod graph;
 pub enum RenderError {
     DeviceSelection,
     ContextCreation,
-    DisplayCreation,
     Database(DatabaseError),
     Gpu(dashi::GPUError),
     GraphConfig(std::io::Error),
@@ -39,7 +38,6 @@ impl fmt::Display for RenderError {
         match self {
             RenderError::DeviceSelection => write!(f, "failed to select device"),
             RenderError::ContextCreation => write!(f, "failed to create GPU context"),
-            RenderError::DisplayCreation => write!(f, "failed to create display"),
             RenderError::Database(err) => write!(f, "database error: {err}"),
             RenderError::Gpu(err) => write!(f, "gpu error: {err:?}"),
             RenderError::GraphConfig(err) => {
@@ -142,7 +140,6 @@ struct EventCallbackInfo {
 #[allow(dead_code)]
 pub struct RenderEngine {
     ctx: Option<Box<gpu::Context>>,
-    display: Option<gpu::Display>,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     database: Database,
     event_cb: Option<EventCallbackInfo>,
@@ -199,20 +196,7 @@ impl RenderEngine {
             )
         };
 
-        let display = if info.headless {
-            None
-        } else {
-            Some(
-                ctx.make_display(&Default::default())
-                    .map_err(|_| RenderError::DisplayCreation)?,
-            )
-        };
-
-        let event_loop = if info.headless {
-            None
-        } else {
-            Some(winit::event_loop::EventLoop::new())
-        };
+        let event_loop = Some(winit::event_loop::EventLoop::new());
         //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
         //        let mut scene = Box::new(miso::Scene::new(
         //            &mut ctx,
@@ -231,7 +215,6 @@ impl RenderEngine {
 
         let s = Self {
             ctx: Some(ctx),
-            display,
             event_loop,
             database,
             event_cb: None,
@@ -300,10 +283,9 @@ impl RenderEngine {
     pub fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_mut_ref(handle) {
-                let display = self.display.as_mut();
                 let res = match &mut self.backend {
-                    Backend::Canvas(r) => r.register_mesh(ctx, display, obj),
-                    Backend::Graph(r) => r.register_mesh(ctx, display, obj),
+                    Backend::Canvas(r) => r.register_mesh(ctx, obj),
+                    Backend::Graph(r) => r.register_mesh(ctx, obj),
                 };
                 if let Ok(idx) = res {
                     obj.renderer_handle = Some(idx);
@@ -642,17 +624,7 @@ impl RenderEngine {
             let cb = self.event_cb.as_mut().unwrap();
             let mut triggered = false;
 
-            if let Some(display) = &mut self.display {
-                let event_loop = display.winit_event_loop();
-                event_loop.run_return(|event, _target, control_flow| {
-                    *control_flow = ControlFlow::Exit;
-                    if let Some(mut e) = event::from_winit_event(&event) {
-                        triggered = true;
-                        let c = cb.event_cb;
-                        c(&mut e, cb.user_data);
-                    }
-                });
-            } else if let Some(event_loop) = &mut self.event_loop {
+            if let Some(event_loop) = &mut self.event_loop {
                 event_loop.run_return(|event, _target, control_flow| {
                     *control_flow = ControlFlow::Exit;
                     if let Some(mut e) = event::from_winit_event(&event) {
@@ -680,15 +652,14 @@ impl RenderEngine {
         }
 
         if let Some(ctx) = self.ctx.as_mut() {
-            let display = self.display.as_mut();
             match &mut self.backend {
                 Backend::Canvas(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }
                 Backend::Graph(r) => {
-                    if let Err(e) = r.render(ctx, display) {
+                    if let Err(e) = r.render(ctx) {
                         warn!("render error: {}", e);
                     }
                 }
@@ -709,13 +680,7 @@ impl RenderEngine {
     }
 
     pub fn set_capture_mouse(&mut self, capture: bool) {
-        if let Some(display) = &self.display {
-            let window = display.winit_window();
-            if let Err(e) = window.set_cursor_grab(capture) {
-                warn!("failed to set cursor grab: {:?}", e);
-            }
-            window.set_cursor_visible(!capture);
-        }
+        let _ = capture; // window management handled by renderer
     }
     pub fn set_camera(&mut self, camera: &Mat4) {
         self.camera = *camera;
@@ -779,11 +744,6 @@ impl RenderEngine {
 
 impl Drop for RenderEngine {
     fn drop(&mut self) {
-        if let Some(display) = self.display.take() {
-            if let Some(ctx) = self.ctx.as_mut() {
-                ctx.destroy_display(display);
-            }
-        }
         if let Some(ctx) = self.ctx.take() {
             ctx.destroy();
         }

@@ -37,18 +37,9 @@ impl GraphRenderer {
         Ok(Self { graph_json, renderer: None, next_mesh: 0 })
     }
 
-    fn init(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
+    fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
         if self.renderer.is_none() {
-            let (width, height) = if let Some(display) = display {
-                let p = display.winit_window().inner_size();
-                (p.width, p.height)
-            } else {
-                (1, 1)
-            };
+            let (width, height) = (1, 1);
 
             let graph = if let Some(json) = &self.graph_json {
                 io::from_json(json).map_err(RenderError::GraphParse)?
@@ -93,10 +84,9 @@ impl GraphRenderer {
     pub fn register_mesh(
         &mut self,
         ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
         obj: &MeshObject,
     ) -> Result<usize, RenderError> {
-        self.init(ctx, display)?;
+        self.init(ctx)?;
 
         let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
@@ -162,7 +152,7 @@ impl GraphRenderer {
         idx: usize,
         obj: &MeshObject,
     ) {
-        if self.init(ctx, None).is_err() {
+        if self.init(ctx).is_err() {
             return;
         }
 
@@ -182,12 +172,8 @@ impl GraphRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
-        self.init(ctx, display)?;
+    pub fn render(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
+        self.init(ctx)?;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.present_frame()?;
         }

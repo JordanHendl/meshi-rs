@@ -19,30 +19,15 @@ impl CanvasRenderer {
         Self { extent, renderer: None, next_mesh: 0 }
     }
 
-    fn init(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
+    fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
         if self.renderer.is_none() {
-            let [width, height] = if let Some(extent) = self.extent {
-                println!("wtf2? i{} {}", extent[0], extent[1]);
-                extent
-            } else if let Some(display) = display {
-                let p = display.winit_window().inner_size();
-                    println!("wtf? {} {}", p.width, p.height);
-                [p.width, p.height]
-            } else {
-                [1024, 1024]
-            };
+            let [width, height] = self.extent.unwrap_or([1024, 1024]);
 
-            println!("a {} {}", width, height);
             let canvas = CanvasBuilder::new()
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
 
-            println!("b");
             let mut renderer = Renderer::with_canvas(width, height, ctx, canvas.clone())?;
 
             let vert = inline_spirv!(
@@ -59,20 +44,15 @@ impl CanvasRenderer {
                 "#,
                 frag
             );
-
-            println!("c");
             let pso = PipelineBuilder::new(ctx, "canvas_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
                 .render_pass((canvas.render_pass(), 0))
                 .build_with_resources(renderer.resources())
                 .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
-
-            println!("d");
             renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
 
             self.renderer = Some(renderer);
-            println!("e");
         }
         Ok(())
     }
@@ -80,10 +60,9 @@ impl CanvasRenderer {
     pub fn register_mesh(
         &mut self,
         ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
         obj: &MeshObject,
     ) -> Result<usize, RenderError> {
-        self.init(ctx, display)?;
+        self.init(ctx)?;
 
         let vertices: Vec<KojiVertex> = obj.mesh.vertices[..obj.mesh.num_vertices]
             .iter()
@@ -149,7 +128,7 @@ impl CanvasRenderer {
         idx: usize,
         obj: &MeshObject,
     ) {
-        if self.init(ctx, None).is_err() {
+        if self.init(ctx).is_err() {
             return;
         }
 
@@ -169,12 +148,8 @@ impl CanvasRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        ctx: &mut dashi::Context,
-        display: Option<&mut dashi::Display>,
-    ) -> Result<(), RenderError> {
-        self.init(ctx, display)?;
+    pub fn render(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
+        self.init(ctx)?;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.present_frame()?;
         }
