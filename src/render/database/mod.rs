@@ -497,6 +497,13 @@ impl Database {
             })
         })
     }
+
+    /// Release any GPU resources tracked by the database.
+    pub fn destroy(&mut self) {
+        self.geometry.clear();
+        self.textures.clear();
+        self.materials.clear();
+    }
 }
 
 #[cfg(test)]
