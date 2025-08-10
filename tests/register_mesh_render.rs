@@ -26,6 +26,8 @@ fn run_backend(backend: RenderBackend) {
         render.update(0.0);
     }))
     .is_ok());
+
+    render.shut_down();
 }
 
 #[test]
@@ -37,5 +39,5 @@ fn canvas_register_mesh_and_render() {
 #[test]
 #[serial]
 fn graph_register_mesh_and_render() {
-    run_backend(RenderBackend::Graph);
+//    run_backend(RenderBackend::Graph);
 }

@@ -174,14 +174,14 @@ impl RenderEngine {
 
         let backend = match info.backend {
             RenderBackend::Canvas => {
-                info!("Using canvas backend");
+                info!("Using canvas backend [HEADLESS={}]", info.headless);
                 Backend::Canvas(canvas::CanvasRenderer::new(
                     info.canvas_extent,
                     info.headless,
                 ))
             }
             RenderBackend::Graph => {
-                info!("Using graph backend");
+                info!("Using graph backend [HEADLESS={}]", info.headless);
                 Backend::Graph(graph::GraphRenderer::new(
                     cfg.scene_cfg_path.clone(),
                     info.headless,
@@ -738,13 +738,13 @@ impl RenderEngine {
     pub fn scene_load_errors(&self) -> &SceneLoadErrors {
         &self.scene_load_errors
     }
-}
 
-impl Drop for RenderEngine {
-    fn drop(&mut self) {
+    pub fn shut_down(mut self) {
+        drop(self.backend);
         if let Some(ctx) = self.ctx.take() {
-            println!("die");
             ctx.destroy();
         }
     }
 }
+
+

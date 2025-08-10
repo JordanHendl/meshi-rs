@@ -78,7 +78,8 @@ impl MeshiEngine {
         info!("--INITIALIZING ENGINE--");
         info!("Application Name: '{}'", appname);
         info!("Application Dir: '{}'", appdir);
-
+        info!("Headless Mode: '{}'", info.headless != 0);
+        
         Some(Box::new(MeshiEngine {
             render: RenderEngine::new(&RenderEngineInfo {
                 application_path: appdir.to_string(),
@@ -112,6 +113,10 @@ impl MeshiEngine {
         self.audio.update(dt_secs);
 
         dt_secs
+    }
+
+    fn shut_down(mut self) {
+        self.render.shut_down();
     }
 }
 
@@ -176,8 +181,8 @@ pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
         unsafe {
             // Take ownership and ensure the engine and all subsystems are fully dropped
             // (render, physics and audio) before returning.
-            let _engine = Box::from_raw(engine);
-            // `_engine` is dropped here when it goes out of scope.
+            let engine = Box::from_raw(engine);
+            engine.shut_down();
         }
     }
 }

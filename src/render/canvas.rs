@@ -7,6 +7,7 @@ use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{CanvasBuilder, PipelineBuilder};
+use tracing::info;
 
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
@@ -30,9 +31,9 @@ impl CanvasRenderer {
                 .build(ctx)?;
     
             let mut renderer = if self.headless {
-                Renderer::with_canvas(width, height, ctx, canvas.clone())?
-            } else {
                 Renderer::with_canvas_headless(width, height, ctx, canvas.clone())?
+            } else {
+                Renderer::with_canvas(width, height, ctx, canvas.clone())?
             };
 
             let vert = inline_spirv!(
@@ -49,6 +50,7 @@ impl CanvasRenderer {
                 "#,
                 frag
             );
+
             let pso = PipelineBuilder::new(ctx, "canvas_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)

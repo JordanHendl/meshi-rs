@@ -49,9 +49,9 @@ impl GraphRenderer {
             };
 
             let mut renderer = if self.headless {
-                Renderer::with_graph(width, height, ctx, graph)?
-            } else {
                 Renderer::with_graph_headless(width, height, ctx, graph)?
+            } else {
+                Renderer::with_graph(width, height, ctx, graph)?
             };
 
             let vert = inline_spirv!(
@@ -73,6 +73,7 @@ impl GraphRenderer {
                 .graph()
                 .render_pass_for_output("swapchain")
                 .expect("missing swapchain output");
+
             let mut pso = PipelineBuilder::new(ctx, "graph_pso")
                 .vertex_shader(vert)
                 .fragment_shader(frag)
