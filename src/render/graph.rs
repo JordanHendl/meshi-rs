@@ -29,13 +29,17 @@ impl GraphRenderer {
                 Ok(s) => Some(s),
                 Err(e) => {
                     warn!("failed to read scene config {path}: {e}");
-                    return Err(RenderError::GraphConfig(e));
+                    None
                 }
             }
         } else {
             None
         };
         Ok(Self { graph_json, renderer: None, next_mesh: 0, headless })
+    }
+
+    fn default_graph(_headless: bool) -> RenderGraph {
+        RenderGraph::new()
     }
 
     fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
@@ -45,7 +49,7 @@ impl GraphRenderer {
             let graph = if let Some(json) = &self.graph_json {
                 io::from_json(json).map_err(RenderError::GraphParse)?
             } else {
-                RenderGraph::new()
+                Self::default_graph(self.headless)
             };
 
             let mut renderer = if self.headless {
