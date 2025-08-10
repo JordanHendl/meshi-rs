@@ -39,5 +39,5 @@ fn canvas_register_mesh_and_render() {
 #[test]
 #[serial]
 fn graph_register_mesh_and_render() {
-//    run_backend(RenderBackend::Graph);
+    run_backend(RenderBackend::Graph);
 }
