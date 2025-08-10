@@ -1,4 +1,4 @@
-use std::{ffi::c_void, fmt};
+use std::{ffi::c_void, fmt, path::Path};
 
 use dashi::{
     utils::{Handle, Pool},
@@ -167,8 +167,18 @@ impl RenderEngine {
 
         info!("Initializing Render Engine with device {}", device);
 
+        let scene_cfg_path = {
+            let path = format!("{}/koji.json", info.application_path);
+            if Path::new(&path).exists() {
+                Some(path)
+            } else {
+                warn!("scene config not found at {path}, using default graph");
+                None
+            }
+        };
+
         let cfg = config::RenderEngineConfig {
-            scene_cfg_path: Some(format!("{}/koji.json", info.application_path)),
+            scene_cfg_path,
             database_path: Some(format!("{}/database", info.application_path)),
         };
 
@@ -746,5 +756,3 @@ impl RenderEngine {
         }
     }
 }
-
-
