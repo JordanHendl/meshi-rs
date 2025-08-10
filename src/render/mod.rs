@@ -284,7 +284,7 @@ impl RenderEngine {
         self.mesh_objects.release(handle);
     }
 
-    fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
+    pub fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_mut_ref(handle) {
                 let res = match &mut self.backend {
@@ -296,6 +296,13 @@ impl RenderEngine {
                 }
             }
         }
+    }
+
+    pub fn mesh_renderer_handle(&self, handle: Handle<MeshObject>) -> Option<usize> {
+        self
+            .mesh_objects
+            .get_ref(handle)
+            .and_then(|obj| obj.renderer_handle)
     }
 
     fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
