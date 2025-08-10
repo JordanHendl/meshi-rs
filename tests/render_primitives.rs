@@ -2,6 +2,7 @@ use image::{Rgba, RgbaImage};
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo};
 use serial_test::serial;
 use tempfile::tempdir;
+mod common;
 
 fn expected_triangle(width: u32, height: u32) -> RgbaImage {
     let mut img = RgbaImage::new(width, height);
@@ -26,7 +27,7 @@ fn expected_triangle(width: u32, height: u32) -> RgbaImage {
     img
 }
 
-fn run_backend<F>(backend: RenderBackend, create: F)
+fn run_backend<F>(backend: RenderBackend, create: F, name: &str)
 where
     F: Fn(&mut RenderEngine),
 {
@@ -65,91 +66,131 @@ where
     create(&mut render);
     let img = render.render_to_image(EXTENT).expect("render to image");
     let expected = expected_triangle(EXTENT[0], EXTENT[1]);
-    assert_eq!(img.as_raw(), expected.as_raw());
+    common::assert_images_eq(name, &img, &expected);
 }
 
 #[test]
 #[serial]
 fn canvas_cube() {
-    run_backend(RenderBackend::Canvas, |r| {
-        r.create_cube();
-    });
+    run_backend(
+        RenderBackend::Canvas,
+        |r| {
+            r.create_cube();
+        },
+        concat!(module_path!(), "::", stringify!(canvas_cube)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_cube() {
-    run_backend(RenderBackend::Graph, |r| {
-        r.create_cube();
-    });
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cube();
+        },
+        concat!(module_path!(), "::", stringify!(graph_cube)),
+    );
 }
 
 #[test]
 #[serial]
 fn canvas_sphere() {
-    run_backend(RenderBackend::Canvas, |r| {
-        r.create_sphere();
-    });
+    run_backend(
+        RenderBackend::Canvas,
+        |r| {
+            r.create_sphere();
+        },
+        concat!(module_path!(), "::", stringify!(canvas_sphere)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_sphere() {
-    run_backend(RenderBackend::Graph, |r| {
-        r.create_sphere();
-    });
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_sphere();
+        },
+        concat!(module_path!(), "::", stringify!(graph_sphere)),
+    );
 }
 
 #[test]
 #[serial]
 fn canvas_cylinder() {
     use meshi::render::database::geometry_primitives::CylinderPrimitiveInfo;
-    run_backend(RenderBackend::Canvas, |r| {
-        r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Canvas,
+        |r| {
+            r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(canvas_cylinder)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_cylinder() {
     use meshi::render::database::geometry_primitives::CylinderPrimitiveInfo;
-    run_backend(RenderBackend::Graph, |r| {
-        r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_cylinder)),
+    );
 }
 
 #[test]
 #[serial]
 fn canvas_plane() {
     use meshi::render::database::geometry_primitives::PlanePrimitiveInfo;
-    run_backend(RenderBackend::Canvas, |r| {
-        r.create_plane_ex(&PlanePrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Canvas,
+        |r| {
+            r.create_plane_ex(&PlanePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(canvas_plane)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_plane() {
     use meshi::render::database::geometry_primitives::PlanePrimitiveInfo;
-    run_backend(RenderBackend::Graph, |r| {
-        r.create_plane_ex(&PlanePrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_plane_ex(&PlanePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_plane)),
+    );
 }
 
 #[test]
 #[serial]
 fn canvas_cone() {
     use meshi::render::database::geometry_primitives::ConePrimitiveInfo;
-    run_backend(RenderBackend::Canvas, |r| {
-        r.create_cone_ex(&ConePrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Canvas,
+        |r| {
+            r.create_cone_ex(&ConePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(canvas_cone)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_cone() {
     use meshi::render::database::geometry_primitives::ConePrimitiveInfo;
-    run_backend(RenderBackend::Graph, |r| {
-        r.create_cone_ex(&ConePrimitiveInfo::default());
-    });
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cone_ex(&ConePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_cone)),
+    );
 }

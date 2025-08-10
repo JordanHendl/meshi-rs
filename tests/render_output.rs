@@ -2,6 +2,7 @@ use image::{Rgba, RgbaImage};
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo};
 use serial_test::serial;
 use tempfile::tempdir;
+mod common;
 
 fn expected_triangle(width: u32, height: u32) -> RgbaImage {
     let mut img = RgbaImage::new(width, height);
@@ -26,7 +27,7 @@ fn expected_triangle(width: u32, height: u32) -> RgbaImage {
     img
 }
 
-fn run_backend(backend: RenderBackend) {
+fn run_backend(backend: RenderBackend, name: &str) {
     const EXTENT: [u32; 2] = [64, 64];
     let dir = tempdir().unwrap();
     let base = dir.path();
@@ -49,17 +50,23 @@ fn run_backend(backend: RenderBackend) {
         .render_to_image(EXTENT)
         .expect("render to image");
     let expected = expected_triangle(EXTENT[0], EXTENT[1]);
-    assert_eq!(img.as_raw(), expected.as_raw());
+    common::assert_images_eq(name, &img, &expected);
 }
 
 #[test]
 #[serial]
 fn canvas_red_triangle() {
-    run_backend(RenderBackend::Canvas);
+    run_backend(
+        RenderBackend::Canvas,
+        concat!(module_path!(), "::", stringify!(canvas_red_triangle)),
+    );
 }
 
 #[test]
 #[serial]
 fn graph_red_triangle() {
-    run_backend(RenderBackend::Graph);
+    run_backend(
+        RenderBackend::Graph,
+        concat!(module_path!(), "::", stringify!(graph_red_triangle)),
+    );
 }
