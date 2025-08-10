@@ -175,11 +175,17 @@ impl RenderEngine {
         let backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
-                Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent, info.headless))
+                Backend::Canvas(canvas::CanvasRenderer::new(
+                    info.canvas_extent,
+                    info.headless,
+                ))
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");
-                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone(), info.headless)?)
+                Backend::Graph(graph::GraphRenderer::new(
+                    cfg.scene_cfg_path.clone(),
+                    info.headless,
+                )?)
             }
         };
 
@@ -198,12 +204,17 @@ impl RenderEngine {
             )
         };
 
-
         let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
+
+        let event_loop = if cfg!(test) || info.headless {
+            None
+        } else {
+            Some(winit::event_loop::EventLoop::new())
+        };
 
         let s = Self {
             ctx: Some(ctx),
-            event_loop: None,
+            event_loop,
             database,
             event_cb: None,
             mesh_objects: Default::default(),
@@ -283,8 +294,7 @@ impl RenderEngine {
     }
 
     pub fn mesh_renderer_handle(&self, handle: Handle<MeshObject>) -> Option<usize> {
-        self
-            .mesh_objects
+        self.mesh_objects
             .get_ref(handle)
             .and_then(|obj| obj.renderer_handle)
     }
