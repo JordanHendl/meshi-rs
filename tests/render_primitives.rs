@@ -85,13 +85,13 @@ fn canvas_cube() {
 #[test]
 #[serial]
 fn graph_cube() {
-//    run_backend(
-//        RenderBackend::Graph,
-//        |r| {
-//            r.create_cube();
-//        },
-//        concat!(module_path!(), "::", stringify!(graph_cube)),
-//    );
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cube();
+        },
+        concat!(module_path!(), "::", stringify!(graph_cube)),
+    );
 }
 
 #[test]
@@ -109,13 +109,13 @@ fn canvas_sphere() {
 #[test]
 #[serial]
 fn graph_sphere() {
-//    run_backend(
-//        RenderBackend::Graph,
-//        |r| {
-//            r.create_sphere();
-//        },
-//        concat!(module_path!(), "::", stringify!(graph_sphere)),
-//    );
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_sphere();
+        },
+        concat!(module_path!(), "::", stringify!(graph_sphere)),
+    );
 }
 
 #[test]
@@ -134,14 +134,14 @@ fn canvas_cylinder() {
 #[test]
 #[serial]
 fn graph_cylinder() {
-//    use meshi::render::database::geometry_primitives::CylinderPrimitiveInfo;
-//    run_backend(
-//        RenderBackend::Graph,
-//        |r| {
-//            r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
-//        },
-//        concat!(module_path!(), "::", stringify!(graph_cylinder)),
-//    );
+    use meshi::render::database::geometry_primitives::CylinderPrimitiveInfo;
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cylinder_ex(&CylinderPrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_cylinder)),
+    );
 }
 
 #[test]
@@ -160,14 +160,14 @@ fn canvas_plane() {
 #[test]
 #[serial]
 fn graph_plane() {
-//    use meshi::render::database::geometry_primitives::PlanePrimitiveInfo;
-//    run_backend(
-//        RenderBackend::Graph,
-//        |r| {
-//            r.create_plane_ex(&PlanePrimitiveInfo::default());
-//        },
-//        concat!(module_path!(), "::", stringify!(graph_plane)),
-//    );
+    use meshi::render::database::geometry_primitives::PlanePrimitiveInfo;
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_plane_ex(&PlanePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_plane)),
+    );
 }
 
 #[test]
@@ -186,12 +186,12 @@ fn canvas_cone() {
 #[test]
 #[serial]
 fn graph_cone() {
-//    use meshi::render::database::geometry_primitives::ConePrimitiveInfo;
-//    run_backend(
-//        RenderBackend::Graph,
-//        |r| {
-//            r.create_cone_ex(&ConePrimitiveInfo::default());
-//        },
-//        concat!(module_path!(), "::", stringify!(graph_cone)),
-//    );
+    use meshi::render::database::geometry_primitives::ConePrimitiveInfo;
+    run_backend(
+        RenderBackend::Graph,
+        |r| {
+            r.create_cone_ex(&ConePrimitiveInfo::default());
+        },
+        concat!(module_path!(), "::", stringify!(graph_cone)),
+    );
 }

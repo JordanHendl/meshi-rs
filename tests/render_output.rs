@@ -34,7 +34,11 @@ fn run_backend(backend: RenderBackend, name: &str) {
     let db_dir = base.join("database");
     std::fs::create_dir(&db_dir).unwrap();
     std::fs::write(db_dir.join("db.json"), "{}".as_bytes()).unwrap();
-    std::fs::write(base.join("koji.json"), "{\"nodes\":[],\"edges\":[]}".as_bytes()).unwrap();
+    std::fs::write(
+        base.join("koji.json"),
+        "{\"nodes\":[],\"edges\":[]}".as_bytes(),
+    )
+    .unwrap();
 
     let mut render = RenderEngine::new(&RenderEngineInfo {
         application_path: base.to_str().unwrap().into(),
@@ -46,9 +50,7 @@ fn run_backend(backend: RenderBackend, name: &str) {
     .expect("renderer init");
 
     render.create_triangle();
-    let img = render
-        .render_to_image(EXTENT)
-        .expect("render to image");
+    let img = render.render_to_image(EXTENT).expect("render to image");
     let expected = expected_triangle(EXTENT[0], EXTENT[1]);
     common::assert_images_eq(name, &img, &expected);
     render.shut_down();
@@ -66,8 +68,8 @@ fn canvas_red_triangle() {
 #[test]
 #[serial]
 fn graph_red_triangle() {
-//    run_backend(
-//        RenderBackend::Graph,
-//        concat!(module_path!(), "::", stringify!(graph_red_triangle)),
-//    );
+    run_backend(
+        RenderBackend::Graph,
+        concat!(module_path!(), "::", stringify!(graph_red_triangle)),
+    );
 }

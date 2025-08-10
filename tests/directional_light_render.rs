@@ -87,8 +87,8 @@ fn canvas_directional_light() {
 #[test]
 #[serial]
 fn graph_directional_light() {
-//    run_backend(
-//        RenderBackend::Graph,
-//        concat!(module_path!(), "::", stringify!(graph_directional_light)),
-//    );
+    run_backend(
+        RenderBackend::Graph,
+        concat!(module_path!(), "::", stringify!(graph_directional_light)),
+    );
 }
