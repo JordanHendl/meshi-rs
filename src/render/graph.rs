@@ -72,11 +72,20 @@ impl GraphRenderer {
                 "#,
                 frag
             );
+            let outputs = renderer.graph().output_images();
+            let output_name = if !self.headless && outputs.iter().any(|o| o == "swapchain") {
+                "swapchain".to_string()
+            } else {
+                outputs
+                    .first()
+                    .cloned()
+                    .expect("render graph has no outputs")
+            };
 
             let (pass, _) = renderer
                 .graph()
-                .render_pass_for_output("swapchain")
-                .expect("missing swapchain output");
+                .render_pass_for_output(&output_name)
+                .expect(&format!("missing {output_name} output"));
 
             let mut pso = PipelineBuilder::new(ctx, "graph_pso")
                 .vertex_shader(vert)
