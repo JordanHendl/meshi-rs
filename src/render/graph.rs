@@ -18,11 +18,12 @@ use tracing::warn;
 pub struct GraphRenderer {
     graph_json: Option<String>,
     renderer: Option<Renderer>,
+    headless: bool,
     next_mesh: usize,
 }
 
 impl GraphRenderer {
-    pub fn new(scene_cfg_path: Option<String>) -> Result<Self, RenderError> {
+    pub fn new(scene_cfg_path: Option<String>, headless: bool) -> Result<Self, RenderError> {
         let graph_json = if let Some(path) = scene_cfg_path {
             match std::fs::read_to_string(&path) {
                 Ok(s) => Some(s),
@@ -34,7 +35,7 @@ impl GraphRenderer {
         } else {
             None
         };
-        Ok(Self { graph_json, renderer: None, next_mesh: 0 })
+        Ok(Self { graph_json, renderer: None, next_mesh: 0, headless })
     }
 
     fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
@@ -47,7 +48,11 @@ impl GraphRenderer {
                 RenderGraph::new()
             };
 
-            let mut renderer = Renderer::with_graph(width, height, ctx, graph)?;
+            let mut renderer = if self.headless {
+                Renderer::with_graph(width, height, ctx, graph)?
+            } else {
+                Renderer::with_graph_headless(width, height, ctx, graph)?
+            };
 
             let vert = inline_spirv!(
                 r#"#version 450
@@ -63,6 +68,7 @@ impl GraphRenderer {
                 "#,
                 frag
             );
+
             let (pass, _) = renderer
                 .graph()
                 .render_pass_for_output("swapchain")

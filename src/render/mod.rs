@@ -175,47 +175,35 @@ impl RenderEngine {
         let backend = match info.backend {
             RenderBackend::Canvas => {
                 info!("Using canvas backend");
-                Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent))
+                Backend::Canvas(canvas::CanvasRenderer::new(info.canvas_extent, info.headless))
             }
             RenderBackend::Graph => {
                 info!("Using graph backend");
-                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone())?)
+                Backend::Graph(graph::GraphRenderer::new(cfg.scene_cfg_path.clone(), info.headless)?)
             }
         };
 
         // The GPU context that holds all the data.
         let mut ctx = if info.headless {
+            info!("Initializing Headless Rendering Context");
             Box::new(
                 gpu::Context::headless(&ContextInfo { device })
                     .map_err(|_| RenderError::ContextCreation)?,
             )
         } else {
+            info!("Initializing Rendering Context");
             Box::new(
                 gpu::Context::new(&ContextInfo { device })
                     .map_err(|_| RenderError::ContextCreation)?,
             )
         };
 
-        let event_loop = Some(winit::event_loop::EventLoop::new());
-        //        let event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
-        //        let mut scene = Box::new(miso::Scene::new(
-        //            &mut ctx,
-        //            &miso::SceneInfo {
-        //                cfg: cfg.scene_cfg_path,
-        //            },
-        //        ));
 
         let database = Database::new(cfg.database_path.as_ref().unwrap(), &mut ctx)?;
 
-        //        let global_camera = scene.register_camera(&CameraInfo {
-        //            pass: "ALL",
-        //            transform: Default::default(),
-        //            projection: Default::default(),
-        //        });
-
         let s = Self {
             ctx: Some(ctx),
-            event_loop,
+            event_loop: None,
             database,
             event_cb: None,
             mesh_objects: Default::default(),
@@ -745,6 +733,7 @@ impl RenderEngine {
 impl Drop for RenderEngine {
     fn drop(&mut self) {
         if let Some(ctx) = self.ctx.take() {
+            println!("die");
             ctx.destroy();
         }
     }

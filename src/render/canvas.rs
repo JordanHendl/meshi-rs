@@ -11,12 +11,13 @@ use koji::{CanvasBuilder, PipelineBuilder};
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
     renderer: Option<Renderer>,
+    headless: bool,
     next_mesh: usize,
 }
 
 impl CanvasRenderer {
-    pub fn new(extent: Option<[u32; 2]>) -> Self {
-        Self { extent, renderer: None, next_mesh: 0 }
+    pub fn new(extent: Option<[u32; 2]>, headless: bool) -> Self {
+        Self { extent, renderer: None, next_mesh: 0, headless }
     }
 
     fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
@@ -27,8 +28,12 @@ impl CanvasRenderer {
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
                 .build(ctx)?;
-
-            let mut renderer = Renderer::with_canvas(width, height, ctx, canvas.clone())?;
+    
+            let mut renderer = if self.headless {
+                Renderer::with_canvas(width, height, ctx, canvas.clone())?
+            } else {
+                Renderer::with_canvas_headless(width, height, ctx, canvas.clone())?
+            };
 
             let vert = inline_spirv!(
                 r#"#version 450
