@@ -1,8 +1,8 @@
 use super::RenderError;
 use crate::object::MeshObject;
 use crate::render::database::Vertex as MeshVertex;
-use dashi::{BufferInfo, BufferUsage, Format, MemoryVisibility};
 use bytemuck::cast_slice;
+use dashi::{BufferInfo, BufferUsage, Format, MemoryVisibility};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
@@ -18,7 +18,12 @@ pub struct CanvasRenderer {
 
 impl CanvasRenderer {
     pub fn new(extent: Option<[u32; 2]>, headless: bool) -> Self {
-        Self { extent, renderer: None, next_mesh: 0, headless }
+        Self {
+            extent,
+            renderer: None,
+            next_mesh: 0,
+            headless,
+        }
     }
 
     fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
@@ -28,8 +33,9 @@ impl CanvasRenderer {
             let canvas = CanvasBuilder::new()
                 .extent([width, height])
                 .color_attachment("color", Format::RGBA8)
+                .depth_attachment("depth", Format::D24S8)
                 .build(ctx)?;
-    
+
             let mut renderer = if self.headless {
                 Renderer::with_canvas_headless(width, height, ctx, canvas.clone())?
             } else {
@@ -114,7 +120,11 @@ impl CanvasRenderer {
         let mesh = StaticMesh {
             material_id: String::new(),
             vertices,
-            indices: if indices.is_empty() { None } else { Some(indices) },
+            indices: if indices.is_empty() {
+                None
+            } else {
+                Some(indices)
+            },
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
@@ -129,12 +139,7 @@ impl CanvasRenderer {
         Ok(idx)
     }
 
-    pub fn update_mesh(
-        &mut self,
-        ctx: &mut dashi::Context,
-        idx: usize,
-        obj: &MeshObject,
-    ) {
+    pub fn update_mesh(&mut self, ctx: &mut dashi::Context, idx: usize, obj: &MeshObject) {
         if self.init(ctx).is_err() {
             return;
         }
