@@ -151,25 +151,46 @@ impl AudioEngine {
         if let Some(s) = self.get_source_mut(h) {
             if backend == AudioBackend::Rodio {
                 if let Some(handle) = handle_clone {
-                    if let Ok(file) = File::open(&s.path) {
-                        if let Ok(decoder) = Decoder::new(BufReader::new(file)) {
-                            if let Ok(sink) = Sink::try_new(&handle) {
-                                if s.looping {
-                                    sink.append(decoder.repeat_infinite());
-                                } else {
-                                    sink.append(decoder);
-                                }
-                                sink.set_volume(s.volume);
-                                sink.play();
-                                s.sink = Some(sink);
-                                s.state = PlaybackState::Playing;
-                                return;
-                            }
+                    let file = match File::open(&s.path) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            info!("Failed to open audio file {}: {}", s.path, e);
+                            s.state = PlaybackState::Stopped;
+                            return;
                         }
+                    };
+                    let decoder = match Decoder::new(BufReader::new(file)) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            info!("Failed to decode audio file {}: {}", s.path, e);
+                            s.state = PlaybackState::Stopped;
+                            return;
+                        }
+                    };
+                    let sink = match Sink::try_new(&handle) {
+                        Ok(sink) => sink,
+                        Err(e) => {
+                            info!("Failed to create audio sink for {}: {}", s.path, e);
+                            s.state = PlaybackState::Stopped;
+                            return;
+                        }
+                    };
+
+                    if s.looping {
+                        sink.append(decoder.repeat_infinite());
+                    } else {
+                        sink.append(decoder);
                     }
+                    sink.set_volume(s.volume);
+                    sink.play();
+                    s.sink = Some(sink);
+                    s.state = PlaybackState::Playing;
+                    return;
+                } else {
+                    info!("No Rodio handle available; cannot play {}", s.path);
                 }
             }
-            s.state = PlaybackState::Playing;
+            s.state = PlaybackState::Stopped;
         }
     }
 
