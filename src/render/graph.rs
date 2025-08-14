@@ -1,9 +1,9 @@
+use bytemuck::cast_slice;
+use dashi::{BufferInfo, BufferUsage, MemoryVisibility};
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{render_graph::io, PipelineBuilder, RenderGraph};
-use dashi::{BufferInfo, BufferUsage, MemoryVisibility};
-use bytemuck::cast_slice;
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -35,7 +35,12 @@ impl GraphRenderer {
         } else {
             None
         };
-        Ok(Self { graph_json, renderer: None, next_mesh: 0, headless })
+        Ok(Self {
+            graph_json,
+            renderer: None,
+            next_mesh: 0,
+            headless,
+        })
     }
 
     fn default_graph(_headless: bool) -> RenderGraph {
@@ -60,8 +65,18 @@ impl GraphRenderer {
 
             let vert = inline_spirv!(
                 r#"#version 450
-                layout(location=0) in vec4 position;
-                void main() { gl_Position = position; }
+                layout(location=0) in vec3 position;
+                layout(location=1) in vec3 normal;
+                layout(location=2) in vec4 tangent;
+                layout(location=3) in vec2 uv;
+                layout(location=4) in vec4 color;
+                void main() {
+                    gl_Position = vec4(position, 1.0)
+                        + vec4(normal, 0.0) * 0.0
+                        + tangent * 0.0
+                        + vec4(uv, 0.0, 0.0) * 0.0
+                        + color * 0.0;
+                }
                 "#,
                 vert
             );
@@ -152,7 +167,11 @@ impl GraphRenderer {
         let mesh = StaticMesh {
             material_id: "graph_pso".to_string(),
             vertices,
-            indices: if indices.is_empty() { None } else { Some(indices) },
+            indices: if indices.is_empty() {
+                None
+            } else {
+                Some(indices)
+            },
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
@@ -167,12 +186,7 @@ impl GraphRenderer {
         Ok(idx)
     }
 
-    pub fn update_mesh(
-        &mut self,
-        ctx: &mut dashi::Context,
-        idx: usize,
-        obj: &MeshObject,
-    ) {
+    pub fn update_mesh(&mut self, ctx: &mut dashi::Context, idx: usize, obj: &MeshObject) {
         if self.init(ctx).is_err() {
             return;
         }
