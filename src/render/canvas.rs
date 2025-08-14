@@ -63,7 +63,7 @@ impl CanvasRenderer {
                 .render_pass((canvas.render_pass(), 0))
                 .build_with_resources(renderer.resources())
                 .map_err(|_| RenderError::Gpu(dashi::GPUError::LibraryError()))?;
-            renderer.register_pipeline_for_pass("main", pso, [None, None, None, None]);
+            renderer.register_pipeline_for_pass("color", pso, [None, None, None, None]);
 
             self.renderer = Some(renderer);
         }
