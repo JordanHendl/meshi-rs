@@ -7,7 +7,6 @@ use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{CanvasBuilder, PipelineBuilder};
-use tracing::info;
 
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
@@ -89,7 +88,7 @@ impl CanvasRenderer {
             .collect();
 
         let vertex_bytes = cast_slice(&vertices);
-        let _vertex_buffer = ctx
+        let vertex_buffer = ctx
             .make_buffer(&BufferInfo {
                 debug_name: "mesh_vertex_buffer",
                 byte_size: vertex_bytes.len() as u32,
@@ -100,7 +99,7 @@ impl CanvasRenderer {
             .map_err(RenderError::Gpu)?;
 
         let indices = obj.mesh.indices[..obj.mesh.num_indices].to_vec();
-        let _index_buffer = if !indices.is_empty() {
+        let index_buffer = if !indices.is_empty() {
             let index_bytes = cast_slice(&indices);
             Some(
                 ctx.make_buffer(&BufferInfo {
@@ -116,7 +115,13 @@ impl CanvasRenderer {
             None
         };
 
-        // Register mesh with Koji renderer using CPU data (Koji handles upload).
+        let index_count = if index_buffer.is_some() {
+            indices.len()
+        } else {
+            vertices.len()
+        };
+
+        // Register mesh with Koji renderer using GPU buffers.
         let mesh = StaticMesh {
             material_id: String::new(),
             vertices,
@@ -125,9 +130,9 @@ impl CanvasRenderer {
             } else {
                 Some(indices)
             },
-            vertex_buffer: None,
-            index_buffer: None,
-            index_count: 0,
+            vertex_buffer: Some(vertex_buffer),
+            index_buffer,
+            index_count,
         };
 
         if let Some(renderer) = self.renderer.as_mut() {
