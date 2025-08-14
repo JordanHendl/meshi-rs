@@ -2,7 +2,12 @@ use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{render_graph::io, PipelineBuilder, RenderGraph};
-use dashi::{BufferInfo, BufferUsage, MemoryVisibility};
+use dashi::{
+    BufferInfo, BufferUsage, MemoryVisibility, DynamicState, GraphicsPipelineDetails,
+    GraphicsPipelineInfo, GraphicsPipelineLayoutInfo, PipelineShaderInfo, ShaderType,
+    VertexDescriptionInfo, VertexEntryInfo, ShaderPrimitiveType, VertexRate, CullMode,
+    VertexOrdering,
+};
 use bytemuck::cast_slice;
 
 use super::RenderError;
@@ -94,6 +99,57 @@ impl GraphRenderer {
                 .render_pass((pass, 0))
                 .build_with_resources(renderer.resources())
                 .unwrap();
+
+            // Rebuild pipeline with viewport and scissor as dynamic states
+            let vertex_info = VertexDescriptionInfo {
+                entries: &[VertexEntryInfo {
+                    format: ShaderPrimitiveType::Vec4,
+                    location: 0,
+                    offset: 0,
+                }],
+                stride: 16,
+                rate: VertexRate::Vertex,
+            };
+
+            let layout_info = GraphicsPipelineLayoutInfo {
+                debug_name: "graph_pso",
+                vertex_info,
+                bg_layouts: [None, None, None, None],
+                shaders: &[
+                    PipelineShaderInfo {
+                        stage: ShaderType::Vertex,
+                        spirv: vert,
+                        specialization: &[],
+                    },
+                    PipelineShaderInfo {
+                        stage: ShaderType::Fragment,
+                        spirv: frag,
+                        specialization: &[],
+                    },
+                ],
+                details: GraphicsPipelineDetails {
+                    dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
+                    culling: CullMode::None,
+                    front_face: VertexOrdering::CounterClockwise,
+                    ..Default::default()
+                },
+            };
+
+            let layout = ctx.make_graphics_pipeline_layout(&layout_info).unwrap();
+            let pipeline_handle = ctx
+                .make_graphics_pipeline(&GraphicsPipelineInfo {
+                    debug_name: "graph_pso",
+                    layout,
+                    render_pass: pass,
+                    subpass_id: 0,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            pso.layout = layout;
+            pso.pipeline = pipeline_handle;
+            pso.bind_group_layouts = [None, None, None, None];
+
             let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
             renderer.register_material_pipeline("graph_pso", pso, bgr);
             self.renderer = Some(renderer);
