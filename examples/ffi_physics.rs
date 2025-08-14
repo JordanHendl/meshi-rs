@@ -4,8 +4,8 @@ use meshi::{render::RenderBackend, *};
 use std::ffi::CString;
 
 fn main() {
-    let app = CString::new("Example").unwrap();
-    let loc = CString::new(".").unwrap();
+    let app = CString::new("Example").unwrap_or_default();
+    let loc = CString::new(".").unwrap_or_default();
     let info = MeshiEngineInfo {
         application_name: app.as_ptr(),
         application_location: loc.as_ptr(),

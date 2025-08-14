@@ -3,8 +3,8 @@ use meshi::*;
 use std::ffi::CString;
 
 fn main() {
-    let name = CString::new("test").unwrap();
-    let loc = CString::new(".").unwrap();
+    let name = CString::new("test").unwrap_or_default();
+    let loc = CString::new(".").unwrap_or_default();
     let info = MeshiEngineInfo {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),

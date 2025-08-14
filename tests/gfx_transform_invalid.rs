@@ -6,8 +6,8 @@ use std::ffi::CString;
 
 #[test]
 fn set_transform_with_invalid_handle_does_nothing() {
-    let name = CString::new("test").unwrap();
-    let loc = CString::new(".").unwrap();
+    let name = CString::new("test").unwrap_or_default();
+    let loc = CString::new(".").unwrap_or_default();
     let info = MeshiEngineInfo {
         application_name: name.as_ptr(),
         application_location: loc.as_ptr(),
