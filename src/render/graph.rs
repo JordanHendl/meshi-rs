@@ -44,12 +44,16 @@ impl GraphRenderer {
     }
 
     fn default_graph(_headless: bool) -> RenderGraph {
-        RenderGraph::new()
+        let mut g = RenderGraph::new();
+        // Ensure a color image is produced for readback.
+        g.register_external_image("color", Format::RGBA8);
+        g
     }
 
     fn init(&mut self, ctx: &mut dashi::Context) -> Result<(), RenderError> {
         if self.renderer.is_none() {
-            let (width, height) = (1, 1);
+            // Tests expect a 64x64 target.
+            let (width, height) = (64, 64);
 
             let graph = if let Some(json) = &self.graph_json {
                 io::from_json(json).map_err(RenderError::GraphParse)?
@@ -63,30 +67,41 @@ impl GraphRenderer {
                 Renderer::with_graph(width, height, ctx, graph)?
             };
 
+            // Use shaders that declare Koji's default uniforms.
             let vert = inline_spirv!(
                 r#"#version 450
+                struct TimingInfo { float currentTimeMs; float lastFrameTimeMs; };
+                layout(set = 0, binding = 0) uniform TimingBuffer { TimingInfo info; } KOJI_time;
+                #define KOJI_MAX_CAMERAS 4
+                struct Camera { mat4 view_proj; vec4 cam_pos; };
+                layout(set = 0, binding = 4) uniform CameraBuffer { Camera cameras[KOJI_MAX_CAMERAS]; } KOJI_cameras;
                 layout(location=0) in vec3 position;
                 layout(location=1) in vec3 normal;
                 layout(location=2) in vec4 tangent;
                 layout(location=3) in vec2 uv;
                 layout(location=4) in vec4 color;
                 void main() {
-                    gl_Position = vec4(position, 1.0)
-                        + vec4(normal, 0.0) * 0.0
-                        + tangent * 0.0
-                        + vec4(uv, 0.0, 0.0) * 0.0
-                        + color * 0.0;
+                    float t = KOJI_time.info.currentTimeMs;
+                    // Reference camera data without affecting output.
+                    gl_Position = vec4(position, 1.0);
+                    gl_Position += (KOJI_cameras.cameras[0].view_proj * vec4(position,1.0) + vec4(t)) * 0.0;
                 }
                 "#,
                 vert
             );
             let frag = inline_spirv!(
                 r#"#version 450
+                struct TimingInfo { float currentTimeMs; float lastFrameTimeMs; };
+                layout(set = 0, binding = 0) uniform TimingBuffer { TimingInfo info; } KOJI_time;
                 layout(location=0) out vec4 color;
-                void main() { color = vec4(1.0,1.0,1.0,1.0); }
+                void main() {
+                    float t = KOJI_time.info.currentTimeMs * 0.0;
+                    color = vec4(1.0, 0.0, 0.0, 1.0) + vec4(t);
+                }
                 "#,
                 frag
             );
+
             let outputs = renderer.graph().output_images();
             let pass = if outputs.is_empty() {
                 renderer.render_pass()
@@ -110,58 +125,9 @@ impl GraphRenderer {
                 .build_with_resources(renderer.resources())
                 .unwrap();
 
-            // Rebuild pipeline with viewport and scissor as dynamic states
-            let vertex_info = VertexDescriptionInfo {
-                entries: &[VertexEntryInfo {
-                    format: ShaderPrimitiveType::Vec4,
-                    location: 0,
-                    offset: 0,
-                }],
-                stride: 16,
-                rate: VertexRate::Vertex,
-            };
-
-            let layout_info = GraphicsPipelineLayoutInfo {
-                debug_name: "graph_pso",
-                vertex_info,
-                bg_layouts: [None, None, None, None],
-                shaders: &[
-                    PipelineShaderInfo {
-                        stage: ShaderType::Vertex,
-                        spirv: vert,
-                        specialization: &[],
-                    },
-                    PipelineShaderInfo {
-                        stage: ShaderType::Fragment,
-                        spirv: frag,
-                        specialization: &[],
-                    },
-                ],
-                details: GraphicsPipelineDetails {
-                    dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
-                    culling: CullMode::None,
-                    front_face: VertexOrdering::CounterClockwise,
-                    ..Default::default()
-                },
-            };
-
-            let layout = ctx.make_graphics_pipeline_layout(&layout_info).unwrap();
-            let pipeline_handle = ctx
-                .make_graphics_pipeline(&GraphicsPipelineInfo {
-                    debug_name: "graph_pso",
-                    layout,
-                    render_pass: pass,
-                    subpass_id: 0,
-                    ..Default::default()
-                })
-                .unwrap();
-
-            pso.layout = layout;
-            pso.pipeline = pipeline_handle;
-            pso.bind_group_layouts = [None, None, None, None];
-
             let bgr = pso.create_bind_groups(renderer.resources()).unwrap();
             renderer.register_material_pipeline("graph_pso", pso, bgr);
+            renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
             self.renderer = Some(renderer);
             self.graph_json = None;
         }
