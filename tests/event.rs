@@ -13,6 +13,7 @@ use winit::event::{
     DeviceEvent, ElementState, Event as WEvent, KeyboardInput, ModifiersState, MouseScrollDelta,
     TouchPhase, VirtualKeyCode, WindowEvent,
 };
+mod common;
 
 extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
     let counter: &AtomicUsize = unsafe { &*(data as *const AtomicUsize) };
@@ -20,6 +21,7 @@ extern "C" fn cb(_ev: *mut Event, data: *mut c_void) {
 }
 
 fn main() {
+    let _guard = common::ValidationGuard::new();
     // Test conversion from winit events
     let window_id: winit::window::WindowId = unsafe { std::mem::zeroed() };
 

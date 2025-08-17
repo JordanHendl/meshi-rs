@@ -28,6 +28,7 @@ fn expected_triangle(width: u32, height: u32) -> RgbaImage {
 }
 
 fn run_backend(backend: RenderBackend, name: &str) {
+    let _guard = common::ValidationGuard::new();
     const EXTENT: [u32; 2] = [64, 64];
     let dir = tempdir().unwrap();
     let base = dir.path();
