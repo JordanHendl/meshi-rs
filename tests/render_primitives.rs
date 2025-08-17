@@ -31,6 +31,7 @@ fn run_backend<F>(backend: RenderBackend, create: F, name: &str)
 where
     F: Fn(&mut RenderEngine),
 {
+    let _guard = common::ValidationGuard::new();
     const EXTENT: [u32; 2] = [64, 64];
     let dir = tempdir().unwrap();
     let base = dir.path();

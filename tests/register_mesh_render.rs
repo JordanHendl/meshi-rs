@@ -1,8 +1,10 @@
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo};
 use serial_test::serial;
 use tempfile::tempdir;
+mod common;
 
 fn run_backend(backend: RenderBackend) {
+    let _guard = common::ValidationGuard::new();
     let dir = tempdir().unwrap();
     let base = dir.path();
     let db_dir = base.join("database");
