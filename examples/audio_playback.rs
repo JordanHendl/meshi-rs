@@ -8,18 +8,12 @@ fn system_sound_path() -> Option<&'static str> {
             "/usr/share/sounds/alsa/Front_Center.wav",
             "/usr/share/sounds/freedesktop/stereo/bell.oga",
         ];
-        CANDIDATES
-            .iter()
-            .find(|p| Path::new(p).exists())
-            .copied()
+        CANDIDATES.iter().find(|p| Path::new(p).exists()).copied()
     }
     #[cfg(target_os = "macos")]
     {
         const CANDIDATES: [&str; 1] = ["/System/Library/Sounds/Glass.aiff"];
-        CANDIDATES
-            .iter()
-            .find(|p| Path::new(p).exists())
-            .copied()
+        CANDIDATES.iter().find(|p| Path::new(p).exists()).copied()
     }
     #[cfg(target_os = "windows")]
     {
@@ -27,10 +21,7 @@ fn system_sound_path() -> Option<&'static str> {
             "C:\\Windows\\Media\\notify.wav",
             "C:\\Windows\\Media\\tada.wav",
         ];
-        CANDIDATES
-            .iter()
-            .find(|p| Path::new(p).exists())
-            .copied()
+        CANDIDATES.iter().find(|p| Path::new(p).exists()).copied()
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {

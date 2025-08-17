@@ -1,7 +1,5 @@
 use meshi::audio::{AudioEngine, AudioEngineInfo, PlaybackState};
-use meshi::{
-    meshi_audio_get_state, meshi_audio_pause, meshi_audio_play, meshi_audio_stop,
-};
+use meshi::{meshi_audio_get_state, meshi_audio_pause, meshi_audio_play, meshi_audio_stop};
 use serial_test::serial;
 
 #[test]
