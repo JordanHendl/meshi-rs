@@ -1,8 +1,10 @@
 use image::{Rgba, RgbaImage};
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo, SceneInfo};
 use std::fs;
+mod common;
 
 fn main() {
+    let _guard = common::ValidationGuard::new();
     // Create a temporary directory for the database resources.
     let mut dir = std::env::temp_dir();
     dir.push("meshi_scene_test");

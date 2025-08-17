@@ -3,8 +3,10 @@ use meshi::physics::{ActorStatus, RigidBodyInfo};
 use meshi::render::{database::geometry_primitives::CubePrimitiveInfo, RenderBackend};
 use meshi::*;
 use std::ffi::CString;
+mod common;
 
 fn main() {
+    let _guard = common::ValidationGuard::new();
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {

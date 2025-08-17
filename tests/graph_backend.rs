@@ -5,6 +5,7 @@ use tempfile::tempdir;
 mod common;
 
 fn render_triangle(backend: RenderBackend) -> RgbaImage {
+    let _guard = common::ValidationGuard::new();
     const EXTENT: [u32; 2] = [64, 64];
     let dir = tempdir().expect("temp dir");
     let base = dir.path();

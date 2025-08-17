@@ -8,8 +8,10 @@ use meshi::render::{
 };
 use meshi::*;
 use std::ffi::CString;
+mod common;
 
 fn main() {
+    let _guard = common::ValidationGuard::new();
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {

@@ -1,8 +1,10 @@
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo, SceneInfo};
 use std::fs;
+mod common;
 
 #[test]
 fn records_missing_resources() {
+    let _guard = common::ValidationGuard::new();
     // Create temporary directory with minimal database.
     let dir = tempfile::tempdir().unwrap();
     let db_dir = dir.path().join("database");

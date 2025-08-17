@@ -2,8 +2,10 @@ use image::{Rgba, RgbaImage};
 use meshi::render::{RenderBackend, RenderEngine, RenderEngineInfo, SceneInfo};
 use serial_test::serial;
 use tempfile::tempdir;
+mod common;
 
 fn run_backend(backend: RenderBackend) {
+    let _guard = common::ValidationGuard::new();
     const EXTENT: [u32; 2] = [64, 64];
     let dir = tempdir().unwrap();
     let base = dir.path();

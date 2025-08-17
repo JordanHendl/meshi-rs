@@ -1192,6 +1192,7 @@ dependencies = [
  "image 0.24.9",
  "inline-spirv",
  "koji",
+ "libc",
  "rayon",
  "rodio",
  "serde",

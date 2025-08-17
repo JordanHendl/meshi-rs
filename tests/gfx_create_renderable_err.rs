@@ -2,9 +2,11 @@ use dashi::utils::Handle;
 use glam::Mat4;
 use meshi::{*, render::RenderBackend};
 use std::ffi::CString;
+mod common;
 
 #[test]
 fn invalid_info_returns_default_handle() {
+    let _guard = common::ValidationGuard::new();
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {
