@@ -310,7 +310,6 @@ impl RenderEngine {
     }
 
     fn update_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
-        println!("3");
         if let Some(ctx) = self.ctx.as_mut() {
             if let Some(obj) = self.mesh_objects.get_ref(handle) {
                 if let Some(idx) = obj.renderer_handle {
@@ -602,12 +601,11 @@ impl RenderEngine {
             );
             return;
         }
-        println!("1");
         match self.mesh_objects.get_mut_ref(handle) {
             Some(obj) => {
                 obj.transform = *transform;
                 for target in &obj.targets {
-                    info!("Submitting transform for mesh '{}'", target.mesh.name);
+//                    info!("Submitting transform for mesh '{}'", target.mesh.name);
                 }
             }
             None => {
@@ -619,7 +617,6 @@ impl RenderEngine {
             }
         }
 
-        println!("2");
         // After transform update, refresh GPU mesh
         self.update_mesh_with_renderer(handle);
     }
@@ -750,6 +747,7 @@ impl RenderEngine {
     }
 
     pub fn shut_down(mut self) {
+        println!("Shutting down render engine!");
         drop(self.backend);
         if let Some(ctx) = self.ctx.take() {
             ctx.destroy();
