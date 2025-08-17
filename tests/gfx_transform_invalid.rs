@@ -3,9 +3,11 @@ use glam::Mat4;
 use meshi::render::RenderBackend;
 use meshi::*;
 use std::ffi::CString;
+mod common;
 
 #[test]
 fn set_transform_with_invalid_handle_does_nothing() {
+    let _guard = common::ValidationGuard::new();
     let name = CString::new("test").unwrap();
     let loc = CString::new(".").unwrap();
     let info = MeshiEngineInfo {
