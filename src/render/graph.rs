@@ -3,7 +3,7 @@ use dashi::*;
 use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
-use koji::{render_graph::io, PipelineBuilder, RenderGraph};
+use koji::{render_graph::io, CanvasBuilder, PipelineBuilder, RenderGraph};
 
 use super::RenderError;
 use crate::object::MeshObject;
@@ -43,10 +43,15 @@ impl GraphRenderer {
         })
     }
 
-    fn default_graph(_headless: bool) -> RenderGraph {
+    fn default_graph(ctx: &mut dashi::Context, width: u32, height: u32) -> RenderGraph {
         let mut g = RenderGraph::new();
-        // Ensure a color image is produced for readback.
-        g.register_external_image("color", Format::RGBA8);
+        let canvas = CanvasBuilder::new()
+            .extent([width, height])
+            .color_attachment("color", Format::RGBA8)
+            .depth_attachment("depth", Format::D24S8)
+            .build(ctx)
+            .expect("canvas build");
+        g.add_canvas(&canvas);
         g
     }
 
@@ -56,9 +61,14 @@ impl GraphRenderer {
             let (width, height) = (64, 64);
 
             let graph = if let Some(json) = &self.graph_json {
-                io::from_json(json).map_err(RenderError::GraphParse)?
+                let g = io::from_json(ctx, json).map_err(RenderError::GraphParse)?;
+                if g.canvases().is_empty() {
+                    Self::default_graph(ctx, width, height)
+                } else {
+                    g
+                }
             } else {
-                Self::default_graph(self.headless)
+                Self::default_graph(ctx, width, height)
             };
 
             let mut renderer = if self.headless {
@@ -195,7 +205,7 @@ impl GraphRenderer {
         };
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.register_static_mesh(mesh, None, "graph_pso".into());
+            renderer.register_static_mesh(mesh, None, "graph_pso".into(), "canvas");
         }
 
         let idx = self.next_mesh;
@@ -220,7 +230,7 @@ impl GraphRenderer {
             .collect();
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.update_static_mesh(idx, &vertices);
+            renderer.update_static_mesh("canvas", idx, &vertices);
         }
     }
 

@@ -30,7 +30,7 @@ pub enum RenderError {
     Database(DatabaseError),
     Gpu(dashi::GPUError),
     GraphConfig(std::io::Error),
-    GraphParse(serde_json::Error),
+    GraphParse(String),
 }
 
 impl fmt::Display for RenderError {
@@ -55,7 +55,7 @@ impl std::error::Error for RenderError {
         match self {
             RenderError::Database(err) => Some(err),
             RenderError::GraphConfig(err) => Some(err),
-            RenderError::GraphParse(err) => Some(err),
+            RenderError::GraphParse(_) => None,
             _ => None,
         }
     }
@@ -81,7 +81,7 @@ impl From<std::io::Error> for RenderError {
 
 impl From<serde_json::Error> for RenderError {
     fn from(value: serde_json::Error) -> Self {
-        RenderError::GraphParse(value)
+        RenderError::GraphParse(value.to_string())
     }
 }
 
