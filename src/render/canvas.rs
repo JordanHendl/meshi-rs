@@ -7,7 +7,6 @@ use image::{Rgba, RgbaImage};
 use inline_spirv::inline_spirv;
 use koji::renderer::{Renderer, StaticMesh, Vertex as KojiVertex};
 use koji::{CanvasBuilder, PipelineBuilder};
-use tracing::info;
 
 pub struct CanvasRenderer {
     extent: Option<[u32; 2]>,
@@ -141,7 +140,7 @@ impl CanvasRenderer {
         };
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.register_static_mesh(mesh, None, "color".into());
+            renderer.register_static_mesh(mesh, None, "color".into(), "canvas");
         }
 
         let idx = self.next_mesh;
@@ -166,7 +165,7 @@ impl CanvasRenderer {
             .collect();
 
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.update_static_mesh(idx, &vertices);
+            renderer.update_static_mesh("canvas", idx, &vertices);
         }
     }
 
