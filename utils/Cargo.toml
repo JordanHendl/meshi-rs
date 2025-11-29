@@ -1,0 +1,14 @@
+[package]
+name = "meshi-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dashi = {git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"]}
+noren = {git = "https://github.com/JordanHendl/noren"}
+bento = {git = "https://github.com/JordanHendl/bento"}
+furikake = {git = "https://github.com/JordanHendl/furikake"}
+
+
+[lib]
+
