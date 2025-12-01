@@ -148,11 +148,13 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/bento#a7d97c959ea13e94771241c4e0f74a61de4a10ab"
+source = "git+https://github.com/JordanHendl/bento#3c84ca7459f1c5967142c366bfb9074003f7bccf"
 dependencies = [
  "bincode",
  "clap",
  "dashi",
+ "regex",
+ "rspirv",
  "rspirv-reflect",
  "serde",
  "serde_json",
@@ -630,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#85c7e55b22a67b7504f177205796f01fe0e24cba"
+source = "git+https://github.com/JordanHendl/dashi#a03785c0a014a3ca8220e3db877fac8fa6c295ad"
 dependencies = [
  "anyhow",
  "ash",
@@ -794,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/furikake#da709bc075402151fab4414156b25a12de72d267"
+source = "git+https://github.com/JordanHendl/furikake#ec448e5365ebdd04bd30bf24d62d1ffc204771d3"
 dependencies = [
  "bento",
  "dashi",
@@ -1273,6 +1275,7 @@ dependencies = [
  "meshi-graphics",
  "meshi-physics",
  "meshi-utils",
+ "noren",
  "resource_pool",
  "serial_test",
  "tempfile",
@@ -1498,13 +1501,14 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#2ad4bcc078eea7e4c22c78886437b60add98e833"
+source = "git+https://github.com/JordanHendl/noren#1414d87189cf84452f4d808cc40d58190ee2e1d5"
 dependencies = [
  "bento",
  "bincode",
  "bytemuck",
  "dashi",
  "fontdue",
+ "furikake",
  "glam 0.24.2",
  "gltf",
  "image 0.24.9",
@@ -1896,7 +1900,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 [[package]]
 name = "resource_pool"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/ResourcePool#08774d83bbf641da09b636a56f341bfd6648a54f"
+source = "git+https://github.com/JordanHendl/ResourcePool#52c231ad68e6c13dce9fd7dbe75d5f7a229aa66f"
 dependencies = [
  "bytemuck",
 ]
@@ -3018,18 +3022,18 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.30"
+version = "0.8.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ea879c944afe8a2b25fef16bb4ba234f47c694565e97383b36f3a878219065c"
+checksum = "fd74ec98b9250adb3ca554bdde269adf631549f51d8a8f8f0a10b50f1cb298c3"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.30"
+version = "0.8.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf955aa904d6040f70dc8e9384444cb1030aed272ba3cb09bbc4ab9e7c1f34f5"
+checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -1,30 +1,30 @@
 pub mod event;
-pub mod structs;
 mod renderer;
+pub mod structs;
 
-pub use structs::*;
-use noren::*;
-use std::ffi::c_void;
 use dashi::{Context, Display, DisplayInfo, Handle};
 use glam::{Mat4, Vec3, Vec4};
-use meshi_ffi_structs::FFIMeshObjectInfo;
+use meshi_ffi_structs::{DirectionalLightInfo, MeshObjectInfo};
 use meshi_utils::MeshiError;
+use meta::{DeviceMesh, DeviceModel};
+pub use noren::*;
+use renderer::{Renderer, RendererInfo};
+use std::{ffi::c_void, ptr::NonNull};
+pub use structs::*;
 
 pub struct RenderEngine {
-    ctx: Context,
     display: Option<Display>,
-    database: DB,
+    renderer: Renderer,
+    db: Option<NonNull<DB>>,
 }
 
 impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
-        let mut ctx = if info.headless {
-            Context::new(&Default::default())?
-        } else {
-            Context::headless(&Default::default())?
-        };
+        let mut renderer = Renderer::new(&RendererInfo {
+            headless: info.headless,
+        });
         let display = if info.headless {
-            Some(ctx.make_display(&DisplayInfo {
+            Some(renderer.context().make_display(&DisplayInfo {
                 window: todo!(),
                 vsync: todo!(),
                 buffering: todo!(),
@@ -32,17 +32,20 @@ impl RenderEngine {
         } else {
             None
         };
-        let database = DB::new(&DBInfo {
-            ctx: &mut ctx,
-            base_dir: &info.database_path,
-            layout_file: None,
-        })?;
 
         Ok(Self {
-            ctx,
             display,
-            database,
+            renderer,
+            db: None,
         })
+    }
+
+    pub fn initialize(&mut self, db: &mut DB) {
+        self.db = Some(NonNull::new(db).expect("lmao"));
+    }
+
+    pub fn context(&mut self) -> &mut Context {
+        self.renderer.context()
     }
 
     pub fn shut_down(&mut self) {
@@ -73,73 +76,25 @@ impl RenderEngine {
     }
 
     pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
-        todo!()//self.directional_lights.release(handle);
+        todo!() //self.directional_lights.release(handle);
     }
 
-    pub fn register_mesh_object(
+    pub fn register_object(
         &mut self,
-        info: &FFIMeshObjectInfo,
-    ) -> Result<Handle<MeshObject>, MeshiError> {
+        info: &RenderObjectInfo,
+    ) -> Result<Handle<RenderObject>, MeshiError> {
         todo!()
     }
 
-    pub fn release_mesh_object(&mut self, handle: Handle<MeshObject>) {
+    pub fn release_object(&mut self, handle: Handle<RenderObject>) {
         todo!()
     }
 
-    pub fn register_mesh_with_renderer(&mut self, handle: Handle<MeshObject>) {
+    pub fn register_object_with_renderer(&mut self, handle: Handle<RenderObject>) {
         todo!()
     }
 
-    pub fn create_cube(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_cube_ex(&mut self, info: &CubePrimitiveInfo) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_sphere(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_sphere_ex(&mut self, info: &SpherePrimitiveInfo) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_cylinder(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_cylinder_ex(&mut self, info: &CylinderPrimitiveInfo) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_plane(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_plane_ex(&mut self, info: &PlanePrimitiveInfo) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_cone(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_cone_ex(&mut self, info: &ConePrimitiveInfo) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn create_triangle(&mut self) -> Handle<MeshObject> {
-        todo!()
-    }
-
-    pub fn set_mesh_object_transform(
-        &mut self,
-        handle: Handle<MeshObject>,
-        transform: &glam::Mat4,
-    ) {
+    pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         todo!()
     }
 
@@ -195,9 +150,9 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-//        self.event_cb = Some(EventCallbackInfo {
-//            event_cb,
-//            user_data,
-//        });
+        //        self.event_cb = Some(EventCallbackInfo {
+        //            event_cb,
+        //            user_data,
+        //        });
     }
 }

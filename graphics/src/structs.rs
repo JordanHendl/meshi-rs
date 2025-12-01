@@ -1,10 +1,20 @@
 use glam::{Mat4, Vec4};
+use meshi_ffi_structs::DirectionalLightInfo;
+use noren::{meta::DeviceModel, DB};
 
 #[derive(Default)]
 pub struct MeshObject {
     //pub mesh: MeshResource,
     pub transform: Mat4,
     pub renderer_handle: Option<usize>,
+}
+
+pub enum RenderObjectInfo {
+    Model(DeviceModel),
+}
+
+pub enum RenderObject {
+    Mesh(MeshObject),
 }
 
 #[repr(C)]
@@ -81,14 +91,6 @@ impl Default for PlanePrimitiveInfo {
     }
 }
 
-#[derive(Default, Clone, Copy)]
-#[repr(C)]
-pub struct DirectionalLightInfo {
-    pub direction: Vec4,
-    pub color: Vec4,
-    pub intensity: f32,
-}
-
 #[derive(Default)]
 pub struct DirectionalLight {
     pub transform: Mat4,
@@ -101,7 +103,6 @@ pub struct RgbaImage {
 
 #[derive(Default)]
 pub struct RenderEngineInfo {
-    pub database_path: String,
     pub headless: bool,
     pub canvas_extent: Option<[u32; 2]>,
 }

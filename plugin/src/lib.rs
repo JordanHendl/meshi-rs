@@ -1,13 +1,19 @@
-use meshi_audio::{AudioEngineInfo, AudioSource, Bus, FinishedCallback, PlaybackState, StreamingSource};
-use meshi_graphics::{CubePrimitiveInfo, DirectionalLight, DirectionalLightInfo, MeshObject, RenderEngineInfo};
-use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
-use resource_pool::Handle;
 use glam::{Mat4, Vec3};
-pub use meshi_ffi_structs::*;
-pub use meshi_physics::PhysicsSimulation;
-pub use meshi_graphics::RenderEngine;
 pub use meshi_audio::AudioEngine;
+use meshi_audio::{
+    AudioEngineInfo, AudioSource, Bus, FinishedCallback, PlaybackState, StreamingSource,
+};
+pub use meshi_ffi_structs::*;
+pub use meshi_graphics::RenderEngine;
+use meshi_graphics::{
+    CubePrimitiveInfo, DirectionalLight, MeshObject, RenderEngineInfo, RenderObject,
+    RenderObjectInfo,
+};
+pub use meshi_physics::PhysicsSimulation;
+use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
 use meshi_utils::timer::Timer;
+use noren::{meta::DeviceModel, DBInfo};
+use resource_pool::Handle;
 use std::ffi::*;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -42,8 +48,9 @@ pub struct MeshiEngineInfo {
 #[repr(C)]
 pub struct MeshiEngine {
     name: String,
-    render: RenderEngine,
+    render: Box<RenderEngine>,
     physics: Box<PhysicsSimulation>,
+    database: Box<noren::DB>,
     audio: AudioEngine,
     frame_timer: Timer,
 }
@@ -68,21 +75,31 @@ impl MeshiEngine {
         info!("Application Name: '{}'", appname);
         info!("Application Dir: '{}'", appdir);
         info!("Headless Mode: '{}'", info.headless != 0);
-        
-        Some(Box::new(MeshiEngine {
-            render: RenderEngine::new(&RenderEngineInfo {
-                database_path: appdir.to_string(),
+        let mut render = Box::new(
+            RenderEngine::new(&RenderEngineInfo {
                 headless: info.headless != 0,
                 canvas_extent: if info.canvas_extent.is_null() {
                     None
                 } else {
-                    Some(unsafe { [
-                        *info.canvas_extent,
-                        *info.canvas_extent.add(1),
-                    ] })
+                    Some(unsafe { [*info.canvas_extent, *info.canvas_extent.add(1)] })
                 },
             })
             .expect("failed to initialize render engine"),
+        );
+
+        let mut database = Box::new(
+            noren::DB::new(&DBInfo {
+                ctx: render.context(),
+                base_dir: &appdir,
+                layout_file: None,
+            })
+            .expect("failed to initialize database!"),
+        );
+        
+        render.initialize(database.as_mut());
+        Some(Box::new(MeshiEngine {
+            database,
+            render,
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
             audio: AudioEngine::new(&AudioEngineInfo::default()),
             frame_timer: Timer::new(),
@@ -213,11 +230,11 @@ pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
 /// # Safety
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
-pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut RenderEngine {
+pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut MeshiEngine {
     if engine.is_null() {
         return std::ptr::null_mut();
     }
-    unsafe { &mut (*engine).render }
+    return engine;
 }
 
 /// Register a new renderable mesh object.
@@ -226,127 +243,52 @@ pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut Re
 /// `render` must be a valid pointer obtained from [`meshi_get_graphics_system`]
 /// and `info` must point to a valid [`FFIMeshObjectInfo`].
 #[no_mangle]
-pub extern "C" fn meshi_gfx_create_renderable(
-    render: *mut RenderEngine,
-    info: *const FFIMeshObjectInfo,
-) -> Handle<MeshObject> {
+pub extern "C" fn meshi_gfx_create_mesh_object(
+    render: *mut MeshiEngine,
+    info: *const MeshObjectInfo,
+) -> Handle<RenderObject> {
     return_if_null!(Handle::default(), render, info);
-    match unsafe { &mut *render }.register_mesh_object(unsafe { &*info }) {
-        Ok(handle) => handle,
-        Err(_) => Handle::default(),
-    }
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+
+    let info: &MeshObjectInfo = unsafe { &(*info) };
+    let mesh = unsafe { CStr::from_ptr(info.mesh) }
+        .to_str()
+        .unwrap_or("mesh/default");
+
+    let material = unsafe { CStr::from_ptr(info.material) }
+        .to_str()
+        .unwrap_or("material/default");
+
+    let mesh = engine
+        .database
+        .fetch_gpu_mesh_with_material(mesh, material)
+        .expect("Failed to load mesh");
+
+    let model = DeviceModel {
+        name: "".to_string(),
+        meshes: vec![mesh],
+    };
+
+    let h = engine
+        .render
+        .register_object(&RenderObjectInfo::Model(model))
+        .expect("Unable to register object");
+    meshi_gfx_set_transform(engine, h, &info.transform);
+
+    h
 }
 
 #[no_mangle]
-pub extern "C" fn meshi_gfx_create_cube(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_cube()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_cube_ex(
-    render: *mut RenderEngine,
-    info: *const CubePrimitiveInfo,
-) -> Handle<MeshObject> {
-    return_if_null!(Handle::default(), render, info);
-    unsafe { &mut *render }.create_cube_ex(unsafe { &*info })
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_sphere(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_sphere()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_sphere_ex(
-    render: *mut RenderEngine,
-    info: *const meshi_graphics::SpherePrimitiveInfo,
-) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_sphere_ex(unsafe { &*info })
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_cylinder(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_cylinder()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_cylinder_ex(
-    render: *mut RenderEngine,
-    info: *const meshi_graphics::CylinderPrimitiveInfo,
-) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_cylinder_ex(unsafe { &*info })
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_plane(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_plane()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_plane_ex(
-    render: *mut RenderEngine,
-    info: *const meshi_graphics::PlanePrimitiveInfo,
-) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_plane_ex(unsafe { &*info })
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_cone(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_cone()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_cone_ex(
-    render: *mut RenderEngine,
-    info: *const meshi_graphics::ConePrimitiveInfo,
-) -> Handle<MeshObject> {
-    if render.is_null() || info.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_cone_ex(unsafe { &*info })
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_create_triangle(render: *mut RenderEngine) -> Handle<MeshObject> {
-    if render.is_null() {
-        return Handle::default();
-    }
-    unsafe { &mut *render }.create_triangle()
-}
-
-#[no_mangle]
-pub extern "C" fn meshi_gfx_release_mesh_object(
-    render: *mut RenderEngine,
-    h: *const Handle<MeshObject>,
+pub extern "C" fn meshi_gfx_release_render_object(
+    render: *mut MeshiEngine,
+    h: *const Handle<RenderObject>,
 ) {
     if render.is_null() || h.is_null() {
         return;
     }
-    unsafe { &mut *render }.release_mesh_object(unsafe { *h });
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.render.release_object(unsafe { *h });
 }
 
 /// Update the transformation matrix for a renderable object.
@@ -356,9 +298,9 @@ pub extern "C" fn meshi_gfx_release_mesh_object(
 /// `transform` must point to a valid [`Mat4`]. If either pointer is null this
 /// function returns without modifying the renderable.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_renderable_transform(
-    render: *mut RenderEngine,
-    h: Handle<MeshObject>,
+pub extern "C" fn meshi_gfx_set_transform(
+    render: *mut MeshiEngine,
+    h: Handle<RenderObject>,
     transform: *const Mat4,
 ) {
     if render.is_null() || transform.is_null() {
@@ -371,7 +313,13 @@ pub extern "C" fn meshi_gfx_set_renderable_transform(
         );
         return;
     }
-    unsafe { &mut *render }.set_mesh_object_transform(h, unsafe { &*transform });
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine
+        .render
+        .set_object_transform(h, unsafe { &*transform });
+    //unsafe { &mut *render }.set_object_transform(h, unsafe { &*transform });
+    todo!()
 }
 
 /// Create a directional light for the scene.
@@ -380,24 +328,30 @@ pub extern "C" fn meshi_gfx_set_renderable_transform(
 /// `render` must be valid and `info` must not be null.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_directional_light(
-    render: *mut RenderEngine,
+    render: *mut MeshiEngine,
     info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.render.register_directional_light(unsafe { &*info });
+
+    //unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+    todo!()
 }
 
 #[no_mangle]
 pub extern "C" fn meshi_gfx_release_directional_light(
-    render: *mut RenderEngine,
+    render: *mut MeshiEngine,
     h: *const Handle<DirectionalLight>,
 ) {
     if render.is_null() || h.is_null() {
         return;
     }
-    unsafe { &mut *render }.release_directional_light(unsafe { *h });
+    //unsafe { &mut *render }.release_directional_light(unsafe { *h });
+    todo!()
 }
 
 /// Update the transform for a directional light.
@@ -406,14 +360,15 @@ pub extern "C" fn meshi_gfx_release_directional_light(
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_directional_light_transform(
-    render: *mut RenderEngine,
+    render: *mut MeshiEngine,
     h: Handle<DirectionalLight>,
     transform: *const Mat4,
 ) {
     if render.is_null() || transform.is_null() {
         return;
     }
-    unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
+    //unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
+    todo!()
 }
 
 /// Update the properties for a directional light.
@@ -422,14 +377,14 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
 /// `render` and `info` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_directional_light_info(
-    render: *mut RenderEngine,
+    render: *mut MeshiEngine,
     h: Handle<DirectionalLight>,
     info: *const DirectionalLightInfo,
 ) {
     if render.is_null() || info.is_null() {
         return;
     }
-    unsafe { &mut *render }.set_directional_light_info(h, unsafe { &*info });
+    todo!()
 }
 
 /// Set the world-to-camera transform used for rendering.
@@ -437,11 +392,11 @@ pub extern "C" fn meshi_gfx_set_directional_light_info(
 /// # Safety
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_camera(render: *mut RenderEngine, transform: *const Mat4) {
+pub extern "C" fn meshi_gfx_set_camera_transform(render: *mut MeshiEngine, transform: *const Mat4) {
     if render.is_null() || transform.is_null() {
         return;
     }
-    unsafe { &mut *render }.set_camera(unsafe { &*transform });
+    todo!()
 }
 
 /// Set the projection matrix used for rendering.
@@ -449,11 +404,30 @@ pub extern "C" fn meshi_gfx_set_camera(render: *mut RenderEngine, transform: *co
 /// # Safety
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_projection(render: *mut RenderEngine, transform: *const Mat4) {
+pub extern "C" fn meshi_gfx_register_camera(
+    render: *mut MeshiEngine,
+    initial_transform: *const Mat4,
+) {
+    if render.is_null() || initial_transform.is_null() {
+        return;
+    }
+
+    todo!()
+}
+
+/// Set the projection matrix used for rendering.
+///
+/// # Safety
+/// `render` and `transform` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_camera_projection(
+    render: *mut MeshiEngine,
+    transform: *const Mat4,
+) {
     if render.is_null() || transform.is_null() {
         return;
     }
-    unsafe { &mut *render }.set_projection(unsafe { &*transform });
+    todo!()
 }
 
 /// Enable or disable mouse capture for the renderer window.
@@ -461,11 +435,11 @@ pub extern "C" fn meshi_gfx_set_projection(render: *mut RenderEngine, transform:
 /// # Safety
 /// `render` must be a valid pointer.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_capture_mouse(render: *mut RenderEngine, value: i32) {
+pub extern "C" fn meshi_gfx_capture_mouse(render: *mut MeshiEngine, value: i32) {
     if render.is_null() {
         return;
     }
-    unsafe { &mut *render }.set_capture_mouse(value != 0);
+    todo!()
 }
 
 ////////////////////////////////////////////
@@ -914,8 +888,8 @@ pub extern "C" fn meshi_physx_collision_shape_capsule(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use meshi_physics::{ActorStatus, PhysicsSimulation, RigidBodyInfo, SimulationInfo};
     use glam::{Quat, Vec3};
+    use meshi_physics::{ActorStatus, PhysicsSimulation, RigidBodyInfo, SimulationInfo};
 
     #[test]
     fn rigid_body_transform_roundtrip() {
