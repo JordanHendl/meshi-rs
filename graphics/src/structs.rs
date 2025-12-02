@@ -12,9 +12,10 @@ pub struct MeshObject {
 pub enum RenderObjectInfo {
     Model(DeviceModel),
 }
+pub struct RenderObject;
 
-pub enum RenderObject {
-    Mesh(MeshObject),
+pub struct Camera {
+
 }
 
 #[repr(C)]

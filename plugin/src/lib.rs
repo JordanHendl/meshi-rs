@@ -6,8 +6,7 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{
-    CubePrimitiveInfo, DirectionalLight, MeshObject, RenderEngineInfo, RenderObject,
-    RenderObjectInfo,
+    Camera, CubePrimitiveInfo, DirectionalLight, MeshObject, RenderEngineInfo, RenderObject, RenderObjectInfo
 };
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
@@ -407,9 +406,9 @@ pub extern "C" fn meshi_gfx_set_camera_transform(render: *mut MeshiEngine, trans
 pub extern "C" fn meshi_gfx_register_camera(
     render: *mut MeshiEngine,
     initial_transform: *const Mat4,
-) {
+) -> Handle<Camera> {
     if render.is_null() || initial_transform.is_null() {
-        return;
+        todo!()
     }
 
     todo!()

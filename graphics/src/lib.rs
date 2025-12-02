@@ -1,5 +1,6 @@
 pub mod event;
-mod renderer;
+pub(crate) mod utils;
+mod render;
 pub mod structs;
 
 use dashi::{Context, Display, DisplayInfo, Handle};
@@ -8,19 +9,19 @@ use meshi_ffi_structs::{DirectionalLightInfo, MeshObjectInfo};
 use meshi_utils::MeshiError;
 use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
-use renderer::{Renderer, RendererInfo};
+use render::deferred::{DeferredRenderer, DeferredRendererInfo};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 
 pub struct RenderEngine {
     display: Option<Display>,
-    renderer: Renderer,
+    renderer: DeferredRenderer,
     db: Option<NonNull<DB>>,
 }
 
 impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
-        let mut renderer = Renderer::new(&RendererInfo {
+        let mut renderer = DeferredRenderer::new(&DeferredRendererInfo {
             headless: info.headless,
         });
         let display = if info.headless {
@@ -125,8 +126,20 @@ impl RenderEngine {
         //        }
         //
     }
-
+    
     pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
+        todo!()
+    }
+    
+    pub fn register_camera(&mut self, initial_transform: &Mat4) -> Handle<Camera> {
+        todo!()
+    }
+    
+    pub fn set_camera_as_active(&mut self, camera: Handle<Camera>) {
+        todo!()
+    }
+
+    pub fn release_camera(&mut self, camera: Handle<Camera>) {
         todo!()
     }
 
