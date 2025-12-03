@@ -15,6 +15,7 @@ use dashi::{
 };
 use furikake::{
     GPUState,
+    reservations::bindless_camera::ReservedBindlessCamera,
     types::{Camera, Material},
 };
 use glam::Mat4;
@@ -362,7 +363,8 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn set_active_camera(&mut self, camera: Handle<Camera>) {
-        todo!("Set active camera in furikake state's active camera resources to use.")
+        self.camera = camera;
+        self.update_active_camera_buffer();
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
@@ -433,6 +435,7 @@ impl<State: GPUState> GPUScene<State> {
 
     pub fn cull(&mut self) -> (CommandStream<Recording>, &DynamicGPUPool) {
         let mut stream = CommandStream::new().begin();
+        self.update_active_camera_buffer();
         self.objects_to_process.sync_up(&mut stream);
 
         stream = stream
@@ -456,5 +459,31 @@ impl<State: GPUState> GPUScene<State> {
 
         // Idea is: Either user can pull this in a full GPU driven renderer with inderect
         // drawing.... or they can just pull to CPU and then iterate through draw list.
+    }
+
+    fn update_active_camera_buffer(&mut self) {
+        if !self.camera.valid() {
+            return;
+        }
+
+        let state: &State = unsafe { self.state.as_ref() };
+        if let Ok(binding) = state.binding("meshi_bindless_camera") {
+            if let Some(bindless_camera) = binding.as_any().downcast_ref::<ReservedBindlessCamera>()
+            {
+                let ctx: &mut Context = unsafe { self.ctx.as_mut() };
+                match ctx.map_buffer_mut::<Camera>(self.pipeline_data.curr_camera) {
+                    Ok(mapped) => {
+                        mapped[0] = *bindless_camera.camera(self.camera);
+
+                        if let Err(err) = ctx.unmap_buffer(self.pipeline_data.curr_camera) {
+                            error!("Failed to unmap active camera buffer: {err:?}");
+                        }
+                    }
+                    Err(err) => {
+                        error!("Failed to map active camera buffer: {err:?}");
+                    }
+                }
+            }
+        }
     }
 }
