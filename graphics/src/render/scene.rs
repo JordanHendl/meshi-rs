@@ -15,6 +15,7 @@ use furikake::{
 use glam::Mat4;
 use noren::meta::DeviceModel;
 use resource_pool::resource_list::ResourceList;
+use tracing::error;
 #[repr(C)]
 pub struct SceneObjectInfo {
     pub local: Mat4,
@@ -81,21 +82,25 @@ pub struct GPUScene<State: GPUState> {
 }
 
 impl<State: GPUState> GPUScene<State> {
-    fn make_bento_shader() -> bento::CompilationResult {
-        let compiler = bento::Compiler::new().unwrap();
+    fn make_bento_shader() -> Result<bento::CompilationResult, bento::BentoError> {
+        let compiler = bento::Compiler::new().map_err(|err| {
+            error!("Failed to create Bento compiler for scene culling: {err}");
+            err
+        })?;
 
-        return compiler
-            .compile(
-                &[],
-                &bento::Request {
-                    name: todo!(),
-                    lang: todo!(),
-                    stage: todo!(),
-                    optimization: todo!(),
-                    debug_symbols: todo!(),
-                },
-            )
-            .unwrap();
+        let request = bento::Request {
+            name: Some("scene_cull".to_string()),
+            lang: bento::ShaderLang::Glsl,
+            stage: dashi::ShaderType::Compute,
+            optimization: bento::OptimizationLevel::Performance,
+            debug_symbols: cfg!(debug_assertions),
+        };
+
+        compiler.compile(include_bytes!("shaders/scene_cull.comp.glsl"), &request)
+            .map_err(|err| {
+                error!("Failed to compile scene culling shader: {err}");
+                err
+            })
     }
 
     pub fn new(info: &GPUSceneInfo, state: &mut State) -> Self {
