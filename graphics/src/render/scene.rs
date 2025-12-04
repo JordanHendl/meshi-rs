@@ -31,11 +31,15 @@ pub struct SceneObjectInfo {
 
 #[repr(C)]
 pub struct SceneObject {
-    scene_mask: u32,
-    parent: Handle<SceneObject>,
-    local_transform: Mat4,
-    world_transform: Mat4,
-    children: ArrayVec<Handle<SceneObject>, 16>,
+    pub local_transform: Mat4,
+    pub world_transform: Mat4,
+    pub scene_mask: u32,
+    pub parent_slot: u32,
+    pub dirty: u32,
+    pub active: u32,
+    pub parent: Handle<SceneObject>,
+    pub child_count: u32,
+    pub children: [Handle<SceneObject>; 16],
 }
 
 #[repr(C)]
@@ -77,6 +81,8 @@ struct GPUScenePipelineData {
     pipeline: Handle<ComputePipeline>,
     bind_groups: ArrayVec<Option<Handle<BindGroup>>, 4>,
     bind_tables: ArrayVec<Option<Handle<BindTable>>, 4>,
+    transform_pipeline: Handle<ComputePipeline>,
+    transform_bind_group: Handle<BindGroup>,
     curr_camera: Handle<Buffer>,
 }
 
@@ -110,6 +116,31 @@ impl<State: GPUState> GPUScene<State> {
             .compile(include_bytes!("shaders/scene_cull.comp.glsl"), &request)
             .map_err(|err| {
                 error!("Failed to compile scene culling shader: {err}");
+                err
+            })
+    }
+
+    fn make_transform_shader() -> Result<bento::CompilationResult, bento::BentoError> {
+        let compiler = bento::Compiler::new().map_err(|err| {
+            error!("Failed to create Bento compiler for scene transforms: {err}");
+            err
+        })?;
+
+        let request = bento::Request {
+            name: Some("scene_transform".to_string()),
+            lang: bento::ShaderLang::Glsl,
+            stage: dashi::ShaderType::Compute,
+            optimization: bento::OptimizationLevel::Performance,
+            debug_symbols: cfg!(debug_assertions),
+        };
+
+        compiler
+            .compile(
+                include_bytes!("shaders/scene_transform.comp.glsl"),
+                &request,
+            )
+            .map_err(|err| {
+                error!("Failed to compile scene transform shader: {err}");
                 err
             })
     }
@@ -335,10 +366,46 @@ impl<State: GPUState> GPUScene<State> {
                         .build(ctx)
                         .expect("Failed to build scene culling pipeline");
 
+                let transform_bg_layout = BindGroupLayoutBuilder::new(&format!(
+                    "{} Scene Transform BG Layout",
+                    info.name
+                ))
+                .storage_buffer(0, 1)
+                .build(ctx)
+                .expect("Failed to build transform bind group layout");
+
+                let transform_pipeline =
+                    ComputePipelineBuilder::new(&format!("{} Scene Transform Pipeline", info.name))
+                        .layout(
+                            ComputePipelineLayoutBuilder::new()
+                                .bind_group_layout(transform_bg_layout)
+                                .build(ctx)
+                                .expect("Failed to build transform pipeline layout"),
+                        )
+                        .shader(
+                            ShaderInfo::new(
+                                ShaderType::Compute,
+                                PipelineShaderInfo::None,
+                                &ShaderResource::bento(Self::make_transform_shader().unwrap()),
+                            )
+                            .with_debug_name(&format!("{} Scene Transform Shader", info.name)),
+                        )
+                        .build(ctx)
+                        .expect("Failed to build scene transform pipeline");
+
+                let transform_bind_group =
+                    BindGroupBuilder::new(&format!("{} Scene Transform BG", info.name))
+                        .layout(transform_bg_layout)
+                        .storage_buffer(objects_buffer, 0, None)
+                        .build(ctx)
+                        .expect("Failed to build scene transform bind group");
+
                 GPUScenePipelineData {
                     pipeline,
                     bind_groups,
                     bind_tables,
+                    transform_pipeline,
+                    transform_bind_group,
                     curr_camera: active_camera,
                 }
             } else {
@@ -346,6 +413,8 @@ impl<State: GPUState> GPUScene<State> {
                     pipeline: Default::default(),
                     bind_groups: ArrayVec::new(),
                     bind_tables: ArrayVec::new(),
+                    transform_pipeline: Default::default(),
+                    transform_bind_group: Default::default(),
                     curr_camera: active_camera,
                 }
             }
@@ -373,39 +442,55 @@ impl<State: GPUState> GPUScene<State> {
                 local_transform: info.local,
                 world_transform: info.global,
                 scene_mask: info.scene_mask,
+                parent_slot: u32::MAX,
+                active: 1,
+                dirty: 0,
                 parent: Default::default(),
-                children: Default::default(),
+                child_count: 0,
+                children: [Handle::default(); 16],
             })
             .unwrap()
     }
 
     pub fn release_object(&mut self, handle: Handle<SceneObject>) {
+        if let Some(object) = self.objects_to_process.get_mut_ref(handle) {
+            object.active = 0;
+            object.dirty = 0;
+        }
+
         self.objects_to_process.release(handle);
     }
 
     pub fn transform_object(&mut self, handle: Handle<SceneObject>, transform: &Mat4) {
-        self.objects_to_process
-            .get_mut_ref(handle)
-            .expect("")
-            .local_transform *= *transform;
-        todo!("Modify scene object transform")
+        {
+            let object = self.objects_to_process.get_mut_ref(handle).expect("");
+            object.local_transform *= *transform;
+            object.dirty = 1;
+        }
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<SceneObject>, transform: &Mat4) {
-        self.objects_to_process
-            .get_mut_ref(handle)
-            .expect("")
-            .local_transform = *transform;
-        todo!("Set scene object transform")
+        {
+            let object = self.objects_to_process.get_mut_ref(handle).expect("");
+            object.local_transform = *transform;
+            object.dirty = 1;
+        }
     }
 
     pub fn add_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
-        self.objects_to_process
-            .get_mut_ref(parent)
-            .expect("")
-            .children
-            .push(child);
-        self.objects_to_process.get_mut_ref(child).expect("").parent = parent;
+        if let Some(parent_ref) = self.objects_to_process.get_mut_ref(parent) {
+            if (parent_ref.child_count as usize) < parent_ref.children.len() {
+                let idx = parent_ref.child_count as usize;
+                parent_ref.children[idx] = child;
+                parent_ref.child_count += 1;
+            }
+        }
+
+        if let Some(child_ref) = self.objects_to_process.get_mut_ref(child) {
+            child_ref.parent = parent;
+            child_ref.parent_slot = parent.slot as u32;
+            child_ref.dirty = 1;
+        }
     }
 
     pub fn remove_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
@@ -425,11 +510,18 @@ impl<State: GPUState> GPUScene<State> {
         }
 
         if child_idx != -1 {
-            self.objects_to_process
-                .get_mut_ref(parent)
-                .unwrap()
-                .children
-                .remove(child_idx as usize);
+            if let Some(parent_ref) = self.objects_to_process.get_mut_ref(parent) {
+                for i in child_idx as usize..(parent_ref.child_count as usize - 1) {
+                    parent_ref.children[i] = parent_ref.children[i + 1];
+                }
+                parent_ref.child_count = parent_ref.child_count.saturating_sub(1);
+                parent_ref.children[parent_ref.child_count as usize] = Handle::default();
+            }
+            if let Some(child_ref) = self.objects_to_process.get_mut_ref(child) {
+                child_ref.parent = Handle::default();
+                child_ref.parent_slot = u32::MAX;
+                child_ref.dirty = 1;
+            }
         }
     }
 
@@ -437,6 +529,8 @@ impl<State: GPUState> GPUScene<State> {
         let mut stream = CommandStream::new().begin();
         self.update_active_camera_buffer();
         self.objects_to_process.sync_up(&mut stream);
+
+        self.dispatch_transform_updates(&mut stream);
 
         stream = stream
             .dispatch(&Dispatch {
@@ -459,6 +553,37 @@ impl<State: GPUState> GPUScene<State> {
 
         // Idea is: Either user can pull this in a full GPU driven renderer with inderect
         // drawing.... or they can just pull to CPU and then iterate through draw list.
+    }
+
+    fn dispatch_transform_updates(&mut self, stream: &mut CommandStream<Recording>) {
+        if !self.pipeline_data.transform_pipeline.valid() {
+            return;
+        }
+
+        let num_objects = self.objects_to_process.len() as u32;
+        if num_objects == 0 {
+            return;
+        }
+
+        let workgroup_size = 64u32;
+        let dispatch_x = (num_objects + workgroup_size - 1) / workgroup_size;
+
+        stream
+            .dispatch(&Dispatch {
+                x: dispatch_x,
+                y: 1,
+                z: 1,
+                pipeline: self.pipeline_data.transform_pipeline,
+                bind_groups: [
+                    self.pipeline_data.transform_bind_group,
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                ],
+                bind_tables: Default::default(),
+                dynamic_buffers: Default::default(),
+            })
+            .unbind_pipeline();
     }
 
     fn update_active_camera_buffer(&mut self) {
