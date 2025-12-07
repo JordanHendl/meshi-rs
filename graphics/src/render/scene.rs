@@ -77,28 +77,30 @@ impl<'a> Default for GPUSceneInfo<'a> {
     }
 }
 
-struct GPUScenePipelineData {
-    pipeline: Handle<ComputePipeline>,
-    bind_groups: ArrayVec<Option<Handle<BindGroup>>, 4>,
-    bind_tables: ArrayVec<Option<Handle<BindTable>>, 4>,
-    transform_pipeline: Handle<ComputePipeline>,
-    transform_bind_group: Handle<BindGroup>,
-    curr_camera: Handle<Buffer>,
+struct SceneData {
+    scene_bins: Handle<Buffer>, // A buffer of scene bin descriptions... this is used to know which
+    // bins to put each scene object into when it passes the cull test.
+    objects_to_process: GPUPool<SceneObject>, // Scene objects to be culled.
+    draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
+    current_camera: Handle<Camera>,
+}
+
+#[derive(Default)]
+struct SceneComputePipelines {
+    cull_state: Option<bento::builder::CSO>,
+    transform_state: Option<bento::builder::CSO>,
 }
 
 pub struct GPUScene<State: GPUState> {
     state: NonNull<State>,
     ctx: NonNull<Context>,
-    scene_bins: Handle<Buffer>, // A buffer of scene bin descriptions... this is used to know which
-    // bins to put each scene object into when it passes the cull test.
-    objects_to_process: GPUPool<SceneObject>, // Scene objects to be culled.
-    draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
-    pipeline_data: GPUScenePipelineData,
+    data: SceneData,
+    pipelines: SceneComputePipelines,
     camera: Handle<Camera>,
 }
 
 impl<State: GPUState> GPUScene<State> {
-    fn make_bento_shader() -> Result<bento::CompilationResult, bento::BentoError> {
+    fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let compiler = bento::Compiler::new().map_err(|err| {
             error!("Failed to create Bento compiler for scene culling: {err}");
             err
@@ -112,37 +114,24 @@ impl<State: GPUState> GPUScene<State> {
             debug_symbols: cfg!(debug_assertions),
         };
 
-        compiler
+        let res = compiler
             .compile(include_bytes!("shaders/scene_cull.comp.glsl"), &request)
             .map_err(|err| {
                 error!("Failed to compile scene culling shader: {err}");
                 err
-            })
-    }
+            })?;
 
-    fn make_transform_shader() -> Result<bento::CompilationResult, bento::BentoError> {
-        let compiler = bento::Compiler::new().map_err(|err| {
-            error!("Failed to create Bento compiler for scene transforms: {err}");
-            err
-        })?;
+        //////////////////////////////////////////////////////////////////
 
-        let request = bento::Request {
-            name: Some("scene_transform".to_string()),
-            lang: bento::ShaderLang::Glsl,
-            stage: dashi::ShaderType::Compute,
-            optimization: bento::OptimizationLevel::Performance,
-            debug_symbols: cfg!(debug_assertions),
-        };
+        let meshi_bindless_camera = unsafe { self.state.as_mut().binding("meshi_bindless_camera") }
+            .expect("Unable to get shader variable!");
 
-        compiler
-            .compile(
-                include_bytes!("shaders/scene_transform.comp.glsl"),
-                &request,
-            )
-            .map_err(|err| {
-                error!("Failed to compile scene transform shader: {err}");
-                err
-            })
+        let builder = bento::builder::ComputePipelineBuilder::new();
+        builder
+            .shader_compiled(Some(res))
+            .build(unsafe { self.ctx.as_mut() });
+
+        todo!()
     }
 
     pub fn new(info: &GPUSceneInfo, state: &mut State) -> Self {
@@ -152,14 +141,6 @@ impl<State: GPUState> GPUScene<State> {
         let culled_object_size = std::mem::size_of::<CulledObject>();
         let culled_object_align = std::mem::align_of::<CulledObject>();
         let total_cull_slots = max_scene_objects * info.draw_bins.len();
-        if State::reserved_names()
-            .iter()
-            .find(|name| **name == "meshi_bindless_materials")
-            == None
-        {
-            // Throw error result here.... we NEED meshi_bindless_materials for material listings.
-            panic!()
-        }
 
         if State::reserved_names()
             .iter()
@@ -172,7 +153,7 @@ impl<State: GPUState> GPUScene<State> {
 
         let scene_bin_size = std::mem::size_of::<SceneBin>() * info.draw_bins.len();
 
-        let mut objects_to_process = GPUPool::new(
+        let objects_to_process = GPUPool::new(
             ctx,
             &BufferInfo {
                 debug_name: &format!("{} Scene Objects", info.name),
@@ -184,7 +165,7 @@ impl<State: GPUState> GPUScene<State> {
         )
         .unwrap();
 
-        let mut draw_bins = DynamicGPUPool::new(
+        let draw_bins = DynamicGPUPool::new(
             ctx,
             &BufferInfo {
                 debug_name: &format!("{} Scene Cull Bins", info.name),
@@ -197,9 +178,6 @@ impl<State: GPUState> GPUScene<State> {
             culled_object_align,
         )
         .unwrap();
-
-        let objects_buffer = objects_to_process.get_gpu_handle();
-        let draw_bins_buffer = draw_bins.get_gpu_handle();
 
         let scene_bins = ctx
             .make_buffer(&BufferInfo {
@@ -221,214 +199,24 @@ impl<State: GPUState> GPUScene<State> {
             })
             .expect("Failed to allocate camera buffer");
 
-        let pipeline_data = {
-            let mut set_variables: [Vec<dashi::BindGroupVariable>; 4] =
-                std::array::from_fn(|_| Vec::new());
-
-            if let Ok(shader) = Self::make_bento_shader() {
-                for variable in shader.variables.iter() {
-                    if let Some(set) = set_variables.get_mut(variable.set as usize) {
-                        set.push(variable.kind.clone());
-                    }
-                }
-
-                if set_variables.iter().all(|set| set.is_empty()) {
-                    set_variables[0].extend_from_slice(&[
-                        dashi::BindGroupVariable {
-                            var_type: dashi::BindGroupVariableType::Storage,
-                            binding: 0,
-                            count: 1,
-                        },
-                        dashi::BindGroupVariable {
-                            var_type: dashi::BindGroupVariableType::Storage,
-                            binding: 1,
-                            count: 1,
-                        },
-                        dashi::BindGroupVariable {
-                            var_type: dashi::BindGroupVariableType::Storage,
-                            binding: 2,
-                            count: 1,
-                        },
-                        dashi::BindGroupVariable {
-                            var_type: dashi::BindGroupVariableType::Uniform,
-                            binding: 3,
-                            count: 1,
-                        },
-                    ]);
-                }
-
-                let mut bg_layouts = [None, None, None, None];
-                let mut bt_layouts = [None, None, None, None];
-                let mut bind_groups: ArrayVec<Option<Handle<BindGroup>>, 4> = ArrayVec::new();
-                let mut bind_tables: ArrayVec<Option<Handle<BindTable>>, 4> = ArrayVec::new();
-
-                for (set_idx, vars) in set_variables.iter().enumerate() {
-                    if vars.is_empty() {
-                        bind_groups.push(None);
-                        bind_tables.push(None);
-                        continue;
-                    }
-
-                    let shader_info = ShaderInfo {
-                        shader_type: ShaderType::Compute,
-                        variables: vars.as_slice(),
-                    };
-
-                    let bg_layout_name =
-                        format!("{} Scene Culling BG Layout Set {}", info.name, set_idx);
-                    let bt_layout_name =
-                        format!("{} Scene Culling BT Layout Set {}", info.name, set_idx);
-
-                    let bg_layout = BindGroupLayoutBuilder::new(&bg_layout_name)
-                        .shader(shader_info.clone())
-                        .build(ctx)
-                        .expect("Failed to build bind group layout for scene culling");
-
-                    let bt_layout = BindTableLayoutBuilder::new(&bt_layout_name)
-                        .shader(shader_info)
-                        .build(ctx)
-                        .expect("Failed to build bind table layout for scene culling");
-
-                    bg_layouts[set_idx] = Some(bg_layout);
-                    bt_layouts[set_idx] = Some(bt_layout);
-
-                    let bind_group_name =
-                        format!("{} Scene Culling Bind Group Set {}", info.name, set_idx);
-                    let mut group_builder = BindGroupBuilder::new(&bind_group_name)
-                        .layout(bg_layout)
-                        .set(set_idx as u32);
-
-                    let mut table_resources: Vec<Vec<IndexedResource>> = Vec::new();
-
-                    for var in vars.iter() {
-                        let resource = match var.binding {
-                            0 => ShaderResource::StorageBuffer(objects_buffer),
-                            1 => ShaderResource::StorageBuffer(draw_bins_buffer),
-                            2 => ShaderResource::StorageBuffer(scene_bins),
-                            3 => ShaderResource::Buffer(active_camera),
-                            _ => ShaderResource::Buffer(active_camera),
-                        };
-
-                        group_builder = group_builder.binding(var.binding, resource.clone());
-                        table_resources.push(vec![IndexedResource { slot: 0, resource }]);
-                    }
-
-                    let bind_group = group_builder
-                        .build(ctx)
-                        .expect("Failed to build scene culling bind group");
-
-                    let bind_table_name =
-                        format!("{} Scene Culling Bind Table Set {}", info.name, set_idx);
-                    let mut table_builder = BindTableBuilder::new(&bind_table_name)
-                        .layout(bt_layout)
-                        .set(set_idx as u32);
-
-                    for (var, resources) in vars.iter().zip(table_resources.iter()) {
-                        table_builder = table_builder.binding(var.binding, resources.as_slice());
-                    }
-
-                    let bind_table = table_builder
-                        .build(ctx)
-                        .expect("Failed to build scene culling bind table");
-
-                    bind_groups.push(Some(bind_group));
-                    bind_tables.push(Some(bind_table));
-                }
-
-                let pipeline_layout = {
-                    let mut layout_builder =
-                        ComputePipelineLayoutBuilder::new().shader(PipelineShaderInfo {
-                            stage: ShaderType::Compute,
-                            spirv: shader.spirv.as_slice(),
-                            specialization: &[],
-                        });
-
-                    for (i, layout) in bg_layouts.iter().enumerate() {
-                        if let Some(layout) = layout {
-                            layout_builder = layout_builder.bind_group_layout(i, *layout);
-                        }
-                    }
-
-                    for (i, layout) in bt_layouts.iter().enumerate() {
-                        if let Some(layout) = layout {
-                            layout_builder = layout_builder.bind_table_layout(i, *layout);
-                        }
-                    }
-
-                    layout_builder
-                        .build(ctx)
-                        .expect("Failed to build scene culling pipeline layout")
-                };
-
-                let pipeline =
-                    ComputePipelineBuilder::new(format!("{} Scene Culling Pipeline", info.name))
-                        .layout(pipeline_layout)
-                        .build(ctx)
-                        .expect("Failed to build scene culling pipeline");
-
-                let transform_bg_layout = BindGroupLayoutBuilder::new(&format!(
-                    "{} Scene Transform BG Layout",
-                    info.name
-                ))
-                .storage_buffer(0, 1)
-                .build(ctx)
-                .expect("Failed to build transform bind group layout");
-
-                let transform_pipeline =
-                    ComputePipelineBuilder::new(&format!("{} Scene Transform Pipeline", info.name))
-                        .layout(
-                            ComputePipelineLayoutBuilder::new()
-                                .bind_group_layout(transform_bg_layout)
-                                .build(ctx)
-                                .expect("Failed to build transform pipeline layout"),
-                        )
-                        .shader(
-                            ShaderInfo::new(
-                                ShaderType::Compute,
-                                PipelineShaderInfo::None,
-                                &ShaderResource::bento(Self::make_transform_shader().unwrap()),
-                            )
-                            .with_debug_name(&format!("{} Scene Transform Shader", info.name)),
-                        )
-                        .build(ctx)
-                        .expect("Failed to build scene transform pipeline");
-
-                let transform_bind_group =
-                    BindGroupBuilder::new(&format!("{} Scene Transform BG", info.name))
-                        .layout(transform_bg_layout)
-                        .storage_buffer(objects_buffer, 0, None)
-                        .build(ctx)
-                        .expect("Failed to build scene transform bind group");
-
-                GPUScenePipelineData {
-                    pipeline,
-                    bind_groups,
-                    bind_tables,
-                    transform_pipeline,
-                    transform_bind_group,
-                    curr_camera: active_camera,
-                }
-            } else {
-                GPUScenePipelineData {
-                    pipeline: Default::default(),
-                    bind_groups: ArrayVec::new(),
-                    bind_tables: ArrayVec::new(),
-                    transform_pipeline: Default::default(),
-                    transform_bind_group: Default::default(),
-                    curr_camera: active_camera,
-                }
-            }
-        };
-
-        Self {
-            state: NonNull::new(state).unwrap(),
-            ctx: NonNull::new(info.ctx).unwrap(),
+        let data = SceneData {
+            scene_bins,
             objects_to_process,
             draw_bins,
-            pipeline_data,
+            current_camera: Default::default(),
+        };
+
+        let mut s = Self {
+            state: NonNull::new(state).unwrap(),
+            ctx: NonNull::new(info.ctx).unwrap(),
+            data,
             camera: Default::default(),
-            scene_bins,
-        }
+            pipelines: Default::default(),
+        };
+
+        s.pipelines = s.make_pipelines().unwrap();
+
+        s
     }
 
     pub fn set_active_camera(&mut self, camera: Handle<Camera>) {
@@ -437,7 +225,8 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
-        self.objects_to_process
+        self.data
+            .objects_to_process
             .insert(SceneObject {
                 local_transform: info.local,
                 world_transform: info.global,
@@ -453,17 +242,17 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn release_object(&mut self, handle: Handle<SceneObject>) {
-        if let Some(object) = self.objects_to_process.get_mut_ref(handle) {
+        if let Some(object) = self.data.objects_to_process.get_mut_ref(handle) {
             object.active = 0;
             object.dirty = 0;
         }
 
-        self.objects_to_process.release(handle);
+        self.data.objects_to_process.release(handle);
     }
 
     pub fn transform_object(&mut self, handle: Handle<SceneObject>, transform: &Mat4) {
         {
-            let object = self.objects_to_process.get_mut_ref(handle).expect("");
+            let object = self.data.objects_to_process.get_mut_ref(handle).expect("");
             object.local_transform *= *transform;
             object.dirty = 1;
         }
@@ -471,14 +260,14 @@ impl<State: GPUState> GPUScene<State> {
 
     pub fn set_object_transform(&mut self, handle: Handle<SceneObject>, transform: &Mat4) {
         {
-            let object = self.objects_to_process.get_mut_ref(handle).expect("");
+            let object = self.data.objects_to_process.get_mut_ref(handle).expect("");
             object.local_transform = *transform;
             object.dirty = 1;
         }
     }
 
     pub fn add_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
-        if let Some(parent_ref) = self.objects_to_process.get_mut_ref(parent) {
+        if let Some(parent_ref) = self.data.objects_to_process.get_mut_ref(parent) {
             if (parent_ref.child_count as usize) < parent_ref.children.len() {
                 let idx = parent_ref.child_count as usize;
                 parent_ref.children[idx] = child;
@@ -486,7 +275,7 @@ impl<State: GPUState> GPUScene<State> {
             }
         }
 
-        if let Some(child_ref) = self.objects_to_process.get_mut_ref(child) {
+        if let Some(child_ref) = self.data.objects_to_process.get_mut_ref(child) {
             child_ref.parent = parent;
             child_ref.parent_slot = parent.slot as u32;
             child_ref.dirty = 1;
@@ -496,6 +285,7 @@ impl<State: GPUState> GPUScene<State> {
     pub fn remove_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
         let mut child_idx: i32 = -1;
         for (i, ch) in self
+            .data
             .objects_to_process
             .get_mut_ref(parent)
             .expect("")
@@ -510,14 +300,14 @@ impl<State: GPUState> GPUScene<State> {
         }
 
         if child_idx != -1 {
-            if let Some(parent_ref) = self.objects_to_process.get_mut_ref(parent) {
+            if let Some(parent_ref) = self.data.objects_to_process.get_mut_ref(parent) {
                 for i in child_idx as usize..(parent_ref.child_count as usize - 1) {
                     parent_ref.children[i] = parent_ref.children[i + 1];
                 }
                 parent_ref.child_count = parent_ref.child_count.saturating_sub(1);
                 parent_ref.children[parent_ref.child_count as usize] = Handle::default();
             }
-            if let Some(child_ref) = self.objects_to_process.get_mut_ref(child) {
+            if let Some(child_ref) = self.data.objects_to_process.get_mut_ref(child) {
                 child_ref.parent = Handle::default();
                 child_ref.parent_slot = u32::MAX;
                 child_ref.dirty = 1;
@@ -528,9 +318,9 @@ impl<State: GPUState> GPUScene<State> {
     pub fn cull(&mut self) -> (CommandStream<Recording>, &DynamicGPUPool) {
         let mut stream = CommandStream::new().begin();
         self.update_active_camera_buffer();
-        self.objects_to_process.sync_up(&mut stream);
+        self.data.objects_to_process.sync_up(&mut stream);
 
-        self.dispatch_transform_updates(&mut stream);
+        stream = self.dispatch_transform_updates(stream);
 
         stream = stream
             .dispatch(&Dispatch {
@@ -544,9 +334,9 @@ impl<State: GPUState> GPUScene<State> {
             })
             .unbind_pipeline();
 
-        self.draw_bins.sync_down(&mut stream);
+        self.data.draw_bins.sync_down(&mut stream);
 
-        return (stream, &self.draw_bins);
+        return (stream, &self.data.draw_bins);
         todo!(
             "Records compute shader dispatches to the gpu, returns ref to dynamic gpu pool. Pool is formatted like [0..num_bins][0..max_bin_meshes] of types CullResult"
         )
@@ -555,27 +345,31 @@ impl<State: GPUState> GPUScene<State> {
         // drawing.... or they can just pull to CPU and then iterate through draw list.
     }
 
-    fn dispatch_transform_updates(&mut self, stream: &mut CommandStream<Recording>) {
-        if !self.pipeline_data.transform_pipeline.valid() {
-            return;
+    fn dispatch_transform_updates(
+        &mut self,
+        stream: CommandStream<Recording>,
+    ) -> CommandStream<Recording> {
+        let cull_state = self.pipelines.cull_state.as_ref();
+        if !cull_state.handle.valid() {
+            return stream;
         }
 
-        let num_objects = self.objects_to_process.len() as u32;
+        let num_objects = self.data.objects_to_process.len() as u32;
         if num_objects == 0 {
-            return;
+            return stream;
         }
 
         let workgroup_size = 64u32;
         let dispatch_x = (num_objects + workgroup_size - 1) / workgroup_size;
 
-        stream
+        let s = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
                 z: 1,
-                pipeline: self.pipeline_data.transform_pipeline,
+                pipeline: cull_state.handle,
                 bind_groups: [
-                    self.pipeline_data.transform_bind_group,
+                    Default::default(),
                     Default::default(),
                     Default::default(),
                     Default::default(),
@@ -584,6 +378,8 @@ impl<State: GPUState> GPUScene<State> {
                 dynamic_buffers: Default::default(),
             })
             .unbind_pipeline();
+
+        return s;
     }
 
     fn update_active_camera_buffer(&mut self) {
@@ -591,24 +387,24 @@ impl<State: GPUState> GPUScene<State> {
             return;
         }
 
-        let state: &State = unsafe { self.state.as_ref() };
-        if let Ok(binding) = state.binding("meshi_bindless_camera") {
-            if let Some(bindless_camera) = binding.as_any().downcast_ref::<ReservedBindlessCamera>()
-            {
-                let ctx: &mut Context = unsafe { self.ctx.as_mut() };
-                match ctx.map_buffer_mut::<Camera>(self.pipeline_data.curr_camera) {
-                    Ok(mapped) => {
-                        mapped[0] = *bindless_camera.camera(self.camera);
-
-                        if let Err(err) = ctx.unmap_buffer(self.pipeline_data.curr_camera) {
-                            error!("Failed to unmap active camera buffer: {err:?}");
-                        }
-                    }
-                    Err(err) => {
-                        error!("Failed to map active camera buffer: {err:?}");
-                    }
-                }
-            }
-        }
+        //        let state: &State = unsafe { self.state.as_ref() };
+        //        if let Ok(binding) = state.binding("meshi_bindless_camera") {
+        //            if let Some(bindless_camera) = binding.as_any().downcast_ref::<ReservedBindlessCamera>()
+        //            {
+        //                let ctx: &mut Context = unsafe { self.ctx.as_mut() };
+        //                match ctx.map_buffer_mut::<Camera>(self.data.curr_camera) {
+        //                    Ok(mapped) => {
+        //                        mapped[0] = *bindless_camera.camera(self.camera);
+        //
+        //                        if let Err(err) = ctx.unmap_buffer(self.pipeline_data.curr_camera) {
+        //                            error!("Failed to unmap active camera buffer: {err:?}");
+        //                        }
+        //                    }
+        //                    Err(err) => {
+        //                        error!("Failed to map active camera buffer: {err:?}");
+        //                    }
+        //                }
+        //            }
+        //        }
     }
 }

@@ -8,6 +8,8 @@ use resource_pool::resource_list::ResourceList;
 
 use crate::{DirectionalLight, RenderObject, RenderObjectInfo, RgbaImage};
 
+use super::scene::GPUScene;
+
 struct MaterialData {
     material: ShaderResource,
 }
@@ -22,6 +24,7 @@ struct HostData {}
 
 pub struct DeferredRenderer {
     ctx: Context,
+    scene: GPUScene<furikake::BindlessState>,
 }
 
 pub struct DeferredRendererInfo {
