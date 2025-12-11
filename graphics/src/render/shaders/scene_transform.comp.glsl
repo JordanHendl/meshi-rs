@@ -14,7 +14,7 @@ struct SceneObject {
     uint children[16];
 };
 
-layout(std430, binding = 0) buffer SceneObjects {
+layout(set = 0, binding = 0) buffer SceneObjects {
     SceneObject objects[];
 };
 
