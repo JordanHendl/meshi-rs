@@ -349,7 +349,7 @@ impl<State: GPUState> GPUScene<State> {
         &mut self,
         stream: CommandStream<Recording>,
     ) -> CommandStream<Recording> {
-        let cull_state = self.pipelines.cull_state.as_ref();
+        let cull_state = self.pipelines.cull_state.as_ref().unwrap();
         if !cull_state.handle.valid() {
             return stream;
         }
@@ -369,12 +369,17 @@ impl<State: GPUState> GPUScene<State> {
                 z: 1,
                 pipeline: cull_state.handle,
                 bind_groups: [
-                    Default::default(),
+                    todo!(),
                     Default::default(),
                     Default::default(),
                     Default::default(),
                 ],
-                bind_tables: Default::default(),
+                bind_tables: [
+                    todo!(),
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                ],
                 dynamic_buffers: Default::default(),
             })
             .unbind_pipeline();
