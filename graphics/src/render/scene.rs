@@ -1,23 +1,18 @@
 use std::ptr::NonNull;
 
 use bento::{
-    builder::ComputePipelineBuilder as BentoComputePipelineBuilder, Compiler, OptimizationLevel,
-    Request, ShaderLang,
+    Compiler, OptimizationLevel, Request, ShaderLang,
+    builder::ComputePipelineBuilder as BentoComputePipelineBuilder,
 };
 use dashi::{
-    BindGroup, BindTable, Buffer, BufferInfo, BufferUsage, CommandStream, Context, Handle,
-    MemoryVisibility, ShaderResource, ShaderType, cmd::Recording, driver::command::Dispatch,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility,
+    ShaderResource, ShaderType,
+    cmd::Executable,
+    driver::command::Dispatch,
     utils::gpupool::{DynamicGPUPool, GPUPool},
 };
-use furikake::{
-    GPUState,
-    reservations::bindless_camera::ReservedBindlessCamera,
-    types::Camera,
-};
+use furikake::{GPUState, reservations::bindless_camera::ReservedBindlessCamera, types::Camera};
 use glam::Mat4;
-use noren::meta::DeviceModel;
-use resource_pool::resource_list::ResourceList;
-use tracing::error;
 #[repr(C)]
 pub struct SceneObjectInfo {
     pub local: Mat4,
@@ -90,7 +85,6 @@ struct SceneData {
     draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
     bin_counts: Handle<Buffer>,
     dispatch: Handle<Buffer>,
-    current_camera: Handle<Camera>,
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
 }
@@ -259,23 +253,12 @@ impl<State: GPUState> GPUScene<State> {
             })
             .expect("Failed to allocate scene dispatch buffer");
 
-        let _active_camera = ctx
-            .make_buffer(&BufferInfo {
-                debug_name: &format!("{} Active Camera", info.name),
-                byte_size: std::mem::size_of::<Camera>() as u32,
-                visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::UNIFORM,
-                initial_data: None,
-            })
-            .expect("Failed to allocate camera buffer");
-
         let data = SceneData {
             scene_bins,
             objects_to_process,
             draw_bins,
             bin_counts,
             dispatch,
-            current_camera: Default::default(),
             bin_descriptions: info.draw_bins.to_vec(),
             active_objects: Vec::new(),
         };
@@ -295,7 +278,6 @@ impl<State: GPUState> GPUScene<State> {
 
     pub fn set_active_camera(&mut self, camera: Handle<Camera>) {
         self.camera = camera;
-        self.update_active_camera_buffer();
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
@@ -396,35 +378,30 @@ impl<State: GPUState> GPUScene<State> {
         }
     }
 
-    pub fn cull(&mut self) -> (CommandStream<Recording>, &DynamicGPUPool) {
+    pub fn cull(&mut self) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
-        self.update_active_camera_buffer();
         self.data.draw_bins.clear();
 
-        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
-            return (stream, &self.data.draw_bins);
-        };
-        let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
-            return (stream, &self.data.draw_bins);
-        };
-
-        if !cull_state.handle.valid() || !transform_state.handle.valid() {
-            return (stream, &self.data.draw_bins);
-        }
-
-        if !self.camera.valid() {
-            return (stream, &self.data.draw_bins);
-        }
-
         let state: &State = unsafe { self.state.as_ref() };
-        let Ok(binding) = state.binding("meshi_bindless_camera") else {
-            return (stream, &self.data.draw_bins);
-        };
-        let Some(bindless_camera) = binding.as_any().downcast_ref::<ReservedBindlessCamera>()
-        else {
-            return (stream, &self.data.draw_bins);
-        };
-        let _ = bindless_camera.camera(self.camera);
+        let mut camera_slot = u32::MAX;
+
+        if self.camera.valid() {
+            if let Ok(binding) = state.binding("meshi_bindless_camera") {
+                if let Some(bindless_camera) =
+                    binding.as_any().downcast_ref::<ReservedBindlessCamera>()
+                {
+                    let _ = bindless_camera.camera(self.camera);
+                }
+
+                if let furikake::reservations::ReservedBinding::BindlessBinding(info) =
+                    binding.binding()
+                {
+                    if (self.camera.slot as usize) < info.resources.len() {
+                        camera_slot = self.camera.slot as u32;
+                    }
+                }
+            }
+        }
 
         let ctx: &mut Context = unsafe { self.ctx.as_mut() };
 
@@ -434,15 +411,6 @@ impl<State: GPUState> GPUScene<State> {
             }
             let _ = ctx.unmap_buffer(self.data.bin_counts);
         }
-
-        let camera_slot = match binding.binding() {
-            furikake::reservations::ReservedBinding::BindlessBinding(info)
-                if (self.camera.slot as usize) < info.resources.len() =>
-            {
-                self.camera.slot as u32
-            }
-            _ => u32::MAX,
-        };
 
         if let Ok(mut mapped) = ctx.map_buffer_mut::<SceneDispatchInfo>(self.data.dispatch) {
             mapped[0] = SceneDispatchInfo {
@@ -458,12 +426,12 @@ impl<State: GPUState> GPUScene<State> {
 
         let workgroup_size = 64u32;
         let num_objects = self.data.objects_to_process.len() as u32;
-        if num_objects == 0 {
-            return (stream, &self.data.draw_bins);
-        }
 
-        let dispatch_x = (num_objects + workgroup_size - 1) / workgroup_size;
+        let dispatch_x = ((num_objects.max(1) + workgroup_size - 1) / workgroup_size).max(1);
 
+        let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
+            return stream.end();
+        };
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
@@ -476,6 +444,9 @@ impl<State: GPUState> GPUScene<State> {
             })
             .unbind_pipeline();
 
+        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
+            return stream.end();
+        };
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
@@ -488,33 +459,11 @@ impl<State: GPUState> GPUScene<State> {
             })
             .unbind_pipeline();
 
-        (stream, &self.data.draw_bins)
+        stream.end()
     }
 
-    fn update_active_camera_buffer(&mut self) {
-        if !self.camera.valid() {
-            return;
-        }
-
-        //        let state: &State = unsafe { self.state.as_ref() };
-        //        if let Ok(binding) = state.binding("meshi_bindless_camera") {
-        //            if let Some(bindless_camera) = binding.as_any().downcast_ref::<ReservedBindlessCamera>()
-        //            {
-        //                let ctx: &mut Context = unsafe { self.ctx.as_mut() };
-        //                match ctx.map_buffer_mut::<Camera>(self.data.curr_camera) {
-        //                    Ok(mapped) => {
-        //                        mapped[0] = *bindless_camera.camera(self.camera);
-        //
-        //                        if let Err(err) = ctx.unmap_buffer(self.pipeline_data.curr_camera) {
-        //                            error!("Failed to unmap active camera buffer: {err:?}");
-        //                        }
-        //                    }
-        //                    Err(err) => {
-        //                        error!("Failed to map active camera buffer: {err:?}");
-        //                    }
-        //                }
-        //            }
-        //        }
+    pub fn output_bins(&self) -> &DynamicGPUPool {
+        &self.data.draw_bins
     }
 }
 
