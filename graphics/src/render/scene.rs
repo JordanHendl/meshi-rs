@@ -517,3 +517,154 @@ impl<State: GPUState> GPUScene<State> {
         //        }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dashi::ContextInfo;
+    use furikake::BindlessState;
+    use glam::Vec3;
+
+    fn make_test_scene(
+        ctx: &mut Box<Context>,
+        state: &mut Box<BindlessState>,
+    ) -> GPUScene<BindlessState> {
+        let data = SceneData {
+            scene_bins: Handle::default(),
+            objects_to_process: GPUPool::default(),
+            draw_bins: DynamicGPUPool::default(),
+            bin_counts: Handle::default(),
+            dispatch: Handle::default(),
+            current_camera: Handle::default(),
+            bin_descriptions: vec![SceneBin { id: 0, mask: u32::MAX }],
+            active_objects: Vec::new(),
+        };
+
+        GPUScene {
+            state: NonNull::from(state.as_mut()),
+            ctx: NonNull::from(ctx.as_mut()),
+            data,
+            pipelines: SceneComputePipelines::default(),
+            camera: Handle::default(),
+        }
+    }
+
+    fn setup_scene() -> (Box<Context>, Box<BindlessState>, GPUScene<BindlessState>) {
+        let mut ctx = Box::new(Context::headless(&ContextInfo::default()).expect("create context"));
+        let mut state = Box::new(BindlessState::new(ctx.as_mut()));
+        let scene = make_test_scene(&mut ctx, &mut state);
+
+        (ctx, state, scene)
+    }
+
+    #[test]
+    fn registering_object_tracks_state() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let info = SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 0xFF,
+        };
+
+        let handle = scene.register_object(&info);
+
+        assert_eq!(scene.data.active_objects.len(), 1);
+        assert_eq!(scene.data.active_objects[0], handle);
+
+        let stored = scene.data.objects_to_process.get_ref(handle).unwrap();
+        assert_eq!(stored.scene_mask, info.scene_mask);
+        assert_eq!(stored.active, 1);
+        assert_eq!(stored.local_transform, info.local);
+        assert_eq!(stored.world_transform, info.global);
+    }
+
+    #[test]
+    fn releasing_object_clears_tracking() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let handle = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+
+        scene.release_object(handle);
+
+        assert!(scene.data.active_objects.is_empty());
+        assert!(scene.data.objects_to_process.get_ref(handle).is_none());
+    }
+
+    #[test]
+    fn transforming_object_marks_dirty() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let handle = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+
+        let delta = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        scene.transform_object(handle, &delta);
+
+        let stored = scene.data.objects_to_process.get_ref(handle).unwrap();
+        assert_eq!(stored.local_transform, Mat4::IDENTITY * delta);
+        assert_eq!(stored.dirty, 1);
+    }
+
+    #[test]
+    fn setting_object_transform_replaces_value() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let handle = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+
+        let replacement = Mat4::from_scale(Vec3::splat(2.0));
+        scene.set_object_transform(handle, &replacement);
+
+        let stored = scene.data.objects_to_process.get_ref(handle).unwrap();
+        assert_eq!(stored.local_transform, replacement);
+        assert_eq!(stored.dirty, 1);
+    }
+
+    #[test]
+    fn adding_and_removing_child_updates_relationships() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let parent = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+        let child = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+
+        scene.add_child(parent, child);
+
+        let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
+        assert_eq!(parent_ref.child_count, 1);
+        assert_eq!(parent_ref.children[0], child);
+
+        let child_ref = scene.data.objects_to_process.get_ref(child).unwrap();
+        assert_eq!(child_ref.parent, parent);
+        assert_eq!(child_ref.parent_slot, parent.slot as u32);
+
+        scene.remove_child(parent, child);
+
+        let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
+        assert_eq!(parent_ref.child_count, 0);
+        assert_eq!(parent_ref.children[0], Handle::default());
+
+        let child_ref = scene.data.objects_to_process.get_ref(child).unwrap();
+        assert_eq!(child_ref.parent, Handle::default());
+        assert_eq!(child_ref.parent_slot, u32::MAX);
+        assert_eq!(child_ref.dirty, 1);
+    }
+}
