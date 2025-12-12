@@ -484,7 +484,6 @@ mod tests {
             draw_bins: DynamicGPUPool::default(),
             bin_counts: Handle::default(),
             dispatch: Handle::default(),
-            current_camera: Handle::default(),
             bin_descriptions: vec![SceneBin { id: 0, mask: u32::MAX }],
             active_objects: Vec::new(),
         };
