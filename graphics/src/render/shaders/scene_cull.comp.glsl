@@ -1,3 +1,4 @@
+//scene_cull.comp.glsl
 #version 450
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -8,7 +9,7 @@ struct SceneObject {
     uint scene_mask;
     uint parent_slot;
     uint dirty;
-    uint active;
+    uint is_active;
     uint parent;
     uint child_count;
     uint children[16];
@@ -49,9 +50,12 @@ layout(set = 0, binding = 3) buffer BinCounts {
 layout(set = 0, binding = 4) uniform SceneParams {
     uint num_bins;
     uint max_objects;
-    uint camera_slot;
     uint _padding1;
 } params;
+
+layout(set = 0, binding = 5) uniform SceneCamera {
+    uint slot;
+} camera;
 
 layout(set = 1, binding = 0) buffer Cameras {
     Camera cameras[];
@@ -69,15 +73,15 @@ void main() {
     }
 
     SceneObject obj = objects[idx];
-    if (obj.active == 0) {
+    if (obj.is_active == 0) {
         return;
     }
 
-    if (params.camera_slot == 0xffffffffu) {
+    if (camera.slot == 0xffffffffu) {
         return;
     }
 
-    Camera cam = cameras[params.camera_slot];
+    Camera cam = cameras[camera.slot];
     vec3 world_position = obj.world_transform[3].xyz;
     vec3 to_object = world_position - cam.position;
     vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), cam.rotation);

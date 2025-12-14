@@ -148,24 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/bento#3c84ca7459f1c5967142c366bfb9074003f7bccf"
-dependencies = [
- "bincode",
- "clap",
- "dashi",
- "regex",
- "rspirv",
- "rspirv-reflect",
- "serde",
- "serde_json",
- "shaderc",
- "thiserror",
-]
-
-[[package]]
-name = "bento"
-version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#5c81140f1affba9113c8ff8ca46c2d39c157d138"
+source = "git+https://github.com/JordanHendl/gohan#edac4d0acf21723dc15e46150c1538a16f17993e"
 dependencies = [
  "bincode",
  "clap",
@@ -382,9 +365,9 @@ checksum = "4bfbf56724aa9eca8afa4fcfadeb479e722935bb2a0900c2d37e0cc477af0688"
 
 [[package]]
 name = "cmake"
-version = "0.1.54"
+version = "0.1.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
+checksum = "b042e5d8a74ae91bb0961acd039822472ec99f8ab0948cbf6d1369588f8be586"
 dependencies = [
  "cc",
 ]
@@ -649,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#e3863c0340844563b647c02a3f08b0e53b86be9b"
+source = "git+https://github.com/JordanHendl/dashi#7ab85ac9b4f21c37a3518b838e874720e0101aaa"
 dependencies = [
  "anyhow",
  "ash",
@@ -813,9 +796,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/furikake#ec448e5365ebdd04bd30bf24d62d1ffc204771d3"
+source = "git+https://github.com/JordanHendl/gohan#edac4d0acf21723dc15e46150c1538a16f17993e"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/bento)",
+ "bento",
  "dashi",
  "glam 0.24.2",
 ]
@@ -1330,7 +1313,7 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "base64 0.22.1",
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan)",
+ "bento",
  "bitflags 2.10.0",
  "bytemuck",
  "dashi",
@@ -1340,6 +1323,7 @@ dependencies = [
  "meshi-utils",
  "noren",
  "resource_pool",
+ "tare",
  "tracing",
  "tracing-subscriber",
  "winit",
@@ -1362,7 +1346,7 @@ dependencies = [
 name = "meshi-utils"
 version = "0.1.0"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/bento)",
+ "bento",
  "dashi",
  "furikake",
  "noren",
@@ -1520,9 +1504,9 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#9b764ae4ea5f4b90b27e15d1bd02f44e7544a3eb"
+source = "git+https://github.com/JordanHendl/noren#0477b058452dc49a0e2d963e291b38bfa2e1673f"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/bento)",
+ "bento",
  "bincode",
  "bytemuck",
  "dashi",
@@ -2283,6 +2267,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tare"
+version = "0.1.0"
+source = "git+https://github.com/JordanHendl/gohan#edac4d0acf21723dc15e46150c1538a16f17993e"
+dependencies = [
+ "bento",
+ "dashi",
+ "glam 0.24.2",
 ]
 
 [[package]]

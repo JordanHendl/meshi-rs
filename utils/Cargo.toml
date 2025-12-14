@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 dashi = {git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"]}
 noren = {git = "https://github.com/JordanHendl/noren"}
-bento = {git = "https://github.com/JordanHendl/bento"}
-furikake = {git = "https://github.com/JordanHendl/furikake"}
+bento = {git = "https://github.com/JordanHendl/gohan"}
+furikake = {git = "https://github.com/JordanHendl/gohan"}
 
 
 [lib]

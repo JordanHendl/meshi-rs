@@ -10,7 +10,8 @@ resource_pool = {git = "https://github.com/JordanHendl/ResourcePool"}
 dashi = {git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"]}
 noren = {git = "https://github.com/JordanHendl/noren"}
 bento = {git = "https://github.com/JordanHendl/gohan"}
-furikake = {git = "https://github.com/JordanHendl/furikake"}
+tare = {git = "https://github.com/JordanHendl/gohan"}
+furikake = {git = "https://github.com/JordanHendl/gohan"}
 arrayvec = "0.7.6"
 bitflags = "2.10.0"
 glam = { version = "0.29.2", features = ["bytemuck"] }

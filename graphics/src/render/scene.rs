@@ -13,6 +13,7 @@ use dashi::{
 };
 use furikake::{GPUState, reservations::bindless_camera::ReservedBindlessCamera, types::Camera};
 use glam::Mat4;
+use tare::utils::StagedBuffer;
 #[repr(C)]
 pub struct SceneObjectInfo {
     pub local: Mat4,
@@ -43,7 +44,6 @@ pub struct CulledObject {
 pub struct SceneDispatchInfo {
     pub num_bins: u32,
     pub max_objects: u32,
-    pub camera_slot: u32,
     pub _padding: u32,
 }
 
@@ -83,8 +83,8 @@ struct SceneData {
     // bins to put each scene object into when it passes the cull test.
     objects_to_process: GPUPool<SceneObject>, // Scene objects to be culled.
     draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
-    bin_counts: Handle<Buffer>,
-    dispatch: Handle<Buffer>,
+    bin_counts: StagedBuffer,
+    dispatch: StagedBuffer,
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
 }
@@ -100,7 +100,7 @@ pub struct GPUScene<State: GPUState> {
     ctx: NonNull<Context>,
     data: SceneData,
     pipelines: SceneComputePipelines,
-    camera: Handle<Camera>,
+    camera: StagedBuffer,
 }
 
 impl<State: GPUState> GPUScene<State> {
@@ -108,57 +108,40 @@ impl<State: GPUState> GPUScene<State> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &State = unsafe { self.state.as_ref() };
 
-        let compiler =
-            Compiler::new().map_err(|e| bento::BentoError::InvalidInput(e.to_string()))?;
-        let transform_stage = compiler.compile(
-            include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
-            &Request {
-                name: Some("scene_transform".to_string()),
-                lang: ShaderLang::Glsl,
-                stage: ShaderType::Compute,
-                optimization: OptimizationLevel::Performance,
-                debug_symbols: false,
-            },
-        )?;
-
-        let cull_stage = compiler.compile(
-            include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
-            &Request {
-                name: Some("scene_cull".to_string()),
-                lang: ShaderLang::Glsl,
-                stage: ShaderType::Compute,
-                optimization: OptimizationLevel::Performance,
-                debug_symbols: false,
-            },
-        )?;
-
         let transform_state = BentoComputePipelineBuilder::new()
-            .shader_compiled(Some(transform_stage))
+            .shader(Some(
+                include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
+            ))
             .add_variable(
                 "objects",
-                ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle()),
+                ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .build(&mut ctx);
 
         let mut cull_builder = BentoComputePipelineBuilder::new()
-            .shader_compiled(Some(cull_stage))
+            .shader(Some(
+                include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
+            ))
             .add_variable(
                 "objects",
-                ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle()),
+                ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .add_variable(
                 "scene_bins",
-                ShaderResource::StorageBuffer(self.data.scene_bins),
+                ShaderResource::StorageBuffer(self.data.scene_bins.into()),
             )
             .add_variable(
                 "culled_bins",
-                ShaderResource::StorageBuffer(self.data.draw_bins.get_gpu_handle()),
+                ShaderResource::StorageBuffer(self.data.draw_bins.get_gpu_handle().into()),
             )
             .add_variable(
                 "bin_counts",
-                ShaderResource::StorageBuffer(self.data.bin_counts),
+                ShaderResource::StorageBuffer(self.data.bin_counts.device().into()),
             )
-            .add_variable("scene_params", ShaderResource::Buffer(self.data.dispatch));
+            .add_variable(
+                "scene_params",
+                ShaderResource::Buffer(self.data.dispatch.device().into()),
+            );
 
         if let Ok(binding) = state.binding("meshi_bindless_camera") {
             if let furikake::reservations::ReservedBinding::BindlessBinding(info) =
@@ -208,6 +191,16 @@ impl<State: GPUState> GPUScene<State> {
             },
         )
         .unwrap();
+        let active_camera = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} camera buffer", info.name),
+                byte_size: std::mem::size_of::<u32>() as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::UNIFORM,
+                initial_data: Some(&std::u32::MAX.to_ne_bytes()),
+            },
+        );
 
         let draw_bins = DynamicGPUPool::new(
             ctx,
@@ -233,25 +226,36 @@ impl<State: GPUState> GPUScene<State> {
             })
             .expect("");
 
-        let bin_counts = ctx
-            .make_buffer(&BufferInfo {
+        let mut bin_counts = StagedBuffer::new(
+            ctx,
+            BufferInfo {
                 debug_name: &format!("{} Scene Bin Counts", info.name),
                 byte_size: bin_counter_size as u32,
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::STORAGE,
                 initial_data: None,
-            })
-            .expect("Failed to allocate bin counter buffer");
+            },
+        );
 
-        let dispatch = ctx
-            .make_buffer(&BufferInfo {
+        for count in bin_counts.as_slice_mut() {
+            *count = 0;
+        }
+
+        let mut dispatch = StagedBuffer::new(
+            ctx,
+            BufferInfo {
                 debug_name: &format!("{} Scene Dispatch", info.name),
                 byte_size: std::mem::size_of::<SceneDispatchInfo>() as u32,
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::UNIFORM,
                 initial_data: None,
-            })
-            .expect("Failed to allocate scene dispatch buffer");
+            },
+        );
+        dispatch.as_slice_mut()[0] = SceneDispatchInfo {
+            num_bins: info.draw_bins.len() as u32,
+            max_objects: objects_to_process.len() as u32,
+            _padding: 0,
+        };
 
         let data = SceneData {
             scene_bins,
@@ -267,7 +271,7 @@ impl<State: GPUState> GPUScene<State> {
             state: NonNull::new(state).unwrap(),
             ctx: NonNull::new(info.ctx).unwrap(),
             data,
-            camera: Default::default(),
+            camera: active_camera,
             pipelines: Default::default(),
         };
 
@@ -277,7 +281,7 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn set_active_camera(&mut self, camera: Handle<Camera>) {
-        self.camera = camera;
+        self.camera.as_slice_mut::<u32>()[0] = camera.slot as u32;
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
@@ -378,51 +382,15 @@ impl<State: GPUState> GPUScene<State> {
         }
     }
 
+    pub fn update(&mut self) {}
+
     pub fn cull(&mut self) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
         self.data.draw_bins.clear();
-
-        let state: &State = unsafe { self.state.as_ref() };
-        let mut camera_slot = u32::MAX;
-
-        if self.camera.valid() {
-            if let Ok(binding) = state.binding("meshi_bindless_camera") {
-                if let Some(bindless_camera) =
-                    binding.as_any().downcast_ref::<ReservedBindlessCamera>()
-                {
-                    let _ = bindless_camera.camera(self.camera);
-                }
-
-                if let furikake::reservations::ReservedBinding::BindlessBinding(info) =
-                    binding.binding()
-                {
-                    if (self.camera.slot as usize) < info.resources.len() {
-                        camera_slot = self.camera.slot as u32;
-                    }
-                }
-            }
-        }
-
-        let ctx: &mut Context = unsafe { self.ctx.as_mut() };
-
-        if let Ok(mut mapped) = ctx.map_buffer_mut::<u32>(self.data.bin_counts) {
-            for count in mapped.iter_mut() {
-                *count = 0;
-            }
-            let _ = ctx.unmap_buffer(self.data.bin_counts);
-        }
-
-        if let Ok(mut mapped) = ctx.map_buffer_mut::<SceneDispatchInfo>(self.data.dispatch) {
-            mapped[0] = SceneDispatchInfo {
-                num_bins: self.data.bin_descriptions.len() as u32,
-                max_objects: self.data.objects_to_process.len() as u32,
-                camera_slot,
-                _padding: 0,
-            };
-            let _ = ctx.unmap_buffer(self.data.dispatch);
-        }
-
-        let _ = self.data.objects_to_process.sync_up(&mut stream);
+        // sync up all possibly mutated data
+        self.data.objects_to_process.sync_up(&mut stream).unwrap();
+        stream.combine(self.data.dispatch.sync_up());
+        stream.combine(self.data.bin_counts.sync_up());
 
         let workgroup_size = 64u32;
         let num_objects = self.data.objects_to_process.len() as u32;
@@ -478,23 +446,20 @@ mod tests {
         ctx: &mut Box<Context>,
         state: &mut Box<BindlessState>,
     ) -> GPUScene<BindlessState> {
-        let data = SceneData {
-            scene_bins: Handle::default(),
-            objects_to_process: GPUPool::default(),
-            draw_bins: DynamicGPUPool::default(),
-            bin_counts: Handle::default(),
-            dispatch: Handle::default(),
-            bin_descriptions: vec![SceneBin { id: 0, mask: u32::MAX }],
-            active_objects: Vec::new(),
-        };
-
-        GPUScene {
-            state: NonNull::from(state.as_mut()),
-            ctx: NonNull::from(ctx.as_mut()),
-            data,
-            pipelines: SceneComputePipelines::default(),
-            camera: Handle::default(),
-        }
+        GPUScene::new(
+            &GPUSceneInfo {
+                name: "test_scene",
+                ctx: ctx.as_mut(),
+                draw_bins: &[SceneBin {
+                    id: 0,
+                    mask: u32::MAX,
+                }],
+                limits: GPUSceneLimits {
+                    max_num_scene_objects: 1024,
+                },
+            },
+            state,
+        )
     }
 
     fn setup_scene() -> (Box<Context>, Box<BindlessState>, GPUScene<BindlessState>) {

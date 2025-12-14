@@ -1,3 +1,4 @@
+//scene_transform.comp.glsl
 #version 450
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -8,7 +9,7 @@ struct SceneObject {
     uint scene_mask;
     uint parent_slot;
     uint dirty;
-    uint active;
+    uint is_active;
     uint parent;
     uint child_count;
     uint children[16];
@@ -25,7 +26,7 @@ void main() {
     }
 
     SceneObject obj = objects[idx];
-    if (obj.active == 0) {
+    if (obj.is_active == 0) {
         return;
     }
 
