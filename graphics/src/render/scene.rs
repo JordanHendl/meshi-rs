@@ -448,7 +448,7 @@ impl<State: GPUState> GPUScene<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashi::{ContextInfo, QueueType, SubmitInfo};
+    use dashi::{ContextInfo, QueueType, SubmitInfo, SubmitInfo2};
     use furikake::BindlessState;
     use glam::Vec3;
 
@@ -663,10 +663,11 @@ mod tests {
 
         // Record the GPU commands for culling to ensure the pipelines and bindings are
         // properly constructed.
-        let mut commands = scene.cull();
+        let commands = scene.cull();
 
-        // Chain download copies after the cull dispatch so the staging buffers reflect GPU writes.
         let mut readback = CommandStream::new().begin();
+        readback.combine(commands);
+
         scene
             .data
             .objects_to_process
@@ -678,6 +679,7 @@ mod tests {
             .sync_down(&mut readback)
             .expect("download culled bins");
         readback.combine(scene.data.bin_counts.sync_down());
+
         let readback = readback.end();
 
         let ctx_ptr = ctx.as_mut() as *mut Context;
@@ -685,59 +687,12 @@ mod tests {
             .pool_mut(QueueType::Graphics)
             .begin(ctx_ptr, "scene_cull_test", false)
             .expect("begin compute queue");
+        
+        let (_, fence) = readback.submit(&mut queue, &SubmitInfo2 {
+            ..Default::default()
+        });
 
-        let executed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let pending = commands.append(&mut queue);
-            let readback_pending = readback.append(&mut queue);
-            let fence = ctx
-                .submit(&mut queue, &SubmitInfo::default())
-                .expect("submit cull commands");
-            ctx.wait(fence).expect("wait for cull");
-            drop((pending, readback_pending));
-            Ok::<(), dashi::GPUError>(())
-        })) {
-            Ok(Ok(())) => true,
-            _ => false,
-        };
-
-        ctx.pool_mut(QueueType::Graphics).recycle(queue);
-
-        if !executed {
-            // Fall back to CPU-populated expectations when command encoding fails inside dashi's CommandQueue.
-            scene
-                .data
-                .objects_to_process
-                .get_mut_ref(parent)
-                .expect("parent stored")
-                .world_transform = parent_transform;
-            scene
-                .data
-                .objects_to_process
-                .get_mut_ref(child)
-                .expect("child stored")
-                .world_transform = parent_transform * child_local;
-            scene.data.bin_counts.as_slice_mut::<u32>()[0] = 2;
-            if let Some(first) = scene
-                .data
-                .draw_bins
-                .get_mut_ref::<CulledObject>(Handle::new(0, 0))
-            {
-                *first = CulledObject {
-                    total_transform: parent_transform,
-                    bin_id: 0,
-                };
-            }
-            if let Some(second) = scene
-                .data
-                .draw_bins
-                .get_mut_ref::<CulledObject>(Handle::new(1, 0))
-            {
-                *second = CulledObject {
-                    total_transform: parent_transform * child_local,
-                    bin_id: 0,
-                };
-            }
-        }
+        ctx.wait(fence.unwrap()).expect("wait for cull");
 
         let parent_world = scene
             .data
