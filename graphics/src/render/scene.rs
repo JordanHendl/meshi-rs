@@ -107,7 +107,7 @@ impl<State: GPUState> GPUScene<State> {
     fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &State = unsafe { self.state.as_ref() };
-
+        
         let transform_state = BentoComputePipelineBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
@@ -123,7 +123,7 @@ impl<State: GPUState> GPUScene<State> {
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
             .add_variable(
-                "in_list",
+                "objects",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .add_variable(
@@ -144,7 +144,7 @@ impl<State: GPUState> GPUScene<State> {
             )
             .add_variable(
                 "params",
-                ShaderResource::Buffer(self.data.dispatch.device().into()),
+                ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
             );
 
         if let Ok(binding) = state.binding("meshi_bindless_camera") {
@@ -199,10 +199,10 @@ impl<State: GPUState> GPUScene<State> {
             ctx,
             BufferInfo {
                 debug_name: &format!("{} camera buffer", info.name),
-                byte_size: std::mem::size_of::<u32>() as u32,
+                byte_size: 256,
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::UNIFORM,
-                initial_data: Some(&std::u32::MAX.to_ne_bytes()),
+                initial_data: None,
             },
         );
 
@@ -414,6 +414,9 @@ impl<State: GPUState> GPUScene<State> {
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
             return stream.end();
         };
+
+        assert!(transform_state.bindings()[0].is_some());
+
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
