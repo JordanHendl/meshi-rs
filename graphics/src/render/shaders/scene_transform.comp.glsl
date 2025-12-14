@@ -17,15 +17,15 @@ struct SceneObject {
 
 layout(set = 0, binding = 0) buffer SceneObjects {
     SceneObject objects[];
-};
+} in_list;
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= objects.length()) {
+    if (idx >= in_list.objects.length()) {
         return;
     }
 
-    SceneObject obj = objects[idx];
+    SceneObject obj = in_list.objects[idx];
     if (obj.is_active == 0) {
         return;
     }
@@ -34,11 +34,11 @@ void main() {
     uint parent_slot = obj.parent_slot;
 
     while (parent_slot != 0xffffffffu) {
-        SceneObject parent = objects[parent_slot];
+        SceneObject parent = in_list.objects[parent_slot];
         world = parent.local_transform * world;
         parent_slot = parent.parent_slot;
     }
 
-    objects[idx].world_transform = world;
-    objects[idx].dirty = 0;
+    in_list.objects[idx].world_transform = world;
+    in_list.objects[idx].dirty = 0;
 }

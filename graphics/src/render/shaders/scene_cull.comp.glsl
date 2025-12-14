@@ -33,19 +33,19 @@ struct Camera {
 
 layout(set = 0, binding = 0) buffer SceneObjects {
     SceneObject objects[];
-};
+} objects;
 
 layout(set = 0, binding = 1) buffer SceneBins {
     SceneBin bins[];
-};
+} bins;
 
 layout(set = 0, binding = 2) buffer CulledBins {
     CulledObject culled[];
-};
+} culled;
 
 layout(set = 0, binding = 3) buffer BinCounts {
     uint counts[];
-};
+} counts;
 
 layout(set = 0, binding = 4) uniform SceneParams {
     uint num_bins;
@@ -59,7 +59,7 @@ layout(set = 0, binding = 5) uniform SceneCamera {
 
 layout(set = 1, binding = 0) buffer Cameras {
     Camera cameras[];
-};
+} cameras;
 
 vec3 rotate_vec3(vec3 v, vec4 q) {
     vec3 t = 2.0 * cross(q.xyz, v);
@@ -72,7 +72,7 @@ void main() {
         return;
     }
 
-    SceneObject obj = objects[idx];
+    SceneObject obj = objects.objects[idx];
     if (obj.is_active == 0) {
         return;
     }
@@ -81,7 +81,7 @@ void main() {
         return;
     }
 
-    Camera cam = cameras[camera.slot];
+    Camera cam = cameras.cameras[camera.slot];
     vec3 world_position = obj.world_transform[3].xyz;
     vec3 to_object = world_position - cam.position;
     vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), cam.rotation);
@@ -91,17 +91,17 @@ void main() {
     }
 
     for (uint bin = 0; bin < params.num_bins; ++bin) {
-        if ((obj.scene_mask & bins[bin].mask) == 0) {
+        if ((obj.scene_mask & bins.bins[bin].mask) == 0) {
             continue;
         }
 
-        uint write_index = atomicAdd(counts[bin], 1);
+        uint write_index = atomicAdd(counts.counts[bin], 1);
         if (write_index >= params.max_objects) {
             continue;
         }
 
         uint target = bin * params.max_objects + write_index;
-        culled[target].total_transform = obj.world_transform;
-        culled[target].bin_id = bins[bin].id;
+        culled.culled[target].total_transform = obj.world_transform;
+        culled.culled[target].bin_id = bins.bins[bin].id;
     }
 }

@@ -113,7 +113,7 @@ impl<State: GPUState> GPUScene<State> {
                 include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
             ))
             .add_variable(
-                "objects",
+                "in_list",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .build(&mut ctx);
@@ -123,23 +123,27 @@ impl<State: GPUState> GPUScene<State> {
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
             .add_variable(
-                "objects",
+                "in_list",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .add_variable(
-                "scene_bins",
+                "bins",
                 ShaderResource::StorageBuffer(self.data.scene_bins.into()),
             )
             .add_variable(
-                "culled_bins",
+                "culled",
                 ShaderResource::StorageBuffer(self.data.draw_bins.get_gpu_handle().into()),
             )
             .add_variable(
-                "bin_counts",
+                "counts",
                 ShaderResource::StorageBuffer(self.data.bin_counts.device().into()),
             )
             .add_variable(
-                "scene_params",
+                "camera",
+                ShaderResource::ConstBuffer(self.camera.device().into()),
+            )
+            .add_variable(
+                "params",
                 ShaderResource::Buffer(self.data.dispatch.device().into()),
             );
 
