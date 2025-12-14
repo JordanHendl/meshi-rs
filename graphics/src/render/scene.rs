@@ -306,6 +306,16 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn release_object(&mut self, handle: Handle<SceneObject>) {
+        if let Some(parent) = self
+            .data
+            .objects_to_process
+            .get_ref(handle)
+            .map(|object| object.parent)
+            .filter(|parent| parent.valid())
+        {
+            self.remove_child(parent, handle);
+        }
+
         if let Some(object) = self.data.objects_to_process.get_mut_ref(handle) {
             object.active = 0;
             object.dirty = 0;
@@ -579,5 +589,39 @@ mod tests {
         assert_eq!(child_ref.parent, Handle::default());
         assert_eq!(child_ref.parent_slot, u32::MAX);
         assert_eq!(child_ref.dirty, 1);
+    }
+
+    #[test]
+    fn releasing_child_detaches_from_parent() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let parent = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+        let child = scene.register_object(&SceneObjectInfo {
+            local: Mat4::IDENTITY,
+            global: Mat4::IDENTITY,
+            scene_mask: 1,
+        });
+
+        scene.add_child(parent, child);
+        scene.release_object(child);
+
+        let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
+        assert_eq!(parent_ref.child_count, 0);
+        assert_eq!(parent_ref.children[0], Handle::default());
+    }
+
+    #[test]
+    fn setting_active_camera_updates_buffer() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let expected_slot: u16 = 7;
+        let handle = Handle::<Camera>::new(expected_slot, 1);
+        scene.set_active_camera(handle);
+
+        assert_eq!(scene.camera.as_slice::<u32>()[0], expected_slot as u32);
     }
 }
