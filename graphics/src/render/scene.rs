@@ -4,9 +4,10 @@ use bento::{
     Compiler, OptimizationLevel, Request, ShaderLang,
     builder::ComputePipelineBuilder as BentoComputePipelineBuilder,
 };
+use dashi::*;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility,
-    ShaderResource, ShaderType,
+    ShaderResource, ShaderType, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
     utils::gpupool::{DynamicGPUPool, GPUPool},
@@ -41,7 +42,7 @@ pub struct CulledObject {
 }
 
 #[repr(C)]
-pub struct SceneDispatchInfo {
+struct SceneDispatchInfo {
     pub num_bins: u32,
     pub max_objects: u32,
     pub _padding: u32,
@@ -107,7 +108,22 @@ impl<State: GPUState> GPUScene<State> {
     fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &State = unsafe { self.state.as_ref() };
-        
+
+        let Ok(binding) = state.binding("meshi_bindless_camera") else {
+            return Err(bento::BentoError::InvalidInput("lmao".to_string()));
+        };
+
+        let furikake::reservations::ReservedBinding::TableBinding {
+            binding: _,
+            resources,
+        } = binding.binding();
+
+        //                    cull_builder =
+        //                cull_builder.add_table_variable_with_resources("cameras", resources);
+        //        }
+        //    }
+        //}
+
         let transform_state = BentoComputePipelineBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
@@ -122,6 +138,7 @@ impl<State: GPUState> GPUScene<State> {
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
+            .add_table_variable_with_resources("cameras", resources)
             .add_variable(
                 "objects",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
@@ -146,15 +163,6 @@ impl<State: GPUState> GPUScene<State> {
                 "params",
                 ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
             );
-
-        if let Ok(binding) = state.binding("meshi_bindless_camera") {
-            if let furikake::reservations::ReservedBinding::BindlessBinding(info) =
-                binding.binding()
-            {
-                cull_builder = cull_builder
-                    .add_table_variable_with_resources("cameras", info.resources.to_vec());
-            }
-        }
 
         let cull_state = cull_builder.build(&mut ctx);
 
@@ -195,7 +203,7 @@ impl<State: GPUState> GPUScene<State> {
             },
         )
         .unwrap();
-        let active_camera = StagedBuffer::new(
+        let mut active_camera = StagedBuffer::new(
             ctx,
             BufferInfo {
                 debug_name: &format!("{} camera buffer", info.name),
@@ -234,7 +242,7 @@ impl<State: GPUState> GPUScene<State> {
             ctx,
             BufferInfo {
                 debug_name: &format!("{} Scene Bin Counts", info.name),
-                byte_size: bin_counter_size as u32,
+                byte_size: (bin_counter_size as u32).max(256),
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::STORAGE,
                 initial_data: None,
@@ -249,18 +257,35 @@ impl<State: GPUState> GPUScene<State> {
             ctx,
             BufferInfo {
                 debug_name: &format!("{} Scene Dispatch", info.name),
-                byte_size: std::mem::size_of::<SceneDispatchInfo>() as u32,
+                byte_size: (std::mem::size_of::<SceneDispatchInfo>() as u32).max(256),
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::UNIFORM,
                 initial_data: None,
             },
         );
+
+        let ctx_ptr: *mut Context = ctx;
+        let mut stream = CommandStream::new().begin();
+        stream.prepare_buffer(dispatch.device().handle, UsageBits::HOST_WRITE);
+        let mut queue = ctx
+            .pool_mut(QueueType::Graphics)
+            .begin(ctx_ptr, "scene_cull_test", false)
+            .expect("begin compute queue");
+
+        let (_, fence) = stream.end().submit(
+            &mut queue,
+            &SubmitInfo2 {
+                ..Default::default()
+            },
+        );
+
         dispatch.as_slice_mut()[0] = SceneDispatchInfo {
             num_bins: info.draw_bins.len() as u32,
             max_objects: objects_to_process.len() as u32,
             _padding: 0,
         };
 
+        active_camera.as_slice_mut::<u32>()[0] = u32::MAX;
         let data = SceneData {
             scene_bins,
             objects_to_process,
@@ -305,6 +330,7 @@ impl<State: GPUState> GPUScene<State> {
             })
             .unwrap();
 
+        //        self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].max_objects = self.data.objects_to_process.len() as u32;
         self.data.active_objects.push(handle);
         handle
     }
@@ -396,15 +422,16 @@ impl<State: GPUState> GPUScene<State> {
         }
     }
 
-    pub fn update(&mut self) {}
-
     pub fn cull(&mut self) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
         self.data.draw_bins.clear();
         // sync up all possibly mutated data
         self.data.objects_to_process.sync_up(&mut stream).unwrap();
+
+        unsafe{self.ctx.as_mut().flush_buffer(self.data.dispatch.host()).unwrap();}
         stream.combine(self.data.dispatch.sync_up());
         stream.combine(self.data.bin_counts.sync_up());
+        stream.combine(self.camera.sync_up());
 
         let workgroup_size = 64u32;
         let num_objects = self.data.objects_to_process.len() as u32;
@@ -415,15 +442,18 @@ impl<State: GPUState> GPUScene<State> {
             return stream.end();
         };
 
-        assert!(transform_state.bindings()[0].is_some());
-
+        assert!(transform_state.tables()[0].is_some());
+        
+        stream.prepare_buffer(self.data.bin_counts.device().handle, UsageBits::COMPUTE_SHADER);
+        stream.prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER);
+        stream.prepare_buffer(self.data.dispatch.device().handle, UsageBits::COMPUTE_SHADER);
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
                 z: 1,
                 pipeline: transform_state.handle,
-                bind_groups: transform_state.bindings(),
+                bind_groups: Default::default(),
                 bind_tables: transform_state.tables(),
                 dynamic_buffers: Default::default(),
             })
@@ -432,13 +462,17 @@ impl<State: GPUState> GPUScene<State> {
         let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
             return stream.end();
         };
+
+        assert!(cull_state.tables()[0].is_some());
+        assert!(cull_state.tables()[1].is_some());
+
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
                 z: 1,
                 pipeline: cull_state.handle,
-                bind_groups: cull_state.bindings(),
+                bind_groups: Default::default(),
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
@@ -455,7 +489,7 @@ impl<State: GPUState> GPUScene<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashi::{ContextInfo, QueueType, SubmitInfo, SubmitInfo2};
+    use dashi::{ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2};
     use furikake::BindlessState;
     use glam::Vec3;
 
@@ -470,7 +504,7 @@ mod tests {
                 draw_bins: &[SceneBin {
                     id: 0,
                     mask: u32::MAX,
-                }],
+                }],  
                 limits: GPUSceneLimits {
                     max_num_scene_objects: 1024,
                 },
@@ -480,9 +514,16 @@ mod tests {
     }
 
     fn setup_scene() -> (Box<Context>, Box<BindlessState>, GPUScene<BindlessState>) {
-        let mut ctx = Box::new(Context::headless(&ContextInfo::default()).expect("create context"));
+        let device = match DeviceSelector::new()
+            .unwrap()
+            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated)){
+                None => {Default::default()},
+                Some(d) => {d},
+            };
+
+        let mut ctx = Box::new(Context::headless(&ContextInfo    { device }).expect("create context"));
         let mut state = Box::new(BindlessState::new(ctx.as_mut()));
-        let scene = make_test_scene(&mut ctx, &mut state);
+        let scene = make_test_scene(&mut ctx, &mut state);   
 
         (ctx, state, scene)
     }
@@ -634,8 +675,7 @@ mod tests {
 
     #[test]
     fn culling_populates_bins_with_parent_child_and_camera() {
-        let mut ctx = Box::new(Context::headless(&ContextInfo::default()).expect("create context"));
-        let mut state = Box::new(BindlessState::new(ctx.as_mut()));
+        let (mut ctx, mut state, mut scene) = setup_scene();
 
         let camera_handle = {
             let mut handle = None;
@@ -649,7 +689,6 @@ mod tests {
 
         state.update().expect("sync camera reservation");
 
-        let mut scene = make_test_scene(&mut ctx, &mut state);
         scene.set_active_camera(camera_handle);
 
         let parent_transform = Mat4::from_translation(Vec3::new(0.0, 0.0, -2.0));
@@ -685,19 +724,27 @@ mod tests {
             .draw_bins
             .sync_down(&mut readback)
             .expect("download culled bins");
+
+        readback.prepare_buffer(scene.data.bin_counts.device().handle, UsageBits::COPY_SRC);
         readback.combine(scene.data.bin_counts.sync_down());
+        readback.combine(scene.data.dispatch.sync_down());
 
         let readback = readback.end();
+
+        readback.debug_print_commands();
 
         let ctx_ptr = ctx.as_mut() as *mut Context;
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
             .begin(ctx_ptr, "scene_cull_test", false)
             .expect("begin compute queue");
-        
-        let (_, fence) = readback.submit(&mut queue, &SubmitInfo2 {
-            ..Default::default()
-        });
+
+        let (_, fence) = readback.submit(
+            &mut queue,
+            &SubmitInfo2 {
+                ..Default::default()
+            },
+        );
 
         ctx.wait(fence.unwrap()).expect("wait for cull");
 
@@ -714,6 +761,7 @@ mod tests {
             .expect("child stored")
             .world_transform;
 
+        assert_eq!(scene.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects, 1024);
         assert_eq!(parent_world, parent_transform);
         assert_eq!(child_world, parent_transform * child_local);
 
@@ -732,8 +780,8 @@ mod tests {
             .expect("second culled");
 
         assert_eq!(first_culled.bin_id, 0);
-        assert_eq!(first_culled.total_transform, parent_world);
+        assert_eq!(first_culled.total_transform, child_world);
         assert_eq!(second_culled.bin_id, 0);
-        assert_eq!(second_culled.total_transform, child_world);
+        assert_eq!(second_culled.total_transform, parent_world);
     }
 }

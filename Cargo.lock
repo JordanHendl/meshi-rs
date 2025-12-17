@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7e4e5a536f1c80d9645a8ca37ab252ad7c31a7f7"
+source = "git+https://github.com/JordanHendl/gohan#8e633b31f226457abba30dfb40a15aea1df9a5cb"
 dependencies = [
  "bincode",
  "clap",
@@ -215,9 +215,9 @@ checksum = "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a"
 
 [[package]]
 name = "bumpalo"
-version = "3.19.0"
+version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
+checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 
 [[package]]
 name = "bytemuck"
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#9e6f8c6db17f6c2b92e95c28d3702b29e3cd46e2"
+source = "git+https://github.com/JordanHendl/dashi#dd0902f3d3707e1a1a47ae612fc348e938a676a2"
 dependencies = [
  "anyhow",
  "ash",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7e4e5a536f1c80d9645a8ca37ab252ad7c31a7f7"
+source = "git+https://github.com/JordanHendl/gohan#8e633b31f226457abba30dfb40a15aea1df9a5cb"
 dependencies = [
  "bento",
  "dashi",
@@ -1382,9 +1382,9 @@ dependencies = [
 
 [[package]]
 name = "moxcms"
-version = "0.7.10"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80986bbbcf925ebd3be54c26613d861255284584501595cf418320c078945608"
+checksum = "ac9557c559cd6fc9867e122e20d2cbefc9ca29d80d027a8e39310920ed2f0a97"
 dependencies = [
  "num-traits",
  "pxfm",
@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#0477b058452dc49a0e2d963e291b38bfa2e1673f"
+source = "git+https://github.com/JordanHendl/noren#550936e4b9bafb949fcc6df9abdd70d74523c3fb"
 dependencies = [
  "bento",
  "bincode",
@@ -2272,7 +2272,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7e4e5a536f1c80d9645a8ca37ab252ad7c31a7f7"
+source = "git+https://github.com/JordanHendl/gohan#8e633b31f226457abba30dfb40a15aea1df9a5cb"
 dependencies = [
  "bento",
  "dashi",
@@ -3070,9 +3070,9 @@ dependencies = [
 
 [[package]]
 name = "zune-jpeg"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f520eebad972262a1dde0ec455bce4f8b298b1e5154513de58c114c4c54303e8"
+checksum = "51d915729b0e7d5fe35c2f294c5dc10b30207cc637920e5b59077bfa3da63f28"
 dependencies = [
  "zune-core",
 ]
