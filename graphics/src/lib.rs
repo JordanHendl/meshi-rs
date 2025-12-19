@@ -85,7 +85,7 @@ impl RenderEngine {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        todo!()
+        self.renderer.register_object(info)
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -156,6 +156,14 @@ impl RenderEngine {
     }
 
     pub fn camera_position(&self) -> Vec3 {
+        todo!()
+    }
+
+    pub fn camera_transform(&self) -> Mat4 {
+        todo!()
+    }
+    
+    pub fn camera_view(&self) -> Mat4 {
         todo!()
     }
 

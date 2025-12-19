@@ -1,3 +1,4 @@
+use glam::Mat4;
 use meshi_graphics::*;
 
 fn main() {
@@ -13,5 +14,8 @@ fn main() {
 
     db.import_dashi_context(engine.context());
 
-    engine.register_object(&RenderObjectInfo::Model(db.fetch_gpu_model("models/cube").unwrap())).unwrap();
+    let camera = engine.register_camera(&Mat4::IDENTITY);
+    let cube = engine.register_object(&RenderObjectInfo::Model(db.fetch_gpu_model("model/sphere").unwrap())).unwrap();
+    
+ 
 }
