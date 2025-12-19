@@ -1,4 +1,4 @@
-use glam::Mat4;
+use glam::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
 
@@ -26,6 +26,8 @@ fn main() {
         ))
         .unwrap();
     
+    engine.set_object_transform(cube, &Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)));
+
     let mut timer = Timer::new();
     timer.start();
 

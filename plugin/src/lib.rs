@@ -325,7 +325,7 @@ pub extern "C" fn meshi_gfx_set_transform(
 /// # Safety
 /// `render` must be valid and `info` must not be null.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_create_directional_light(
+pub extern "C" fn meshi_gfx_create_light(
     render: *mut MeshiEngine,
     info: *const DirectionalLightInfo,
 ) -> Handle<DirectionalLight> {
@@ -334,21 +334,21 @@ pub extern "C" fn meshi_gfx_create_directional_light(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    engine.render.register_directional_light(unsafe { &*info });
+    engine.render.register_light(unsafe { &*info });
 
-    //unsafe { &mut *render }.register_directional_light(unsafe { &*info })
+    //unsafe { &mut *render }.register_light(unsafe { &*info })
     todo!()
 }
 
 #[no_mangle]
-pub extern "C" fn meshi_gfx_release_directional_light(
+pub extern "C" fn meshi_gfx_release_light(
     render: *mut MeshiEngine,
     h: *const Handle<DirectionalLight>,
 ) {
     if render.is_null() || h.is_null() {
         return;
     }
-    //unsafe { &mut *render }.release_directional_light(unsafe { *h });
+    //unsafe { &mut *render }.release_light(unsafe { *h });
     todo!()
 }
 
@@ -357,7 +357,7 @@ pub extern "C" fn meshi_gfx_release_directional_light(
 /// # Safety
 /// `render` and `transform` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_directional_light_transform(
+pub extern "C" fn meshi_gfx_set_light_transform(
     render: *mut MeshiEngine,
     h: Handle<DirectionalLight>,
     transform: *const Mat4,
@@ -365,7 +365,7 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
     if render.is_null() || transform.is_null() {
         return;
     }
-    //unsafe { &mut *render }.set_directional_light_transform(h, unsafe { &*transform });
+    //unsafe { &mut *render }.set_light_transform(h, unsafe { &*transform });
     todo!()
 }
 
@@ -374,7 +374,7 @@ pub extern "C" fn meshi_gfx_set_directional_light_transform(
 /// # Safety
 /// `render` and `info` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_directional_light_info(
+pub extern "C" fn meshi_gfx_set_light_info(
     render: *mut MeshiEngine,
     h: Handle<DirectionalLight>,
     info: *const DirectionalLightInfo,

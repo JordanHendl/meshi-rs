@@ -14,9 +14,7 @@ pub enum RenderObjectInfo {
 }
 pub struct RenderObject;
 
-pub struct Camera {
-
-}
+pub type Camera = furikake::types::Camera;
 
 #[repr(C)]
 pub struct CubePrimitiveInfo {

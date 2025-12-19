@@ -4,6 +4,7 @@ pub mod structs;
 pub(crate) mod utils;
 
 use dashi::{Context, Display, DisplayInfo, Handle};
+use furikake::BindlessState;
 use glam::{Mat4, Vec3, Vec4};
 use meshi_ffi_structs::{DirectionalLightInfo, MeshObjectInfo};
 use meshi_utils::MeshiError;
@@ -54,22 +55,15 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn register_directional_light(
-        &mut self,
-        info: &DirectionalLightInfo,
-    ) -> Handle<DirectionalLight> {
+    pub fn register_light(&mut self, info: &DirectionalLightInfo) -> Handle<DirectionalLight> {
         todo!()
     }
 
-    pub fn set_directional_light_transform(
-        &mut self,
-        handle: Handle<DirectionalLight>,
-        transform: &Mat4,
-    ) {
+    pub fn set_light_transform(&mut self, handle: Handle<DirectionalLight>, transform: &Mat4) {
         todo!()
     }
 
-    pub fn set_directional_light_info(
+    pub fn set_light_info(
         &mut self,
         handle: Handle<DirectionalLight>,
         info: &DirectionalLightInfo,
@@ -77,8 +71,8 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn release_directional_light(&mut self, handle: Handle<DirectionalLight>) {
-        todo!() //self.directional_lights.release(handle);
+    pub fn release_light(&mut self, handle: Handle<DirectionalLight>) {
+        todo!() //self.lights.release(handle);
     }
 
     pub fn register_object(
@@ -92,11 +86,11 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn register_object_with_renderer(&mut self, handle: Handle<RenderObject>) {
+    pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         todo!()
     }
 
-    pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
+    pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
         todo!()
     }
 
@@ -127,7 +121,11 @@ impl RenderEngine {
         //        }
         //
     }
-
+    
+    pub fn register_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
+        todo!()
+    }
+    
     pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
         todo!()
     }
@@ -137,15 +135,45 @@ impl RenderEngine {
     }
 
     pub fn register_camera(&mut self, initial_transform: &Mat4) -> Handle<Camera> {
-        todo!()
+        let mut h = Handle::default();
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    h = a.add_camera();
+                    let c = a.camera_mut(h);
+                    c.set_transform(initial_transform.clone());
+                },
+            )
+            .unwrap();
+
+        h
     }
 
     pub fn release_camera(&mut self, camera: Handle<Camera>) {
         todo!()
     }
 
-    pub fn set_camera_projection(&mut self, camera: Handle<Camera>, proj: &Mat4) {
-        todo!()
+    pub fn set_camera_perspective(
+        &mut self,
+        camera: Handle<Camera>,
+        fov_y_radians: f32,
+        width: f32,
+        height: f32,
+        near: f32,
+        far: f32,
+    ) {
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    let c = a.camera_mut(camera);
+                    c.set_perspective(fov_y_radians, width, height, near, far);
+                },
+            )
+            .unwrap();
     }
 
     pub fn set_primary_camera(&mut self, camera: Handle<Camera>) {
@@ -159,7 +187,7 @@ impl RenderEngine {
     pub fn camera_transform(&self, camera: Handle<Camera>) -> Mat4 {
         todo!()
     }
-    
+
     pub fn camera_view(&self, camera: Handle<Camera>) -> Mat4 {
         todo!()
     }
