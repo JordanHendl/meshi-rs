@@ -5,8 +5,9 @@ pub(crate) mod utils;
 
 use dashi::{Context, Display, DisplayInfo, Handle};
 use furikake::BindlessState;
+pub use furikake::types::*;
 use glam::{Mat4, Vec3, Vec4};
-use meshi_ffi_structs::{DirectionalLightInfo, MeshObjectInfo};
+use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
@@ -55,23 +56,23 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn register_light(&mut self, info: &DirectionalLightInfo) -> Handle<DirectionalLight> {
+    pub fn register_light(&mut self, info: &LightInfo) -> Handle<Light> {
         todo!()
     }
 
-    pub fn set_light_transform(&mut self, handle: Handle<DirectionalLight>, transform: &Mat4) {
+    pub fn set_light_transform(&mut self, handle: Handle<Light>, transform: &Mat4) {
         todo!()
     }
 
     pub fn set_light_info(
         &mut self,
-        handle: Handle<DirectionalLight>,
-        info: &DirectionalLightInfo,
+        handle: Handle<Light>,
+        info: &LightInfo,
     ) {
         todo!()
     }
 
-    pub fn release_light(&mut self, handle: Handle<DirectionalLight>) {
+    pub fn release_light(&mut self, handle: Handle<Light>) {
         todo!() //self.lights.release(handle);
     }
 
