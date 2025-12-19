@@ -12,4 +12,6 @@ fn main() {
     }).expect("Unable to create database");
 
     db.import_dashi_context(engine.context());
+
+    engine.register_object(&RenderObjectInfo::Model(db.fetch_gpu_model("models/cube").unwrap())).unwrap();
 }

@@ -1,7 +1,7 @@
 pub mod event;
-pub(crate) mod utils;
 mod render;
 pub mod structs;
+pub(crate) mod utils;
 
 use dashi::{Context, Display, DisplayInfo, Handle};
 use glam::{Mat4, Vec3, Vec4};
@@ -41,8 +41,9 @@ impl RenderEngine {
         })
     }
 
-    pub fn initialize(&mut self, db: &mut DB) {
+    pub fn initialize_database(&mut self, db: &mut DB) {
         self.db = Some(NonNull::new(db).expect("lmao"));
+        self.renderer.initialize_database(db);
     }
 
     pub fn context(&mut self) -> &mut Context {
@@ -126,15 +127,15 @@ impl RenderEngine {
         //        }
         //
     }
-    
+
     pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
         todo!()
     }
-    
+
     pub fn register_camera(&mut self, initial_transform: &Mat4) -> Handle<Camera> {
         todo!()
     }
-    
+
     pub fn set_camera_as_active(&mut self, camera: Handle<Camera>) {
         todo!()
     }

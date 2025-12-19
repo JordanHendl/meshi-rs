@@ -94,7 +94,7 @@ impl MeshiEngine {
             .expect("failed to initialize database!"),
         );
         
-        render.initialize(database.as_mut());
+        render.initialize_database(database.as_mut());
         Some(Box::new(MeshiEngine {
             database,
             render,

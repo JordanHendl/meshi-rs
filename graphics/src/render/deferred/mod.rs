@@ -5,6 +5,7 @@ use furikake::BindlessState;
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::DirectionalLightInfo;
 use meshi_utils::MeshiError;
+use noren::DB;
 use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
 use crate::{
@@ -40,6 +41,7 @@ pub struct DeferredRendererInfo {
 pub struct DeferredRenderer {
     ctx: Box<Context>,
     state: Box<BindlessState>,
+    db: Option<NonNull<DB>>,
     scene: GPUScene<furikake::BindlessState>,
     alloc: TransientAllocator,
 }
@@ -75,6 +77,7 @@ impl DeferredRenderer {
             state,
             scene,
             alloc,
+            db: None,
         }
     }
 
@@ -84,6 +87,12 @@ impl DeferredRenderer {
 
     pub fn state(&mut self) -> &mut BindlessState {
         &mut self.state
+    }
+
+    pub fn initialize_database(&mut self, db: &mut DB) {
+        db.import_dashi_context(&mut self.ctx);
+        db.import_furikake_state(&mut self.state);
+        self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
     pub fn register_object(
