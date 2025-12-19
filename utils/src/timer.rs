@@ -38,7 +38,6 @@ impl Timer {
     }
 
     // Pause the timer
-    #[cfg(test)]
     pub fn pause(&mut self) {
         if self.start_time.is_some() {
             self.elapsed = self.elapsed_duration();
@@ -48,7 +47,6 @@ impl Timer {
     }
 
     // Reset the timer
-    #[cfg(test)]
     pub fn reset(&mut self) {
         self.start_time = None;
         self.elapsed = Duration::new(0, 0);
@@ -69,25 +67,21 @@ impl Timer {
     }
 
     // Get the current elapsed time in milliseconds
-    #[cfg(test)]
     pub fn elapsed_ms(&self) -> u128 {
         self.elapsed_duration().as_millis()
     }
 
     // Get the current elapsed time in microseconds
-    #[cfg(test)]
     pub fn elapsed_micro(&self) -> u128 {
         self.elapsed_duration().as_micros()
     }
 
     // Get the current elapsed time in seconds as f32
-    #[cfg(test)]
     pub fn elapsed_seconds_f32(&self) -> f32 {
         self.elapsed_duration().as_secs_f32()
     }
 
     // Get the current elapsed time in seconds as f64
-    #[cfg(test)]
     pub fn elapsed_seconds_f64(&self) -> f64 {
         self.elapsed_duration().as_secs_f64()
     }

@@ -132,11 +132,11 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn register_camera(&mut self, initial_transform: &Mat4) -> Handle<Camera> {
-        todo!()
+    pub fn set_capture_mouse(&mut self, capture: bool) {
+        let _ = capture; // window management handled by renderer
     }
 
-    pub fn set_camera_as_active(&mut self, camera: Handle<Camera>) {
+    pub fn register_camera(&mut self, initial_transform: &Mat4) -> Handle<Camera> {
         todo!()
     }
 
@@ -144,26 +144,23 @@ impl RenderEngine {
         todo!()
     }
 
-    pub fn set_projection(&mut self, proj: &Mat4) {
+    pub fn set_camera_projection(&mut self, camera: Handle<Camera>, proj: &Mat4) {
         todo!()
     }
 
-    pub fn set_capture_mouse(&mut self, capture: bool) {
-        let _ = capture; // window management handled by renderer
-    }
-    pub fn set_camera(&mut self, camera: &Mat4) {
+    pub fn set_primary_camera(&mut self, camera: Handle<Camera>) {
         todo!()
     }
 
-    pub fn camera_position(&self) -> Vec3 {
+    pub fn camera_position(&self, camera: Handle<Camera>) -> Vec3 {
         todo!()
     }
 
-    pub fn camera_transform(&self) -> Mat4 {
+    pub fn camera_transform(&self, camera: Handle<Camera>) -> Mat4 {
         todo!()
     }
     
-    pub fn camera_view(&self) -> Mat4 {
+    pub fn camera_view(&self, camera: Handle<Camera>) -> Mat4 {
         todo!()
     }
 
