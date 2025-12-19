@@ -3,13 +3,13 @@ use std::ptr::NonNull;
 use dashi::*;
 use furikake::BindlessState;
 use glam::{Mat4, Vec3};
-use meshi_ffi_structs::DirectionalLightInfo;
+use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 use noren::DB;
 use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
 use crate::{
-    DirectionalLight, RenderObject, RenderObjectInfo, RgbaImage, render::scene::*,
+    RenderObject, RenderObjectInfo, RgbaImage, render::scene::*,
 };
 
 use super::scene::GPUScene;

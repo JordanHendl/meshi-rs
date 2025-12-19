@@ -1305,6 +1305,7 @@ dependencies = [
 name = "meshi-ffi-structs"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.10.0",
  "glam 0.29.3",
 ]
 

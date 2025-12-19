@@ -6,7 +6,7 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{
-    Camera, CubePrimitiveInfo, DirectionalLight, MeshObject, RenderEngineInfo, RenderObject, RenderObjectInfo
+    Camera, CubePrimitiveInfo, Light, MeshObject, RenderEngineInfo, RenderObject, RenderObjectInfo
 };
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
@@ -327,8 +327,8 @@ pub extern "C" fn meshi_gfx_set_transform(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_light(
     render: *mut MeshiEngine,
-    info: *const DirectionalLightInfo,
-) -> Handle<DirectionalLight> {
+    info: *const LightInfo,
+) -> Handle<Light> {
     if render.is_null() || info.is_null() {
         return Handle::default();
     }
@@ -343,7 +343,7 @@ pub extern "C" fn meshi_gfx_create_light(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_release_light(
     render: *mut MeshiEngine,
-    h: *const Handle<DirectionalLight>,
+    h: *const Handle<Light>,
 ) {
     if render.is_null() || h.is_null() {
         return;
@@ -359,7 +359,7 @@ pub extern "C" fn meshi_gfx_release_light(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_light_transform(
     render: *mut MeshiEngine,
-    h: Handle<DirectionalLight>,
+    h: Handle<Light>,
     transform: *const Mat4,
 ) {
     if render.is_null() || transform.is_null() {
@@ -376,8 +376,8 @@ pub extern "C" fn meshi_gfx_set_light_transform(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_light_info(
     render: *mut MeshiEngine,
-    h: Handle<DirectionalLight>,
-    info: *const DirectionalLightInfo,
+    h: Handle<Light>,
+    info: *const LightInfo,
 ) {
     if render.is_null() || info.is_null() {
         return;
