@@ -57,18 +57,27 @@ impl RenderEngine {
     }
 
     pub fn register_light(&mut self, info: &LightInfo) -> Handle<Light> {
-        todo!()
+        let mut h = Handle::default();
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_lights",
+                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                    h = lights.add_light();
+                    *lights.light_mut(h) = pack_gpu_light(*info);
+                },
+            )
+            .unwrap();
+
+        h
     }
 
     pub fn set_light_transform(&mut self, handle: Handle<Light>, transform: &Mat4) {
         todo!()
     }
 
-    pub fn set_light_info(
-        &mut self,
-        handle: Handle<Light>,
-        info: &LightInfo,
-    ) {
+    pub fn set_light_info(&mut self, handle: Handle<Light>, info: &LightInfo) {
         todo!()
     }
 
@@ -122,11 +131,11 @@ impl RenderEngine {
         //        }
         //
     }
-    
+
     pub fn register_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
         todo!()
     }
-    
+
     pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
         todo!()
     }
