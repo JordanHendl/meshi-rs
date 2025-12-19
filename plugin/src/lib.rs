@@ -88,7 +88,6 @@ impl MeshiEngine {
 
         let mut database = Box::new(
             noren::DB::new(&DBInfo {
-                ctx: render.context(),
                 base_dir: &appdir,
                 layout_file: None,
             })

@@ -73,7 +73,7 @@ impl<'a> Default for GPUSceneInfo<'a> {
             ctx: Default::default(),
             draw_bins: Default::default(),
             limits: GPUSceneLimits {
-                max_num_scene_objects: 0,
+                max_num_scene_objects: 2048,
             },
         }
     }
@@ -109,7 +109,7 @@ impl<State: GPUState> GPUScene<State> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &State = unsafe { self.state.as_ref() };
 
-        let Ok(binding) = state.binding("meshi_bindless_camera") else {
+        let Ok(binding) = state.binding("meshi_bindless_cameras") else {
             return Err(bento::BentoError::InvalidInput("lmao".to_string()));
         };
 
@@ -134,11 +134,11 @@ impl<State: GPUState> GPUScene<State> {
             )
             .build(&mut ctx);
 
-        let mut cull_builder = BentoComputePipelineBuilder::new()
+        let cull_builder = BentoComputePipelineBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
-            .add_table_variable_with_resources("cameras", resources)
+            .add_variable("cameras", resources[0].resource.clone())
             .add_variable(
                 "objects",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
@@ -183,7 +183,7 @@ impl<State: GPUState> GPUScene<State> {
 
         if State::reserved_names()
             .iter()
-            .find(|name| **name == "meshi_bindless_camera")
+            .find(|name| **name == "meshi_bindless_cameras")
             == None
         {
             // Throw error result here.... we NEED meshi_bindless_materials for material listings.
@@ -428,7 +428,12 @@ impl<State: GPUState> GPUScene<State> {
         // sync up all possibly mutated data
         self.data.objects_to_process.sync_up(&mut stream).unwrap();
 
-        unsafe{self.ctx.as_mut().flush_buffer(self.data.dispatch.host()).unwrap();}
+        unsafe {
+            self.ctx
+                .as_mut()
+                .flush_buffer(self.data.dispatch.host())
+                .unwrap();
+        }
         stream.combine(self.data.dispatch.sync_up());
         stream.combine(self.data.bin_counts.sync_up());
         stream.combine(self.camera.sync_up());
@@ -443,10 +448,16 @@ impl<State: GPUState> GPUScene<State> {
         };
 
         assert!(transform_state.tables()[0].is_some());
-        
-        stream.prepare_buffer(self.data.bin_counts.device().handle, UsageBits::COMPUTE_SHADER);
+
+        stream.prepare_buffer(
+            self.data.bin_counts.device().handle,
+            UsageBits::COMPUTE_SHADER,
+        );
         stream.prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER);
-        stream.prepare_buffer(self.data.dispatch.device().handle, UsageBits::COMPUTE_SHADER);
+        stream.prepare_buffer(
+            self.data.dispatch.device().handle,
+            UsageBits::COMPUTE_SHADER,
+        );
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
@@ -489,7 +500,9 @@ impl<State: GPUState> GPUScene<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashi::{ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2};
+    use dashi::{
+        ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
+    };
     use furikake::BindlessState;
     use glam::Vec3;
 
@@ -504,7 +517,7 @@ mod tests {
                 draw_bins: &[SceneBin {
                     id: 0,
                     mask: u32::MAX,
-                }],  
+                }],
                 limits: GPUSceneLimits {
                     max_num_scene_objects: 1024,
                 },
@@ -516,14 +529,15 @@ mod tests {
     fn setup_scene() -> (Box<Context>, Box<BindlessState>, GPUScene<BindlessState>) {
         let device = match DeviceSelector::new()
             .unwrap()
-            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated)){
-                None => {Default::default()},
-                Some(d) => {d},
-            };
+            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+        {
+            None => Default::default(),
+            Some(d) => d,
+        };
 
-        let mut ctx = Box::new(Context::headless(&ContextInfo    { device }).expect("create context"));
+        let mut ctx = Box::new(Context::headless(&ContextInfo { device }).expect("create context"));
         let mut state = Box::new(BindlessState::new(ctx.as_mut()));
-        let scene = make_test_scene(&mut ctx, &mut state);   
+        let scene = make_test_scene(&mut ctx, &mut state);
 
         (ctx, state, scene)
     }
@@ -680,7 +694,7 @@ mod tests {
         let camera_handle = {
             let mut handle = None;
             state
-                .reserved_mut::<ReservedBindlessCamera, _>("meshi_bindless_camera", |cameras| {
+                .reserved_mut::<ReservedBindlessCamera, _>("meshi_bindless_cameras", |cameras| {
                     handle = Some(cameras.add_camera());
                 })
                 .expect("add camera");
@@ -761,7 +775,10 @@ mod tests {
             .expect("child stored")
             .world_transform;
 
-        assert_eq!(scene.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects, 1024);
+        assert_eq!(
+            scene.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects,
+            1024
+        );
         assert_eq!(parent_world, parent_transform);
         assert_eq!(child_world, parent_transform * child_local);
 
