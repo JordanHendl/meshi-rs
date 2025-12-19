@@ -45,7 +45,7 @@ pub struct CulledObject {
 struct SceneDispatchInfo {
     pub num_bins: u32,
     pub max_objects: u32,
-    pub _padding: u32,
+    pub num_views: u32,
 }
 
 #[repr(C)]
@@ -57,6 +57,7 @@ pub struct SceneBin {
 
 pub struct GPUSceneLimits {
     pub max_num_scene_objects: u32,
+    pub max_num_views: u32,
 }
 
 pub struct GPUSceneInfo<'a> {
@@ -74,7 +75,28 @@ impl<'a> Default for GPUSceneInfo<'a> {
             draw_bins: Default::default(),
             limits: GPUSceneLimits {
                 max_num_scene_objects: 2048,
+                max_num_views: 1,
             },
+        }
+    }
+}
+
+const MAX_ACTIVE_VIEWS: usize = 8;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ActiveCameras {
+    pub count: u32,
+    pub _padding: [u32; 3],
+    pub slots: [[u32; 4]; MAX_ACTIVE_VIEWS],
+}
+
+impl Default for ActiveCameras {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            _padding: [0; 3],
+            slots: [[u32::MAX; 4]; MAX_ACTIVE_VIEWS],
         }
     }
 }
@@ -88,6 +110,7 @@ struct SceneData {
     dispatch: StagedBuffer,
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
+    max_views: u32,
 }
 
 #[derive(Default)]
@@ -178,8 +201,9 @@ impl<State: GPUState> GPUScene<State> {
         let scene_object_size = std::mem::size_of::<SceneObject>();
         let culled_object_size = std::mem::size_of::<CulledObject>();
         let culled_object_align = std::mem::align_of::<CulledObject>();
-        let total_cull_slots = max_scene_objects * info.draw_bins.len();
-        let bin_counter_size = std::mem::size_of::<u32>() * info.draw_bins.len();
+        let max_views = info.limits.max_num_views as usize;
+        let total_cull_slots = max_scene_objects * info.draw_bins.len() * max_views;
+        let bin_counter_size = std::mem::size_of::<u32>() * info.draw_bins.len() * max_views;
 
         if State::reserved_names()
             .iter()
@@ -207,7 +231,7 @@ impl<State: GPUState> GPUScene<State> {
             ctx,
             BufferInfo {
                 debug_name: &format!("{} camera buffer", info.name),
-                byte_size: 256,
+                byte_size: (std::mem::size_of::<ActiveCameras>() as u32).max(256),
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::UNIFORM,
                 initial_data: None,
@@ -282,10 +306,13 @@ impl<State: GPUState> GPUScene<State> {
         dispatch.as_slice_mut()[0] = SceneDispatchInfo {
             num_bins: info.draw_bins.len() as u32,
             max_objects: objects_to_process.len() as u32,
-            _padding: 0,
+            num_views: info.limits.max_num_views,
         };
 
-        active_camera.as_slice_mut::<u32>()[0] = u32::MAX;
+        {
+            let camera_info = active_camera.as_slice_mut::<ActiveCameras>();
+            camera_info[0] = ActiveCameras::default();
+        }
         let data = SceneData {
             scene_bins,
             objects_to_process,
@@ -294,6 +321,7 @@ impl<State: GPUState> GPUScene<State> {
             dispatch,
             bin_descriptions: info.draw_bins.to_vec(),
             active_objects: Vec::new(),
+            max_views: info.limits.max_num_views,
         };
 
         let mut s = Self {
@@ -310,7 +338,23 @@ impl<State: GPUState> GPUScene<State> {
     }
 
     pub fn set_active_camera(&mut self, camera: Handle<Camera>) {
-        self.camera.as_slice_mut::<u32>()[0] = camera.slot as u32;
+        self.set_active_cameras(&[camera]);
+    }
+
+    pub fn set_active_cameras(&mut self, cameras: &[Handle<Camera>]) {
+        let active_cameras = self.camera.as_slice_mut::<ActiveCameras>();
+        let count = cameras
+            .len()
+            .min(MAX_ACTIVE_VIEWS)
+            .min(self.data.max_views as usize);
+        active_cameras[0].count = count as u32;
+
+        active_cameras[0].slots = [[u32::MAX; 4]; MAX_ACTIVE_VIEWS];
+        for (idx, handle) in cameras.iter().take(count).enumerate() {
+            active_cameras[0].slots[idx][0] = handle.slot as u32;
+        }
+
+        self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].num_views = count as u32;
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
@@ -425,6 +469,9 @@ impl<State: GPUState> GPUScene<State> {
     pub fn cull(&mut self) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
         self.data.draw_bins.clear();
+        for count in self.data.bin_counts.as_slice_mut::<u32>() {
+            *count = 0;
+        }
         // sync up all possibly mutated data
         self.data.objects_to_process.sync_up(&mut stream).unwrap();
 
@@ -520,6 +567,7 @@ mod tests {
                 }],
                 limits: GPUSceneLimits {
                     max_num_scene_objects: 1024,
+                    max_num_views: MAX_ACTIVE_VIEWS as u32,
                 },
             },
             state,
@@ -684,7 +732,44 @@ mod tests {
         let handle = Handle::<Camera>::new(expected_slot, 1);
         scene.set_active_camera(handle);
 
-        assert_eq!(scene.camera.as_slice::<u32>()[0], expected_slot as u32);
+        let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
+        assert_eq!(camera_state.count, 1);
+        assert_eq!(camera_state.slots[0][0], expected_slot as u32);
+        assert!(
+            camera_state.slots[0][1..]
+                .iter()
+                .all(|slot| *slot == u32::MAX)
+        );
+        assert!(
+            camera_state.slots[1..]
+                .iter()
+                .all(|slot| slot[0] == u32::MAX)
+        );
+    }
+
+    #[test]
+    fn setting_multiple_active_cameras_clamps_and_orders_slots() {
+        let (_ctx, _state, mut scene) = setup_scene();
+
+        let mut handles = Vec::new();
+        for i in 0..(MAX_ACTIVE_VIEWS as u16 + 2) {
+            handles.push(Handle::<Camera>::new(i, 1));
+        }
+
+        scene.set_active_cameras(&handles);
+
+        let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
+        assert_eq!(camera_state.count as usize, MAX_ACTIVE_VIEWS);
+        for i in 0..MAX_ACTIVE_VIEWS {
+            assert_eq!(camera_state.slots[i][0], i as u32);
+        }
+        assert!(
+            camera_state
+                .slots
+                .iter()
+                .flat_map(|slot| slot.iter())
+                .any(|slot| *slot == u32::MAX)
+        );
     }
 
     #[test]

@@ -50,11 +50,12 @@ layout(set = 0, binding = 3) buffer BinCounts {
 layout(set = 0, binding = 4) uniform SceneParams {
     uint num_bins;
     uint max_objects;
-    uint _padding1;
+    uint num_views;
 } params;
 
-layout(set = 0, binding = 5) uniform SceneCamera {
-    uint slot;
+layout(set = 0, binding = 5) uniform SceneCameras {
+    uint count;
+    uint slots[8];
 } camera;
 
 layout(set = 1, binding = 0) buffer Cameras {
@@ -77,31 +78,41 @@ void main() {
         return;
     }
 
-    if (camera.slot == 0xffffffffu) {
+    if (camera.count == 0u) {
         return;
     }
 
-    Camera cam = cameras.cameras[camera.slot];
+    uint view_count = min(camera.count, params.num_views);
     vec3 world_position = obj.world_transform[3].xyz;
-    vec3 to_object = world_position - cam.position;
-    vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), cam.rotation);
 
-    if (dot(forward, to_object) <= 0.0) {
-        return;
-    }
-
-    for (uint bin = 0; bin < params.num_bins; ++bin) {
-        if ((obj.scene_mask & bins.bins[bin].mask) == 0) {
+    for (uint view = 0; view < view_count; ++view) {
+        uint slot = camera.slots[view];
+        if (slot == 0xffffffffu) {
             continue;
         }
 
-        uint write_index = atomicAdd(counts.counts[bin], 1);
-        if (write_index >= params.max_objects) {
+        Camera cam = cameras.cameras[slot];
+        vec3 to_object = world_position - cam.position;
+        vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), cam.rotation);
+
+        if (dot(forward, to_object) <= 0.0) {
             continue;
         }
 
-        uint target = bin * params.max_objects + write_index;
-        culled.culled[target].total_transform = obj.world_transform;
-        culled.culled[target].bin_id = bins.bins[bin].id;
+        for (uint bin = 0; bin < params.num_bins; ++bin) {
+            if ((obj.scene_mask & bins.bins[bin].mask) == 0) {
+                continue;
+            }
+
+            uint bin_offset = view * params.num_bins + bin;
+            uint write_index = atomicAdd(counts.counts[bin_offset], 1);
+            if (write_index >= params.max_objects) {
+                continue;
+            }
+
+            uint target = bin_offset * params.max_objects + write_index;
+            culled.culled[target].total_transform = obj.world_transform;
+            culled.culled[target].bin_id = bins.bins[bin].id;
+        }
     }
 }
