@@ -151,8 +151,6 @@ pub fn pack_gpu_light(s: LightInfo) -> Light {
     out
 }
 
-pub struct RgbaImage {}
-
 #[derive(Default)]
 pub struct RenderEngineInfo {
     pub headless: bool,

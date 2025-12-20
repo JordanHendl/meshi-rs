@@ -59,6 +59,14 @@ pub struct LightInfo {
     pub rect_half_height: f32,
 }
 
+#[repr(C)]
+pub struct FFIImage {
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub pixels: *const u8,
+}
+
 pub struct EventCallbackInfo {
     pub event_cb: extern "C" fn(*mut event::Event, *mut c_void),
     pub user_data: *mut c_void,

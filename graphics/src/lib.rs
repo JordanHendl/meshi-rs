@@ -4,8 +4,8 @@ pub(crate) mod utils;
 
 use dashi::utils::Pool;
 use dashi::{
-    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle, Rect2D,
-    Viewport,
+    Buffer, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle,
+    ImageView, Rect2D, Viewport,
 };
 use furikake::BindlessState;
 pub use furikake::types::*;
@@ -21,8 +21,18 @@ pub use structs::*;
 
 pub type DisplayInfo = DashiDisplayInfo;
 pub type WindowInfo = dashi::WindowInfo;
+struct CPUImageOutput {
+    img: ImageView,
+    staging: Handle<Buffer>,
+}
+
+enum DisplayImpl {
+    Window(Option<Box<DashiDisplay>>),
+    CPUImage(CPUImageOutput),
+}
+
 pub struct Display {
-    raw: Option<Box<DashiDisplay>>,
+    raw: DisplayImpl,
     scene: Handle<Camera>,
 }
 
@@ -172,7 +182,7 @@ impl RenderEngine {
         self.renderer.update(delta_time);
     }
 
-    pub fn register_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
+    pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
         let raw = Some(Box::new(
             self.context()
                 .make_display(&info)
@@ -181,10 +191,31 @@ impl RenderEngine {
         return self
             .displays
             .insert(Display {
-                raw,
+                raw: DisplayImpl::Window(raw),
                 scene: Default::default(),
             })
             .unwrap();
+    }
+
+    pub fn register_cpu_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
+        todo!("Not yet implemented.");
+//        let raw = Some(Box::new(
+//            self.context()
+//                .make_display(&info)
+//                .expect("Failed to make display!"),
+//        ));
+//        return self
+//            .displays
+//            .insert(Display {
+//                raw: DisplayImpl::Window(raw),
+//                scene: Default::default(),
+//            })
+//            .unwrap();
+    }
+
+
+    pub fn frame_dump(&mut self, _display: Handle<Display>) -> Option<FFIImage> {
+        None
     }
 
     pub fn attach_camera_to_display(&mut self, display: Handle<Display>, camera: Handle<Camera>) {

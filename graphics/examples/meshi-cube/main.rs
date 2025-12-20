@@ -17,7 +17,7 @@ fn main() {
 
     db.import_dashi_context(engine.context());
     
-    let display = engine.register_display(DisplayInfo {
+    let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
             title: "meshi-cube".to_string(),
             size: [1024, 1024],

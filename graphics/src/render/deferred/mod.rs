@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-use crate::{RenderObject, RenderObjectInfo, RgbaImage, render::scene::*};
+use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use dashi::*;
 use furikake::BindlessState;
 use glam::{Mat4, Vec3};
@@ -157,6 +157,7 @@ impl DeferredRenderer {
         deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
         let cmds = self.scene.cull();
+
         self.graph.add_subpass(
             &SubpassInfo {
                 viewport: self.viewport,
@@ -166,6 +167,7 @@ impl DeferredRenderer {
                 depth_clear: None,
             },
             |cmd| {
+                todo!("Draw all renderables!");
                 return cmd;
             },
         );
