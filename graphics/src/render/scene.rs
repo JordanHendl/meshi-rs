@@ -75,7 +75,7 @@ impl<'a> Default for GPUSceneInfo<'a> {
             draw_bins: Default::default(),
             limits: GPUSceneLimits {
                 max_num_scene_objects: 2048,
-                max_num_views: 1,
+                max_num_views: 4,
             },
         }
     }
@@ -88,7 +88,7 @@ const MAX_ACTIVE_VIEWS: usize = 8;
 struct ActiveCameras {
     pub count: u32,
     pub _padding: [u32; 3],
-    pub slots: [[u32; 4]; MAX_ACTIVE_VIEWS],
+    pub slots: [u32; MAX_ACTIVE_VIEWS],
 }
 
 impl Default for ActiveCameras {
@@ -96,7 +96,7 @@ impl Default for ActiveCameras {
         Self {
             count: 0,
             _padding: [0; 3],
-            slots: [[u32::MAX; 4]; MAX_ACTIVE_VIEWS],
+            slots: [u32::MAX; MAX_ACTIVE_VIEWS],
         }
     }
 }
@@ -140,12 +140,6 @@ impl<State: GPUState> GPUScene<State> {
             binding: _,
             resources,
         } = binding.binding();
-
-        //                    cull_builder =
-        //                cull_builder.add_table_variable_with_resources("cameras", resources);
-        //        }
-        //    }
-        //}
 
         let transform_state = BentoComputePipelineBuilder::new()
             .shader(Some(
@@ -349,9 +343,9 @@ impl<State: GPUState> GPUScene<State> {
             .min(self.data.max_views as usize);
         active_cameras[0].count = count as u32;
 
-        active_cameras[0].slots = [[u32::MAX; 4]; MAX_ACTIVE_VIEWS];
+        active_cameras[0].slots = [u32::MAX; MAX_ACTIVE_VIEWS];
         for (idx, handle) in cameras.iter().take(count).enumerate() {
-            active_cameras[0].slots[idx][0] = handle.slot as u32;
+            active_cameras[0].slots[idx] = handle.slot as u32;
         }
 
         self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].num_views = count as u32;
@@ -734,16 +728,11 @@ mod tests {
 
         let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
         assert_eq!(camera_state.count, 1);
-        assert_eq!(camera_state.slots[0][0], expected_slot as u32);
-        assert!(
-            camera_state.slots[0][1..]
-                .iter()
-                .all(|slot| *slot == u32::MAX)
-        );
+        assert_eq!(camera_state.slots[0], expected_slot as u32);
         assert!(
             camera_state.slots[1..]
                 .iter()
-                .all(|slot| slot[0] == u32::MAX)
+                .all(|slot| *slot == u32::MAX)
         );
     }
 
@@ -761,15 +750,8 @@ mod tests {
         let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
         assert_eq!(camera_state.count as usize, MAX_ACTIVE_VIEWS);
         for i in 0..MAX_ACTIVE_VIEWS {
-            assert_eq!(camera_state.slots[i][0], i as u32);
+            assert_eq!(camera_state.slots[i], i as u32);
         }
-        assert!(
-            camera_state
-                .slots
-                .iter()
-                .flat_map(|slot| slot.iter())
-                .any(|slot| *slot == u32::MAX)
-        );
     }
 
     #[test]
@@ -818,6 +800,7 @@ mod tests {
             .objects_to_process
             .sync_down(&mut readback)
             .expect("download objects");
+
         scene
             .data
             .draw_bins

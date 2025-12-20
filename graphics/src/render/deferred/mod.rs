@@ -121,7 +121,6 @@ impl DeferredRenderer {
     }
 
     pub fn update(&mut self, _delta_time: f32) {
-        let cmds = self.scene.cull();
 
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
@@ -157,6 +156,7 @@ impl DeferredRenderer {
         let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
         deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
+        let cmds = self.scene.cull();
         self.graph.add_subpass(
             &SubpassInfo {
                 viewport: self.viewport,
@@ -172,13 +172,5 @@ impl DeferredRenderer {
 
 
         self.graph.execute();
-    }
-
-    pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
-        todo!()
-    }
-
-    pub fn set_capture_mouse(&mut self, capture: bool) {
-        let _ = capture; // window management handled by renderer
     }
 }
