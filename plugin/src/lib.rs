@@ -195,7 +195,7 @@ pub extern "C" fn meshi_destroy_engine(engine: *mut MeshiEngine) {
 pub extern "C" fn meshi_register_event_callback(
     engine: *mut MeshiEngine,
     user_data: *mut c_void,
-    cb: extern "C" fn(*mut meshi_graphics::event::Event, *mut c_void),
+    cb: extern "C" fn(*mut event::Event, *mut c_void),
 ) {
     if engine.is_null() {
         return;
