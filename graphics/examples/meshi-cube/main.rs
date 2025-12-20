@@ -16,9 +16,18 @@ fn main() {
     .expect("Unable to create database");
 
     db.import_dashi_context(engine.context());
+    
+    let display = engine.register_display(DisplayInfo {
+        window: WindowInfo {
+            title: "meshi-cube".to_string(),
+            size: [1024, 1024],
+            resizable: false,
+        },
+        ..Default::default()
+    });
 
     let camera = engine.register_camera(&Mat4::IDENTITY);
-    engine.set_primary_camera(camera);
+    engine.attach_camera_to_display(display, camera);
 
     let cube = engine
         .register_object(&RenderObjectInfo::Model(

@@ -1,9 +1,12 @@
-pub mod event;
 mod render;
 pub mod structs;
 pub(crate) mod utils;
 
-use dashi::{Context, Display, DisplayInfo, Handle};
+use dashi::utils::Pool;
+use dashi::{
+    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle, Rect2D,
+    Viewport,
+};
 use furikake::BindlessState;
 pub use furikake::types::*;
 use glam::{Mat4, Vec3, Vec4};
@@ -12,34 +15,60 @@ use meshi_utils::MeshiError;
 use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
 use render::deferred::{DeferredRenderer, DeferredRendererInfo};
+use std::collections::HashMap;
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 
+pub type DisplayInfo = DashiDisplayInfo;
+pub type WindowInfo = dashi::WindowInfo;
+pub struct Display {
+    raw: Option<Box<DashiDisplay>>,
+    scene: Handle<Camera>,
+}
+
 pub struct RenderEngine {
-    display: Option<Display>,
     renderer: DeferredRenderer,
+    displays: Pool<Display>,
+    event_cb: Option<EventCallbackInfo>,
+    event_loop: Option<winit::event_loop::EventLoop<()>>,
     db: Option<NonNull<DB>>,
 }
 
 impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
-        let mut renderer = DeferredRenderer::new(&DeferredRendererInfo {
+        let extent = info.canvas_extent.unwrap_or([1024, 1024]);
+
+        let renderer = DeferredRenderer::new(&DeferredRendererInfo {
             headless: info.headless,
+            initial_viewport: Viewport {
+                area: FRect2D {
+                    x: 0.0,
+                    y: 0.0,
+                    w: extent[0] as f32,
+                    h: extent[1] as f32,
+                },
+                scissor: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: extent[0],
+                    h: extent[1],
+                },
+                ..Default::default()
+            },
         });
-        let display = if info.headless {
-            Some(renderer.context().make_display(&DisplayInfo {
-                window: todo!(),
-                vsync: todo!(),
-                buffering: todo!(),
-            })?)
-        } else {
+
+        let event_loop = if cfg!(test) || info.headless {
             None
+        } else {
+            Some(winit::event_loop::EventLoop::new())
         };
 
         Ok(Self {
-            display,
+            displays: Default::default(),
             renderer,
             db: None,
+            event_cb: None,
+            event_loop,
         })
     }
 
@@ -97,47 +126,71 @@ impl RenderEngine {
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
-        todo!()
+        self.renderer.set_object_transform(handle, transform);
     }
 
     pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
         todo!()
     }
 
-    pub fn update(&mut self, _delta_time: f32) {
-        //        use winit::event_loop::ControlFlow;
-        //        use winit::platform::run_return::EventLoopExtRunReturn;
-        //
-        //        if self.event_cb.is_some() {
-        //            let cb = self.event_cb.as_mut().unwrap();
-        //            let mut triggered = false;
-        //
-        //            if let Some(event_loop) = &mut self.event_loop {
-        //                event_loop.run_return(|event, _target, control_flow| {
-        //                    *control_flow = ControlFlow::Exit;
-        //                    if let Some(mut e) = event::from_winit_event(&event) {
-        //                        triggered = true;
-        //                        let c = cb.event_cb;
-        //                        c(&mut e, cb.user_data);
-        //                    }
-        //                });
-        //            }
-        //
-        //            if !triggered {
-        //                let mut synthetic: event::Event = unsafe { std::mem::zeroed() };
-        //                let c = cb.event_cb;
-        //                c(&mut synthetic, cb.user_data);
-        //            }
-        //        }
-        //
+    fn publish_events(&mut self) {
+        use winit::event_loop::ControlFlow;
+        use winit::platform::run_return::EventLoopExtRunReturn;
+
+        if self.event_cb.is_some() {
+            let cb = self.event_cb.as_mut().unwrap();
+            let mut triggered = false;
+
+            if let Some(event_loop) = &mut self.event_loop {
+                event_loop.run_return(|event, _target, control_flow| {
+                    *control_flow = ControlFlow::Exit;
+                    if let Some(mut e) = event::from_winit_event(&event) {
+                        triggered = true;
+                        let c = cb.event_cb;
+                        c(&mut e, cb.user_data);
+                    }
+                });
+            }
+
+            if !triggered {
+                let mut synthetic: event::Event = unsafe { std::mem::zeroed() };
+                let c = cb.event_cb;
+                c(&mut synthetic, cb.user_data);
+            }
+        } else {
+            if let Some(event_loop) = &mut self.event_loop {
+                event_loop.run_return(|event, _target, control_flow| {
+                    *control_flow = ControlFlow::Exit;
+                    if let Some(mut _e) = event::from_winit_event(&event) {}
+                });
+            }
+        }
+    }
+
+    pub fn update(&mut self, delta_time: f32) {
+        self.publish_events();
+        self.renderer.update(delta_time);
     }
 
     pub fn register_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
-        todo!()
+        let raw = Some(Box::new(
+            self.context()
+                .make_display(&info)
+                .expect("Failed to make display!"),
+        ));
+        return self
+            .displays
+            .insert(Display {
+                raw,
+                scene: Default::default(),
+            })
+            .unwrap();
     }
 
-    pub fn render_to_image(&mut self, extent: [u32; 2]) -> Result<RgbaImage, MeshiError> {
-        todo!()
+    pub fn attach_camera_to_display(&mut self, display: Handle<Display>, camera: Handle<Camera>) {
+        if display.valid() {
+            self.displays.get_mut_ref(display).unwrap().scene = camera;
+        }
     }
 
     pub fn set_capture_mouse(&mut self, capture: bool) {
@@ -186,10 +239,6 @@ impl RenderEngine {
             .unwrap();
     }
 
-    pub fn set_primary_camera(&mut self, camera: Handle<Camera>) {
-        todo!()
-    }
-
     pub fn camera_position(&self, camera: Handle<Camera>) -> Vec3 {
         todo!()
     }
@@ -207,9 +256,9 @@ impl RenderEngine {
         event_cb: extern "C" fn(*mut event::Event, *mut c_void),
         user_data: *mut c_void,
     ) {
-        //        self.event_cb = Some(EventCallbackInfo {
-        //            event_cb,
-        //            user_data,
-        //        });
+        self.event_cb = Some(EventCallbackInfo {
+            event_cb,
+            user_data,
+        });
     }
 }

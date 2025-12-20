@@ -1,6 +1,7 @@
 
+pub mod event;
 use glam::*;
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, c_void, CStr};
 use std::fmt;
 
 #[repr(C)]
@@ -58,3 +59,7 @@ pub struct LightInfo {
     pub rect_half_height: f32,
 }
 
+pub struct EventCallbackInfo {
+    pub event_cb: extern "C" fn(*mut event::Event, *mut c_void),
+    pub user_data: *mut c_void,
+}
