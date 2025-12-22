@@ -3,11 +3,17 @@ use std::{collections::HashMap, ptr::NonNull};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
-use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*, reservations::bindless_transformations::*};
+use furikake::{
+    BindlessState, reservations::ReservedBinding, reservations::bindless_transformations::*,
+    types::Material, types::*,
+};
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
-use noren::{DB, meta::HostMaterial};
+use noren::{
+    DB,
+    meta::{DeviceModel, HostMaterial},
+};
 use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
 use tracing::info;
@@ -42,9 +48,16 @@ pub struct DeferredRenderer {
     db: Option<NonNull<DB>>,
     scene: GPUScene<furikake::BindlessState>,
     pipelines: HashMap<Handle<Material>, PSO>,
+    objects: ResourceList<RenderObjectData>,
     dynamic: DynamicAllocator,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
+}
+
+struct RenderObjectData {
+    model: DeviceModel,
+    scene_handle: Handle<SceneObject>,
+    transformation: Handle<Transformation>,
 }
 
 impl DeferredRenderer {
@@ -71,10 +84,12 @@ impl DeferredRenderer {
         );
 
         let mut alloc = Box::new(TransientAllocator::new(ctx.as_mut()));
-        
-        let dynamic = ctx.make_dynamic_allocator(&DynamicAllocatorInfo {
-            ..Default::default()
-        }).expect("Unable to create dynamic allocator!");
+
+        let dynamic = ctx
+            .make_dynamic_allocator(&DynamicAllocatorInfo {
+                ..Default::default()
+            })
+            .expect("Unable to create dynamic allocator!");
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
@@ -87,6 +102,7 @@ impl DeferredRenderer {
             db: None,
             dynamic,
             pipelines: Default::default(),
+            objects: Default::default(),
             viewport: info.initial_viewport,
         }
     }
@@ -113,7 +129,10 @@ impl DeferredRenderer {
         let mut state = GraphicsPipelineBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
-            .add_variable("per_object_ssbo", ShaderResource::DynamicStorage(self.dynamic.state()));
+            .add_variable(
+                "per_object_ssbo",
+                ShaderResource::DynamicStorage(self.dynamic.state()),
+            );
 
         {
             let ReservedBinding::TableBinding {
@@ -160,7 +179,8 @@ impl DeferredRenderer {
                 .binding("meshi_bindless_transformations")
                 .unwrap()
                 .binding();
-            state = state.add_table_variable_with_resources("meshi_bindless_transformations", resources);
+            state = state
+                .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
 
         state
@@ -204,23 +224,77 @@ impl DeferredRenderer {
     ) -> Result<Handle<RenderObject>, MeshiError> {
         let transformation = self.alloc_transform();
 
-        let h = self.scene.register_object(&SceneObjectInfo {
+        self.state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    transforms.transform_mut(transformation).transform = Mat4::IDENTITY;
+                },
+            )
+            .expect("transformations available");
+
+        let scene_handle = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
             transformation,
             scene_mask: PassMask::MAIN_COLOR as u32,
         });
 
-        if let RenderObjectInfo::Model(m) = info {}
-        todo!()
+        match info {
+            RenderObjectInfo::Model(m) => {
+                let h = self.objects.push(RenderObjectData {
+                    model: m.clone(),
+                    scene_handle,
+                    transformation,
+                });
+
+                Ok(h)
+            }
+            RenderObjectInfo::Empty => Err(MeshiError::ResourceUnavailable),
+        }
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
-        todo!()
+        if !handle.valid() {
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            return;
+        }
+
+        let obj = self.objects.get_ref(handle);
+        self.scene.release_object(obj.scene_handle);
+
+        let transformation = obj.transformation;
+        self.state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| transforms.remove_transform(transformation),
+            )
+            .expect("transformations available");
+
+        self.objects.release(handle);
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
-        //  self.scene.set_object_transform(handle, transform);
+        if !handle.valid() {
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            return;
+        }
+
+        let obj = self.objects.get_ref(handle);
+        self.state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| transforms.transform_mut(obj.transformation).transform = *transform,
+            )
+            .expect("transformations available");
+
+        self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
     pub fn update(&mut self, _delta_time: f32) {
@@ -257,7 +331,13 @@ impl DeferredRenderer {
         let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
         deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
-        let cmds = self.scene.cull();
+        let mut culled_cmds = self.scene.cull();
+        let object_draws: Vec<_> = self
+            .objects
+            .entries
+            .iter()
+            .map(|handle| self.objects.get_ref(*handle).model.clone())
+            .collect();
 
         self.graph.add_subpass(
             &SubpassInfo {
@@ -268,9 +348,26 @@ impl DeferredRenderer {
                 depth_clear: None,
             },
             |cmd| {
-
-//                let alloc = self.dynamic.bump();
-                todo!("Draw all renderables!");
+                //                let alloc = self.dynamic.bump();
+                //                let mut cmd = cmd.combine(&mut culled_cmds);
+                //
+                //                for model in &object_draws {
+                //                    for mesh in &model.meshes {
+//                        if let Some(material) = &mesh.material {
+//                            // TODO: retrieve the material's bindless handle once it is exposed
+//                            // on DeviceMaterial so we can select the correct PSO here.
+//                            if let Some((_, pso)) = self.pipelines.iter().next() {
+//                                cmd = cmd
+//                                    .bind_pso(pso.clone())
+//                                    .bind_vertex_buffer(mesh.geometry.base.vertices)
+//                                    .bind_index_buffer(mesh.geometry.base.indices)
+//                                    .draw_indexed(mesh.geometry.base.indices, 0, 1);
+//                            }
+//                        }
+                //                    }
+                //                }
+                //
+                //                cmd
                 return cmd;
             },
         );
