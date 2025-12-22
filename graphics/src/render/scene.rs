@@ -38,6 +38,7 @@ pub struct SceneObject {
 #[repr(C)]
 pub struct CulledObject {
     pub total_transform: Mat4,
+    pub object_id: u32,
     pub bin_id: u32,
 }
 

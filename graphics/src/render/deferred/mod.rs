@@ -1,14 +1,17 @@
-use std::ptr::NonNull;
+use std::{collections::HashMap, ptr::NonNull};
 
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
+use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
-use furikake::BindlessState;
+use furikake::{BindlessState, reservations::ReservedBinding, types::Material};
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
-use noren::DB;
+use noren::{DB, meta::HostMaterial};
 use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
+use tracing::info;
+use utils::gpupool::GPUPool;
 
 use super::scene::GPUScene;
 use tare::graph::*;
@@ -17,25 +20,14 @@ use tare::graph::*;
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 
-struct MaterialData {
-    material: ShaderResource,
+#[repr(u32)]
+pub enum PassMask {
+    MAIN_COLOR = 0x00000001,
 }
-
-struct DeviceData {
-    materials: ResourceList<ShaderResource>,
-    transformations: ResourceList<ShaderResource>,
-}
-
-struct HostData {}
 
 pub struct DeferredRendererInfo {
     pub headless: bool,
     pub initial_viewport: Viewport,
-}
-
-pub struct Display {
-    raw: dashi::Display,
-    attached_camera: Handle<crate::Camera>,
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -49,6 +41,7 @@ pub struct DeferredRenderer {
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene<furikake::BindlessState>,
+    pipelines: HashMap<Handle<Material>, PSO>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -69,7 +62,7 @@ impl DeferredRenderer {
                 ctx: ctx.as_mut(),
                 draw_bins: &[SceneBin {
                     id: 0,
-                    mask: 0x000001,
+                    mask: PassMask::MAIN_COLOR as u32,
                 }],
                 ..Default::default()
             },
@@ -87,6 +80,7 @@ impl DeferredRenderer {
             alloc,
             graph,
             db: None,
+            pipelines: Default::default(),
             viewport: info.initial_viewport,
         }
     }
@@ -99,9 +93,75 @@ impl DeferredRenderer {
         &mut self.state
     }
 
+    fn build_pipeline(&mut self, mat: &HostMaterial) -> PSO {
+        let ctx: *mut Context = self.ctx.as_mut();
+
+        let mut defines = Vec::new();
+
+        if mat.material.render_mask & 0x000001 > 0 {
+            defines.push("-DLMAO".to_string());
+        }
+
+        let shaders = miso::stddeferred(&defines);
+
+        let mut state = GraphicsPipelineBuilder::new()
+            .vertex_compiled(Some(shaders[0].clone()))
+            .fragment_compiled(Some(shaders[1].clone()));
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_cameras")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_textures", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_textures")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_textures", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_materials")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_textures", resources);
+        }
+
+        state
+            .build(unsafe { &mut (*ctx) })
+            .expect("Failed to build material!")
+    }
+
     pub fn initialize_database(&mut self, db: &mut DB) {
         db.import_dashi_context(&mut self.ctx);
         db.import_furikake_state(&mut self.state);
+
+        let materials = db.enumerate_materials();
+
+        for name in materials {
+            let (mat, handle) = db.fetch_host_material(&name).unwrap();
+            info!("[MESHI/GFX] Creating pipelines for material {}.", name);
+            let p = self.build_pipeline(&mat);
+            self.pipelines.insert(handle.unwrap(), p);
+        }
+
         self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
@@ -109,6 +169,13 @@ impl DeferredRenderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
+        let h = self.scene.register_object(&SceneObjectInfo {
+            local: Default::default(),
+            global: Default::default(),
+            scene_mask: PassMask::MAIN_COLOR as u32,
+        });
+
+        if let RenderObjectInfo::Model(m) = info {}
         todo!()
     }
 
@@ -121,7 +188,6 @@ impl DeferredRenderer {
     }
 
     pub fn update(&mut self, _delta_time: f32) {
-
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
             dim: [self.viewport.area.x as u32, self.viewport.area.y as u32, 1],
@@ -147,7 +213,6 @@ impl DeferredRenderer {
             ..default_framebuffer_info
         });
 
-
         let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
         deferred_pass_attachments[0] = Some(position);
         deferred_pass_attachments[1] = Some(normal);
@@ -171,7 +236,6 @@ impl DeferredRenderer {
                 return cmd;
             },
         );
-
 
         self.graph.execute();
     }

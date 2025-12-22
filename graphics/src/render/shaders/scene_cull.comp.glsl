@@ -22,6 +22,7 @@ struct SceneBin {
 
 struct CulledObject {
     mat4 total_transform;
+    uint object_id;
     uint bin_id;
 };
 
@@ -185,6 +186,7 @@ void main() {
             uint target = bin_offset * params.max_objects + write_index;
             culled.culled[target].total_transform = obj.world_transform;
             culled.culled[target].bin_id = bins.bins[bin].id;
+            culled.culled[target].object_id = idx;
         }
     }
 }

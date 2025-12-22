@@ -12,6 +12,7 @@ pub struct MeshObject {
 }
 
 pub enum RenderObjectInfo {
+    Empty,
     Model(DeviceModel),
 }
 pub struct RenderObject;
