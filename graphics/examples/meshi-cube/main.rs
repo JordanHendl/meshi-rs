@@ -3,6 +3,7 @@ use meshi_graphics::*;
 use meshi_utils::timer::Timer;
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let mut engine = RenderEngine::new(&RenderEngineInfo {
         headless: false,
         canvas_extent: Some([1280, 1024]),

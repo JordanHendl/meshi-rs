@@ -3,7 +3,7 @@ use std::{collections::HashMap, ptr::NonNull};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
-use furikake::{BindlessState, reservations::ReservedBinding, types::Material};
+use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*, reservations::bindless_transformations::*};
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
@@ -42,6 +42,7 @@ pub struct DeferredRenderer {
     db: Option<NonNull<DB>>,
     scene: GPUScene<furikake::BindlessState>,
     pipelines: HashMap<Handle<Material>, PSO>,
+    dynamic: DynamicAllocator,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -70,6 +71,10 @@ impl DeferredRenderer {
         );
 
         let mut alloc = Box::new(TransientAllocator::new(ctx.as_mut()));
+        
+        let dynamic = ctx.make_dynamic_allocator(&DynamicAllocatorInfo {
+            ..Default::default()
+        }).expect("Unable to create dynamic allocator!");
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
@@ -80,6 +85,7 @@ impl DeferredRenderer {
             alloc,
             graph,
             db: None,
+            dynamic,
             pipelines: Default::default(),
             viewport: info.initial_viewport,
         }
@@ -98,7 +104,7 @@ impl DeferredRenderer {
 
         let mut defines = Vec::new();
 
-        if mat.material.render_mask & 0x000001 > 0 {
+        if mat.material.render_mask & PassMask::MAIN_COLOR as u16 > 0 {
             defines.push("-DLMAO".to_string());
         }
 
@@ -106,7 +112,8 @@ impl DeferredRenderer {
 
         let mut state = GraphicsPipelineBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()));
+            .fragment_compiled(Some(shaders[1].clone()))
+            .add_variable("per_object_ssbo", ShaderResource::DynamicStorage(self.dynamic.state()));
 
         {
             let ReservedBinding::TableBinding {
@@ -117,7 +124,7 @@ impl DeferredRenderer {
                 .binding("meshi_bindless_cameras")
                 .unwrap()
                 .binding();
-            state = state.add_table_variable_with_resources("meshi_bindless_textures", resources);
+            state = state.add_table_variable_with_resources("meshi_bindless_cameras", resources);
         }
 
         {
@@ -141,7 +148,19 @@ impl DeferredRenderer {
                 .binding("meshi_bindless_materials")
                 .unwrap()
                 .binding();
-            state = state.add_table_variable_with_resources("meshi_bindless_textures", resources);
+            state = state.add_table_variable_with_resources("meshi_bindless_materials", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_transformations")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
 
         state
@@ -165,13 +184,30 @@ impl DeferredRenderer {
         self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
+    fn alloc_transform(&mut self) -> Handle<Transformation> {
+        let mut handle = Handle::default();
+        self.state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    handle = transforms.add_transform();
+                },
+            )
+            .expect("allocate bindless transform");
+
+        handle
+    }
+
     pub fn register_object(
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
+        let transformation = self.alloc_transform();
+
         let h = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
+            transformation,
             scene_mask: PassMask::MAIN_COLOR as u32,
         });
 
@@ -232,6 +268,8 @@ impl DeferredRenderer {
                 depth_clear: None,
             },
             |cmd| {
+
+//                let alloc = self.dynamic.bump();
                 todo!("Draw all renderables!");
                 return cmd;
             },
