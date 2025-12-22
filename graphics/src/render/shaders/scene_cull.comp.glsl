@@ -7,6 +7,7 @@ struct SceneObject {
     mat4 local_transform;
     mat4 world_transform;
     uint scene_mask;
+    uint transformation;
     uint parent_slot;
     uint dirty;
     uint is_active;

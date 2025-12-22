@@ -6,13 +6,18 @@ use bento::{
 };
 use dashi::*;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility,
+    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle,
+    MemoryVisibility,
     ShaderResource, ShaderType, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
     utils::gpupool::{DynamicGPUPool, GPUPool},
 };
-use furikake::{GPUState, reservations::bindless_camera::ReservedBindlessCamera, types::Camera};
+use furikake::{
+    GPUState,
+    reservations::bindless_camera::ReservedBindlessCamera,
+    types::{Camera, Transformation},
+};
 use glam::Mat4;
 use tare::utils::StagedBuffer;
 #[repr(C)]
@@ -20,6 +25,7 @@ pub struct SceneObjectInfo {
     pub local: Mat4,
     pub global: Mat4,
     pub scene_mask: u32,
+    pub transformation: Handle<Transformation>,
 }
 
 #[repr(C)]
@@ -27,6 +33,7 @@ pub struct SceneObject {
     pub local_transform: Mat4,
     pub world_transform: Mat4,
     pub scene_mask: u32,
+    pub transformation: Handle<Transformation>,
     pub parent_slot: u32,
     pub dirty: u32,
     pub active: u32,
@@ -109,6 +116,8 @@ struct SceneData {
     draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
     bin_counts: StagedBuffer,
     dispatch: StagedBuffer,
+    transformations: ShaderResource,
+    transformations_buffer: BufferView,
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
     max_views: u32,
@@ -150,6 +159,7 @@ impl<State: GPUState> GPUScene<State> {
                 "in_list",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
+            .add_variable("transformations", self.data.transformations.clone())
             .build(&mut ctx);
 
         let cull_builder = BentoComputePipelineBuilder::new()
@@ -209,7 +219,30 @@ impl<State: GPUState> GPUScene<State> {
             panic!()
         }
 
+        if State::reserved_names()
+            .iter()
+            .find(|name| **name == "meshi_bindless_transformations")
+            == None
+        {
+            panic!()
+        }
+
         let scene_bin_size = std::mem::size_of::<SceneBin>() * info.draw_bins.len();
+
+        let transformation_binding = state
+            .binding("meshi_bindless_transformations")
+            .expect("missing bindless transformations");
+
+        let furikake::reservations::ReservedBinding::TableBinding {
+            binding: _,
+            resources: transformation_resources,
+        } = transformation_binding.binding();
+
+        let transformations = transformation_resources[0].resource.clone();
+        let transformations_buffer = match transformation_resources[0].resource {
+            ShaderResource::StorageBuffer(view) => view,
+            _ => panic!("bindless transformations should be a storage buffer"),
+        };
 
         let objects_to_process = GPUPool::new(
             ctx,
@@ -314,6 +347,8 @@ impl<State: GPUState> GPUScene<State> {
             draw_bins,
             bin_counts,
             dispatch,
+            transformations,
+            transformations_buffer,
             bin_descriptions: info.draw_bins.to_vec(),
             active_objects: Vec::new(),
             max_views: info.limits.max_num_views,
@@ -360,6 +395,7 @@ impl<State: GPUState> GPUScene<State> {
                 local_transform: info.local,
                 world_transform: info.global,
                 scene_mask: info.scene_mask,
+                transformation: info.transformation,
                 parent_slot: u32::MAX,
                 active: 1,
                 dirty: 0,
@@ -500,6 +536,10 @@ impl<State: GPUState> GPUScene<State> {
             self.data.dispatch.device().handle,
             UsageBits::COMPUTE_SHADER,
         );
+        stream.prepare_buffer(
+            self.data.transformations_buffer.handle,
+            UsageBits::COMPUTE_SHADER,
+        );
         stream = stream
             .dispatch(&Dispatch {
                 x: dispatch_x,
@@ -545,7 +585,10 @@ mod tests {
     use dashi::{
         ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
     };
-    use furikake::BindlessState;
+    use furikake::{
+        BindlessState,
+        reservations::bindless_transformations::ReservedBindlessTransformations,
+    };
     use glam::Vec3;
 
     fn make_test_scene(
@@ -585,15 +628,39 @@ mod tests {
         (ctx, state, scene)
     }
 
+    fn alloc_transform(state: &mut BindlessState) -> Handle<Transformation> {
+        let mut handle = Handle::default();
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    handle = transforms.add_transform();
+                },
+            )
+            .expect("allocate bindless transform");
+
+        handle
+    }
+
+    fn make_object_info(
+        state: &mut BindlessState,
+        local: Mat4,
+        global: Mat4,
+        scene_mask: u32,
+    ) -> SceneObjectInfo {
+        SceneObjectInfo {
+            local,
+            global,
+            scene_mask,
+            transformation: alloc_transform(state),
+        }
+    }
+
     #[test]
     fn registering_object_tracks_state() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let info = SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 0xFF,
-        };
+        let info = make_object_info(&mut state, Mat4::IDENTITY, Mat4::IDENTITY, 0xFF);
 
         let handle = scene.register_object(&info);
 
@@ -609,13 +676,14 @@ mod tests {
 
     #[test]
     fn releasing_object_clears_tracking() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let handle = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
+        let handle = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
 
         scene.release_object(handle);
 
@@ -625,13 +693,14 @@ mod tests {
 
     #[test]
     fn transforming_object_marks_dirty() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let handle = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
+        let handle = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
 
         let delta = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
         scene.transform_object(handle, &delta);
@@ -643,13 +712,14 @@ mod tests {
 
     #[test]
     fn setting_object_transform_replaces_value() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let handle = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
+        let handle = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
 
         let replacement = Mat4::from_scale(Vec3::splat(2.0));
         scene.set_object_transform(handle, &replacement);
@@ -661,18 +731,20 @@ mod tests {
 
     #[test]
     fn adding_and_removing_child_updates_relationships() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let parent = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
-        let child = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
+        let parent = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
+        let child = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
 
         scene.add_child(parent, child);
 
@@ -698,18 +770,20 @@ mod tests {
 
     #[test]
     fn releasing_child_detaches_from_parent() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
-        let parent = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
-        let child = scene.register_object(&SceneObjectInfo {
-            local: Mat4::IDENTITY,
-            global: Mat4::IDENTITY,
-            scene_mask: 1,
-        });
+        let parent = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
+        let child = scene.register_object(&make_object_info(
+            &mut state,
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            1,
+        ));
 
         scene.add_child(parent, child);
         scene.release_object(child);
@@ -776,16 +850,18 @@ mod tests {
         let parent_transform = Mat4::from_translation(Vec3::new(0.0, 0.0, -2.0));
         let child_local = Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0));
 
-        let parent = scene.register_object(&SceneObjectInfo {
-            local: parent_transform,
-            global: Mat4::IDENTITY,
-            scene_mask: u32::MAX,
-        });
-        let child = scene.register_object(&SceneObjectInfo {
-            local: child_local,
-            global: Mat4::IDENTITY,
-            scene_mask: u32::MAX,
-        });
+        let parent = scene.register_object(&make_object_info(
+            &mut state,
+            parent_transform,
+            Mat4::IDENTITY,
+            u32::MAX,
+        ));
+        let child = scene.register_object(&make_object_info(
+            &mut state,
+            child_local,
+            Mat4::IDENTITY,
+            u32::MAX,
+        ));
 
         scene.add_child(parent, child);
 

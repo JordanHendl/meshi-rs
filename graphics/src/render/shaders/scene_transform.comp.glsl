@@ -7,6 +7,7 @@ struct SceneObject {
     mat4 local_transform;
     mat4 world_transform;
     uint scene_mask;
+    uint transformation;
     uint parent_slot;
     uint dirty;
     uint is_active;
@@ -18,6 +19,10 @@ struct SceneObject {
 layout(set = 0, binding = 0) buffer SceneObjects {
     SceneObject objects[];
 } in_list;
+
+layout(set = 3, binding = 0) buffer Transformations {
+    mat4 transforms[];
+} transformations;
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
@@ -41,4 +46,7 @@ void main() {
 
     in_list.objects[idx].world_transform = world;
     in_list.objects[idx].dirty = 0;
+
+    uint transform_slot = in_list.objects[idx].transformation & 0xFFFFu;
+    transformations.transforms[transform_slot] = world;
 }
