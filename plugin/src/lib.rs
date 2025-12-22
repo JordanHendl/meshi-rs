@@ -90,6 +90,7 @@ impl MeshiEngine {
             noren::DB::new(&DBInfo {
                 base_dir: &appdir,
                 layout_file: None,
+                pooled_geometry_uploads: false,
             })
             .expect("failed to initialize database!"),
         );

@@ -9,14 +9,19 @@ fn main() {
     })
     .unwrap();
 
+    // Default database. Given bogus directory so all we have to work with is the default
+    // models/materials...
     let mut db = DB::new(&DBInfo {
         base_dir: "",
         layout_file: None,
+        pooled_geometry_uploads: false,
     })
     .expect("Unable to create database");
 
-    db.import_dashi_context(engine.context());
     
+    engine.initialize_database(&mut db);
+
+    // Make window for output to render to.
     let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
             title: "meshi-cube".to_string(),
@@ -25,16 +30,19 @@ fn main() {
         },
         ..Default::default()
     });
-
+    
+    // Register a camera and assign it to the display.
     let camera = engine.register_camera(&Mat4::IDENTITY);
     engine.attach_camera_to_display(display, camera);
-
+    
+    // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/sphere").unwrap(),
+            db.fetch_gpu_model("model/cube").unwrap(),
         ))
         .unwrap();
     
+    // Update object transform to be the center.
     engine.set_object_transform(cube, &Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)));
 
     let mut timer = Timer::new();
