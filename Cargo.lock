@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#9d01b24db3e0e8d3270d49e5f467b8793ce53868"
+source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
 dependencies = [
  "bincode",
  "clap",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#9d01b24db3e0e8d3270d49e5f467b8793ce53868"
+source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
 dependencies = [
  "bento",
  "dashi",
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#9d01b24db3e0e8d3270d49e5f467b8793ce53868"
+source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
 dependencies = [
  "bento",
  "dashi",
@@ -2285,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#9d01b24db3e0e8d3270d49e5f467b8793ce53868"
+source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
 dependencies = [
  "bento",
  "dashi",

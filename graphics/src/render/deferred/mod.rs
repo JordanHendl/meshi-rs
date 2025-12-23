@@ -3,6 +3,7 @@ use std::{collections::HashMap, ptr::NonNull};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
+use driver::command::DrawIndexed;
 use furikake::{
     BindlessState, reservations::ReservedBinding, reservations::bindless_transformations::*,
     types::Material, types::*,
@@ -68,13 +69,28 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
     return Handle::new(h.slot, h.generation);
 }
 
-
 impl DeferredRenderer {
     pub fn new(info: &DeferredRendererInfo) -> Self {
+        let device = DeviceSelector::new()
+            .unwrap()
+            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+            .unwrap();
         let mut ctx = if info.headless {
-            Box::new(Context::headless(&Default::default()).expect(""))
+            Box::new(
+                Context::headless(&ContextInfo {
+                    device,
+                    ..Default::default()
+                })
+                .expect(""),
+            )
         } else {
-            Box::new(Context::new(&Default::default()).expect(""))
+            Box::new(
+                Context::new(&ContextInfo {
+                    device,
+                    ..Default::default()
+                })
+                .expect(""),
+            )
         };
 
         let mut state = Box::new(BindlessState::new(&mut ctx));
@@ -116,8 +132,8 @@ impl DeferredRenderer {
         }
     }
 
-    pub fn context(&mut self) -> &mut Context {
-        &mut self.ctx
+    pub fn context(&mut self) -> &'static mut Context {
+        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
     }
 
     pub fn state(&mut self) -> &mut BindlessState {
@@ -259,7 +275,7 @@ impl DeferredRenderer {
 
                 Ok(to_handle(h))
             }
-            RenderObjectInfo::Empty => todo!(),//Err(MeshiError::ResourceUnavailable),
+            RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
         }
     }
 
@@ -356,27 +372,28 @@ impl DeferredRenderer {
                 clear_values: deferred_pass_clear,
                 depth_clear: None,
             },
-            |cmd| {
-                //                let alloc = self.dynamic.bump();
-                //                let mut cmd = cmd.combine(&mut culled_cmds);
-                //
-                //                for model in &object_draws {
-                //                    for mesh in &model.meshes {
-//                        if let Some(material) = &mesh.material {
-//                            // TODO: retrieve the material's bindless handle once it is exposed
-//                            // on DeviceMaterial so we can select the correct PSO here.
-//                            if let Some((_, pso)) = self.pipelines.iter().next() {
-//                                cmd = cmd
-//                                    .bind_pso(pso.clone())
-//                                    .bind_vertex_buffer(mesh.geometry.base.vertices)
-//                                    .bind_index_buffer(mesh.geometry.base.indices)
-//                                    .draw_indexed(mesh.geometry.base.indices, 0, 1);
-//                            }
-//                        }
-                //                    }
-                //                }
-                //
-                //                cmd
+            |mut cmd| {
+                let alloc = self.dynamic.bump().expect("Failed to allocate dynamic buffer!");
+                for model in &object_draws {
+                    for mesh in &model.meshes {
+                        if let Some(material) = &mesh.material {
+                            // TODO: retrieve the material's bindless handle once it is exposed
+                            // on DeviceMaterial so we can select the correct PSO here.
+                            if let Some((_, pso)) = self.pipelines.iter().next() {
+                                let mut draw = cmd.bind_graphics_pipeline(pso.handle);
+                                draw.draw_indexed(&DrawIndexed {
+                                    vertices: mesh.geometry.base.vertices.handle().unwrap(),
+                                    indices: mesh.geometry.base.indices.handle().unwrap(),
+                                    index_count:mesh.geometry.base.index_count.unwrap(),
+                                    bind_tables: pso.tables(),
+                                    dynamic_buffers: [Some(alloc), None, None, None],
+                                    ..Default::default()
+                                });
+                                cmd = draw.unbind_graphics_pipeline();
+                            }
+                        }
+                    }
+                }
                 return cmd;
             },
         );

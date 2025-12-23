@@ -18,11 +18,9 @@ fn main() {
         pooled_geometry_uploads: false,
     })
     .expect("Unable to create database");
-println!("a");
     
     engine.initialize_database(&mut db);
 
-println!("b");
     // Make window for output to render to.
     let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
@@ -33,12 +31,10 @@ println!("b");
         ..Default::default()
     });
     
-println!("c");
     // Register a camera and assign it to the display.
     let camera = engine.register_camera(&Mat4::IDENTITY);
     engine.attach_camera_to_display(display, camera);
     
-println!("d");
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
@@ -46,11 +42,9 @@ println!("d");
         ))
         .unwrap();
     
-println!("e");
     // Update object transform to be the center.
     engine.set_object_transform(cube, &Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)));
 
-println!("f");
     let mut timer = Timer::new();
     timer.start();
 
