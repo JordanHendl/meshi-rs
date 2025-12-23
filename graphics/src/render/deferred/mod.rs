@@ -60,6 +60,15 @@ struct RenderObjectData {
     transformation: Handle<Transformation>,
 }
 
+fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
+    return Handle::new(h.slot, h.generation);
+}
+
+fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
+    return Handle::new(h.slot, h.generation);
+}
+
+
 impl DeferredRenderer {
     pub fn new(info: &DeferredRendererInfo) -> Self {
         let mut ctx = if info.headless {
@@ -248,9 +257,9 @@ impl DeferredRenderer {
                     transformation,
                 });
 
-                Ok(h)
+                Ok(to_handle(h))
             }
-            RenderObjectInfo::Empty => Err(MeshiError::ResourceUnavailable),
+            RenderObjectInfo::Empty => todo!(),//Err(MeshiError::ResourceUnavailable),
         }
     }
 
@@ -263,7 +272,7 @@ impl DeferredRenderer {
             return;
         }
 
-        let obj = self.objects.get_ref(handle);
+        let obj = self.objects.get_ref(from_handle(handle));
         self.scene.release_object(obj.scene_handle);
 
         let transformation = obj.transformation;
@@ -274,7 +283,7 @@ impl DeferredRenderer {
             )
             .expect("transformations available");
 
-        self.objects.release(handle);
+        self.objects.release(from_handle(handle));
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
@@ -286,7 +295,7 @@ impl DeferredRenderer {
             return;
         }
 
-        let obj = self.objects.get_ref(handle);
+        let obj = self.objects.get_ref(from_handle(handle));
         self.state
             .reserved_mut::<ReservedBindlessTransformations, _>(
                 "meshi_bindless_transformations",
@@ -300,7 +309,7 @@ impl DeferredRenderer {
     pub fn update(&mut self, _delta_time: f32) {
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
-            dim: [self.viewport.area.x as u32, self.viewport.area.y as u32, 1],
+            dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
