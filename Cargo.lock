@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
+source = "git+https://github.com/JordanHendl/gohan#72824925acfb80b9a809c2611fbd1f8feae4118d"
 dependencies = [
  "bincode",
  "clap",
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#dd0902f3d3707e1a1a47ae612fc348e938a676a2"
+source = "git+https://github.com/JordanHendl/dashi#42c5a08bad90a8f0b45effd3f1a1c3d50b023da4"
 dependencies = [
  "anyhow",
  "ash",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
+source = "git+https://github.com/JordanHendl/gohan#72824925acfb80b9a809c2611fbd1f8feae4118d"
 dependencies = [
  "bento",
  "dashi",
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
+source = "git+https://github.com/JordanHendl/gohan#72824925acfb80b9a809c2611fbd1f8feae4118d"
 dependencies = [
  "bento",
  "dashi",
@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#2c31382bb78d4adbb7dc3034d32d1e29c8edbcfc"
+source = "git+https://github.com/JordanHendl/noren#1873b8466f8ca0ca9673729225859b8f8035767b"
 dependencies = [
  "bento",
  "bincode",
@@ -2068,15 +2068,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.146"
+version = "1.0.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "217ca874ae0207aac254aa02c957ded05585a90892cc8d87f9e5fa49669dadd8"
+checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
 dependencies = [
  "itoa",
  "memchr",
- "ryu",
  "serde",
  "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -2285,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#3525bc13473a2646b33e3f616565c2d299a790ce"
+source = "git+https://github.com/JordanHendl/gohan#72824925acfb80b9a809c2611fbd1f8feae4118d"
 dependencies = [
  "bento",
  "dashi",
@@ -2294,9 +2294,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.23.0"
+version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d31c77bdf42a745371d260a26ca7163f1e0924b64afa0b688e61b5a9fa02f16"
+checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
 dependencies = [
  "fastrand",
  "getrandom",
@@ -3065,6 +3065,12 @@ dependencies = [
  "quote",
  "syn 2.0.111",
 ]
+
+[[package]]
+name = "zmij"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e404bcd8afdaf006e529269d3e85a743f9480c3cef60034d77860d02964f3ba"
 
 [[package]]
 name = "zune-core"

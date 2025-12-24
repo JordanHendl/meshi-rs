@@ -373,23 +373,28 @@ impl DeferredRenderer {
                 depth_clear: None,
             },
             |mut cmd| {
-                let alloc = self.dynamic.bump().expect("Failed to allocate dynamic buffer!");
+                let alloc = self
+                    .dynamic
+                    .bump()
+                    .expect("Failed to allocate dynamic buffer!");
                 for model in &object_draws {
                     for mesh in &model.meshes {
                         if let Some(material) = &mesh.material {
                             // TODO: retrieve the material's bindless handle once it is exposed
                             // on DeviceMaterial so we can select the correct PSO here.
                             if let Some((_, pso)) = self.pipelines.iter().next() {
-                                let mut draw = cmd.bind_graphics_pipeline(pso.handle);
-                                draw.draw_indexed(&DrawIndexed {
-                                    vertices: mesh.geometry.base.vertices.handle().unwrap(),
-                                    indices: mesh.geometry.base.indices.handle().unwrap(),
-                                    index_count:mesh.geometry.base.index_count.unwrap(),
-                                    bind_tables: pso.tables(),
-                                    dynamic_buffers: [Some(alloc), None, None, None],
-                                    ..Default::default()
-                                });
-                                cmd = draw.unbind_graphics_pipeline();
+                                assert!(pso.handle.valid());
+                                let draw = cmd.bind_graphics_pipeline(pso.handle);
+                                cmd = draw
+                                    .draw_indexed(&DrawIndexed {
+                                        vertices: mesh.geometry.base.vertices.handle().unwrap(),
+                                        indices: mesh.geometry.base.indices.handle().unwrap(),
+                                        index_count: mesh.geometry.base.index_count.unwrap(),
+                                        bind_tables: pso.tables(),
+                                        dynamic_buffers: [Some(alloc), None, None, None],
+                                        ..Default::default()
+                                    })
+                                    .unbind_graphics_pipeline();
                             }
                         }
                     }

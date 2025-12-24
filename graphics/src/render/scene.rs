@@ -6,8 +6,7 @@ use bento::{
 };
 use dashi::*;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle,
-    MemoryVisibility,
+    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
     ShaderResource, ShaderType, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
@@ -317,8 +316,10 @@ impl<State: GPUState> GPUScene<State> {
         );
 
         let ctx_ptr: *mut Context = ctx;
-        let mut stream = CommandStream::new().begin();
-        stream.prepare_buffer(dispatch.device().handle, UsageBits::HOST_WRITE);
+        let stream = CommandStream::new()
+            .begin()
+            .prepare_buffer(dispatch.device().handle, UsageBits::HOST_WRITE);
+
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
             .begin(ctx_ptr, "scene_cull_test", false)
@@ -503,18 +504,6 @@ impl<State: GPUState> GPUScene<State> {
         for count in self.data.bin_counts.as_slice_mut::<u32>() {
             *count = 0;
         }
-        // sync up all possibly mutated data
-        self.data.objects_to_process.sync_up(&mut stream).unwrap();
-
-        unsafe {
-            self.ctx
-                .as_mut()
-                .flush_buffer(self.data.dispatch.host())
-                .unwrap();
-        }
-        stream.combine(self.data.dispatch.sync_up());
-        stream.combine(self.data.bin_counts.sync_up());
-        stream.combine(self.camera.sync_up());
 
         let workgroup_size = 64u32;
         let num_objects = self.data.objects_to_process.len() as u32;
@@ -524,23 +513,32 @@ impl<State: GPUState> GPUScene<State> {
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
             return stream.end();
         };
+        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
+            return stream.end();
+        };
 
         assert!(transform_state.tables()[0].is_some());
+        assert!(cull_state.tables()[0].is_some());
+        assert!(cull_state.tables()[1].is_some());
 
-        stream.prepare_buffer(
-            self.data.bin_counts.device().handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream.prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER);
-        stream.prepare_buffer(
-            self.data.dispatch.device().handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream.prepare_buffer(
-            self.data.transformations_buffer.handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream = stream
+        stream
+            .combine(self.data.objects_to_process.sync_up().unwrap())
+            .combine(self.data.dispatch.sync_up())
+            .combine(self.data.bin_counts.sync_up())
+            .combine(self.camera.sync_up())
+            .prepare_buffer(
+                self.data.bin_counts.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(
+                self.data.dispatch.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.transformations_buffer.handle,
+                UsageBits::COMPUTE_SHADER,
+            )
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
@@ -550,16 +548,7 @@ impl<State: GPUState> GPUScene<State> {
                 bind_tables: transform_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline();
-
-        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
-            return stream.end();
-        };
-
-        assert!(cull_state.tables()[0].is_some());
-        assert!(cull_state.tables()[1].is_some());
-
-        stream = stream
+            .unbind_pipeline()
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
@@ -569,9 +558,8 @@ impl<State: GPUState> GPUScene<State> {
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline();
-
-        stream.end()
+            .unbind_pipeline()
+            .end()
     }
 
     pub fn output_bins(&self) -> &DynamicGPUPool {
@@ -586,8 +574,7 @@ mod tests {
         ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
     };
     use furikake::{
-        BindlessState,
-        reservations::bindless_transformations::ReservedBindlessTransformations,
+        BindlessState, reservations::bindless_transformations::ReservedBindlessTransformations,
     };
     use glam::Vec3;
 
@@ -804,11 +791,7 @@ mod tests {
         let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
         assert_eq!(camera_state.count, 1);
         assert_eq!(camera_state.slots[0], expected_slot as u32);
-        assert!(
-            camera_state.slots[1..]
-                .iter()
-                .all(|slot| *slot == u32::MAX)
-        );
+        assert!(camera_state.slots[1..].iter().all(|slot| *slot == u32::MAX));
     }
 
     #[test]
@@ -869,26 +852,27 @@ mod tests {
         // properly constructed.
         let commands = scene.cull();
 
-        let mut readback = CommandStream::new().begin();
-        readback.combine(commands);
-
-        scene
-            .data
-            .objects_to_process
-            .sync_down(&mut readback)
-            .expect("download objects");
-
-        scene
-            .data
-            .draw_bins
-            .sync_down(&mut readback)
-            .expect("download culled bins");
-
-        readback.prepare_buffer(scene.data.bin_counts.device().handle, UsageBits::COPY_SRC);
-        readback.combine(scene.data.bin_counts.sync_down());
-        readback.combine(scene.data.dispatch.sync_down());
-
-        let readback = readback.end();
+        let mut readback = CommandStream::new()
+            .begin()
+            .combine(commands)
+            .combine(
+                scene
+                    .data
+                    .objects_to_process
+                    .sync_down()
+                    .expect("download objects"),
+            )
+            .combine(
+                scene
+                    .data
+                    .draw_bins
+                    .sync_down()
+                    .expect("download culled bins"),
+            )
+            .prepare_buffer(scene.data.bin_counts.device().handle, UsageBits::COPY_SRC)
+            .combine(scene.data.bin_counts.sync_down())
+            .combine(scene.data.dispatch.sync_down())
+            .end();
 
         readback.debug_print_commands();
 
