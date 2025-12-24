@@ -221,8 +221,8 @@ impl DeferredRenderer {
 
         for name in materials {
             let (mat, handle) = db.fetch_host_material(&name).unwrap();
-            info!("[MESHI/GFX] Creating pipelines for material {}.", name);
             let p = self.build_pipeline(&mat);
+            info!("[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.", name, handle);
             self.pipelines.insert(handle.unwrap(), p);
         }
 
@@ -380,21 +380,22 @@ impl DeferredRenderer {
                 for model in &object_draws {
                     for mesh in &model.meshes {
                         if let Some(material) = &mesh.material {
-                            // TODO: retrieve the material's bindless handle once it is exposed
-                            // on DeviceMaterial so we can select the correct PSO here.
-                            if let Some((_, pso)) = self.pipelines.iter().next() {
-                                assert!(pso.handle.valid());
-                                let draw = cmd.bind_graphics_pipeline(pso.handle);
-                                cmd = draw
-                                    .draw_indexed(&DrawIndexed {
-                                        vertices: mesh.geometry.base.vertices.handle().unwrap(),
-                                        indices: mesh.geometry.base.indices.handle().unwrap(),
-                                        index_count: mesh.geometry.base.index_count.unwrap(),
-                                        bind_tables: pso.tables(),
-                                        dynamic_buffers: [Some(alloc), None, None, None],
-                                        ..Default::default()
-                                    })
-                                    .unbind_graphics_pipeline();
+                            if let Some(mat_idx) = material.furikake_material_handle {
+                                if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                    assert!(pso.handle.valid());
+                                    cmd = cmd
+                                        .bind_graphics_pipeline(pso.handle)
+                                        .update_viewport(&self.viewport)
+                                        .draw_indexed(&DrawIndexed {
+                                            vertices: mesh.geometry.base.vertices.handle().unwrap(),
+                                            indices: mesh.geometry.base.indices.handle().unwrap(),
+                                            index_count: mesh.geometry.base.index_count.unwrap(),
+                                            bind_tables: pso.tables(),
+                                            dynamic_buffers: [Some(alloc), None, None, None],
+                                            ..Default::default()
+                                        })
+                                        .unbind_graphics_pipeline();
+                                }
                             }
                         }
                     }
