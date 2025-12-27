@@ -150,13 +150,16 @@ impl DeferredRenderer {
         }
 
         let shaders = miso::stddeferred(&defines);
-
+        
         let mut state = GraphicsPipelineBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
-            .add_variable(
-                "per_object_ssbo",
-                ShaderResource::DynamicStorage(self.dynamic.state()),
+            .add_table_variable_with_resources(
+                "per_obj_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(self.dynamic.state()),
+                    slot: 0,
+                }],
             );
 
         {
@@ -207,10 +210,17 @@ impl DeferredRenderer {
             state = state
                 .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
-
-        state
+        
+        let s = state.set_details (GraphicsPipelineDetails {
+            color_blend_states: vec![Default::default(); 3],
+            ..Default::default()
+        })
             .build(unsafe { &mut (*ctx) })
-            .expect("Failed to build material!")
+            .expect("Failed to build material!");
+            
+            assert!(s.bind_table[0].is_some());
+            assert!(s.bind_table[1].is_some());
+            s
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -391,7 +401,7 @@ impl DeferredRenderer {
                                             indices: mesh.geometry.base.indices.handle().unwrap(),
                                             index_count: mesh.geometry.base.index_count.unwrap(),
                                             bind_tables: pso.tables(),
-                                            dynamic_buffers: [Some(alloc), None, None, None],
+                                            dynamic_buffers: [None, Some(alloc), None, None],
                                             ..Default::default()
                                         })
                                         .unbind_graphics_pipeline();

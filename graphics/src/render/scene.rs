@@ -194,8 +194,8 @@ impl<State: GPUState> GPUScene<State> {
         let cull_state = cull_builder.build(&mut ctx);
 
         Ok(SceneComputePipelines {
-            cull_state,
-            transform_state,
+            cull_state: cull_state.ok(),
+            transform_state: transform_state.ok(),
         })
     }
 
@@ -544,7 +544,6 @@ impl<State: GPUState> GPUScene<State> {
                 y: 1,
                 z: 1,
                 pipeline: transform_state.handle,
-                bind_groups: Default::default(),
                 bind_tables: transform_state.tables(),
                 dynamic_buffers: Default::default(),
             })
@@ -554,7 +553,6 @@ impl<State: GPUState> GPUScene<State> {
                 y: 1,
                 z: 1,
                 pipeline: cull_state.handle,
-                bind_groups: Default::default(),
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
