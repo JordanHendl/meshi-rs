@@ -18,7 +18,6 @@ fn main() {
         pooled_geometry_uploads: false,
     })
     .expect("Unable to create database");
-
     
     engine.initialize_database(&mut db);
 

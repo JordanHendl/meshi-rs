@@ -7,8 +7,8 @@ use dashi::{
     Buffer, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle,
     ImageView, Rect2D, Viewport,
 };
-use furikake::BindlessState;
 pub use furikake::types::*;
+use furikake::BindlessState;
 use glam::{Mat4, Vec3, Vec4};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
@@ -87,7 +87,7 @@ impl RenderEngine {
         self.renderer.initialize_database(db);
     }
 
-    pub fn context(&mut self) -> &mut Context {
+    pub fn context(&mut self) -> &'static mut Context {
         self.renderer.context()
     }
 
@@ -180,6 +180,23 @@ impl RenderEngine {
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
         self.renderer.update(delta_time);
+        
+        let ctx = &mut self.context();
+        self.displays.for_each_occupied_mut(|dis| {
+            if dis.scene.valid() {
+                match &mut dis.raw {
+                    DisplayImpl::Window(display) => {
+                        let d = display.as_mut().unwrap();
+                        let (img, sem, idx, success) = ctx.acquire_new_image(d).unwrap();
+                        
+                        ctx.present_display(d, &[sem]).expect("Failed to present to display!");
+                    },
+                    DisplayImpl::CPUImage(cpuimage_output) => {
+                        todo!("CPUImage display not yet implemented.")
+                    },
+                }
+            }
+        });
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
@@ -199,20 +216,19 @@ impl RenderEngine {
 
     pub fn register_cpu_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
         todo!("Not yet implemented.");
-//        let raw = Some(Box::new(
-//            self.context()
-//                .make_display(&info)
-//                .expect("Failed to make display!"),
-//        ));
-//        return self
-//            .displays
-//            .insert(Display {
-//                raw: DisplayImpl::Window(raw),
-//                scene: Default::default(),
-//            })
-//            .unwrap();
+        //        let raw = Some(Box::new(
+        //            self.context()
+        //                .make_display(&info)
+        //                .expect("Failed to make display!"),
+        //        ));
+        //        return self
+        //            .displays
+        //            .insert(Display {
+        //                raw: DisplayImpl::Window(raw),
+        //                scene: Default::default(),
+        //            })
+        //            .unwrap();
     }
-
 
     pub fn frame_dump(&mut self, _display: Handle<Display>) -> Option<FFIImage> {
         None
