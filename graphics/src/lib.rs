@@ -4,17 +4,19 @@ pub(crate) mod utils;
 
 use dashi::utils::Pool;
 use dashi::{
-    Buffer, CommandStream, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle, ImageView, Rect2D, Viewport
+    Buffer, CommandStream, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo,
+    Filter, FRect2D, Handle, ImageView, QueueType, Rect2D, SubmitInfo2, Viewport,
 };
+use dashi::driver::command::BlitImage;
 pub use furikake::types::*;
 use furikake::BindlessState;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
 use render::deferred::{DeferredRenderer, DeferredRendererInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 
@@ -178,42 +180,76 @@ impl RenderEngine {
 
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
-
-        let mut wait_sems = Vec::new();
-        
-        let mut blit_stream = CommandStream::new().begin();
-        let ctx = &mut self.context();
-        self.displays.for_each_occupied_mut(|dis| {
-            if dis.scene.valid() {
-                match &mut dis.raw {
-                    DisplayImpl::Window(display) => {
-                        let d = display.as_mut().unwrap();
-                        let (img, sem, idx, success) = ctx.acquire_new_image(d).unwrap();
-                        wait_sems.push(sem); 
-//                        ctx.present_display(d, &[sem]).expect("Failed to present to display!");
-                    },
-                    DisplayImpl::CPUImage(cpuimage_output) => {
-                        todo!("CPUImage display not yet implemented.")
-                    },
-                }
+        let mut views = Vec::new();
+        let mut seen = HashSet::new();
+        self.displays.for_each_occupied(|dis| {
+            if dis.scene.valid() && seen.insert(dis.scene) {
+                views.push(dis.scene);
             }
         });
 
-        let (img, sem) = self.renderer.update(&wait_sems, delta_time);
+        let view_outputs = self.renderer.update(&[], &views, delta_time);
+        let mut outputs_by_camera = HashMap::new();
+        for output in view_outputs {
+            outputs_by_camera.insert(output.camera, output);
+        }
+
+        let ctx = self.context();
+        let ctx_ptr = ctx as *mut Context;
+        let mut queue = ctx
+            .pool_mut(QueueType::Graphics)
+            .begin(ctx_ptr, "display_blit", false)
+            .expect("begin blit queue");
+
         self.displays.for_each_occupied_mut(|dis| {
-            if dis.scene.valid() {
-                match &mut dis.raw {
-                    DisplayImpl::Window(display) => {
-                        let d = display.as_mut().unwrap();
-                        ctx.present_display(d, &[sem]).expect("Failed to present to display!");
-                    },
-                    DisplayImpl::CPUImage(cpuimage_output) => {
-                        todo!("CPUImage display not yet implemented.")
-                    },
+            if !dis.scene.valid() {
+                return;
+            }
+
+            let Some(output) = outputs_by_camera.get(&dis.scene) else {
+                return;
+            };
+
+            match &mut dis.raw {
+                DisplayImpl::Window(display) => {
+                    let d = display.as_mut().unwrap();
+                    let (img, acquire_sem, _, _) = ctx.acquire_new_image(d).unwrap();
+                    let blit_sem = ctx.make_semaphore().expect("make blit semaphore");
+
+                    let blit_cmds = CommandStream::new()
+                        .begin()
+                        .blit_images(&BlitImage {
+                            src: output.image.img,
+                            dst: img.img,
+                            filter: Filter::Nearest,
+                            ..Default::default()
+                        })
+                        .prepare_for_presentation(img.img)
+                        .end();
+
+                    let mut submit = SubmitInfo2::default();
+                    submit.wait_sems = [
+                        acquire_sem,
+                        output.semaphore,
+                        Handle::default(),
+                        Handle::default(),
+                    ];
+                    submit.signal_sems = [
+                        blit_sem,
+                        Handle::default(),
+                        Handle::default(),
+                        Handle::default(),
+                    ];
+
+                    let _ = blit_cmds.submit(&mut queue, &submit);
+                    ctx.present_display(d, &[blit_sem])
+                        .expect("Failed to present to display!");
+                }
+                DisplayImpl::CPUImage(_cpuimage_output) => {
+                    todo!("CPUImage display not yet implemented.")
                 }
             }
         });
-
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
