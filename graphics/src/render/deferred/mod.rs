@@ -5,11 +5,9 @@ use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
 use driver::command::DrawIndexed;
 use furikake::{
-    BindlessState, reservations::ReservedBinding, reservations::bindless_transformations::*,
-    types::Material, types::*,
+    BindlessState, reservations::ReservedBinding, types::Material, types::*,
 };
-use glam::{Mat4, Vec3};
-use meshi_ffi_structs::*;
+use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::{
     DB,
@@ -18,8 +16,6 @@ use noren::{
 use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
 use tracing::info;
-use utils::gpupool::GPUPool;
-
 use super::scene::GPUScene;
 use tare::graph::*;
 
@@ -47,9 +43,10 @@ pub struct DeferredRenderer {
     viewport: Viewport,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
-    scene: GPUScene<furikake::BindlessState>,
+    scene: GPUScene,
     pipelines: HashMap<Handle<Material>, PSO>,
     objects: ResourceList<RenderObjectData>,
+    scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
@@ -58,7 +55,12 @@ pub struct DeferredRenderer {
 struct RenderObjectData {
     model: DeviceModel,
     scene_handle: Handle<SceneObject>,
-    transformation: Handle<Transformation>,
+}
+
+pub struct DeferredViewOutput {
+    pub camera: Handle<Camera>,
+    pub image: ImageView,
+    pub semaphore: Handle<Semaphore>,
 }
 
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
@@ -128,6 +130,7 @@ impl DeferredRenderer {
             dynamic,
             pipelines: Default::default(),
             objects: Default::default(),
+            scene_lookup: Default::default(),
             viewport: info.initial_viewport,
         }
     }
@@ -247,39 +250,13 @@ impl DeferredRenderer {
         self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
-    fn alloc_transform(&mut self) -> Handle<Transformation> {
-        let mut handle = Handle::default();
-        self.state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| {
-                    handle = transforms.add_transform();
-                },
-            )
-            .expect("allocate bindless transform");
-
-        handle
-    }
-
     pub fn register_object(
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let transformation = self.alloc_transform();
-
-        self.state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| {
-                    transforms.transform_mut(transformation).transform = Mat4::IDENTITY;
-                },
-            )
-            .expect("transformations available");
-
         let scene_handle = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
-            transformation,
             scene_mask: PassMask::MAIN_COLOR as u32,
         });
 
@@ -288,8 +265,9 @@ impl DeferredRenderer {
                 let h = self.objects.push(RenderObjectData {
                     model: m.clone(),
                     scene_handle,
-                    transformation,
                 });
+
+                self.scene_lookup.insert(scene_handle.slot, h);
 
                 Ok(to_handle(h))
             }
@@ -308,14 +286,7 @@ impl DeferredRenderer {
 
         let obj = self.objects.get_ref(from_handle(handle));
         self.scene.release_object(obj.scene_handle);
-
-        let transformation = obj.transformation;
-        self.state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| transforms.remove_transform(transformation),
-            )
-            .expect("transformations available");
+        self.scene_lookup.remove(&obj.scene_handle.slot);
 
         self.objects.release(from_handle(handle));
     }
@@ -330,21 +301,78 @@ impl DeferredRenderer {
         }
 
         let obj = self.objects.get_ref(from_handle(handle));
-        self.state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| transforms.transform_mut(obj.transformation).transform = *transform,
-            )
-            .expect("transformations available");
-
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
     pub fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
+        views: &[Handle<Camera>],
         _delta_time: f32,
-    ) -> (ImageView, Handle<Semaphore>) {
+    ) -> Vec<DeferredViewOutput> {
+        if views.is_empty() {
+            return Vec::new();
+        }
+
+        self.scene.set_active_cameras(views);
+
+        let cull_cmds = self.scene.cull_and_sync();
+        let ctx_ptr = self.ctx.as_mut() as *mut Context;
+        let mut queue = self
+            .ctx
+            .pool_mut(QueueType::Graphics)
+            .begin(ctx_ptr, "scene_cull", false)
+            .expect("begin cull queue");
+
+        let (_, fence) = cull_cmds.submit(
+            &mut queue,
+            &SubmitInfo2 {
+                ..Default::default()
+            },
+        );
+
+        if let Some(fence) = fence {
+            self.ctx.wait(fence).expect("wait for cull");
+        }
+
+        struct ViewDrawItem {
+            model: DeviceModel,
+            transformation: Handle<Transformation>,
+            total_transform: Mat4,
+        }
+
+        let num_bins = self.scene.num_bins();
+        let max_objects = self.scene.max_objects_per_bin() as usize;
+        let bin_counts = self.scene.bin_counts();
+        let mut view_draws: Vec<Vec<ViewDrawItem>> =
+            (0..views.len()).map(|_| Vec::new()).collect();
+
+        for (view_idx, _) in views.iter().enumerate() {
+            for bin in 0..num_bins {
+                let bin_offset = view_idx * num_bins + bin;
+                if bin_offset >= bin_counts.len() {
+                    continue;
+                }
+
+                let count = bin_counts[bin_offset] as usize;
+                for draw_idx in 0..count {
+                    let slot = bin_offset * max_objects + draw_idx;
+                    if let Some(culled) = self.scene.culled_object(slot as u32) {
+                        if let Some(obj_handle) =
+                            self.scene_lookup.get(&(culled.object_id as u16))
+                        {
+                            let obj = self.objects.get_ref(*obj_handle);
+                            view_draws[view_idx].push(ViewDrawItem {
+                                model: obj.model.clone(),
+                                transformation: culled.transformation,
+                                total_transform: culled.total_transform,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
             dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
@@ -355,96 +383,109 @@ impl DeferredRenderer {
             initial_data: None,
         };
 
-        let position = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Position Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let normal = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Normal Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let diffuse = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Diffuse Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
-        deferred_pass_attachments[0] = Some(position);
-        deferred_pass_attachments[1] = Some(normal);
-        deferred_pass_attachments[2] = Some(diffuse);
-
-        let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
-        deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
-
-        let mut culled_cmds = self.scene.cull();
-        let object_draws: Vec<_> = self
-            .objects
-            .entries
-            .iter()
-            .map(|handle| self.objects.get_ref(*handle).model.clone())
-            .collect();
-
         let semaphores = self.graph.make_semaphores(1);
-        self.graph.add_subpass(
-            &SubpassInfo {
-                viewport: self.viewport,
-                color_attachments: deferred_pass_attachments,
-                depth_attachment: None,
-                clear_values: deferred_pass_clear,
-                depth_clear: None,
-            },
-            |mut cmd| {
-                for model in &object_draws {
-                    for mesh in &model.meshes {
-                        if let Some(material) = &mesh.material {
-                            if let Some(mat_idx) = material.furikake_material_handle {
-                                if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                    assert!(pso.handle.valid());
+        let mut outputs = Vec::with_capacity(views.len());
 
-                                    let mut alloc = self
-                                        .dynamic
-                                        .bump()
-                                        .expect("Failed to allocate dynamic buffer!");
+        for (view_idx, camera) in views.iter().enumerate() {
+            let position = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Position Framebuffer View {view_idx}"),
+                ..default_framebuffer_info
+            });
 
-                                    #[repr(C)]
-                                    struct PerObj {
-                                        transform: Mat4, // Backup transform
-                                        scene_id: Handle<SceneObject>,
-                                        material_id: Handle<Material>,
-                                        camera: Handle<Camera>,
+            let normal = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
+                ..default_framebuffer_info
+            });
+
+            let diffuse = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
+                ..default_framebuffer_info
+            });
+
+            let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
+            deferred_pass_attachments[0] = Some(position);
+            deferred_pass_attachments[1] = Some(normal);
+            deferred_pass_attachments[2] = Some(diffuse);
+
+            let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
+            deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
+
+            let draw_items = &view_draws[view_idx];
+            let camera_handle = *camera;
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.viewport,
+                    color_attachments: deferred_pass_attachments,
+                    depth_attachment: None,
+                    clear_values: deferred_pass_clear,
+                    depth_clear: None,
+                },
+                |mut cmd| {
+                    for item in draw_items {
+                        for mesh in &item.model.meshes {
+                            if let Some(material) = &mesh.material {
+                                if let Some(mat_idx) = material.furikake_material_handle {
+                                    if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                        assert!(pso.handle.valid());
+
+                                        let mut alloc = self
+                                            .dynamic
+                                            .bump()
+                                            .expect("Failed to allocate dynamic buffer!");
+
+                                        #[repr(C)]
+                                        struct PerObj {
+                                            transform: Mat4, // Backup transform
+                                            transformation: Handle<Transformation>,
+                                            material_id: Handle<Material>,
+                                            camera: Handle<Camera>,
+                                        }
+
+                                        let per_obj = &mut alloc.slice::<PerObj>()[0];
+                                        per_obj.transform = item.total_transform;
+                                        per_obj.transformation = item.transformation;
+                                        per_obj.material_id = mat_idx;
+                                        per_obj.camera = camera_handle;
+
+                                        cmd = cmd
+                                            .bind_graphics_pipeline(pso.handle)
+                                            .update_viewport(&self.viewport)
+                                            .draw_indexed(&DrawIndexed {
+                                                vertices: mesh
+                                                    .geometry
+                                                    .base
+                                                    .vertices
+                                                    .handle()
+                                                    .unwrap(),
+                                                indices: mesh.geometry.base.indices.handle().unwrap(),
+                                                index_count: mesh.geometry.base.index_count.unwrap(),
+                                                bind_tables: pso.tables(),
+                                                dynamic_buffers: [None, Some(alloc), None, None],
+                                                ..Default::default()
+                                            })
+                                            .unbind_graphics_pipeline();
                                     }
-
-                                    let per_obj = &mut alloc.slice::<PerObj>()[0];
-
-                                    //todo fill out per_obj
-                                    cmd = cmd
-                                        .bind_graphics_pipeline(pso.handle)
-                                        .update_viewport(&self.viewport)
-                                        .draw_indexed(&DrawIndexed {
-                                            vertices: mesh.geometry.base.vertices.handle().unwrap(),
-                                            indices: mesh.geometry.base.indices.handle().unwrap(),
-                                            index_count: mesh.geometry.base.index_count.unwrap(),
-                                            bind_tables: pso.tables(),
-                                            dynamic_buffers: [None, Some(alloc), None, None],
-                                            ..Default::default()
-                                        })
-                                        .unbind_graphics_pipeline();
                                 }
                             }
                         }
                     }
-                }
-                return cmd;
-            },
-        );
+
+                    cmd
+                },
+            );
+
+            outputs.push(DeferredViewOutput {
+                camera: *camera,
+                image: position,
+                semaphore: semaphores[0],
+            });
+        }
 
         self.graph.execute_with(&SubmitInfo {
             wait_sems: sems,
             signal_sems: &[semaphores[0]],
         });
 
-        return (position, semaphores[0]);
+        outputs
     }
 }
