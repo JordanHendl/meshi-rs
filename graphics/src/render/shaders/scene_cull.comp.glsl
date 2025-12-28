@@ -25,6 +25,7 @@ struct CulledObject {
     mat4 total_transform;
     uint object_id;
     uint bin_id;
+    uint transformation;
 };
 
 struct Camera {
@@ -188,6 +189,7 @@ void main() {
             culled.culled[target].total_transform = obj.world_transform;
             culled.culled[target].bin_id = bins.bins[bin].id;
             culled.culled[target].object_id = idx;
+            culled.culled[target].transformation = obj.transformation;
         }
     }
 }
