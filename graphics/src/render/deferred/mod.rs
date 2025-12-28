@@ -401,17 +401,24 @@ impl DeferredRenderer {
                         if let Some(material) = &mesh.material {
                             if let Some(mat_idx) = material.furikake_material_handle {
                                 if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                    assert!(pso.handle.valid());
+
                                     let mut alloc = self
                                         .dynamic
                                         .bump()
                                         .expect("Failed to allocate dynamic buffer!");
-                                    
-                                    struct PerObj {
 
-                                    };
+                                    #[repr(C)]
+                                    struct PerObj {
+                                        transform: Mat4, // Backup transform
+                                        scene_id: Handle<SceneObject>,
+                                        material_id: Handle<Material>,
+                                        camera: Handle<Camera>,
+                                    }
 
                                     let per_obj = &mut alloc.slice::<PerObj>()[0];
-                                    assert!(pso.handle.valid());
+
+                                    //todo fill out per_obj
                                     cmd = cmd
                                         .bind_graphics_pipeline(pso.handle)
                                         .update_viewport(&self.viewport)
