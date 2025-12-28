@@ -3,12 +3,16 @@ use std::{collections::HashMap, ptr::NonNull};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
-use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*, reservations::bindless_transformations::*};
-use glam::{Mat4, Vec3};
+use dashi::driver::command::BlitImage;
+use furikake::{
+    BindlessState,
+    reservations::ReservedBinding,
+    types::Material,
+    types::*,
+};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 use noren::{DB, meta::HostMaterial};
-use resource_pool::resource_list::ResourceList;
 use tare::transient::TransientAllocator;
 use tracing::info;
 use utils::gpupool::GPUPool;
@@ -40,11 +44,12 @@ pub struct DeferredRenderer {
     viewport: Viewport,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
-    scene: GPUScene<furikake::BindlessState>,
+    scene: GPUScene,
     pipelines: HashMap<Handle<Material>, PSO>,
     dynamic: DynamicAllocator,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
+    view_draws: Vec<SceneViewDraw>,
 }
 
 impl DeferredRenderer {
@@ -88,6 +93,7 @@ impl DeferredRenderer {
             dynamic,
             pipelines: Default::default(),
             viewport: info.initial_viewport,
+            view_draws: Vec::new(),
         }
     }
 
@@ -184,30 +190,13 @@ impl DeferredRenderer {
         self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
-    fn alloc_transform(&mut self) -> Handle<Transformation> {
-        let mut handle = Handle::default();
-        self.state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| {
-                    handle = transforms.add_transform();
-                },
-            )
-            .expect("allocate bindless transform");
-
-        handle
-    }
-
     pub fn register_object(
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let transformation = self.alloc_transform();
-
         let h = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
-            transformation,
             scene_mask: PassMask::MAIN_COLOR as u32,
         });
 
@@ -223,7 +212,16 @@ impl DeferredRenderer {
         //  self.scene.set_object_transform(handle, transform);
     }
 
-    pub fn update(&mut self, _delta_time: f32) {
+    pub fn set_active_cameras(&mut self, cameras: &[Handle<Camera>]) {
+        self.scene.set_active_cameras(cameras);
+    }
+
+    pub fn update(
+        &mut self,
+        _delta_time: f32,
+        view_outputs: &HashMap<Handle<Camera>, Vec<ImageView>>,
+        submit_info: &SubmitInfo,
+    ) {
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
             dim: [self.viewport.area.x as u32, self.viewport.area.y as u32, 1],
@@ -234,47 +232,127 @@ impl DeferredRenderer {
             initial_data: None,
         };
 
-        let position = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Position Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let normal = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Normal Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let diffuse = self.graph.make_image(&ImageInfo {
-            debug_name: "[MESHI DEFERRED] Diffuse Framebuffer",
-            ..default_framebuffer_info
-        });
-
-        let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
-        deferred_pass_attachments[0] = Some(position);
-        deferred_pass_attachments[1] = Some(normal);
-        deferred_pass_attachments[2] = Some(diffuse);
-
-        let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
-        deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
-
         let cmds = self.scene.cull();
+        let mut readback = CommandStream::new().begin();
+        readback.combine(cmds);
+        self.scene
+            .output_bins_mut()
+            .sync_down(&mut readback)
+            .expect("download culled bins");
+        readback.prepare_buffer(
+            self.scene.output_bin_counts().device().handle,
+            UsageBits::COPY_SRC,
+        );
+        readback.combine(self.scene.output_bin_counts_mut().sync_down());
 
-        self.graph.add_subpass(
-            &SubpassInfo {
-                viewport: self.viewport,
-                color_attachments: deferred_pass_attachments,
-                depth_attachment: None,
-                clear_values: deferred_pass_clear,
-                depth_clear: None,
-            },
-            |cmd| {
-
-//                let alloc = self.dynamic.bump();
-                todo!("Draw all renderables!");
-                return cmd;
+        let readback = readback.end();
+        let ctx_ptr = self.ctx.as_mut() as *mut Context;
+        let mut queue = self
+            .ctx
+            .pool_mut(QueueType::Graphics)
+            .begin(ctx_ptr, "deferred_scene_cull", false)
+            .expect("begin compute queue");
+        let (_, fence) = readback.submit(
+            &mut queue,
+            &SubmitInfo2 {
+                ..Default::default()
             },
         );
+        if let Some(fence) = fence {
+            self.ctx.wait(fence).expect("wait for cull");
+        }
 
-        self.graph.execute();
+        self.view_draws.clear();
+        let bin_count = self.scene.bin_count();
+        let max_objects = self.scene.max_objects_per_bin();
+        let bin_counts = self.scene.output_bin_counts().as_slice::<u32>();
+
+        for (view_index, camera) in self.scene.active_cameras().iter().copied().enumerate() {
+            let mut draws = Vec::new();
+            for bin in 0..bin_count {
+                let count_index = view_index * bin_count + bin;
+                let count = bin_counts[count_index] as usize;
+                for idx in 0..count {
+                    let slot = count_index * max_objects + idx;
+                    let culled = self
+                        .scene
+                        .output_bins()
+                        .get_ref::<CulledObject>(Handle::new(slot as u16, 0))
+                        .expect("culled object");
+                    draws.push(PerDrawData {
+                        transform: culled.transformation,
+                        object_id: culled.object_id,
+                        bin_id: culled.bin_id,
+                    });
+                }
+            }
+            self.view_draws.push(SceneViewDraw { camera, draws });
+        }
+
+        for view in &self.view_draws {
+            let position = self.graph.make_image(&ImageInfo {
+                debug_name: "[MESHI DEFERRED] Position Framebuffer",
+                ..default_framebuffer_info
+            });
+
+            let normal = self.graph.make_image(&ImageInfo {
+                debug_name: "[MESHI DEFERRED] Normal Framebuffer",
+                ..default_framebuffer_info
+            });
+
+            let diffuse = self.graph.make_image(&ImageInfo {
+                debug_name: "[MESHI DEFERRED] Diffuse Framebuffer",
+                ..default_framebuffer_info
+            });
+
+            let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
+            deferred_pass_attachments[0] = Some(position);
+            deferred_pass_attachments[1] = Some(normal);
+            deferred_pass_attachments[2] = Some(diffuse);
+
+            let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
+            deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
+
+            let outputs = view_outputs
+                .get(&view.camera)
+                .cloned()
+                .unwrap_or_default();
+            let color_image = diffuse.img;
+
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.viewport,
+                    color_attachments: deferred_pass_attachments,
+                    depth_attachment: None,
+                    clear_values: deferred_pass_clear,
+                    depth_clear: None,
+                },
+                move |mut cmd| {
+                    for output in outputs.iter() {
+                        cmd.blit_images(&BlitImage {
+                            src: color_image,
+                            dst: output.img,
+                            filter: Filter::Nearest,
+                            ..Default::default()
+                        });
+                    }
+                    cmd
+                },
+            );
+        }
+
+        self.graph.execute_with(submit_info);
     }
+}
+
+#[derive(Clone, Copy)]
+struct PerDrawData {
+    transform: Handle<Transformation>,
+    object_id: u32,
+    bin_id: u32,
+}
+
+struct SceneViewDraw {
+    camera: Handle<Camera>,
+    draws: Vec<PerDrawData>,
 }

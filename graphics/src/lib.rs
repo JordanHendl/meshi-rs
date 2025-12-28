@@ -5,7 +5,7 @@ pub(crate) mod utils;
 use dashi::utils::Pool;
 use dashi::{
     Buffer, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle,
-    ImageView, Rect2D, Viewport,
+    ImageView, Rect2D, Semaphore, SubmitInfo, Viewport,
 };
 use furikake::BindlessState;
 pub use furikake::types::*;
@@ -34,6 +34,7 @@ enum DisplayImpl {
 pub struct Display {
     raw: DisplayImpl,
     scene: Handle<Camera>,
+    render_semaphore: Handle<Semaphore>,
 }
 
 pub struct RenderEngine {
@@ -179,10 +180,74 @@ impl RenderEngine {
 
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
-        self.renderer.update(delta_time);
+        let renderer = &mut self.renderer;
+        let displays = &mut self.displays;
+        let mut view_outputs: HashMap<Handle<Camera>, Vec<ImageView>> = HashMap::new();
+        let mut wait_semaphores: Vec<Handle<Semaphore>> = Vec::new();
+        let mut signal_semaphores: Vec<Handle<Semaphore>> = Vec::new();
+        let mut present_displays: Vec<(Handle<Display>, Handle<Semaphore>)> = Vec::new();
+
+        let mut display_handles = Vec::new();
+        displays.for_each_occupied_handle_mut(|handle| display_handles.push(handle));
+        for handle in display_handles {
+            let display = displays.get_mut_ref(handle).expect("display handle");
+            if !display.scene.valid() {
+                continue;
+            }
+
+            let DisplayImpl::Window(window) = &mut display.raw else {
+                continue;
+            };
+
+            let Some(window) = window.as_mut() else {
+                continue;
+            };
+
+            let (view, wait_sem, _image_index, _suboptimal) = renderer
+                .context()
+                .acquire_new_image(window)
+                .expect("acquire display image");
+            view_outputs
+                .entry(display.scene)
+                .or_default()
+                .push(view);
+            wait_semaphores.push(wait_sem);
+            signal_semaphores.push(display.render_semaphore);
+            present_displays.push((handle, display.render_semaphore));
+        }
+
+        let mut cameras: Vec<Handle<Camera>> = view_outputs.keys().copied().collect();
+        cameras.sort_by_key(|camera| camera.slot);
+        renderer.set_active_cameras(&cameras);
+
+        let submit_info = SubmitInfo {
+            wait_sems: &wait_semaphores,
+            signal_sems: &signal_semaphores,
+            ..Default::default()
+        };
+        renderer.update(delta_time, &view_outputs, &submit_info);
+
+        for (handle, signal_sem) in present_displays {
+            let display = displays.get_ref(handle).expect("display handle");
+            let DisplayImpl::Window(window) = &display.raw else {
+                continue;
+            };
+            let Some(window) = window.as_ref() else {
+                continue;
+            };
+
+            renderer
+                .context()
+                .present_display(window, &[signal_sem])
+                .expect("present display");
+        }
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
+        let render_semaphore = self
+            .context()
+            .make_semaphore()
+            .expect("create render semaphore");
         let raw = Some(Box::new(
             self.context()
                 .make_display(&info)
@@ -193,6 +258,7 @@ impl RenderEngine {
             .insert(Display {
                 raw: DisplayImpl::Window(raw),
                 scene: Default::default(),
+                render_semaphore,
             })
             .unwrap();
     }
