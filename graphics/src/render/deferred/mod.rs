@@ -132,6 +132,10 @@ impl DeferredRenderer {
         }
     }
 
+    pub fn alloc(&mut self) -> &mut TransientAllocator {
+        &mut self.alloc
+    }
+
     pub fn context(&mut self) -> &'static mut Context {
         unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
     }
@@ -150,7 +154,7 @@ impl DeferredRenderer {
         }
 
         let shaders = miso::stddeferred(&defines);
-        
+
         let mut state = GraphicsPipelineBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
@@ -210,17 +214,18 @@ impl DeferredRenderer {
             state = state
                 .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
-        
-        let s = state.set_details (GraphicsPipelineDetails {
-            color_blend_states: vec![Default::default(); 3],
-            ..Default::default()
-        })
+
+        let s = state
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 3],
+                ..Default::default()
+            })
             .build(unsafe { &mut (*ctx) })
             .expect("Failed to build material!");
-            
-            assert!(s.bind_table[0].is_some());
-            assert!(s.bind_table[1].is_some());
-            s
+
+        assert!(s.bind_table[0].is_some());
+        assert!(s.bind_table[1].is_some());
+        s
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -232,7 +237,10 @@ impl DeferredRenderer {
         for name in materials {
             let (mat, handle) = db.fetch_host_material(&name).unwrap();
             let p = self.build_pipeline(&mat);
-            info!("[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.", name, handle);
+            info!(
+                "[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.",
+                name, handle
+            );
             self.pipelines.insert(handle.unwrap(), p);
         }
 
@@ -332,7 +340,11 @@ impl DeferredRenderer {
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
-    pub fn update(&mut self, _delta_time: f32) {
+    pub fn update(
+        &mut self,
+        sems: &[Handle<Semaphore>],
+        _delta_time: f32,
+    ) -> (ImageView, Handle<Semaphore>) {
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
             dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
@@ -374,6 +386,7 @@ impl DeferredRenderer {
             .map(|handle| self.objects.get_ref(*handle).model.clone())
             .collect();
 
+        let semaphores = self.graph.make_semaphores(1);
         self.graph.add_subpass(
             &SubpassInfo {
                 viewport: self.viewport,
@@ -383,15 +396,21 @@ impl DeferredRenderer {
                 depth_clear: None,
             },
             |mut cmd| {
-                let alloc = self
-                    .dynamic
-                    .bump()
-                    .expect("Failed to allocate dynamic buffer!");
                 for model in &object_draws {
                     for mesh in &model.meshes {
                         if let Some(material) = &mesh.material {
                             if let Some(mat_idx) = material.furikake_material_handle {
                                 if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                    let mut alloc = self
+                                        .dynamic
+                                        .bump()
+                                        .expect("Failed to allocate dynamic buffer!");
+                                    
+                                    struct PerObj {
+
+                                    };
+
+                                    let per_obj = &mut alloc.slice::<PerObj>()[0];
                                     assert!(pso.handle.valid());
                                     cmd = cmd
                                         .bind_graphics_pipeline(pso.handle)
@@ -414,6 +433,11 @@ impl DeferredRenderer {
             },
         );
 
-        self.graph.execute();
+        self.graph.execute_with(&SubmitInfo {
+            wait_sems: sems,
+            signal_sems: &[semaphores[0]],
+        });
+
+        return (position, semaphores[0]);
     }
 }

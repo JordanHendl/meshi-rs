@@ -4,8 +4,7 @@ pub(crate) mod utils;
 
 use dashi::utils::Pool;
 use dashi::{
-    Buffer, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle,
-    ImageView, Rect2D, Viewport,
+    Buffer, CommandStream, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle, ImageView, Rect2D, Viewport
 };
 pub use furikake::types::*;
 use furikake::BindlessState;
@@ -179,8 +178,10 @@ impl RenderEngine {
 
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
-        self.renderer.update(delta_time);
+
+        let mut wait_sems = Vec::new();
         
+        let mut blit_stream = CommandStream::new().begin();
         let ctx = &mut self.context();
         self.displays.for_each_occupied_mut(|dis| {
             if dis.scene.valid() {
@@ -188,7 +189,22 @@ impl RenderEngine {
                     DisplayImpl::Window(display) => {
                         let d = display.as_mut().unwrap();
                         let (img, sem, idx, success) = ctx.acquire_new_image(d).unwrap();
-                        
+                        wait_sems.push(sem); 
+//                        ctx.present_display(d, &[sem]).expect("Failed to present to display!");
+                    },
+                    DisplayImpl::CPUImage(cpuimage_output) => {
+                        todo!("CPUImage display not yet implemented.")
+                    },
+                }
+            }
+        });
+
+        let (img, sem) = self.renderer.update(&wait_sems, delta_time);
+        self.displays.for_each_occupied_mut(|dis| {
+            if dis.scene.valid() {
+                match &mut dis.raw {
+                    DisplayImpl::Window(display) => {
+                        let d = display.as_mut().unwrap();
                         ctx.present_display(d, &[sem]).expect("Failed to present to display!");
                     },
                     DisplayImpl::CPUImage(cpuimage_output) => {
@@ -197,6 +213,7 @@ impl RenderEngine {
                 }
             }
         });
+
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
