@@ -1,12 +1,11 @@
 use std::{collections::HashMap, ptr::NonNull};
 
+use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
 use driver::command::DrawIndexed;
-use furikake::{
-    BindlessState, reservations::ReservedBinding, types::Material, types::*,
-};
+use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::{
@@ -14,10 +13,9 @@ use noren::{
     meta::{DeviceModel, HostMaterial},
 };
 use resource_pool::resource_list::ResourceList;
+use tare::graph::*;
 use tare::transient::TransientAllocator;
 use tracing::info;
-use super::scene::GPUScene;
-use tare::graph::*;
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -321,7 +319,7 @@ impl DeferredRenderer {
         let mut queue = self
             .ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "scene_cull", false)
+            .begin("scene_cull", false)
             .expect("begin cull queue");
 
         let (_, fence) = cull_cmds.submit(
@@ -344,8 +342,7 @@ impl DeferredRenderer {
         let num_bins = self.scene.num_bins();
         let max_objects = self.scene.max_objects_per_bin() as usize;
         let bin_counts = self.scene.bin_counts();
-        let mut view_draws: Vec<Vec<ViewDrawItem>> =
-            (0..views.len()).map(|_| Vec::new()).collect();
+        let mut view_draws: Vec<Vec<ViewDrawItem>> = (0..views.len()).map(|_| Vec::new()).collect();
 
         for (view_idx, _) in views.iter().enumerate() {
             for bin in 0..num_bins {
@@ -358,8 +355,7 @@ impl DeferredRenderer {
                 for draw_idx in 0..count {
                     let slot = bin_offset * max_objects + draw_idx;
                     if let Some(culled) = self.scene.culled_object(slot as u32) {
-                        if let Some(obj_handle) =
-                            self.scene_lookup.get(&(culled.object_id as u16))
+                        if let Some(obj_handle) = self.scene_lookup.get(&(culled.object_id as u16))
                         {
                             let obj = self.objects.get_ref(*obj_handle);
                             view_draws[view_idx].push(ViewDrawItem {
@@ -457,8 +453,17 @@ impl DeferredRenderer {
                                                     .vertices
                                                     .handle()
                                                     .unwrap(),
-                                                indices: mesh.geometry.base.indices.handle().unwrap(),
-                                                index_count: mesh.geometry.base.index_count.unwrap(),
+                                                indices: mesh
+                                                    .geometry
+                                                    .base
+                                                    .indices
+                                                    .handle()
+                                                    .unwrap(),
+                                                index_count: mesh
+                                                    .geometry
+                                                    .base
+                                                    .index_count
+                                                    .unwrap(),
                                                 bind_tables: pso.tables(),
                                                 dynamic_buffers: [None, Some(alloc), None, None],
                                                 ..Default::default()

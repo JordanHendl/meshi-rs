@@ -182,6 +182,7 @@ impl RenderEngine {
         self.publish_events();
         let mut views = Vec::new();
         let mut seen = HashSet::new();
+
         self.displays.for_each_occupied(|dis| {
             if dis.scene.valid() && seen.insert(dis.scene) {
                 views.push(dis.scene);
@@ -198,7 +199,7 @@ impl RenderEngine {
         let ctx_ptr = ctx as *mut Context;
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "display_blit", false)
+            .begin("display_blit", false)
             .expect("begin blit queue");
 
         self.displays.for_each_occupied_mut(|dis| {
@@ -233,7 +234,7 @@ impl RenderEngine {
                         output.semaphore,
                         Handle::default(),
                         Handle::default(),
-                    ];
+                ];
                     submit.signal_sems = [
                         blit_sem,
                         Handle::default(),

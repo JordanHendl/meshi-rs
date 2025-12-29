@@ -353,7 +353,7 @@ impl GPUScene {
 
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "scene_cull_test", false)
+            .begin("scene_cull_test", false)
             .expect("begin compute queue");
 
         let (_, fence) = stream.end().submit(
@@ -886,10 +886,9 @@ mod tests {
 
         readback.debug_print_commands();
 
-        let ctx_ptr = ctx.as_mut() as *mut Context;
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "scene_cull_test", false)
+            .begin("scene_cull_test", false)
             .expect("begin compute queue");
 
         let (_, fence) = readback.submit(
