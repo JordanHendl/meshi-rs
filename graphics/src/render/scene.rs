@@ -1,24 +1,17 @@
 use std::ptr::NonNull;
 
-use bento::{
-    Compiler, OptimizationLevel, Request, ShaderLang,
-    builder::ComputePipelineBuilder as BentoComputePipelineBuilder,
-};
+use bento::builder::ComputePipelineBuilder as BentoComputePipelineBuilder;
 use dashi::*;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle,
-    MemoryVisibility,
-    ShaderResource, ShaderType, UsageBits,
+    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
+    ShaderResource, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
     utils::gpupool::{DynamicGPUPool, GPUPool},
 };
 use furikake::{
     BindlessState, GPUState,
-    reservations::{
-        bindless_camera::ReservedBindlessCamera,
-        bindless_transformations::ReservedBindlessTransformations,
-    },
+    reservations::bindless_transformations::ReservedBindlessTransformations,
     types::{Camera, Transformation},
 };
 use glam::Mat4;
@@ -47,9 +40,9 @@ pub struct SceneObject {
 #[repr(C)]
 pub struct CulledObject {
     pub total_transform: Mat4,
+    pub transformation: Handle<Transformation>,
     pub object_id: u32,
     pub bin_id: u32,
-    pub transformation: Handle<Transformation>,
 }
 
 #[repr(C)]
@@ -123,7 +116,6 @@ struct SceneData {
     transformations_buffer: BufferView,
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
-    active_cameras: Vec<Handle<Camera>>,
     max_views: u32,
 }
 
@@ -142,6 +134,35 @@ pub struct GPUScene {
 }
 
 impl GPUScene {
+    fn alloc_transform(&mut self, initial: Mat4) -> Handle<Transformation> {
+        let mut handle = Handle::default();
+        let state: &mut BindlessState = unsafe { self.state.as_mut() };
+
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    handle = transforms.add_transform();
+                    transforms.transform_mut(handle).transform = initial;
+                },
+            )
+            .expect("allocate bindless transform");
+
+        handle
+    }
+
+    fn release_transform(&mut self, handle: Handle<Transformation>) {
+        let state: &mut BindlessState = unsafe { self.state.as_mut() };
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    transforms.remove_transform(handle);
+                },
+            )
+            .expect("release bindless transform");
+    }
+
     fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &BindlessState = unsafe { self.state.as_ref() };
@@ -166,7 +187,7 @@ impl GPUScene {
             .add_variable("transformations", self.data.transformations.clone())
             .build(&mut ctx);
 
-        let cull_builder = BentoComputePipelineBuilder::new()
+        let cull_state = BentoComputePipelineBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
@@ -194,13 +215,12 @@ impl GPUScene {
             .add_variable(
                 "params",
                 ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
-            );
-
-        let cull_state = cull_builder.build(&mut ctx);
+            )
+            .build(&mut ctx);
 
         Ok(SceneComputePipelines {
-            cull_state,
-            transform_state,
+            cull_state: cull_state.ok(),
+            transform_state: transform_state.ok(),
         })
     }
 
@@ -321,11 +341,13 @@ impl GPUScene {
         );
 
         let ctx_ptr: *mut Context = ctx;
-        let mut stream = CommandStream::new().begin();
-        stream.prepare_buffer(dispatch.device().handle, UsageBits::HOST_WRITE);
+        let stream = CommandStream::new()
+            .begin()
+            .prepare_buffer(dispatch.device().handle, UsageBits::HOST_WRITE);
+
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "scene_cull_test", false)
+            .begin("scene_cull_test", false)
             .expect("begin compute queue");
 
         let (_, fence) = stream.end().submit(
@@ -355,7 +377,6 @@ impl GPUScene {
             transformations_buffer,
             bin_descriptions: info.draw_bins.to_vec(),
             active_objects: Vec::new(),
-            active_cameras: Vec::new(),
             max_views: info.limits.max_num_views,
         };
 
@@ -390,11 +411,10 @@ impl GPUScene {
         }
 
         self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].num_views = count as u32;
-        self.data.active_cameras = cameras.iter().copied().take(count).collect();
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
-        let transformation = self.alloc_transform();
+        let transformation = self.alloc_transform(info.global);
         let handle = self
             .data
             .objects_to_process
@@ -428,11 +448,15 @@ impl GPUScene {
             self.remove_child(parent, handle);
         }
 
+        if let Some(object) = self.data.objects_to_process.get_ref(handle) {
+            if object.transformation.valid() {
+                self.release_transform(object.transformation);
+            }
+        }
+
         if let Some(object) = self.data.objects_to_process.get_mut_ref(handle) {
-            let transformation = object.transformation;
             object.active = 0;
             object.dirty = 0;
-            self.release_transform(transformation);
         }
 
         self.data.objects_to_process.release(handle);
@@ -455,6 +479,11 @@ impl GPUScene {
             object.local_transform = *transform;
             object.dirty = 1;
         }
+    }
+
+    pub fn get_object_transform(&self, handle: Handle<SceneObject>) -> Mat4 {
+        let object = self.data.objects_to_process.get_ref(handle).expect("");
+        return object.local_transform;
     }
 
     pub fn add_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
@@ -507,23 +536,11 @@ impl GPUScene {
     }
 
     pub fn cull(&mut self) -> CommandStream<Executable> {
-        let mut stream = CommandStream::new().begin();
+        let stream = CommandStream::new().begin();
         self.data.draw_bins.clear();
         for count in self.data.bin_counts.as_slice_mut::<u32>() {
             *count = 0;
         }
-        // sync up all possibly mutated data
-        self.data.objects_to_process.sync_up(&mut stream).unwrap();
-
-        unsafe {
-            self.ctx
-                .as_mut()
-                .flush_buffer(self.data.dispatch.host())
-                .unwrap();
-        }
-        stream.combine(self.data.dispatch.sync_up());
-        stream.combine(self.data.bin_counts.sync_up());
-        stream.combine(self.camera.sync_up());
 
         let workgroup_size = 64u32;
         let num_objects = self.data.objects_to_process.len() as u32;
@@ -533,121 +550,93 @@ impl GPUScene {
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
             return stream.end();
         };
+        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
+            return stream.end();
+        };
 
         assert!(transform_state.tables()[0].is_some());
+        assert!(cull_state.tables()[0].is_some());
+        assert!(cull_state.tables()[1].is_some());
 
-        stream.prepare_buffer(
-            self.data.bin_counts.device().handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream.prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER);
-        stream.prepare_buffer(
-            self.data.dispatch.device().handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream.prepare_buffer(
-            self.data.transformations_buffer.handle,
-            UsageBits::COMPUTE_SHADER,
-        );
-        stream = stream
+        stream
+            .combine(self.data.objects_to_process.sync_up().unwrap())
+            .combine(self.data.dispatch.sync_up())
+            .combine(self.data.bin_counts.sync_up())
+            .combine(self.camera.sync_up())
+            .prepare_buffer(
+                self.data.bin_counts.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(
+                self.data.dispatch.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.transformations_buffer.handle,
+                UsageBits::COMPUTE_SHADER,
+            )
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
                 z: 1,
                 pipeline: transform_state.handle,
-                bind_groups: Default::default(),
                 bind_tables: transform_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline();
-
-        let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
-            return stream.end();
-        };
-
-        assert!(cull_state.tables()[0].is_some());
-        assert!(cull_state.tables()[1].is_some());
-
-        stream = stream
+            .unbind_pipeline()
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
                 z: 1,
                 pipeline: cull_state.handle,
-                bind_groups: Default::default(),
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline();
-
-        stream.end()
+            .unbind_pipeline()
+            .end()
     }
 
     pub fn output_bins(&self) -> &DynamicGPUPool {
         &self.data.draw_bins
     }
 
-    pub fn output_bins_mut(&mut self) -> &mut DynamicGPUPool {
-        &mut self.data.draw_bins
+    pub fn cull_and_sync(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.cull())
+            .combine(self.data.draw_bins.sync_down().expect("sync culled bins"))
+            .combine(self.data.bin_counts.sync_down())
+            .combine(self.data.dispatch.sync_down())
+            .end()
     }
 
-    pub fn output_bin_counts(&self) -> &StagedBuffer {
-        &self.data.bin_counts
+    pub fn bin_counts(&self) -> &[u32] {
+        self.data.bin_counts.as_slice::<u32>()
     }
 
-    pub fn output_bin_counts_mut(&mut self) -> &mut StagedBuffer {
-        &mut self.data.bin_counts
+    pub fn max_objects_per_bin(&self) -> u32 {
+        self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects
     }
 
-    pub fn bin_count(&self) -> usize {
+    pub fn num_bins(&self) -> usize {
         self.data.bin_descriptions.len()
     }
 
-    pub fn max_objects_per_bin(&self) -> usize {
-        self.data.objects_to_process.len()
-    }
-
-    pub fn active_cameras(&self) -> &[Handle<Camera>] {
-        &self.data.active_cameras
-    }
-
-    fn alloc_transform(&mut self) -> Handle<Transformation> {
-        let mut handle = Handle::default();
-        let state = unsafe { self.state.as_mut() };
-        state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| {
-                    handle = transforms.add_transform();
-                },
-            )
-            .expect("allocate bindless transform");
-
-        handle
-    }
-
-    fn release_transform(&mut self, handle: Handle<Transformation>) {
-        if !handle.valid() {
-            return;
-        }
-
-        let state = unsafe { self.state.as_mut() };
-        state
-            .reserved_mut::<ReservedBindlessTransformations, _>(
-                "meshi_bindless_transformations",
-                |transforms| {
-                    transforms.remove_transform(handle);
-                },
-            )
-            .expect("release bindless transform");
+    pub fn culled_object(&self, index: u32) -> Option<&CulledObject> {
+        self.data
+            .draw_bins
+            .get_ref::<CulledObject>(Handle::new(index as u16, 0))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashi::{ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo2};
-    use furikake::BindlessState;
+    use dashi::{
+        ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
+    };
+    use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
     use glam::Vec3;
 
     fn make_test_scene(ctx: &mut Box<Context>, state: &mut Box<BindlessState>) -> GPUScene {
@@ -684,11 +673,7 @@ mod tests {
         (ctx, state, scene)
     }
 
-    fn make_object_info(
-        local: Mat4,
-        global: Mat4,
-        scene_mask: u32,
-    ) -> SceneObjectInfo {
+    fn make_object_info(local: Mat4, global: Mat4, scene_mask: u32) -> SceneObjectInfo {
         SceneObjectInfo {
             local,
             global,
@@ -698,7 +683,7 @@ mod tests {
 
     #[test]
     fn registering_object_tracks_state() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let info = make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 0xFF);
 
@@ -716,7 +701,7 @@ mod tests {
 
     #[test]
     fn releasing_object_clears_tracking() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -728,7 +713,7 @@ mod tests {
 
     #[test]
     fn transforming_object_marks_dirty() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -742,7 +727,7 @@ mod tests {
 
     #[test]
     fn setting_object_transform_replaces_value() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -756,7 +741,7 @@ mod tests {
 
     #[test]
     fn adding_and_removing_child_updates_relationships() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let parent = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
         let child = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
@@ -785,7 +770,7 @@ mod tests {
 
     #[test]
     fn releasing_child_detaches_from_parent() {
-        let (_ctx, _state, mut scene) = setup_scene();
+        let (_ctx, mut state, mut scene) = setup_scene();
 
         let parent = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
         let child = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
@@ -809,11 +794,7 @@ mod tests {
         let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
         assert_eq!(camera_state.count, 1);
         assert_eq!(camera_state.slots[0], expected_slot as u32);
-        assert!(
-            camera_state.slots[1..]
-                .iter()
-                .all(|slot| *slot == u32::MAX)
-        );
+        assert!(camera_state.slots[1..].iter().all(|slot| *slot == u32::MAX));
     }
 
     #[test]
@@ -860,11 +841,7 @@ mod tests {
             Mat4::IDENTITY,
             u32::MAX,
         ));
-        let child = scene.register_object(&make_object_info(
-            child_local,
-            Mat4::IDENTITY,
-            u32::MAX,
-        ));
+        let child = scene.register_object(&make_object_info(child_local, Mat4::IDENTITY, u32::MAX));
 
         scene.add_child(parent, child);
 
@@ -872,33 +849,33 @@ mod tests {
         // properly constructed.
         let commands = scene.cull();
 
-        let mut readback = CommandStream::new().begin();
-        readback.combine(commands);
-
-        scene
-            .data
-            .objects_to_process
-            .sync_down(&mut readback)
-            .expect("download objects");
-
-        scene
-            .data
-            .draw_bins
-            .sync_down(&mut readback)
-            .expect("download culled bins");
-
-        readback.prepare_buffer(scene.data.bin_counts.device().handle, UsageBits::COPY_SRC);
-        readback.combine(scene.data.bin_counts.sync_down());
-        readback.combine(scene.data.dispatch.sync_down());
-
-        let readback = readback.end();
+        let mut readback = CommandStream::new()
+            .begin()
+            .combine(commands)
+            .combine(
+                scene
+                    .data
+                    .objects_to_process
+                    .sync_down()
+                    .expect("download objects"),
+            )
+            .combine(
+                scene
+                    .data
+                    .draw_bins
+                    .sync_down()
+                    .expect("download culled bins"),
+            )
+            .prepare_buffer(scene.data.bin_counts.device().handle, UsageBits::COPY_SRC)
+            .combine(scene.data.bin_counts.sync_down())
+            .combine(scene.data.dispatch.sync_down())
+            .end();
 
         readback.debug_print_commands();
 
-        let ctx_ptr = ctx.as_mut() as *mut Context;
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "scene_cull_test", false)
+            .begin("scene_cull_test", false)
             .expect("begin compute queue");
 
         let (_, fence) = readback.submit(

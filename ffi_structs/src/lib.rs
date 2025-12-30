@@ -1,8 +1,7 @@
 
 pub mod event;
 use glam::*;
-use std::ffi::{c_char, c_void, CStr};
-use std::fmt;
+use std::ffi::{c_char, c_void};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]

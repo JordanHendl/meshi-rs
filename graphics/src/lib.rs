@@ -2,20 +2,21 @@ mod render;
 pub mod structs;
 pub(crate) mod utils;
 
+use dashi::driver::command::BlitImage;
+use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
-    Buffer, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Handle,
-    ImageView, Rect2D, Semaphore, SubmitInfo, Viewport,
+    Buffer, CommandQueueInfo2, CommandStream, Context, Display as DashiDisplay,
+    DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Handle, ImageView, QueueType, Rect2D,
+    SubmitInfo, SubmitInfo2, Viewport,
 };
-use furikake::BindlessState;
 pub use furikake::types::*;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
-use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
 use render::deferred::{DeferredRenderer, DeferredRendererInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 
@@ -34,13 +35,13 @@ enum DisplayImpl {
 pub struct Display {
     raw: DisplayImpl,
     scene: Handle<Camera>,
-    render_semaphore: Handle<Semaphore>,
 }
 
 pub struct RenderEngine {
     renderer: DeferredRenderer,
     displays: Pool<Display>,
     event_cb: Option<EventCallbackInfo>,
+    blit_queue: CommandRing,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     db: Option<NonNull<DB>>,
 }
@@ -49,7 +50,7 @@ impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
 
-        let renderer = DeferredRenderer::new(&DeferredRendererInfo {
+        let mut renderer = DeferredRenderer::new(&DeferredRendererInfo {
             headless: info.headless,
             initial_viewport: Viewport {
                 area: FRect2D {
@@ -73,6 +74,14 @@ impl RenderEngine {
         } else {
             Some(winit::event_loop::EventLoop::new())
         };
+        let blit_queue = renderer
+            .context()
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "[BLIT]",
+                parent: None,
+                queue_type: QueueType::Graphics,
+            })
+            .expect("Failed to make render queue");
 
         Ok(Self {
             displays: Default::default(),
@@ -80,6 +89,7 @@ impl RenderEngine {
             db: None,
             event_cb: None,
             event_loop,
+            blit_queue,
         })
     }
 
@@ -88,7 +98,7 @@ impl RenderEngine {
         self.renderer.initialize_database(db);
     }
 
-    pub fn context(&mut self) -> &mut Context {
+    pub fn context(&mut self) -> &'static mut Context {
         self.renderer.context()
     }
 
@@ -141,7 +151,7 @@ impl RenderEngine {
     }
 
     pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
-        todo!()
+        self.renderer.object_transform(handle)
     }
 
     fn publish_events(&mut self) {
@@ -180,74 +190,72 @@ impl RenderEngine {
 
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
-        let renderer = &mut self.renderer;
-        let displays = &mut self.displays;
-        let mut view_outputs: HashMap<Handle<Camera>, Vec<ImageView>> = HashMap::new();
-        let mut wait_semaphores: Vec<Handle<Semaphore>> = Vec::new();
-        let mut signal_semaphores: Vec<Handle<Semaphore>> = Vec::new();
-        let mut present_displays: Vec<(Handle<Display>, Handle<Semaphore>)> = Vec::new();
+        let mut views = Vec::new();
+        let mut seen = HashSet::new();
 
-        let mut display_handles = Vec::new();
-        displays.for_each_occupied_handle_mut(|handle| display_handles.push(handle));
-        for handle in display_handles {
-            let display = displays.get_mut_ref(handle).expect("display handle");
-            if !display.scene.valid() {
-                continue;
+        self.displays.for_each_occupied(|dis| {
+            if dis.scene.valid() && seen.insert(dis.scene) {
+                views.push(dis.scene);
+            }
+        });
+
+        let view_outputs = self.renderer.update(&[], &views, delta_time);
+        let mut outputs_by_camera = HashMap::new();
+        for output in view_outputs {
+            outputs_by_camera.insert(output.camera, output);
+        }
+
+        let ctx = self.context();
+        self.displays.for_each_occupied_mut(|dis| {
+            if !dis.scene.valid() {
+                return;
             }
 
-            let DisplayImpl::Window(window) = &mut display.raw else {
-                continue;
+            let Some(output) = outputs_by_camera.get(&dis.scene) else {
+                return;
             };
 
-            let Some(window) = window.as_mut() else {
-                continue;
-            };
+            match &mut dis.raw {
+                DisplayImpl::Window(display) => {
+                    let d = display.as_mut().unwrap();
+                    let (img, acquire_sem, _, _) = ctx.acquire_new_image(d).unwrap();
+                    let blit_sem = ctx.make_semaphore().expect("make blit semaphore");
+                    self.blit_queue
+                        .record(|c| {
+                            CommandStream::new()
+                                .begin()
+                                .blit_images(&BlitImage {
+                                    src: output.image.img,
+                                    dst: img.img,
+                                    filter: Filter::Nearest,
+                                    ..Default::default()
+                                })
+                                .prepare_for_presentation(img.img)
+                                .end()
+                                .append(c);
+                        })
+                        .expect("Failed to make commands");
 
-            let (view, wait_sem, _image_index, _suboptimal) = renderer
-                .context()
-                .acquire_new_image(window)
-                .expect("acquire display image");
-            view_outputs
-                .entry(display.scene)
-                .or_default()
-                .push(view);
-            wait_semaphores.push(wait_sem);
-            signal_semaphores.push(display.render_semaphore);
-            present_displays.push((handle, display.render_semaphore));
-        }
+                    //        self.cull_queue.wait_all().unwrap();
 
-        let mut cameras: Vec<Handle<Camera>> = view_outputs.keys().copied().collect();
-        cameras.sort_by_key(|camera| camera.slot);
-        renderer.set_active_cameras(&cameras);
+                    self.blit_queue
+                        .submit(&SubmitInfo {
+                            wait_sems: &[acquire_sem, output.semaphore],
+                            signal_sems: &[blit_sem],
+                        })
+                        .expect("Failed to submit!");
 
-        let submit_info = SubmitInfo {
-            wait_sems: &wait_semaphores,
-            signal_sems: &signal_semaphores,
-            ..Default::default()
-        };
-        renderer.update(delta_time, &view_outputs, &submit_info);
-
-        for (handle, signal_sem) in present_displays {
-            let display = displays.get_ref(handle).expect("display handle");
-            let DisplayImpl::Window(window) = &display.raw else {
-                continue;
-            };
-            let Some(window) = window.as_ref() else {
-                continue;
-            };
-
-            renderer
-                .context()
-                .present_display(window, &[signal_sem])
-                .expect("present display");
-        }
+                    ctx.present_display(d, &[blit_sem])
+                        .expect("Failed to present to display!");
+                }
+                DisplayImpl::CPUImage(_cpuimage_output) => {
+                    todo!("CPUImage display not yet implemented.")
+                }
+            }
+        });
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
-        let render_semaphore = self
-            .context()
-            .make_semaphore()
-            .expect("create render semaphore");
         let raw = Some(Box::new(
             self.context()
                 .make_display(&info)
@@ -258,27 +266,25 @@ impl RenderEngine {
             .insert(Display {
                 raw: DisplayImpl::Window(raw),
                 scene: Default::default(),
-                render_semaphore,
             })
             .unwrap();
     }
 
     pub fn register_cpu_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
         todo!("Not yet implemented.");
-//        let raw = Some(Box::new(
-//            self.context()
-//                .make_display(&info)
-//                .expect("Failed to make display!"),
-//        ));
-//        return self
-//            .displays
-//            .insert(Display {
-//                raw: DisplayImpl::Window(raw),
-//                scene: Default::default(),
-//            })
-//            .unwrap();
+        //        let raw = Some(Box::new(
+        //            self.context()
+        //                .make_display(&info)
+        //                .expect("Failed to make display!"),
+        //        ));
+        //        return self
+        //            .displays
+        //            .insert(Display {
+        //                raw: DisplayImpl::Window(raw),
+        //                scene: Default::default(),
+        //            })
+        //            .unwrap();
     }
-
 
     pub fn frame_dump(&mut self, _display: Handle<Display>) -> Option<FFIImage> {
         None

@@ -23,9 +23,9 @@ struct SceneBin {
 
 struct CulledObject {
     mat4 total_transform;
+    uint transformation;
     uint object_id;
     uint bin_id;
-    uint transformation;
 };
 
 struct Camera {
@@ -170,7 +170,7 @@ void main() {
         vec3 to_object = world_position - camera_position(cam);
         vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), camera_rotation_quat(cam));
 
-        if (dot(forward, to_object) <= 0.0) {
+        if (dot(forward, to_object) > 100000.0) {
             continue;
         }
 
@@ -187,9 +187,9 @@ void main() {
 
             uint target = bin_offset * params.max_objects + write_index;
             culled.culled[target].total_transform = obj.world_transform;
+            culled.culled[target].transformation = obj.transformation;
             culled.culled[target].bin_id = bins.bins[bin].id;
             culled.culled[target].object_id = idx;
-            culled.culled[target].transformation = obj.transformation;
         }
     }
 }

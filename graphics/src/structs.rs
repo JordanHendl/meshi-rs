@@ -2,7 +2,7 @@ use glam::{Mat4, Vec4};
 use glam::*;
 use furikake::types::*;
 use meshi_ffi_structs::*;
-use noren::{DB, meta::DeviceModel};
+use noren::meta::DeviceModel;
 
 #[derive(Default)]
 pub struct MeshObject {

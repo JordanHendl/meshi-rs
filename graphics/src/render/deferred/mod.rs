@@ -1,24 +1,22 @@
 use std::{collections::HashMap, ptr::NonNull};
 
+use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
-use dashi::driver::command::BlitImage;
-use furikake::{
-    BindlessState,
-    reservations::ReservedBinding,
-    types::Material,
-    types::*,
-};
-use meshi_ffi_structs::*;
+use driver::command::DrawIndexed;
+use execution::{CommandDispatch, CommandRing};
+use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*};
+use glam::Mat4;
 use meshi_utils::MeshiError;
-use noren::{DB, meta::HostMaterial};
-use tare::transient::TransientAllocator;
-use tracing::info;
-use utils::gpupool::GPUPool;
-
-use super::scene::GPUScene;
+use noren::{
+    DB,
+    meta::{DeviceModel, HostMaterial},
+};
+use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
+use tare::transient::TransientAllocator;
+use tracing::{info, warn};
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -46,22 +44,60 @@ pub struct DeferredRenderer {
     db: Option<NonNull<DB>>,
     scene: GPUScene,
     pipelines: HashMap<Handle<Material>, PSO>,
+    objects: ResourceList<RenderObjectData>,
+    scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
+    cull_queue: CommandRing,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
-    view_draws: Vec<SceneViewDraw>,
+}
+
+struct RenderObjectData {
+    model: DeviceModel,
+    scene_handle: Handle<SceneObject>,
+}
+
+pub struct DeferredViewOutput {
+    pub camera: Handle<Camera>,
+    pub image: ImageView,
+    pub semaphore: Handle<Semaphore>,
+}
+
+fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
+    return Handle::new(h.slot, h.generation);
+}
+
+fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
+    return Handle::new(h.slot, h.generation);
 }
 
 impl DeferredRenderer {
     pub fn new(info: &DeferredRendererInfo) -> Self {
+        let device = DeviceSelector::new()
+            .unwrap()
+            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+            .unwrap();
         let mut ctx = if info.headless {
-            Box::new(Context::headless(&Default::default()).expect(""))
+            Box::new(
+                Context::headless(&ContextInfo {
+                    device,
+                    ..Default::default()
+                })
+                .expect(""),
+            )
         } else {
-            Box::new(Context::new(&Default::default()).expect(""))
+            Box::new(
+                Context::new(&ContextInfo {
+                    device,
+                    ..Default::default()
+                })
+                .expect(""),
+            )
         };
 
         let mut state = Box::new(BindlessState::new(&mut ctx));
 
+        CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
         let scene = GPUScene::new(
             &GPUSceneInfo {
                 name: "[MESHI] Deferred Renderer Scene",
@@ -76,12 +112,22 @@ impl DeferredRenderer {
         );
 
         let mut alloc = Box::new(TransientAllocator::new(ctx.as_mut()));
-        
-        let dynamic = ctx.make_dynamic_allocator(&DynamicAllocatorInfo {
-            ..Default::default()
-        }).expect("Unable to create dynamic allocator!");
+
+        let dynamic = ctx
+            .make_dynamic_allocator(&DynamicAllocatorInfo {
+                ..Default::default()
+            })
+            .expect("Unable to create dynamic allocator!");
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
+
+        let cull_queue = ctx
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "[CULL]",
+                parent: None,
+                queue_type: QueueType::Graphics,
+            })
+            .expect("Failed to make cull command queue");
 
         Self {
             ctx,
@@ -92,13 +138,19 @@ impl DeferredRenderer {
             db: None,
             dynamic,
             pipelines: Default::default(),
+            objects: Default::default(),
+            scene_lookup: Default::default(),
             viewport: info.initial_viewport,
-            view_draws: Vec::new(),
+            cull_queue,
         }
     }
 
-    pub fn context(&mut self) -> &mut Context {
-        &mut self.ctx
+    pub fn alloc(&mut self) -> &mut TransientAllocator {
+        &mut self.alloc
+    }
+
+    pub fn context(&mut self) -> &'static mut Context {
+        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
     }
 
     pub fn state(&mut self) -> &mut BindlessState {
@@ -119,7 +171,13 @@ impl DeferredRenderer {
         let mut state = GraphicsPipelineBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
-            .add_variable("per_object_ssbo", ShaderResource::DynamicStorage(self.dynamic.state()));
+            .add_table_variable_with_resources(
+                "per_obj_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(self.dynamic.state()),
+                    slot: 0,
+                }],
+            );
 
         {
             let ReservedBinding::TableBinding {
@@ -131,6 +189,17 @@ impl DeferredRenderer {
                 .unwrap()
                 .binding();
             state = state.add_table_variable_with_resources("meshi_bindless_cameras", resources);
+        }
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_lights")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_lights", resources);
         }
 
         {
@@ -166,12 +235,21 @@ impl DeferredRenderer {
                 .binding("meshi_bindless_transformations")
                 .unwrap()
                 .binding();
-            state = state.add_table_variable_with_resources("meshi_bindless_transformations", resources);
+            state = state
+                .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
 
-        state
+        let s = state
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 3],
+                ..Default::default()
+            })
             .build(unsafe { &mut (*ctx) })
-            .expect("Failed to build material!")
+            .expect("Failed to build material!");
+
+        assert!(s.bind_table[0].is_some());
+        assert!(s.bind_table[1].is_some());
+        s
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -182,8 +260,11 @@ impl DeferredRenderer {
 
         for name in materials {
             let (mat, handle) = db.fetch_host_material(&name).unwrap();
-            info!("[MESHI/GFX] Creating pipelines for material {}.", name);
             let p = self.build_pipeline(&mat);
+            info!(
+                "[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.",
+                name, handle
+            );
             self.pipelines.insert(handle.unwrap(), p);
         }
 
@@ -194,37 +275,139 @@ impl DeferredRenderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let h = self.scene.register_object(&SceneObjectInfo {
+        let scene_handle = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
             scene_mask: PassMask::MAIN_COLOR as u32,
         });
 
-        if let RenderObjectInfo::Model(m) = info {}
-        todo!()
+        match info {
+            RenderObjectInfo::Model(m) => {
+                let h = self.objects.push(RenderObjectData {
+                    model: m.clone(),
+                    scene_handle,
+                });
+
+                self.scene_lookup.insert(scene_handle.slot, h);
+
+                Ok(to_handle(h))
+            }
+            RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
+        }
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
-        todo!()
+        if !handle.valid() {
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            return;
+        }
+
+        let obj = self.objects.get_ref(from_handle(handle));
+        self.scene.release_object(obj.scene_handle);
+        self.scene_lookup.remove(&obj.scene_handle.slot);
+
+        self.objects.release(from_handle(handle));
+    }
+
+    pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
+        if !handle.valid() {
+            return Default::default();
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            return Default::default();
+        }
+
+        let obj = self.objects.get_ref(from_handle(handle));
+        self.scene.get_object_transform(obj.scene_handle)
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
-        //  self.scene.set_object_transform(handle, transform);
-    }
+        if !handle.valid() {
+            warn!("Attempted to update transformation of invalid handle.");
+            return;
+        }
 
-    pub fn set_active_cameras(&mut self, cameras: &[Handle<Camera>]) {
-        self.scene.set_active_cameras(cameras);
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            warn!("Failed to update transform for object {}", handle.slot);
+            return;
+        }
+
+        let obj = self.objects.get_ref(from_handle(handle));
+        self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
     pub fn update(
         &mut self,
+        sems: &[Handle<Semaphore>],
+        views: &[Handle<Camera>],
         _delta_time: f32,
-        view_outputs: &HashMap<Handle<Camera>, Vec<ImageView>>,
-        submit_info: &SubmitInfo,
-    ) {
+    ) -> Vec<DeferredViewOutput> {
+        if views.is_empty() {
+            return Vec::new();
+        }
+
+        self.scene.set_active_cameras(views);
+
+        self.cull_queue
+            .record(|c| {
+                let state_update = self
+                    .state
+                    .update()
+                    .expect("Failed to update furikake state");
+
+                let cull_cmds = state_update.combine(self.scene.cull_and_sync());
+                cull_cmds.append(c);
+            })
+            .expect("Failed to make commands");
+
+        self.cull_queue
+            .submit(&Default::default())
+            .expect("Failed to submit!");
+        self.cull_queue.wait_all().unwrap();
+
+        struct ViewDrawItem {
+            model: DeviceModel,
+            transformation: Handle<Transformation>,
+            total_transform: Mat4,
+        }
+
+        let num_bins = self.scene.num_bins();
+        let max_objects = self.scene.max_objects_per_bin() as usize;
+        let bin_counts = self.scene.bin_counts();
+        let mut view_draws: Vec<Vec<ViewDrawItem>> = (0..views.len()).map(|_| Vec::new()).collect();
+
+        for (view_idx, _) in views.iter().enumerate() {
+            for bin in 0..num_bins {
+                let bin_offset = view_idx * num_bins + bin;
+                if bin_offset >= bin_counts.len() {
+                    continue;
+                }
+
+                let count = bin_counts[bin_offset] as usize;
+                for draw_idx in 0..count {
+                    let slot = bin_offset * max_objects + draw_idx;
+                    if let Some(culled) = self.scene.culled_object(slot as u32) {
+                        if let Some(obj_handle) = self.scene_lookup.get(&(culled.object_id as u16))
+                        {
+                            let obj = self.objects.get_ref(*obj_handle);
+                            view_draws[view_idx].push(ViewDrawItem {
+                                model: obj.model.clone(),
+                                transformation: culled.transformation,
+                                total_transform: culled.total_transform,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
-            dim: [self.viewport.area.x as u32, self.viewport.area.y as u32, 1],
+            dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
@@ -232,76 +415,22 @@ impl DeferredRenderer {
             initial_data: None,
         };
 
-        let cmds = self.scene.cull();
-        let mut readback = CommandStream::new().begin();
-        readback.combine(cmds);
-        self.scene
-            .output_bins_mut()
-            .sync_down(&mut readback)
-            .expect("download culled bins");
-        readback.prepare_buffer(
-            self.scene.output_bin_counts().device().handle,
-            UsageBits::COPY_SRC,
-        );
-        readback.combine(self.scene.output_bin_counts_mut().sync_down());
+        let semaphores = self.graph.make_semaphores(1);
+        let mut outputs = Vec::with_capacity(views.len());
 
-        let readback = readback.end();
-        let ctx_ptr = self.ctx.as_mut() as *mut Context;
-        let mut queue = self
-            .ctx
-            .pool_mut(QueueType::Graphics)
-            .begin(ctx_ptr, "deferred_scene_cull", false)
-            .expect("begin compute queue");
-        let (_, fence) = readback.submit(
-            &mut queue,
-            &SubmitInfo2 {
-                ..Default::default()
-            },
-        );
-        if let Some(fence) = fence {
-            self.ctx.wait(fence).expect("wait for cull");
-        }
-
-        self.view_draws.clear();
-        let bin_count = self.scene.bin_count();
-        let max_objects = self.scene.max_objects_per_bin();
-        let bin_counts = self.scene.output_bin_counts().as_slice::<u32>();
-
-        for (view_index, camera) in self.scene.active_cameras().iter().copied().enumerate() {
-            let mut draws = Vec::new();
-            for bin in 0..bin_count {
-                let count_index = view_index * bin_count + bin;
-                let count = bin_counts[count_index] as usize;
-                for idx in 0..count {
-                    let slot = count_index * max_objects + idx;
-                    let culled = self
-                        .scene
-                        .output_bins()
-                        .get_ref::<CulledObject>(Handle::new(slot as u16, 0))
-                        .expect("culled object");
-                    draws.push(PerDrawData {
-                        transform: culled.transformation,
-                        object_id: culled.object_id,
-                        bin_id: culled.bin_id,
-                    });
-                }
-            }
-            self.view_draws.push(SceneViewDraw { camera, draws });
-        }
-
-        for view in &self.view_draws {
+        for (view_idx, camera) in views.iter().enumerate() {
             let position = self.graph.make_image(&ImageInfo {
-                debug_name: "[MESHI DEFERRED] Position Framebuffer",
+                debug_name: &format!("[MESHI DEFERRED] Position Framebuffer View {view_idx}"),
                 ..default_framebuffer_info
             });
 
             let normal = self.graph.make_image(&ImageInfo {
-                debug_name: "[MESHI DEFERRED] Normal Framebuffer",
+                debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
                 ..default_framebuffer_info
             });
 
             let diffuse = self.graph.make_image(&ImageInfo {
-                debug_name: "[MESHI DEFERRED] Diffuse Framebuffer",
+                debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
                 ..default_framebuffer_info
             });
 
@@ -313,12 +442,8 @@ impl DeferredRenderer {
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
             deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
-            let outputs = view_outputs
-                .get(&view.camera)
-                .cloned()
-                .unwrap_or_default();
-            let color_image = diffuse.img;
-
+            let draw_items = &view_draws[view_idx];
+            let camera_handle = *camera;
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.viewport,
@@ -327,32 +452,83 @@ impl DeferredRenderer {
                     clear_values: deferred_pass_clear,
                     depth_clear: None,
                 },
-                move |mut cmd| {
-                    for output in outputs.iter() {
-                        cmd.blit_images(&BlitImage {
-                            src: color_image,
-                            dst: output.img,
-                            filter: Filter::Nearest,
-                            ..Default::default()
-                        });
+                |mut cmd| {
+                    for item in draw_items {
+                        for mesh in &item.model.meshes {
+                            if let Some(material) = &mesh.material {
+                                if let Some(mat_idx) = material.furikake_material_handle {
+                                    if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                        assert!(pso.handle.valid());
+                                        if self.cull_queue.current_index() == 0 {
+                                            self.dynamic.reset();
+                                        }
+
+                                        let mut alloc = self
+                                            .dynamic
+                                            .bump()
+                                            .expect("Failed to allocate dynamic buffer!");
+
+                                        #[repr(C)]
+                                        struct PerObj {
+                                            transform: Mat4, // Backup transform
+                                            transformation: Handle<Transformation>,
+                                            material_id: Handle<Material>,
+                                            camera: Handle<Camera>,
+                                        }
+
+                                        let per_obj = &mut alloc.slice::<PerObj>()[0];
+                                        per_obj.transform = item.total_transform;
+                                        per_obj.transformation = item.transformation;
+                                        per_obj.material_id = mat_idx;
+                                        per_obj.camera = camera_handle;
+                                        cmd = cmd
+                                            .bind_graphics_pipeline(pso.handle)
+                                            .update_viewport(&self.viewport)
+                                            .draw_indexed(&DrawIndexed {
+                                                vertices: mesh
+                                                    .geometry
+                                                    .base
+                                                    .vertices
+                                                    .handle()
+                                                    .unwrap(),
+                                                indices: mesh
+                                                    .geometry
+                                                    .base
+                                                    .indices
+                                                    .handle()
+                                                    .unwrap(),
+                                                index_count: mesh
+                                                    .geometry
+                                                    .base
+                                                    .index_count
+                                                    .unwrap(),
+                                                bind_tables: pso.tables(),
+                                                dynamic_buffers: [None, Some(alloc), None, None],
+                                                ..Default::default()
+                                            })
+                                            .unbind_graphics_pipeline();
+                                    }
+                                }
+                            }
+                        }
                     }
+
                     cmd
                 },
             );
+
+            outputs.push(DeferredViewOutput {
+                camera: *camera,
+                image: normal,
+                semaphore: semaphores[0],
+            });
         }
 
-        self.graph.execute_with(submit_info);
+        self.graph.execute_with(&SubmitInfo {
+            wait_sems: sems,
+            signal_sems: &[semaphores[0]],
+        });
+
+        outputs
     }
-}
-
-#[derive(Clone, Copy)]
-struct PerDrawData {
-    transform: Handle<Transformation>,
-    object_id: u32,
-    bin_id: u32,
-}
-
-struct SceneViewDraw {
-    camera: Handle<Camera>,
-    draws: Vec<PerDrawData>,
 }
