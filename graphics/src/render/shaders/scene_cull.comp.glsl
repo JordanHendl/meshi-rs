@@ -170,7 +170,7 @@ void main() {
         vec3 to_object = world_position - camera_position(cam);
         vec3 forward = rotate_vec3(vec3(0.0, 0.0, -1.0), camera_rotation_quat(cam));
 
-        if (dot(forward, to_object) <= 0.0) {
+        if (dot(forward, to_object) > 100000.0) {
             continue;
         }
 

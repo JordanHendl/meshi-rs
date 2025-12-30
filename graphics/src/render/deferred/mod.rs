@@ -5,6 +5,7 @@ use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{GraphicsPipelineBuilder, PSO};
 use dashi::*;
 use driver::command::DrawIndexed;
+use execution::{CommandDispatch, CommandRing};
 use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*};
 use glam::Mat4;
 use meshi_utils::MeshiError;
@@ -15,7 +16,7 @@ use noren::{
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
-use tracing::info;
+use tracing::{info, warn};
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -46,6 +47,7 @@ pub struct DeferredRenderer {
     objects: ResourceList<RenderObjectData>,
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
+    cull_queue: CommandRing,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -95,6 +97,7 @@ impl DeferredRenderer {
 
         let mut state = Box::new(BindlessState::new(&mut ctx));
 
+        CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
         let scene = GPUScene::new(
             &GPUSceneInfo {
                 name: "[MESHI] Deferred Renderer Scene",
@@ -118,6 +121,14 @@ impl DeferredRenderer {
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
+        let cull_queue = ctx
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "[CULL]",
+                parent: None,
+                queue_type: QueueType::Graphics,
+            })
+            .expect("Failed to make cull command queue");
+
         Self {
             ctx,
             state,
@@ -130,6 +141,7 @@ impl DeferredRenderer {
             objects: Default::default(),
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
+            cull_queue,
         }
     }
 
@@ -177,6 +189,17 @@ impl DeferredRenderer {
                 .unwrap()
                 .binding();
             state = state.add_table_variable_with_resources("meshi_bindless_cameras", resources);
+        }
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_lights")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_lights", resources);
         }
 
         {
@@ -289,12 +312,27 @@ impl DeferredRenderer {
         self.objects.release(from_handle(handle));
     }
 
+    pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
+        if !handle.valid() {
+            return Default::default();
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            return Default::default();
+        }
+
+        let obj = self.objects.get_ref(from_handle(handle));
+        self.scene.get_object_transform(obj.scene_handle)
+    }
+
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         if !handle.valid() {
+            warn!("Attempted to update transformation of invalid handle.");
             return;
         }
 
         if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            warn!("Failed to update transform for object {}", handle.slot);
             return;
         }
 
@@ -314,24 +352,22 @@ impl DeferredRenderer {
 
         self.scene.set_active_cameras(views);
 
-        let cull_cmds = self.scene.cull_and_sync();
-        let ctx_ptr = self.ctx.as_mut() as *mut Context;
-        let mut queue = self
-            .ctx
-            .pool_mut(QueueType::Graphics)
-            .begin("scene_cull", false)
-            .expect("begin cull queue");
+        self.cull_queue
+            .record(|c| {
+                let state_update = self
+                    .state
+                    .update()
+                    .expect("Failed to update furikake state");
 
-        let (_, fence) = cull_cmds.submit(
-            &mut queue,
-            &SubmitInfo2 {
-                ..Default::default()
-            },
-        );
+                let cull_cmds = state_update.combine(self.scene.cull_and_sync());
+                cull_cmds.append(c);
+            })
+            .expect("Failed to make commands");
 
-        if let Some(fence) = fence {
-            self.ctx.wait(fence).expect("wait for cull");
-        }
+        self.cull_queue
+            .submit(&Default::default())
+            .expect("Failed to submit!");
+        self.cull_queue.wait_all().unwrap();
 
         struct ViewDrawItem {
             model: DeviceModel,
@@ -423,6 +459,9 @@ impl DeferredRenderer {
                                 if let Some(mat_idx) = material.furikake_material_handle {
                                     if let Some(pso) = self.pipelines.get(&mat_idx) {
                                         assert!(pso.handle.valid());
+                                        if self.cull_queue.current_index() == 0 {
+                                            self.dynamic.reset();
+                                        }
 
                                         let mut alloc = self
                                             .dynamic
@@ -442,7 +481,6 @@ impl DeferredRenderer {
                                         per_obj.transformation = item.transformation;
                                         per_obj.material_id = mat_idx;
                                         per_obj.camera = camera_handle;
-
                                         cmd = cmd
                                             .bind_graphics_pipeline(pso.handle)
                                             .update_viewport(&self.viewport)
@@ -481,7 +519,7 @@ impl DeferredRenderer {
 
             outputs.push(DeferredViewOutput {
                 camera: *camera,
-                image: position,
+                image: normal,
                 semaphore: semaphores[0],
             });
         }

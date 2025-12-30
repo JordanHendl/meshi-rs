@@ -1,21 +1,16 @@
 use std::ptr::NonNull;
 
-use bento::{
-    Compiler, OptimizationLevel, Request, ShaderLang,
-    builder::ComputePipelineBuilder as BentoComputePipelineBuilder,
-};
+use bento::builder::ComputePipelineBuilder as BentoComputePipelineBuilder;
 use dashi::*;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
-    ShaderResource, ShaderType, UsageBits,
+    ShaderResource, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
     utils::gpupool::{DynamicGPUPool, GPUPool},
 };
 use furikake::{
-    BindlessState,
-    GPUState,
-    reservations::bindless_camera::ReservedBindlessCamera,
+    BindlessState, GPUState,
     reservations::bindless_transformations::ReservedBindlessTransformations,
     types::{Camera, Transformation},
 };
@@ -192,7 +187,7 @@ impl GPUScene {
             .add_variable("transformations", self.data.transformations.clone())
             .build(&mut ctx);
 
-        let cull_builder = BentoComputePipelineBuilder::new()
+        let cull_state = BentoComputePipelineBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
@@ -220,9 +215,8 @@ impl GPUScene {
             .add_variable(
                 "params",
                 ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
-            );
-
-        let cull_state = cull_builder.build(&mut ctx);
+            )
+            .build(&mut ctx);
 
         Ok(SceneComputePipelines {
             cull_state: cull_state.ok(),
@@ -487,6 +481,11 @@ impl GPUScene {
         }
     }
 
+    pub fn get_object_transform(&self, handle: Handle<SceneObject>) -> Mat4 {
+        let object = self.data.objects_to_process.get_ref(handle).expect("");
+        return object.local_transform;
+    }
+
     pub fn add_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
         if let Some(parent_ref) = self.data.objects_to_process.get_mut_ref(parent) {
             if (parent_ref.child_count as usize) < parent_ref.children.len() {
@@ -537,7 +536,7 @@ impl GPUScene {
     }
 
     pub fn cull(&mut self) -> CommandStream<Executable> {
-        let mut stream = CommandStream::new().begin();
+        let stream = CommandStream::new().begin();
         self.data.draw_bins.clear();
         for count in self.data.bin_counts.as_slice_mut::<u32>() {
             *count = 0;
@@ -606,12 +605,7 @@ impl GPUScene {
         CommandStream::new()
             .begin()
             .combine(self.cull())
-            .combine(
-                self.data
-                    .draw_bins
-                    .sync_down()
-                    .expect("sync culled bins"),
-            )
+            .combine(self.data.draw_bins.sync_down().expect("sync culled bins"))
             .combine(self.data.bin_counts.sync_down())
             .combine(self.data.dispatch.sync_down())
             .end()
@@ -642,13 +636,10 @@ mod tests {
     use dashi::{
         ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
     };
-    use furikake::BindlessState;
+    use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
     use glam::Vec3;
 
-    fn make_test_scene(
-        ctx: &mut Box<Context>,
-        state: &mut Box<BindlessState>,
-    ) -> GPUScene {
+    fn make_test_scene(ctx: &mut Box<Context>, state: &mut Box<BindlessState>) -> GPUScene {
         GPUScene::new(
             &GPUSceneInfo {
                 name: "test_scene",
@@ -850,11 +841,7 @@ mod tests {
             Mat4::IDENTITY,
             u32::MAX,
         ));
-        let child = scene.register_object(&make_object_info(
-            child_local,
-            Mat4::IDENTITY,
-            u32::MAX,
-        ));
+        let child = scene.register_object(&make_object_info(child_local, Mat4::IDENTITY, u32::MAX));
 
         scene.add_child(parent, child);
 

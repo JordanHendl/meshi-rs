@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7142d79dce90af9b130158e3b2ebf3817b74986f"
+source = "git+https://github.com/JordanHendl/gohan#83e9c4710121e42b0e38a4efeeaf0bb74eb51162"
 dependencies = [
  "bincode",
  "clap",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7142d79dce90af9b130158e3b2ebf3817b74986f"
+source = "git+https://github.com/JordanHendl/gohan#83e9c4710121e42b0e38a4efeeaf0bb74eb51162"
 dependencies = [
  "bento",
  "dashi",
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7142d79dce90af9b130158e3b2ebf3817b74986f"
+source = "git+https://github.com/JordanHendl/gohan#83e9c4710121e42b0e38a4efeeaf0bb74eb51162"
 dependencies = [
  "bento",
  "dashi",
@@ -2285,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#7142d79dce90af9b130158e3b2ebf3817b74986f"
+source = "git+https://github.com/JordanHendl/gohan#83e9c4710121e42b0e38a4efeeaf0bb74eb51162"
 dependencies = [
  "bento",
  "dashi",
@@ -3068,9 +3068,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f4a4e8e9dc5c62d159f04fcdbe07f4c3fb710415aab4754bf11505501e3251d"
+checksum = "e9747e91771f56fd7893e1164abd78febd14a670ceec257caad15e051de35f06"
 
 [[package]]
 name = "zune-core"

@@ -2,18 +2,18 @@ mod render;
 pub mod structs;
 pub(crate) mod utils;
 
+use dashi::driver::command::BlitImage;
+use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
-    Buffer, CommandStream, Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo,
-    Filter, FRect2D, Handle, ImageView, QueueType, Rect2D, SubmitInfo2, Viewport,
+    Buffer, CommandQueueInfo2, CommandStream, Context, Display as DashiDisplay,
+    DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Handle, ImageView, QueueType, Rect2D,
+    SubmitInfo, SubmitInfo2, Viewport,
 };
-use dashi::driver::command::BlitImage;
 pub use furikake::types::*;
-use furikake::BindlessState;
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
-use meta::{DeviceMesh, DeviceModel};
 pub use noren::*;
 use render::deferred::{DeferredRenderer, DeferredRendererInfo};
 use std::collections::{HashMap, HashSet};
@@ -41,6 +41,7 @@ pub struct RenderEngine {
     renderer: DeferredRenderer,
     displays: Pool<Display>,
     event_cb: Option<EventCallbackInfo>,
+    blit_queue: CommandRing,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     db: Option<NonNull<DB>>,
 }
@@ -49,7 +50,7 @@ impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
 
-        let renderer = DeferredRenderer::new(&DeferredRendererInfo {
+        let mut renderer = DeferredRenderer::new(&DeferredRendererInfo {
             headless: info.headless,
             initial_viewport: Viewport {
                 area: FRect2D {
@@ -73,6 +74,14 @@ impl RenderEngine {
         } else {
             Some(winit::event_loop::EventLoop::new())
         };
+        let blit_queue = renderer
+            .context()
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "[BLIT]",
+                parent: None,
+                queue_type: QueueType::Graphics,
+            })
+            .expect("Failed to make render queue");
 
         Ok(Self {
             displays: Default::default(),
@@ -80,6 +89,7 @@ impl RenderEngine {
             db: None,
             event_cb: None,
             event_loop,
+            blit_queue,
         })
     }
 
@@ -141,7 +151,7 @@ impl RenderEngine {
     }
 
     pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
-        todo!()
+        self.renderer.object_transform(handle)
     }
 
     fn publish_events(&mut self) {
@@ -196,12 +206,6 @@ impl RenderEngine {
         }
 
         let ctx = self.context();
-        let ctx_ptr = ctx as *mut Context;
-        let mut queue = ctx
-            .pool_mut(QueueType::Graphics)
-            .begin("display_blit", false)
-            .expect("begin blit queue");
-
         self.displays.for_each_occupied_mut(|dis| {
             if !dis.scene.valid() {
                 return;
@@ -216,33 +220,31 @@ impl RenderEngine {
                     let d = display.as_mut().unwrap();
                     let (img, acquire_sem, _, _) = ctx.acquire_new_image(d).unwrap();
                     let blit_sem = ctx.make_semaphore().expect("make blit semaphore");
-
-                    let blit_cmds = CommandStream::new()
-                        .begin()
-                        .blit_images(&BlitImage {
-                            src: output.image.img,
-                            dst: img.img,
-                            filter: Filter::Nearest,
-                            ..Default::default()
+                    self.blit_queue
+                        .record(|c| {
+                            CommandStream::new()
+                                .begin()
+                                .blit_images(&BlitImage {
+                                    src: output.image.img,
+                                    dst: img.img,
+                                    filter: Filter::Nearest,
+                                    ..Default::default()
+                                })
+                                .prepare_for_presentation(img.img)
+                                .end()
+                                .append(c);
                         })
-                        .prepare_for_presentation(img.img)
-                        .end();
+                        .expect("Failed to make commands");
 
-                    let mut submit = SubmitInfo2::default();
-                    submit.wait_sems = [
-                        acquire_sem,
-                        output.semaphore,
-                        Handle::default(),
-                        Handle::default(),
-                ];
-                    submit.signal_sems = [
-                        blit_sem,
-                        Handle::default(),
-                        Handle::default(),
-                        Handle::default(),
-                    ];
+                    //        self.cull_queue.wait_all().unwrap();
 
-                    let _ = blit_cmds.submit(&mut queue, &submit);
+                    self.blit_queue
+                        .submit(&SubmitInfo {
+                            wait_sems: &[acquire_sem, output.semaphore],
+                            signal_sems: &[blit_sem],
+                        })
+                        .expect("Failed to submit!");
+
                     ctx.present_display(d, &[blit_sem])
                         .expect("Failed to present to display!");
                 }

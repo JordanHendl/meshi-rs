@@ -1,7 +1,6 @@
 pub mod gpuoption;
 use bento::builder::PSO;
 use furikake::types::Material;
-pub use gpuoption::*;
 
 #[repr(C)]
 pub struct HPSO {

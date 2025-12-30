@@ -18,7 +18,7 @@ fn main() {
         pooled_geometry_uploads: false,
     })
     .expect("Unable to create database");
-    
+
     engine.initialize_database(&mut db);
 
     // Make window for output to render to.
@@ -30,27 +30,42 @@ fn main() {
         },
         ..Default::default()
     });
-    
+
     // Register a camera and assign it to the display.
     let camera = engine.register_camera(&Mat4::IDENTITY);
     engine.attach_camera_to_display(display, camera);
-    
+
+    // Typical perspective: 60° vertical FOV, window aspect, near/far planes.
+    engine.set_camera_perspective(
+        camera,
+        60f32.to_radians(),
+        1024.0, // width
+        1024.0, // height
+        0.1,    // near
+        100.0,  // far
+    );
+
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
             db.fetch_gpu_model("model/cube").unwrap(),
         ))
         .unwrap();
-    
+
+    let mut transform = Mat4::from_translation(Vec3::new(0.0, 0.0, -5.0));
     // Update object transform to be the center.
-    engine.set_object_transform(cube, &Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)));
+    engine.set_object_transform(cube, &transform);
 
     let mut timer = Timer::new();
     timer.start();
-
+    
     loop {
         timer.stop();
-        engine.update(timer.elapsed_seconds_f32());
+        let dt = timer.elapsed_seconds_f32();
+        let rotation = Mat4::from_rotation_y(20000.0 * dt);
+        transform = transform * rotation;
+        engine.set_object_transform(cube, &transform);
+        engine.update(dt);
         timer.start();
     }
 }
