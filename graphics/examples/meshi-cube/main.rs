@@ -1,12 +1,14 @@
+use std::ffi::c_void;
+
 use glam::*;
+use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-
 fn main() {
     tracing_subscriber::fmt::init();
     let mut engine = RenderEngine::new(&RenderEngineInfo {
         headless: false,
-        canvas_extent: Some([1024, 1024]),
+        canvas_extent: Some([512, 512]),
     })
     .unwrap();
 
@@ -25,7 +27,7 @@ fn main() {
     let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
             title: "meshi-cube".to_string(),
-            size: [1024, 1024],
+            size: [512, 512],
             resizable: false,
         },
         ..Default::default()
@@ -39,8 +41,8 @@ fn main() {
     engine.set_camera_perspective(
         camera,
         60f32.to_radians(),
-        1024.0, // width
-        1024.0, // height
+        512.0, // width
+        512.0, // height
         0.1,    // near
         100.0,  // far
     );
@@ -52,20 +54,54 @@ fn main() {
         ))
         .unwrap();
 
-    let mut transform = Mat4::from_translation(Vec3::new(0.0, 0.0, -5.0));
+    let mut transform = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
     // Update object transform to be the center.
     engine.set_object_transform(cube, &transform);
 
+    struct AppData {
+        running: bool,
+        paused: bool,
+    }
+
+    let mut data = AppData {
+        running: true,
+        paused: false,
+    };
+
+    extern "C" fn callback(event: *mut Event, data: *mut c_void) {
+        unsafe {
+            let e = &mut (*event);
+            let r = &mut (*(data as *mut AppData));
+            if e.source() == EventSource::Key && e.event_type() == EventType::Pressed {
+                if e.key() == KeyCode::Space {
+                    r.paused = !r.paused;
+                }
+            }
+
+            if e.source() == EventSource::Window {
+                if e.event_type() == EventType::Quit {
+                    r.running = false;
+                }
+            }
+        }
+    }
+
+    engine.set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
     let mut timer = Timer::new();
     timer.start();
-    
-    loop {
+
+    while data.running {
         timer.stop();
         let dt = timer.elapsed_seconds_f32();
-        let rotation = Mat4::from_rotation_y(20000.0 * dt);
-        transform = transform * rotation;
-        engine.set_object_transform(cube, &transform);
+        let mut rotation = Mat4::from_rotation_y(20000.0 * dt);
+        rotation = rotation * Mat4::from_rotation_x(20000.0 * dt);
+        if !data.paused {
+            transform = transform * rotation;
+            engine.set_object_transform(cube, &transform);
+        }
         engine.update(dt);
         timer.start();
     }
+
+    engine.shut_down();
 }

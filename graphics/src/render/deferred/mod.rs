@@ -142,7 +142,7 @@ impl DeferredRenderer {
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
-                sample_count: SampleCount::S4,
+                sample_count: SampleCount::S1,
                 ..Default::default()
             })
             .add_table_variable_with_resources(
@@ -501,6 +501,33 @@ impl DeferredRenderer {
         view_draws
     }
 
+    fn update_resource_tables(&mut self) {
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_textures")
+                .unwrap()
+                .binding();
+            self.combine_pso
+                .update_table_slice("meshi_bindless_textures", &resources);
+        }
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
+                .binding("meshi_bindless_samplers")
+                .unwrap()
+                .binding();
+            self.combine_pso
+                .update_table_slice("meshi_bindless_samplers", &resources);
+        }
+    }
+
     pub fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
@@ -518,14 +545,15 @@ impl DeferredRenderer {
 
         // Manually collect all draws per view.
         let view_draws = self.collect_draws(views);
-
+    
+        // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
             dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
-            samples: SampleCount::S4,
+            samples: SampleCount::S4, // JHTODO Make this configurable.
             initial_data: None,
         };
 
@@ -563,6 +591,7 @@ impl DeferredRenderer {
             let final_combine = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Combined Framebuffer View {view_idx}"),
                 format: Format::BGRA8,
+                samples: SampleCount::S1,
                 ..default_framebuffer_info
             });
 
@@ -582,6 +611,12 @@ impl DeferredRenderer {
 
             let draw_items = &view_draws[view_idx];
             let camera_handle = *camera;
+
+            // Deferred SPLIT pass. Renders the following framebuffers:
+            // 1) Position
+            // 2) Albedo (or diffuse)
+            // 3) Normal
+            // 4) Material Code
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.viewport,
@@ -608,7 +643,8 @@ impl DeferredRenderer {
                                             .dynamic
                                             .bump()
                                             .expect("Failed to allocate dynamic buffer!");
-
+                                        
+                                        // Per Object dynamic structure.
                                         #[repr(C)]
                                         struct PerObj {
                                             transform: Mat4, // Backup transform
@@ -657,31 +693,8 @@ impl DeferredRenderer {
                     cmd
                 },
             );
-            {
-                let ReservedBinding::TableBinding {
-                    binding: _,
-                    resources,
-                } = self
-                    .state
-                    .binding("meshi_bindless_textures")
-                    .unwrap()
-                    .binding();
-                self.combine_pso
-                    .update_table_slice("meshi_bindless_textures", &resources);
-            }
-            {
-                let ReservedBinding::TableBinding {
-                    binding: _,
-                    resources,
-                } = self
-                    .state
-                    .binding("meshi_bindless_samplers")
-                    .unwrap()
-                    .binding();
-                self.combine_pso
-                    .update_table_slice("meshi_bindless_samplers", &resources);
-            }
-
+            
+            self.update_resource_tables();
 
             self.graph.add_subpass(
                 &SubpassInfo {
