@@ -54,7 +54,8 @@ fn main() {
         ))
         .unwrap();
 
-    let mut transform = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
+    let translation = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
+    let mut transform = translation;
     // Update object transform to be the center.
     engine.set_object_transform(cube, &transform);
 
@@ -89,18 +90,23 @@ fn main() {
     engine.set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
     let mut timer = Timer::new();
     timer.start();
+    let mut last_time = timer.elapsed_seconds_f32();
+    let mut total_time = 0.0f32;
+    let angular_velocity = 2.0f32;
 
     while data.running {
-        timer.stop();
-        let dt = timer.elapsed_seconds_f32();
-        let mut rotation = Mat4::from_rotation_y(20000.0 * dt);
-        rotation = rotation * Mat4::from_rotation_x(20000.0 * dt);
+        let now = timer.elapsed_seconds_f32();
+        let mut dt = now - last_time;
+        dt = dt.min(1.0 / 30.0);
         if !data.paused {
-            transform = transform * rotation;
+            total_time += dt;
+            let mut rotation = Mat4::from_rotation_y(angular_velocity * total_time);
+            rotation = rotation * Mat4::from_rotation_x(angular_velocity * total_time);
+            transform = translation * rotation;
             engine.set_object_transform(cube, &transform);
         }
         engine.update(dt);
-        timer.start();
+        last_time = now;
     }
 
     engine.shut_down();
