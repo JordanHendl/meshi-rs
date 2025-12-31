@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-use bento::builder::ComputePipelineBuilder as BentoComputePipelineBuilder;
+use bento::builder::CSOBuilder;
 use dashi::*;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
@@ -176,7 +176,7 @@ impl GPUScene {
             resources,
         } = binding.binding();
 
-        let transform_state = BentoComputePipelineBuilder::new()
+        let transform_state = CSOBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
             ))
@@ -187,7 +187,7 @@ impl GPUScene {
             .add_variable("transformations", self.data.transformations.clone())
             .build(&mut ctx);
 
-        let cull_state = BentoComputePipelineBuilder::new()
+        let cull_state = CSOBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
@@ -355,7 +355,7 @@ impl GPUScene {
             &SubmitInfo2 {
                 ..Default::default()
             },
-        );
+        ).unwrap();
 
         dispatch.as_slice_mut()[0] = SceneDispatchInfo {
             num_bins: info.draw_bins.len() as u32,

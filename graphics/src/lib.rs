@@ -2,7 +2,7 @@ mod render;
 pub mod structs;
 pub(crate) mod utils;
 
-use dashi::driver::command::BlitImage;
+use dashi::driver::command::*;
 use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
@@ -19,6 +19,7 @@ use render::deferred::{DeferredRenderer, DeferredRendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
+use tracing::{info, warn, error};
 
 pub type DisplayInfo = DashiDisplayInfo;
 pub type WindowInfo = dashi::WindowInfo;
@@ -224,10 +225,9 @@ impl RenderEngine {
                         .record(|c| {
                             CommandStream::new()
                                 .begin()
-                                .blit_images(&BlitImage {
+                                .resolve_images(&MSImageResolve {
                                     src: output.image.img,
                                     dst: img.img,
-                                    filter: Filter::Nearest,
                                     ..Default::default()
                                 })
                                 .prepare_for_presentation(img.img)
@@ -256,11 +256,14 @@ impl RenderEngine {
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
+
         let raw = Some(Box::new(
             self.context()
                 .make_display(&info)
                 .expect("Failed to make display!"),
         ));
+
+        info!("Registered window {}", info.window.title);
         return self
             .displays
             .insert(Display {

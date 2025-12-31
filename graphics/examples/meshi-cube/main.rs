@@ -6,7 +6,7 @@ fn main() {
     tracing_subscriber::fmt::init();
     let mut engine = RenderEngine::new(&RenderEngineInfo {
         headless: false,
-        canvas_extent: Some([1280, 1024]),
+        canvas_extent: Some([1024, 1024]),
     })
     .unwrap();
 
@@ -48,7 +48,7 @@ fn main() {
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/cube").unwrap(),
+            db.fetch_gpu_model("model/sphere").unwrap(),
         ))
         .unwrap();
 

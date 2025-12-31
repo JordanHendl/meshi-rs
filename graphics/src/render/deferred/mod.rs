@@ -2,7 +2,7 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
-use bento::builder::{GraphicsPipelineBuilder, PSO};
+use bento::builder::{PSO, PSOBuilder, AttachmentDesc};
 use dashi::*;
 use driver::command::DrawIndexed;
 use execution::{CommandDispatch, CommandRing};
@@ -48,7 +48,8 @@ pub struct DeferredRenderer {
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
     cull_queue: CommandRing,
-    alloc: Box<TransientAllocator>,
+    combine_pso: PSO,
+    _alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
 
@@ -61,6 +62,12 @@ pub struct DeferredViewOutput {
     pub camera: Handle<Camera>,
     pub image: ImageView,
     pub semaphore: Handle<Semaphore>,
+}
+
+struct ViewDrawItem {
+    model: DeviceModel,
+    transformation: Handle<Transformation>,
+    total_transform: Mat4,
 }
 
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
@@ -95,9 +102,8 @@ impl DeferredRenderer {
             )
         };
 
-        let mut state = Box::new(BindlessState::new(&mut ctx));
-
         CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
+        let mut state = Box::new(BindlessState::new(&mut ctx));
         let scene = GPUScene::new(
             &GPUSceneInfo {
                 name: "[MESHI] Deferred Renderer Scene",
@@ -129,11 +135,76 @@ impl DeferredRenderer {
             })
             .expect("Failed to make cull command queue");
 
+        let shaders = miso::stddeferred_combine(&[]);
+        let mut psostate = PSOBuilder::new()
+            .vertex_compiled(Some(shaders[0].clone()))
+            .fragment_compiled(Some(shaders[1].clone()))
+            .add_table_variable_with_resources(
+                "per_obj_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            );
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state.binding("meshi_bindless_cameras").unwrap().binding();
+            psostate =
+                psostate.add_table_variable_with_resources("meshi_bindless_cameras", resources);
+        }
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state.binding("meshi_bindless_lights").unwrap().binding();
+            psostate =
+                psostate.add_table_variable_with_resources("meshi_bindless_lights", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state.binding("meshi_bindless_textures").unwrap().binding();
+            psostate =
+                psostate.add_table_variable_with_resources("meshi_bindless_textures", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state.binding("meshi_bindless_materials").unwrap().binding();
+            psostate =
+                psostate.add_table_variable_with_resources("meshi_bindless_materials", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state
+                .binding("meshi_bindless_transformations")
+                .unwrap()
+                .binding();
+            psostate = psostate
+                .add_table_variable_with_resources("meshi_bindless_transformations", resources);
+        }
+
+        info!(
+            "Initialized Deferred Renderer with dimensions [{}, {}]",
+            info.initial_viewport.area.w, info.initial_viewport.area.h
+        );
         Self {
+            combine_pso: psostate
+                .build(ctx.as_mut())
+                .expect("Failed to make deferred combine pso!"),
             ctx,
             state,
             scene,
-            alloc,
             graph,
             db: None,
             dynamic,
@@ -142,11 +213,12 @@ impl DeferredRenderer {
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
             cull_queue,
+            _alloc: alloc,
         }
     }
 
     pub fn alloc(&mut self) -> &mut TransientAllocator {
-        &mut self.alloc
+        &mut self._alloc
     }
 
     pub fn context(&mut self) -> &'static mut Context {
@@ -168,7 +240,7 @@ impl DeferredRenderer {
 
         let shaders = miso::stddeferred(&defines);
 
-        let mut state = GraphicsPipelineBuilder::new()
+        let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .add_table_variable_with_resources(
@@ -238,10 +310,21 @@ impl DeferredRenderer {
             state = state
                 .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
+        
+        state = state.add_depth_target(AttachmentDesc {
+            format: Format::D24S8,
+            samples: SampleCount::S4,
+        });
 
         let s = state
+            .set_attachment_format("@entryPointOutput.normal", Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 3],
+                color_blend_states: vec![Default::default(); 4],
+                sample_count: SampleCount::S4,
+                depth_test: Some(DepthInfo {
+                    should_test: true,
+                    should_write: true,
+                }),
                 ..Default::default()
             })
             .build(unsafe { &mut (*ctx) })
@@ -340,18 +423,7 @@ impl DeferredRenderer {
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
-    pub fn update(
-        &mut self,
-        sems: &[Handle<Semaphore>],
-        views: &[Handle<Camera>],
-        _delta_time: f32,
-    ) -> Vec<DeferredViewOutput> {
-        if views.is_empty() {
-            return Vec::new();
-        }
-
-        self.scene.set_active_cameras(views);
-
+    fn pull_scene(&mut self) {
         self.cull_queue
             .record(|c| {
                 let state_update = self
@@ -368,13 +440,9 @@ impl DeferredRenderer {
             .submit(&Default::default())
             .expect("Failed to submit!");
         self.cull_queue.wait_all().unwrap();
+    }
 
-        struct ViewDrawItem {
-            model: DeviceModel,
-            transformation: Handle<Transformation>,
-            total_transform: Mat4,
-        }
-
+    fn collect_draws(&mut self, views: &[Handle<Camera>]) -> Vec<Vec<ViewDrawItem>> {
         let num_bins = self.scene.num_bins();
         let max_objects = self.scene.max_objects_per_bin() as usize;
         let bin_counts = self.scene.bin_counts();
@@ -404,6 +472,26 @@ impl DeferredRenderer {
                 }
             }
         }
+        view_draws
+    }
+
+    pub fn update(
+        &mut self,
+        sems: &[Handle<Semaphore>],
+        views: &[Handle<Camera>],
+        _delta_time: f32,
+    ) -> Vec<DeferredViewOutput> {
+        if views.is_empty() {
+            return Vec::new();
+        }
+
+        // Set active scene cameras..
+        self.scene.set_active_cameras(views);
+        // Pull scene GPU --> CPU to read.
+        self.pull_scene();
+
+        // Manually collect all draws per view.
+        let view_draws = self.collect_draws(views);
 
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
@@ -411,12 +499,19 @@ impl DeferredRenderer {
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
-            samples: SampleCount::S1,
+            samples: SampleCount::S4,
             initial_data: None,
         };
 
         let semaphores = self.graph.make_semaphores(1);
         let mut outputs = Vec::with_capacity(views.len());
+        let mut depth = self.graph.make_image(&ImageInfo {
+            debug_name: &format!("[MESHI DEFERRED] Depth buffer"),
+            format: Format::D24S8,
+            ..default_framebuffer_info
+        });
+        
+        depth.view.aspect = AspectMask::Depth;
 
         for (view_idx, camera) in views.iter().enumerate() {
             let position = self.graph.make_image(&ImageInfo {
@@ -426,6 +521,7 @@ impl DeferredRenderer {
 
             let normal = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
+                format: Format::BGRA8,
                 ..default_framebuffer_info
             });
 
@@ -434,23 +530,32 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
+            let material_code = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Material Code Framebuffer View {view_idx}"),
+                ..default_framebuffer_info
+            });
+
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
-            deferred_pass_attachments[0] = Some(position);
-            deferred_pass_attachments[1] = Some(normal);
-            deferred_pass_attachments[2] = Some(diffuse);
+            deferred_pass_attachments[0] = Some(position.view);
+            deferred_pass_attachments[1] = Some(diffuse.view);
+            deferred_pass_attachments[2] = Some(normal.view);
+            deferred_pass_attachments[3] = Some(material_code.view);
 
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
-            deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
-
+            deferred_pass_clear[..4].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
+            
             let draw_items = &view_draws[view_idx];
             let camera_handle = *camera;
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.viewport,
                     color_attachments: deferred_pass_attachments,
-                    depth_attachment: None,
+                    depth_attachment: Some(depth.view),
                     clear_values: deferred_pass_clear,
-                    depth_clear: None,
+                    depth_clear: Some(ClearValue::DepthStencil {
+                        depth: 1.0,
+                        stencil: 0,
+                    }),
                 },
                 |mut cmd| {
                     for item in draw_items {
@@ -519,7 +624,7 @@ impl DeferredRenderer {
 
             outputs.push(DeferredViewOutput {
                 camera: *camera,
-                image: normal,
+                image: normal.view,
                 semaphore: semaphores[0],
             });
         }
