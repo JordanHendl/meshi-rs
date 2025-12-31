@@ -19,7 +19,7 @@ use render::deferred::{DeferredRenderer, DeferredRendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
 pub type WindowInfo = dashi::WindowInfo;
@@ -103,8 +103,20 @@ impl RenderEngine {
         self.renderer.context()
     }
 
-    pub fn shut_down(&mut self) {
-        todo!()
+    pub fn shut_down(mut self) {
+        info!("Shutting down render engine.");
+        self.event_cb = None;
+        self.event_loop = None;
+
+        let mut displays = std::mem::take(&mut self.displays);
+        displays.for_each_occupied_mut(|display| match &mut display.raw {
+            DisplayImpl::Window(window) => {
+                let _ = window.take();
+            }
+            DisplayImpl::CPUImage(_cpuimage) => {}
+        });
+        drop(displays);
+        self.renderer.shut_down();
     }
 
     pub fn register_light(&mut self, info: &LightInfo) -> Handle<Light> {
@@ -256,7 +268,6 @@ impl RenderEngine {
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
-
         let raw = Some(Box::new(
             self.context()
                 .make_display(&info)

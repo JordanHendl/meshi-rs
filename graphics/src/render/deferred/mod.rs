@@ -746,12 +746,16 @@ impl DeferredRenderer {
                 semaphore: semaphores[0],
             });
         }
-
+        
         self.graph.execute_with(&SubmitInfo {
             wait_sems: sems,
             signal_sems: &[semaphores[0]],
         });
 
         outputs
+    }
+
+    pub fn shut_down(self) {
+        self.ctx.destroy();
     }
 }
