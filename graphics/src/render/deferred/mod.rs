@@ -2,9 +2,9 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
-use bento::builder::{PSO, PSOBuilder, AttachmentDesc};
+use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
-use driver::command::DrawIndexed;
+use driver::command::{Draw, DrawIndexed};
 use execution::{CommandDispatch, CommandRing};
 use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*};
 use glam::Mat4;
@@ -49,7 +49,7 @@ pub struct DeferredRenderer {
     dynamic: DynamicAllocator,
     cull_queue: CommandRing,
     combine_pso: PSO,
-    _alloc: Box<TransientAllocator>,
+    alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
 
@@ -139,6 +139,12 @@ impl DeferredRenderer {
         let mut psostate = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
+            .set_attachment_format(0, Format::BGRA8)
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 1],
+                sample_count: SampleCount::S4,
+                ..Default::default()
+            })
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
@@ -171,6 +177,14 @@ impl DeferredRenderer {
             } = state.binding("meshi_bindless_textures").unwrap().binding();
             psostate =
                 psostate.add_table_variable_with_resources("meshi_bindless_textures", resources);
+        }
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = state.binding("meshi_bindless_samplers").unwrap().binding();
+            psostate =
+                psostate.add_table_variable_with_resources("meshi_bindless_samplers", resources);
         }
 
         {
@@ -213,12 +227,12 @@ impl DeferredRenderer {
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
             cull_queue,
-            _alloc: alloc,
+            alloc,
         }
     }
 
     pub fn alloc(&mut self) -> &mut TransientAllocator {
-        &mut self._alloc
+        &mut self.alloc
     }
 
     pub fn context(&mut self) -> &'static mut Context {
@@ -292,6 +306,18 @@ impl DeferredRenderer {
                 resources,
             } = self
                 .state
+                .binding("meshi_bindless_samplers")
+                .unwrap()
+                .binding();
+            state = state.add_table_variable_with_resources("meshi_bindless_samplers", resources);
+        }
+
+        {
+            let ReservedBinding::TableBinding {
+                binding: _,
+                resources,
+            } = self
+                .state
                 .binding("meshi_bindless_materials")
                 .unwrap()
                 .binding();
@@ -310,14 +336,13 @@ impl DeferredRenderer {
             state = state
                 .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
-        
+
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
             samples: SampleCount::S4,
         });
 
         let s = state
-            .set_attachment_format("@entryPointOutput.normal", Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 4],
                 sample_count: SampleCount::S4,
@@ -338,6 +363,7 @@ impl DeferredRenderer {
     pub fn initialize_database(&mut self, db: &mut DB) {
         db.import_dashi_context(&mut self.ctx);
         db.import_furikake_state(&mut self.state);
+        self.alloc.set_bindless_registry(self.state.as_mut());
 
         let materials = db.enumerate_materials();
 
@@ -432,7 +458,7 @@ impl DeferredRenderer {
                     .expect("Failed to update furikake state");
 
                 let cull_cmds = state_update.combine(self.scene.cull_and_sync());
-                cull_cmds.append(c);
+                cull_cmds.append(c).unwrap();
             })
             .expect("Failed to make commands");
 
@@ -510,7 +536,7 @@ impl DeferredRenderer {
             format: Format::D24S8,
             ..default_framebuffer_info
         });
-        
+
         depth.view.aspect = AspectMask::Depth;
 
         for (view_idx, camera) in views.iter().enumerate() {
@@ -521,7 +547,6 @@ impl DeferredRenderer {
 
             let normal = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
-                format: Format::BGRA8,
                 ..default_framebuffer_info
             });
 
@@ -535,6 +560,12 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
+            let final_combine = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Combined Framebuffer View {view_idx}"),
+                format: Format::BGRA8,
+                ..default_framebuffer_info
+            });
+
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_pass_attachments[0] = Some(position.view);
             deferred_pass_attachments[1] = Some(diffuse.view);
@@ -543,7 +574,12 @@ impl DeferredRenderer {
 
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
             deferred_pass_clear[..4].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
-            
+
+            let mut deferred_combine_attachments: [Option<ImageView>; 8] = [None; 8];
+            deferred_combine_attachments[0] = Some(final_combine.view);
+            let mut deferred_combine_clear: [Option<ClearValue>; 8] = [None; 8];
+            deferred_combine_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
+
             let draw_items = &view_draws[view_idx];
             let camera_handle = *camera;
             self.graph.add_subpass(
@@ -621,10 +657,79 @@ impl DeferredRenderer {
                     cmd
                 },
             );
+            {
+                let ReservedBinding::TableBinding {
+                    binding: _,
+                    resources,
+                } = self
+                    .state
+                    .binding("meshi_bindless_textures")
+                    .unwrap()
+                    .binding();
+                self.combine_pso
+                    .update_table_slice("meshi_bindless_textures", &resources);
+            }
+            {
+                let ReservedBinding::TableBinding {
+                    binding: _,
+                    resources,
+                } = self
+                    .state
+                    .binding("meshi_bindless_samplers")
+                    .unwrap()
+                    .binding();
+                self.combine_pso
+                    .update_table_slice("meshi_bindless_samplers", &resources);
+            }
+
+
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.viewport,
+                    color_attachments: deferred_combine_attachments,
+                    depth_attachment: None,
+                    clear_values: deferred_combine_clear,
+                    depth_clear: None,
+                },
+                |mut cmd| {
+                    let mut alloc = self
+                        .dynamic
+                        .bump()
+                        .expect("Failed to allocate dynamic buffer!");
+
+                    #[repr(C)]
+                    struct PerObj {
+                        pos: u32,
+                        diff: u32,
+                        norm: u32,
+                        mat: u32,
+                    }
+
+                    let per_obj = &mut alloc.slice::<PerObj>()[0];
+                    per_obj.pos = position.bindless_id.unwrap() as u32;
+                    per_obj.diff = diffuse.bindless_id.unwrap() as u32;
+                    per_obj.norm = normal.bindless_id.unwrap() as u32;
+                    per_obj.mat = material_code.bindless_id.unwrap() as u32;
+
+                    cmd = cmd
+                        .bind_graphics_pipeline(self.combine_pso.handle)
+                        .update_viewport(&self.viewport)
+                        .draw(&Draw {
+                            bind_tables: self.combine_pso.tables(),
+                            dynamic_buffers: [None, Some(alloc), None, None],
+                            instance_count: 1,
+                            count: 3,
+                            ..Default::default()
+                        })
+                        .unbind_graphics_pipeline();
+
+                    cmd
+                },
+            );
 
             outputs.push(DeferredViewOutput {
                 camera: *camera,
-                image: normal.view,
+                image: final_combine.view,
                 semaphore: semaphores[0],
             });
         }
