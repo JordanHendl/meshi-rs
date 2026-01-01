@@ -396,6 +396,7 @@ impl ForwardRenderer {
             mip_levels: 1,
             samples: SampleCount::S4, // JHTODO Make this configurable.
             initial_data: None,
+            ..Default::default()
         };
 
         let semaphores = self.graph.make_semaphores(1);
