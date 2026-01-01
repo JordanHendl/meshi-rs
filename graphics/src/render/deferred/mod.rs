@@ -1,5 +1,6 @@
 use std::{collections::HashMap, ptr::NonNull};
 
+use super::{Renderer, RendererInfo, ViewOutput};
 use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
@@ -28,16 +29,6 @@ pub enum PassMask {
     MAIN_COLOR = 0x00000001,
 }
 
-pub struct DeferredRendererInfo {
-    pub headless: bool,
-    pub initial_viewport: Viewport,
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-
 pub struct DeferredRenderer {
     ctx: Box<Context>,
     viewport: Viewport,
@@ -59,12 +50,6 @@ struct RenderObjectData {
     scene_handle: Handle<SceneObject>,
 }
 
-pub struct DeferredViewOutput {
-    pub camera: Handle<Camera>,
-    pub image: ImageView,
-    pub semaphore: Handle<Semaphore>,
-}
-
 struct ViewDrawItem {
     model: DeviceModel,
     transformation: Handle<Transformation>,
@@ -80,7 +65,7 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
-    pub fn new(info: &DeferredRendererInfo) -> Self {
+    pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
             .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
@@ -239,14 +224,6 @@ impl DeferredRenderer {
         &mut self.alloc
     }
 
-    pub fn context(&mut self) -> &'static mut Context {
-        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
-    }
-
-    pub fn state(&mut self) -> &mut BindlessState {
-        &mut self.state
-    }
-
     fn build_pipeline(&mut self, mat: &HostMaterial) -> PSO {
         let ctx: *mut Context = self.ctx.as_mut();
 
@@ -324,8 +301,8 @@ impl DeferredRenderer {
             let (mat, handle) = db.fetch_host_material(&name).unwrap();
             let p = self.build_pipeline(&mat);
             info!(
-                "[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.",
-                name, handle
+                "[MESHI/GFX] Creating pipelines for material {} (Handle => {}).",
+                name, handle.as_ref().unwrap().slot
             );
             self.pipelines.insert(handle.unwrap(), p);
         }
@@ -459,7 +436,7 @@ impl DeferredRenderer {
         sems: &[Handle<Semaphore>],
         views: &[Handle<Camera>],
         _delta_time: f32,
-    ) -> Vec<DeferredViewOutput> {
+    ) -> Vec<ViewOutput> {
         if views.is_empty() {
             return Vec::new();
         }
@@ -664,7 +641,7 @@ impl DeferredRenderer {
                 },
             );
 
-            outputs.push(DeferredViewOutput {
+            outputs.push(ViewOutput {
                 camera: *camera,
                 image: final_combine.view,
                 semaphore: semaphores[0],
@@ -680,6 +657,48 @@ impl DeferredRenderer {
     }
 
     pub fn shut_down(self) {
+        self.ctx.destroy();
+    }
+}
+
+impl Renderer for DeferredRenderer {
+    fn context(&mut self) -> &'static mut Context {
+        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
+    }
+
+    fn state(&mut self) -> &mut BindlessState {
+        &mut self.state
+    }
+
+    fn initialize_database(&mut self, db: &mut DB) {
+        DeferredRenderer::initialize_database(self, db);
+    }
+
+    fn register_object(
+        &mut self,
+        info: &RenderObjectInfo,
+    ) -> Result<Handle<RenderObject>, MeshiError> {
+        DeferredRenderer::register_object(self, info)
+    }
+
+    fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
+        DeferredRenderer::set_object_transform(self, handle, transform);
+    }
+
+    fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
+        DeferredRenderer::object_transform(self, handle)
+    }
+
+    fn update(
+        &mut self,
+        sems: &[Handle<Semaphore>],
+        views: &[Handle<Camera>],
+        delta_time: f32,
+    ) -> Vec<ViewOutput> {
+        DeferredRenderer::update(self, sems, views, delta_time)
+    }
+
+    fn shut_down(self: Box<Self>) {
         self.ctx.destroy();
     }
 }

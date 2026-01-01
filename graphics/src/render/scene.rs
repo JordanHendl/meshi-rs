@@ -883,7 +883,7 @@ mod tests {
             &SubmitInfo2 {
                 ..Default::default()
             },
-        );
+        ).unwrap();
 
         ctx.wait(fence.unwrap()).expect("wait for cull");
 

@@ -82,6 +82,7 @@ impl MeshiEngine {
                 } else {
                     Some(unsafe { [*info.canvas_extent, *info.canvas_extent.add(1)] })
                 },
+                ..Default::default()
             })
             .expect("failed to initialize render engine"),
         );

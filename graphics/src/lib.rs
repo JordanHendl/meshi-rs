@@ -15,7 +15,9 @@ use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 pub use noren::*;
-use render::deferred::{DeferredRenderer, DeferredRendererInfo};
+use render::deferred::DeferredRenderer;
+use render::forward::ForwardRenderer;
+use render::{Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
@@ -39,7 +41,7 @@ pub struct Display {
 }
 
 pub struct RenderEngine {
-    renderer: DeferredRenderer,
+    renderer: Box<dyn Renderer>,
     displays: Pool<Display>,
     event_cb: Option<EventCallbackInfo>,
     blit_queue: CommandRing,
@@ -51,7 +53,7 @@ impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
 
-        let mut renderer = DeferredRenderer::new(&DeferredRendererInfo {
+        let renderer_info = RendererInfo {
             headless: info.headless,
             initial_viewport: Viewport {
                 area: FRect2D {
@@ -68,7 +70,12 @@ impl RenderEngine {
                 },
                 ..Default::default()
             },
-        });
+        };
+
+        let mut renderer: Box<dyn Renderer> = match info.renderer {
+            RendererSelect::Deferred => Box::new(DeferredRenderer::new(&renderer_info)),
+            RendererSelect::Forward => Box::new(ForwardRenderer::new(&renderer_info)),
+        };
 
         let event_loop = if cfg!(test) || info.headless {
             None

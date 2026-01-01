@@ -1,3 +1,4 @@
+use super::{Renderer, RendererInfo, ViewOutput};
 use super::scene::GPUScene;
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
@@ -27,16 +28,6 @@ pub enum PassMask {
     MAIN_COLOR = 0x00000001,
 }
 
-pub struct ForwardRendererInfo {
-    pub headless: bool,
-    pub initial_viewport: Viewport,
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-
 pub struct ForwardRenderer {
     ctx: Box<Context>,
     viewport: Viewport,
@@ -57,12 +48,6 @@ struct RenderObjectData {
     scene_handle: Handle<SceneObject>,
 }
 
-pub struct ForwardViewOutput {
-    pub camera: Handle<Camera>,
-    pub image: ImageView,
-    pub semaphore: Handle<Semaphore>,
-}
-
 struct ViewDrawItem {
     model: DeviceModel,
     transformation: Handle<Transformation>,
@@ -78,7 +63,7 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl ForwardRenderer {
-    pub fn new(info: &ForwardRendererInfo) -> Self {
+    pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
             .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
@@ -158,14 +143,6 @@ impl ForwardRenderer {
         &mut self.alloc
     }
 
-    pub fn context(&mut self) -> &'static mut Context {
-        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
-    }
-
-    pub fn state(&mut self) -> &mut BindlessState {
-        &mut self.state
-    }
-
     fn build_pipeline(&mut self, mat: &HostMaterial) -> PSO {
         let ctx: *mut Context = self.ctx.as_mut();
 
@@ -232,8 +209,8 @@ impl ForwardRenderer {
             let (mat, handle) = db.fetch_host_material(&name).unwrap();
             let p = self.build_pipeline(&mat);
             info!(
-                "[MESHI/GFX] Creating pipelines for material {} (Handle => {:?}.",
-                name, handle
+                "[MESHI/GFX] Creating pipelines for material {} (Handle => {}).",
+                name, handle.as_ref().unwrap().slot
             );
             self.pipelines.insert(handle.unwrap(), p);
         }
@@ -367,7 +344,7 @@ impl ForwardRenderer {
         sems: &[Handle<Semaphore>],
         views: &[Handle<Camera>],
         _delta_time: f32,
-    ) -> Vec<ForwardViewOutput> {
+    ) -> Vec<ViewOutput> {
         if views.is_empty() {
             return Vec::new();
         }
@@ -495,7 +472,7 @@ impl ForwardRenderer {
                 },
             );
 
-            outputs.push(ForwardViewOutput {
+            outputs.push(ViewOutput {
                 camera: *camera,
                 image: color.view,
                 semaphore: semaphores[0],
@@ -511,6 +488,48 @@ impl ForwardRenderer {
     }
 
     pub fn shut_down(self) {
+        self.ctx.destroy();
+    }
+}
+
+impl Renderer for ForwardRenderer {
+    fn context(&mut self) -> &'static mut Context {
+        unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
+    }
+
+    fn state(&mut self) -> &mut BindlessState {
+        &mut self.state
+    }
+
+    fn initialize_database(&mut self, db: &mut DB) {
+        ForwardRenderer::initialize_database(self, db);
+    }
+
+    fn register_object(
+        &mut self,
+        info: &RenderObjectInfo,
+    ) -> Result<Handle<RenderObject>, MeshiError> {
+        ForwardRenderer::register_object(self, info)
+    }
+
+    fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
+        ForwardRenderer::set_object_transform(self, handle, transform);
+    }
+
+    fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
+        ForwardRenderer::object_transform(self, handle)
+    }
+
+    fn update(
+        &mut self,
+        sems: &[Handle<Semaphore>],
+        views: &[Handle<Camera>],
+        delta_time: f32,
+    ) -> Vec<ViewOutput> {
+        ForwardRenderer::update(self, sems, views, delta_time)
+    }
+
+    fn shut_down(self: Box<Self>) {
         self.ctx.destroy();
     }
 }
