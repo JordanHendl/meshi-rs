@@ -1,4 +1,5 @@
 pub mod deferred;
+pub mod environment;
 pub mod forward;
 mod scene;
 

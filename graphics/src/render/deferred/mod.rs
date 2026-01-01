@@ -1,5 +1,6 @@
 use std::{collections::HashMap, ptr::NonNull};
 
+use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
@@ -35,6 +36,7 @@ pub struct DeferredRenderer {
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene,
+    environment: EnvironmentRenderer,
     pipelines: HashMap<Handle<Material>, PSO>,
     objects: ResourceList<RenderObjectData>,
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
@@ -110,6 +112,16 @@ impl DeferredRenderer {
                 ..Default::default()
             })
             .expect("Unable to create dynamic allocator!");
+
+        let environment = EnvironmentRenderer::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            EnvironmentRendererInfo {
+                color_format: Format::BGRA8,
+                sample_count: SampleCount::S1,
+                use_depth: false,
+            },
+        );
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
@@ -210,6 +222,7 @@ impl DeferredRenderer {
             scene,
             graph,
             db: None,
+            environment,
             dynamic,
             pipelines: Default::default(),
             objects: Default::default(),
@@ -436,13 +449,14 @@ impl DeferredRenderer {
         &mut self,
         sems: &[Handle<Semaphore>],
         views: &[Handle<Camera>],
-        _delta_time: f32,
+        delta_time: f32,
     ) -> Vec<ViewOutput> {
         if views.is_empty() {
             return Vec::new();
         }
         if self.cull_queue.current_index() == 0 {
             self.dynamic.reset();
+            self.environment.reset();
         }
 
         // Set active scene cameras..
@@ -643,6 +657,15 @@ impl DeferredRenderer {
 
                     cmd
                 },
+            );
+
+            self.environment.render(
+                &mut self.graph,
+                self.viewport,
+                final_combine.view,
+                None,
+                camera_handle,
+                delta_time,
             );
 
             outputs.push(ViewOutput {

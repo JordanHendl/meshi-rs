@@ -1,3 +1,4 @@
+use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
@@ -34,6 +35,7 @@ pub struct ForwardRenderer {
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene,
+    environment: EnvironmentRenderer,
     pipelines: HashMap<Handle<Material>, PSO>,
     objects: ResourceList<RenderObjectData>,
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
@@ -109,6 +111,16 @@ impl ForwardRenderer {
             })
             .expect("Unable to create dynamic allocator!");
 
+        let environment = EnvironmentRenderer::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            EnvironmentRendererInfo {
+                color_format: Format::BGRA8,
+                sample_count: SampleCount::S4,
+                use_depth: true,
+            },
+        );
+
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
         let cull_queue = ctx
@@ -129,6 +141,7 @@ impl ForwardRenderer {
             scene,
             graph,
             db: None,
+            environment,
             dynamic,
             pipelines: Default::default(),
             objects: Default::default(),
@@ -356,13 +369,14 @@ impl ForwardRenderer {
         &mut self,
         sems: &[Handle<Semaphore>],
         views: &[Handle<Camera>],
-        _delta_time: f32,
+        delta_time: f32,
     ) -> Vec<ViewOutput> {
         if views.is_empty() {
             return Vec::new();
         }
         if self.cull_queue.current_index() == 0 {
             self.dynamic.reset();
+            self.environment.reset();
         }
 
         // Set active scene cameras..
@@ -483,6 +497,15 @@ impl ForwardRenderer {
 
                     cmd
                 },
+            );
+
+            self.environment.render(
+                &mut self.graph,
+                self.viewport,
+                color.view,
+                Some(depth.view),
+                camera_handle,
+                delta_time,
             );
 
             outputs.push(ViewOutput {
