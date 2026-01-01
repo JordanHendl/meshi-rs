@@ -1,5 +1,5 @@
-use super::{Renderer, RendererInfo, ViewOutput};
 use super::scene::GPUScene;
+use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
@@ -157,6 +157,7 @@ impl ForwardRenderer {
         let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
+            .set_attachment_format(0, Format::BGRA8)  
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
@@ -165,13 +166,24 @@ impl ForwardRenderer {
                 }],
             );
 
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_cameras").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_lights").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_textures").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_samplers").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_materials").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_transformations").unwrap();
-        
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_cameras")
+            .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_lights")
+            .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_textures")
+            .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_samplers")
+            .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_materials")
+            .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_transformations")
+            .unwrap();
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
@@ -190,7 +202,7 @@ impl ForwardRenderer {
             })
             .build(unsafe { &mut (*ctx) })
             .expect("Failed to build material!");
-        
+
         assert!(s.bind_table[0].is_some());
         assert!(s.bind_table[1].is_some());
 
@@ -210,7 +222,8 @@ impl ForwardRenderer {
             let p = self.build_pipeline(&mat);
             info!(
                 "[MESHI/GFX] Creating pipelines for material {} (Handle => {}).",
-                name, handle.as_ref().unwrap().slot
+                name,
+                handle.as_ref().unwrap().slot
             );
             self.pipelines.insert(handle.unwrap(), p);
         }
@@ -328,7 +341,7 @@ impl ForwardRenderer {
                             let obj = self.objects.get_ref(*obj_handle);
                             view_draws[view_idx].push(ViewDrawItem {
                                 model: obj.model.clone(),
-                                transformation: culled.transformation,
+                                transformation: GPUScene::unpack_handle(culled.transformation),
                                 total_transform: culled.total_transform,
                             });
                         }
@@ -348,6 +361,9 @@ impl ForwardRenderer {
         if views.is_empty() {
             return Vec::new();
         }
+        if self.cull_queue.current_index() == 0 {
+            self.dynamic.reset();
+        }
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
@@ -362,7 +378,7 @@ impl ForwardRenderer {
             debug_name: "",
             dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
             layers: 1,
-            format: Format::RGBA8,
+            format: Format::BGRA8,
             mip_levels: 1,
             samples: SampleCount::S4, // JHTODO Make this configurable.
             initial_data: None,
@@ -413,9 +429,6 @@ impl ForwardRenderer {
                                 if let Some(mat_idx) = material.furikake_material_handle {
                                     if let Some(pso) = self.pipelines.get(&mat_idx) {
                                         assert!(pso.handle.valid());
-                                        if self.cull_queue.current_index() == 0 {
-                                            self.dynamic.reset();
-                                        }
 
                                         let mut alloc = self
                                             .dynamic

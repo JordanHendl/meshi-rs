@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ptr::NonNull};
 
-use super::{Renderer, RendererInfo, ViewOutput};
 use super::scene::GPUScene;
+use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
@@ -194,7 +194,7 @@ impl DeferredRenderer {
                 .add_table_variable_with_resources("meshi_bindless_transformations", resources);
         }
 
-       let  pso = psostate
+        let pso = psostate
             .build(ctx.as_mut())
             .expect("Failed to make deferred combine pso!");
 
@@ -302,7 +302,8 @@ impl DeferredRenderer {
             let p = self.build_pipeline(&mat);
             info!(
                 "[MESHI/GFX] Creating pipelines for material {} (Handle => {}).",
-                name, handle.as_ref().unwrap().slot
+                name,
+                handle.as_ref().unwrap().slot
             );
             self.pipelines.insert(handle.unwrap(), p);
         }
@@ -420,7 +421,7 @@ impl DeferredRenderer {
                             let obj = self.objects.get_ref(*obj_handle);
                             view_draws[view_idx].push(ViewDrawItem {
                                 model: obj.model.clone(),
-                                transformation: culled.transformation,
+                                transformation: GPUScene::unpack_handle(culled.transformation),
                                 total_transform: culled.total_transform,
                             });
                         }
@@ -439,6 +440,9 @@ impl DeferredRenderer {
     ) -> Vec<ViewOutput> {
         if views.is_empty() {
             return Vec::new();
+        }
+        if self.cull_queue.current_index() == 0 {
+            self.dynamic.reset();
         }
 
         // Set active scene cameras..
@@ -538,9 +542,6 @@ impl DeferredRenderer {
                                 if let Some(mat_idx) = material.furikake_material_handle {
                                     if let Some(pso) = self.pipelines.get(&mat_idx) {
                                         assert!(pso.handle.valid());
-                                        if self.cull_queue.current_index() == 0 {
-                                            self.dynamic.reset();
-                                        }
 
                                         let mut alloc = self
                                             .dynamic
@@ -549,6 +550,7 @@ impl DeferredRenderer {
 
                                         // Per Object dynamic structure.
                                         #[repr(C)]
+                                        #[derive(Default)]
                                         struct PerObj {
                                             transform: Mat4, // Backup transform
                                             transformation: Handle<Transformation>,
@@ -557,10 +559,12 @@ impl DeferredRenderer {
                                         }
 
                                         let per_obj = &mut alloc.slice::<PerObj>()[0];
+                                        *per_obj = Default::default();
                                         per_obj.transform = item.total_transform;
                                         per_obj.transformation = item.transformation;
                                         per_obj.material_id = mat_idx;
                                         per_obj.camera = camera_handle;
+
                                         cmd = cmd
                                             .bind_graphics_pipeline(pso.handle)
                                             .update_viewport(&self.viewport)

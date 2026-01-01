@@ -56,13 +56,6 @@ fn main() {
         0.1,    // near
         100.0,  // far
     );
-    let other = engine
-        .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/sphere").unwrap(),
-        ))
-        .unwrap();
-
-    engine.set_object_transform(other, &Mat4::from_translation(Vec3::new(0.5, 0.1, -2.5)));
 
     // Register default cube with the engine as an object.
     let cube = engine

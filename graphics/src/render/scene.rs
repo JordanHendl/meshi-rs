@@ -28,19 +28,19 @@ pub struct SceneObject {
     pub local_transform: Mat4,
     pub world_transform: Mat4,
     pub scene_mask: u32,
-    pub transformation: Handle<Transformation>,
+    pub transformation: u32,
     pub parent_slot: u32,
     pub dirty: u32,
     pub active: u32,
-    pub parent: Handle<SceneObject>,
+    pub parent: u32,
     pub child_count: u32,
-    pub children: [Handle<SceneObject>; 16],
+    pub children: [u32; 16],
 }
 
 #[repr(C)]
 pub struct CulledObject {
     pub total_transform: Mat4,
-    pub transformation: Handle<Transformation>,
+    pub transformation: u32,
     pub object_id: u32,
     pub bin_id: u32,
 }
@@ -134,6 +134,22 @@ pub struct GPUScene {
 }
 
 impl GPUScene {
+    const INVALID_HANDLE: u32 = u32::MAX;
+
+    pub(crate) fn pack_handle<T>(handle: Handle<T>) -> u32 {
+        ((handle.generation as u32) << 16) | handle.slot as u32
+    }
+
+    pub(crate) fn unpack_handle<T>(packed: u32) -> Handle<T> {
+        if packed == Self::INVALID_HANDLE {
+            return Handle::default();
+        }
+
+        let slot = (packed & 0xFFFF) as u16;
+        let generation = (packed >> 16) as u16;
+        Handle::new(slot, generation)
+    }
+
     fn alloc_transform(&mut self, initial: Mat4) -> Handle<Transformation> {
         let mut handle = Handle::default();
         let state: &mut BindlessState = unsafe { self.state.as_mut() };
@@ -414,7 +430,7 @@ impl GPUScene {
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
-        let transformation = self.alloc_transform(info.global);
+        let transformation = Self::pack_handle(self.alloc_transform(info.global));
         let handle = self
             .data
             .objects_to_process
@@ -426,9 +442,9 @@ impl GPUScene {
                 parent_slot: u32::MAX,
                 active: 1,
                 dirty: 0,
-                parent: Default::default(),
+                parent: Self::INVALID_HANDLE,
                 child_count: 0,
-                children: [Handle::default(); 16],
+                children: [Self::INVALID_HANDLE; 16],
             })
             .unwrap();
 
@@ -442,15 +458,16 @@ impl GPUScene {
             .data
             .objects_to_process
             .get_ref(handle)
-            .map(|object| object.parent)
+            .map(|object| Self::unpack_handle(object.parent))
             .filter(|parent| parent.valid())
         {
             self.remove_child(parent, handle);
         }
 
         if let Some(object) = self.data.objects_to_process.get_ref(handle) {
-            if object.transformation.valid() {
-                self.release_transform(object.transformation);
+            let transform_handle = Self::unpack_handle(object.transformation);
+            if transform_handle.valid() {
+                self.release_transform(transform_handle);
             }
         }
 
@@ -490,19 +507,20 @@ impl GPUScene {
         if let Some(parent_ref) = self.data.objects_to_process.get_mut_ref(parent) {
             if (parent_ref.child_count as usize) < parent_ref.children.len() {
                 let idx = parent_ref.child_count as usize;
-                parent_ref.children[idx] = child;
+                parent_ref.children[idx] = Self::pack_handle(child);
                 parent_ref.child_count += 1;
             }
         }
 
         if let Some(child_ref) = self.data.objects_to_process.get_mut_ref(child) {
-            child_ref.parent = parent;
+            child_ref.parent = Self::pack_handle(parent);
             child_ref.parent_slot = parent.slot as u32;
             child_ref.dirty = 1;
         }
     }
 
     pub fn remove_child(&mut self, parent: Handle<SceneObject>, child: Handle<SceneObject>) {
+        let packed_child = Self::pack_handle(child);
         let mut child_idx: i32 = -1;
         for (i, ch) in self
             .data
@@ -513,7 +531,7 @@ impl GPUScene {
             .iter()
             .enumerate()
         {
-            if child == *ch {
+            if packed_child == *ch {
                 child_idx = i as i32;
                 break;
             }
@@ -525,10 +543,10 @@ impl GPUScene {
                     parent_ref.children[i] = parent_ref.children[i + 1];
                 }
                 parent_ref.child_count = parent_ref.child_count.saturating_sub(1);
-                parent_ref.children[parent_ref.child_count as usize] = Handle::default();
+                parent_ref.children[parent_ref.child_count as usize] = Self::INVALID_HANDLE;
             }
             if let Some(child_ref) = self.data.objects_to_process.get_mut_ref(child) {
-                child_ref.parent = Handle::default();
+                child_ref.parent = Self::INVALID_HANDLE;
                 child_ref.parent_slot = u32::MAX;
                 child_ref.dirty = 1;
             }
@@ -750,20 +768,20 @@ mod tests {
 
         let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
         assert_eq!(parent_ref.child_count, 1);
-        assert_eq!(parent_ref.children[0], child);
+        assert_eq!(parent_ref.children[0], GPUScene::pack_handle(child));
 
         let child_ref = scene.data.objects_to_process.get_ref(child).unwrap();
-        assert_eq!(child_ref.parent, parent);
+        assert_eq!(child_ref.parent, GPUScene::pack_handle(parent));
         assert_eq!(child_ref.parent_slot, parent.slot as u32);
 
         scene.remove_child(parent, child);
 
         let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
         assert_eq!(parent_ref.child_count, 0);
-        assert_eq!(parent_ref.children[0], Handle::default());
+        assert_eq!(parent_ref.children[0], GPUScene::INVALID_HANDLE);
 
         let child_ref = scene.data.objects_to_process.get_ref(child).unwrap();
-        assert_eq!(child_ref.parent, Handle::default());
+        assert_eq!(child_ref.parent, GPUScene::INVALID_HANDLE);
         assert_eq!(child_ref.parent_slot, u32::MAX);
         assert_eq!(child_ref.dirty, 1);
     }
@@ -780,7 +798,7 @@ mod tests {
 
         let parent_ref = scene.data.objects_to_process.get_ref(parent).unwrap();
         assert_eq!(parent_ref.child_count, 0);
-        assert_eq!(parent_ref.children[0], Handle::default());
+        assert_eq!(parent_ref.children[0], GPUScene::INVALID_HANDLE);
     }
 
     #[test]
@@ -870,8 +888,6 @@ mod tests {
             .combine(scene.data.bin_counts.sync_down())
             .combine(scene.data.dispatch.sync_down())
             .end();
-
-        readback.debug_print_commands();
 
         let mut queue = ctx
             .pool_mut(QueueType::Graphics)
