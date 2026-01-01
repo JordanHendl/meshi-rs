@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#33ff47e635f03404e6254d8d29edc02ed23fcbb8"
+source = "git+https://github.com/JordanHendl/gohan#fbe84fa78a67b47e8034d0370f3855ecba847abc"
 dependencies = [
  "bincode",
  "clap",
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#427472362f7789edb015cf9a21574c6df6c63eab"
+source = "git+https://github.com/JordanHendl/dashi#ebef5b0cee446a3accbe83af244bda247dab23fb"
 dependencies = [
  "anyhow",
  "ash",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#33ff47e635f03404e6254d8d29edc02ed23fcbb8"
+source = "git+https://github.com/JordanHendl/gohan#fbe84fa78a67b47e8034d0370f3855ecba847abc"
 dependencies = [
  "bento",
  "dashi",
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#33ff47e635f03404e6254d8d29edc02ed23fcbb8"
+source = "git+https://github.com/JordanHendl/gohan#fbe84fa78a67b47e8034d0370f3855ecba847abc"
 dependencies = [
  "bento",
  "dashi",
@@ -2285,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#33ff47e635f03404e6254d8d29edc02ed23fcbb8"
+source = "git+https://github.com/JordanHendl/gohan#fbe84fa78a67b47e8034d0370f3855ecba847abc"
 dependencies = [
  "bento",
  "dashi",
@@ -3068,9 +3068,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3280a1b827474fcd5dbef4b35a674deb52ba5c312363aef9135317df179d81b"
+checksum = "aac060176f7020d62c3bcc1cdbcec619d54f48b07ad1963a3f80ce7a0c17755f"
 
 [[package]]
 name = "zune-core"

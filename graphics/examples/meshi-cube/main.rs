@@ -4,11 +4,21 @@ use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
+use std::env::*;
+
 fn main() {
     tracing_subscriber::fmt::init();
+    let args: Vec<String> = args().collect();
+    let mut renderer = RendererSelect::Deferred;
+    if args.len() > 1 {
+        if args[1] == "--forward" {
+            renderer = RendererSelect::Forward;
+        }
+    } 
     let mut engine = RenderEngine::new(&RenderEngineInfo {
         headless: false,
         canvas_extent: Some([512, 512]),
+        renderer,
     })
     .unwrap();
 

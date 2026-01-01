@@ -151,9 +151,16 @@ pub fn pack_gpu_light(s: LightInfo) -> Light {
 
     out
 }
+#[derive(Default)]
+pub enum RendererSelect {
+    #[default]
+    Deferred,
+    Forward,
+}
 
 #[derive(Default)]
 pub struct RenderEngineInfo {
     pub headless: bool,
     pub canvas_extent: Option<[u32; 2]>,
+    pub renderer: RendererSelect,
 }
