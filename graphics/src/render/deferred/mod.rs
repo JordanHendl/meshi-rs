@@ -278,6 +278,15 @@ impl DeferredRenderer {
         state = state
             .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_transformations")
             .unwrap();
+        state = state
+            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_skeletons")
+            .unwrap();
+        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_joints").unwrap();
+        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animations").unwrap();
+        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animation_tracks").unwrap();
+        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animation_keyframes").unwrap();
+        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_skinning").unwrap();
+
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
