@@ -118,6 +118,7 @@ impl ForwardRenderer {
                 color_format: Format::BGRA8,
                 sample_count: SampleCount::S4,
                 use_depth: true,
+                skybox: super::environment::sky::SkyboxInfo::default(),
             },
         );
 
@@ -170,7 +171,7 @@ impl ForwardRenderer {
         let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
-            .set_attachment_format(0, Format::BGRA8)  
+            .set_attachment_format(0, Format::BGRA8)
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
@@ -502,7 +503,7 @@ impl ForwardRenderer {
 
             self.environment.render(
                 &mut self.graph,
-                self.viewport,
+                &self.viewport,
                 color.view,
                 Some(depth.view),
                 camera_handle,

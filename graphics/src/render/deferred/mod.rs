@@ -118,8 +118,9 @@ impl DeferredRenderer {
             state.as_mut(),
             EnvironmentRendererInfo {
                 color_format: Format::BGRA8,
-                sample_count: SampleCount::S1,
-                use_depth: false,
+                sample_count: SampleCount::S4,
+                use_depth: true,
+                skybox: super::environment::sky::SkyboxInfo::default(),
             },
         );
 
@@ -140,7 +141,7 @@ impl DeferredRenderer {
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
-                sample_count: SampleCount::S1,
+                sample_count: SampleCount::S4,
                 ..Default::default()
             })
             .add_table_variable_with_resources(
@@ -513,7 +514,7 @@ impl DeferredRenderer {
             let final_combine = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Combined Framebuffer View {view_idx}"),
                 format: Format::BGRA8,
-                samples: SampleCount::S1,
+                samples: SampleCount::S4,
                 ..default_framebuffer_info
             });
 
@@ -662,9 +663,9 @@ impl DeferredRenderer {
 
             self.environment.render(
                 &mut self.graph,
-                self.viewport,
+                &self.viewport,
                 final_combine.view,
-                None,
+                Some(depth.view),
                 camera_handle,
                 delta_time,
             );

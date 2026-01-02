@@ -1,16 +1,19 @@
 pub mod sky;
 
-use dashi::{ClearValue, Context, DynamicAllocator, Format, ImageView, SampleCount, Viewport};
+use dashi::{ClearValue, Context, DynamicAllocator, Format, ImageInfo, ImageView, SampleCount, Viewport};
 use furikake::{BindlessState, types::Camera};
-use tare::graph::RenderGraph;
+use tare::graph::{RenderGraph, SubpassInfo};
 
 use sky::SkyRenderer;
 
-#[derive(Clone, Copy)]
+use super::ViewOutput;
+
+#[derive(Clone)]
 pub struct EnvironmentRendererInfo {
     pub color_format: Format,
     pub sample_count: SampleCount,
     pub use_depth: bool,
+    pub skybox: sky::SkyboxInfo,
 }
 
 pub struct EnvironmentRenderer {
@@ -30,13 +33,13 @@ impl EnvironmentRenderer {
         let dynamic = ctx
             .make_dynamic_allocator(&Default::default())
             .expect("Failed to make environment dynamic allocator");
-        let sky = SkyRenderer::new(ctx, state, info, &dynamic);
+
         Self {
-            dynamic,
-            time: 0.0,
-            sky,
             color_format: info.color_format,
-            sample_count: info.sample_count,
+            sample_count: info.sample_count.clone(),
+            time: 0.0,
+            sky: SkyRenderer::new(ctx, state, info, &dynamic),
+            dynamic,
         }
     }
 
@@ -47,30 +50,42 @@ impl EnvironmentRenderer {
     pub fn render(
         &mut self,
         graph: &mut RenderGraph,
-        viewport: Viewport,
-        color: ImageView,
+        viewport: &Viewport,
+        fb: ImageView,
         depth: Option<ImageView>,
         camera: dashi::Handle<Camera>,
         delta_time: f32,
-    ) {
+    ) -> ViewOutput {
         self.time += delta_time;
-
+   
         let mut attachments: [Option<ImageView>; 8] = [None; 8];
-        attachments[0] = Some(color);
+        attachments[0] = Some(fb);
 
         let clear_values: [Option<ClearValue>; 8] = [None; 8];
+        
+        let info = SubpassInfo {
+            viewport: viewport.clone(),
+            color_attachments: attachments,
+            depth_attachment: depth,
+            clear_values,
+            depth_clear: None,
+        };
 
         self.sky.add_pass(
             graph,
-            &mut self.dynamic,
             viewport,
-            attachments,
-            clear_values,
-            depth,
+            &mut self.dynamic,
+            info.clone(),
             camera,
             self.time,
             delta_time,
         );
+
+        ViewOutput {
+            camera,
+            image: fb,
+            semaphore: Default::default(),
+        }
     }
 
     pub fn color_format(&self) -> Format {
