@@ -90,7 +90,9 @@ fn main() {
             }
 
             if e.source() == EventSource::Window {
+                println!("e");
                 if e.event_type() == EventType::Quit {
+                println!("eq");
                     r.running = false;
                 }
             }

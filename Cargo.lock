@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#90ee4764596c4c2500d79ce9786082061a338f37"
+source = "git+https://github.com/JordanHendl/dashi#fce305f03e18be37a01a5c398f354c9f328ac5d7"
 dependencies = [
  "anyhow",
  "ash",
@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#a2a6ab065ea760b2a6d7fb49cb4c0edf51232bfd"
+source = "git+https://github.com/JordanHendl/noren#3f34325170b8edcdf79e192a50fa83e686d498f5"
 dependencies = [
  "bento",
  "bincode",
