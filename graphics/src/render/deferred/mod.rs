@@ -122,6 +122,8 @@ impl DeferredRenderer {
                 sample_count: info.sample_count,
                 use_depth: true,
                 skybox: super::environment::sky::SkyboxInfo::default(),
+                ocean: super::environment::ocean::OceanInfo::default(),
+                terrain: super::environment::terrain::TerrainInfo::default(),
             },
         );
 

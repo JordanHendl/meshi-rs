@@ -130,7 +130,7 @@ impl SkyRenderer {
     pub fn new(
         ctx: &mut dashi::Context,
         state: &mut BindlessState,
-        info: EnvironmentRendererInfo,
+        info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
         let clouds = CloudSimulation::new(ctx);
