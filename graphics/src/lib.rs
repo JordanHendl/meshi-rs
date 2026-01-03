@@ -10,7 +10,8 @@ use dashi::{
     DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Handle, ImageView, QueueType, Rect2D,
     SampleCount, SubmitInfo, SubmitInfo2, Viewport,
 };
-pub use furikake::types::*;
+pub use furikake::types::AnimationState as FAnimationState;
+pub use furikake::types::{Camera, Light, Material};
 use glam::{Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
@@ -162,6 +163,26 @@ impl RenderEngine {
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
         self.renderer.register_object(info)
+    }
+
+    pub fn set_skinned_object_animation(
+        &mut self,
+        handle: Handle<RenderObject>,
+        state: AnimationState,
+    ) {
+        self.renderer.set_skinned_animation_state(handle, state);
+    }
+
+    pub fn set_billboard_texture(&mut self, handle: Handle<RenderObject>, texture_id: u32) {
+        self.renderer.set_billboard_texture(handle, texture_id);
+    }
+
+    pub fn set_billboard_material(
+        &mut self,
+        handle: Handle<RenderObject>,
+        material: Option<Handle<Material>>,
+    ) {
+        self.renderer.set_billboard_material(handle, material);
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {

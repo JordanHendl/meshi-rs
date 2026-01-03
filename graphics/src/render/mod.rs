@@ -3,9 +3,9 @@ pub mod environment;
 pub mod forward;
 mod scene;
 
-use crate::{RenderObject, RenderObjectInfo};
+use crate::{AnimationState, RenderObject, RenderObjectInfo};
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{types::Camera, BindlessState};
+use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::DB;
@@ -30,6 +30,13 @@ pub trait Renderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError>;
+    fn set_skinned_animation_state(&mut self, handle: Handle<RenderObject>, state: AnimationState);
+    fn set_billboard_texture(&mut self, handle: Handle<RenderObject>, texture_id: u32);
+    fn set_billboard_material(
+        &mut self,
+        handle: Handle<RenderObject>,
+        material: Option<Handle<Material>>,
+    );
     fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &Mat4);
     fn object_transform(&self, handle: Handle<RenderObject>) -> Mat4;
     fn update(

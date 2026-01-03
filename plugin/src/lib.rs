@@ -267,6 +267,7 @@ pub extern "C" fn meshi_gfx_create_mesh_object(
     let model = DeviceModel {
         name: "".to_string(),
         meshes: vec![mesh],
+        rig: Default::default(),
     };
 
     let h = engine

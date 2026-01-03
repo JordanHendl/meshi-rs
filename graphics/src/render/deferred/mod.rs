@@ -3,7 +3,8 @@ use std::{collections::HashMap, ptr::NonNull};
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{RenderObject, RenderObjectInfo, render::scene::*};
+use crate::AnimationState;
+use crate::{BillboardInfo, RenderObject, RenderObjectInfo, SkinnedModelInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
 use driver::command::{Draw, DrawIndexed};
@@ -49,14 +50,26 @@ pub struct DeferredRenderer {
 }
 
 struct RenderObjectData {
-    model: DeviceModel,
+    kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
 }
 
+enum RenderObjectKind {
+    Model(DeviceModel),
+    SkinnedModel(SkinnedModelInfo),
+    Billboard(BillboardInfo),
+}
+
 struct ViewDrawItem {
-    model: DeviceModel,
+    kind: ViewDrawKind,
     transformation: Handle<Transformation>,
     total_transform: Mat4,
+}
+
+enum ViewDrawKind {
+    Model(DeviceModel),
+    SkinnedModel(SkinnedModelInfo),
+    Billboard(BillboardInfo),
 }
 
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
@@ -155,60 +168,9 @@ impl DeferredRenderer {
                 }],
             );
 
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state.binding("meshi_bindless_cameras").unwrap().binding();
-            psostate =
-                psostate.add_table_variable_with_resources("meshi_bindless_cameras", resources);
-        }
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state.binding("meshi_bindless_lights").unwrap().binding();
-            psostate =
-                psostate.add_table_variable_with_resources("meshi_bindless_lights", resources);
-        }
-
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state.binding("meshi_bindless_textures").unwrap().binding();
-            psostate =
-                psostate.add_table_variable_with_resources("meshi_bindless_textures", resources);
-        }
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state.binding("meshi_bindless_samplers").unwrap().binding();
-            psostate =
-                psostate.add_table_variable_with_resources("meshi_bindless_samplers", resources);
-        }
-
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state.binding("meshi_bindless_materials").unwrap().binding();
-            psostate =
-                psostate.add_table_variable_with_resources("meshi_bindless_materials", resources);
-        }
-
-        {
-            let ReservedBinding::TableBinding {
-                binding: _,
-                resources,
-            } = state
-                .binding("meshi_bindless_transformations")
-                .unwrap()
-                .binding();
-            psostate = psostate
-                .add_table_variable_with_resources("meshi_bindless_transformations", resources);
-        }
+        psostate = psostate
+            .add_reserved_table_variables(state.as_mut())
+            .unwrap();
 
         let pso = psostate
             .build(ctx.as_mut())
@@ -265,32 +227,8 @@ impl DeferredRenderer {
             );
 
         state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_cameras")
+            .add_reserved_table_variables(self.state.as_mut())
             .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_lights")
-            .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_textures")
-            .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_samplers")
-            .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_materials")
-            .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_transformations")
-            .unwrap();
-        state = state
-            .add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_skeletons")
-            .unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_joints").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animations").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animation_tracks").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_animation_keyframes").unwrap();
-        state = state.add_reserved_table_variable(self.state.as_mut(), "meshi_bindless_skinning").unwrap();
-
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
@@ -351,7 +289,27 @@ impl DeferredRenderer {
         match info {
             RenderObjectInfo::Model(m) => {
                 let h = self.objects.push(RenderObjectData {
-                    model: m.clone(),
+                    kind: RenderObjectKind::Model(m.clone()),
+                    scene_handle,
+                });
+
+                self.scene_lookup.insert(scene_handle.slot, h);
+
+                Ok(to_handle(h))
+            }
+            RenderObjectInfo::SkinnedModel(skinned) => {
+                let h = self.objects.push(RenderObjectData {
+                    kind: RenderObjectKind::SkinnedModel(skinned.clone()),
+                    scene_handle,
+                });
+
+                self.scene_lookup.insert(scene_handle.slot, h);
+
+                Ok(to_handle(h))
+            }
+            RenderObjectInfo::Billboard(billboard) => {
+                let h = self.objects.push(RenderObjectData {
+                    kind: RenderObjectKind::Billboard(billboard.clone()),
                     scene_handle,
                 });
 
@@ -360,6 +318,87 @@ impl DeferredRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
+        }
+    }
+
+    pub fn set_skinned_animation_state(
+        &mut self,
+        handle: Handle<RenderObject>,
+        state: AnimationState,
+    ) {
+        if !handle.valid() {
+            warn!("Attempted to update animation on invalid handle.");
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            warn!("Failed to update animation for object {}", handle.slot);
+            return;
+        }
+
+        let obj = self.objects.get_ref_mut(from_handle(handle));
+
+        match &mut obj.kind {
+            RenderObjectKind::SkinnedModel(skinned) => {
+                skinned.animation = state;
+            }
+            _ => {
+                warn!("Attempted to update animation on non-skinned object.");
+            }
+        }
+    }
+
+    pub fn set_billboard_texture(&mut self, handle: Handle<RenderObject>, texture_id: u32) {
+        if !handle.valid() {
+            warn!("Attempted to update billboard texture on invalid handle.");
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            warn!(
+                "Failed to update billboard texture for object {}",
+                handle.slot
+            );
+            return;
+        }
+
+        let obj = self.objects.get_ref_mut(from_handle(handle));
+        match &mut obj.kind {
+            RenderObjectKind::Billboard(billboard) => {
+                billboard.texture_id = texture_id;
+            }
+            _ => {
+                warn!("Attempted to update billboard texture on non-billboard object.");
+            }
+        }
+    }
+
+    pub fn set_billboard_material(
+        &mut self,
+        handle: Handle<RenderObject>,
+        material: Option<Handle<Material>>,
+    ) {
+        if !handle.valid() {
+            warn!("Attempted to update billboard material on invalid handle.");
+            return;
+        }
+
+        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+            warn!(
+                "Failed to update billboard material for object {}",
+                handle.slot
+            );
+            return;
+        }
+
+        let obj = self.objects.get_ref_mut(from_handle(handle));
+        match &mut obj.kind {
+            RenderObjectKind::Billboard(billboard) => {
+                billboard.material = material;
+            }
+            _ => {
+                warn!("Attempted to update billboard material on non-billboard object.");
+            }
         }
     }
 
@@ -446,8 +485,19 @@ impl DeferredRenderer {
                         if let Some(obj_handle) = self.scene_lookup.get(&(culled.object_id as u16))
                         {
                             let obj = self.objects.get_ref(*obj_handle);
+                            let kind = match &obj.kind {
+                                RenderObjectKind::Model(model) => {
+                                    ViewDrawKind::Model(model.clone())
+                                }
+                                RenderObjectKind::SkinnedModel(skinned) => {
+                                    ViewDrawKind::SkinnedModel(skinned.clone())
+                                }
+                                RenderObjectKind::Billboard(billboard) => {
+                                    ViewDrawKind::Billboard(billboard.clone())
+                                }
+                            };
                             view_draws[view_idx].push(ViewDrawItem {
-                                model: obj.model.clone(),
+                                kind,
                                 transformation: GPUScene::unpack_handle(culled.transformation),
                                 total_transform: culled.total_transform,
                             });
@@ -457,6 +507,16 @@ impl DeferredRenderer {
             }
         }
         view_draws
+    }
+
+    fn update_skinned_animations(&mut self, delta_time: f32) {
+        let entries = self.objects.entries.clone();
+        for entry in entries {
+            let obj = self.objects.get_ref_mut(entry);
+            if let RenderObjectKind::SkinnedModel(skinned) = &mut obj.kind {
+                skinned.animation.time_seconds += delta_time * skinned.animation.speed;
+            }
+        }
     }
 
     pub fn update(
@@ -472,6 +532,8 @@ impl DeferredRenderer {
             self.dynamic.reset();
             self.environment.reset();
         }
+
+        self.update_skinned_animations(delta_time);
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
@@ -565,8 +627,26 @@ impl DeferredRenderer {
                     }),
                 },
                 |mut cmd| {
+                    let mut standard_draws = Vec::new();
+                    let mut skinned_draws = Vec::new();
+                    let mut billboard_draws = Vec::new();
+
                     for item in draw_items {
-                        for mesh in &item.model.meshes {
+                        match &item.kind {
+                            ViewDrawKind::Model(model) => {
+                                standard_draws.push((item, model));
+                            }
+                            ViewDrawKind::SkinnedModel(skinned) => {
+                                skinned_draws.push((item, skinned));
+                            }
+                            ViewDrawKind::Billboard(billboard) => {
+                                billboard_draws.push((item, billboard));
+                            }
+                        }
+                    }
+
+                    for (item, model) in standard_draws {
+                        for mesh in &model.meshes {
                             if let Some(material) = &mesh.material {
                                 if let Some(mat_idx) = material.furikake_material_handle {
                                     if let Some(pso) = self.pipelines.get(&mat_idx) {
@@ -624,6 +704,20 @@ impl DeferredRenderer {
                                 }
                             }
                         }
+                    }
+
+                    if !skinned_draws.is_empty() {
+                        warn!(
+                            "Deferred renderer received {} skinned draw(s) without a skinned pass.",
+                            skinned_draws.len()
+                        );
+                    }
+
+                    if !billboard_draws.is_empty() {
+                        warn!(
+                            "Deferred renderer received {} billboard draw(s) without a billboard pass.",
+                            billboard_draws.len()
+                        );
                     }
 
                     cmd
@@ -721,6 +815,22 @@ impl Renderer for DeferredRenderer {
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
         DeferredRenderer::register_object(self, info)
+    }
+
+    fn set_skinned_animation_state(&mut self, handle: Handle<RenderObject>, state: AnimationState) {
+        DeferredRenderer::set_skinned_animation_state(self, handle, state);
+    }
+
+    fn set_billboard_texture(&mut self, handle: Handle<RenderObject>, texture_id: u32) {
+        DeferredRenderer::set_billboard_texture(self, handle, texture_id);
+    }
+
+    fn set_billboard_material(
+        &mut self,
+        handle: Handle<RenderObject>,
+        material: Option<Handle<Material>>,
+    ) {
+        DeferredRenderer::set_billboard_material(self, handle, material);
     }
 
     fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {

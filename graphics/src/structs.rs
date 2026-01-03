@@ -4,6 +4,8 @@ use dashi::SampleCount;
 use furikake::types::*;
 use meshi_ffi_structs::*;
 use noren::meta::DeviceModel;
+use resource_pool::Handle;
+use furikake::types::Material;
 
 #[derive(Default)]
 pub struct MeshObject {
@@ -15,8 +17,41 @@ pub struct MeshObject {
 pub enum RenderObjectInfo {
     Empty,
     Model(DeviceModel),
+    SkinnedModel(SkinnedModelInfo),
+    Billboard(BillboardInfo),
 }
 pub struct RenderObject;
+
+#[derive(Clone, Debug)]
+pub struct SkinnedModelInfo {
+    pub model: DeviceModel,
+    pub animation: AnimationState,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AnimationState {
+    pub clip_index: u32,
+    pub time_seconds: f32,
+    pub speed: f32,
+    pub looping: bool,
+}
+
+impl Default for AnimationState {
+    fn default() -> Self {
+        Self {
+            clip_index: 0,
+            time_seconds: 0.0,
+            speed: 1.0,
+            looping: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BillboardInfo {
+    pub texture_id: u32,
+    pub material: Option<Handle<Material>>,
+}
 
 #[repr(C)]
 pub struct CubePrimitiveInfo {
