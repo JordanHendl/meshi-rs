@@ -19,6 +19,7 @@ fn main() {
         headless: false,
         canvas_extent: Some([512, 512]),
         renderer,
+        sample_count: None,
     })
     .unwrap();
 

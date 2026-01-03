@@ -33,6 +33,7 @@ pub enum PassMask {
 pub struct DeferredRenderer {
     ctx: Box<Context>,
     viewport: Viewport,
+    sample_count: SampleCount,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene,
@@ -118,7 +119,7 @@ impl DeferredRenderer {
             state.as_mut(),
             EnvironmentRendererInfo {
                 color_format: Format::BGRA8,
-                sample_count: SampleCount::S4,
+                sample_count: info.sample_count,
                 use_depth: true,
                 skybox: super::environment::sky::SkyboxInfo::default(),
             },
@@ -141,7 +142,7 @@ impl DeferredRenderer {
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
-                sample_count: SampleCount::S4,
+                sample_count: info.sample_count,
                 ..Default::default()
             })
             .add_table_variable_with_resources(
@@ -229,6 +230,7 @@ impl DeferredRenderer {
             objects: Default::default(),
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
+            sample_count: info.sample_count,
             cull_queue,
             alloc,
         }
@@ -290,13 +292,13 @@ impl DeferredRenderer {
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
-            samples: SampleCount::S4,
+            samples: self.sample_count,
         });
 
         let s = state
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 4],
-                sample_count: SampleCount::S4,
+                sample_count: self.sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: true,
@@ -484,7 +486,7 @@ impl DeferredRenderer {
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
-            samples: SampleCount::S4, // JHTODO Make this configurable.
+            samples: self.sample_count,
             initial_data: None,
             ..Default::default()
         };
@@ -523,7 +525,7 @@ impl DeferredRenderer {
             let final_combine = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Combined Framebuffer View {view_idx}"),
                 format: Format::BGRA8,
-                samples: SampleCount::S4,
+                samples: self.sample_count,
                 ..default_framebuffer_info
             });
 

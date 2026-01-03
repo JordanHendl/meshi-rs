@@ -8,7 +8,7 @@ use dashi::utils::Pool;
 use dashi::{
     Buffer, CommandQueueInfo2, CommandStream, Context, Display as DashiDisplay,
     DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Handle, ImageView, QueueType, Rect2D,
-    SubmitInfo, SubmitInfo2, Viewport,
+    SampleCount, SubmitInfo, SubmitInfo2, Viewport,
 };
 pub use furikake::types::*;
 use glam::{Mat4, Vec3};
@@ -52,6 +52,7 @@ pub struct RenderEngine {
 impl RenderEngine {
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
+        let sample_count = info.sample_count.unwrap_or(SampleCount::S4);
 
         let renderer_info = RendererInfo {
             headless: info.headless,
@@ -70,6 +71,7 @@ impl RenderEngine {
                 },
                 ..Default::default()
             },
+            sample_count,
         };
 
         let mut renderer: Box<dyn Renderer> = match info.renderer {

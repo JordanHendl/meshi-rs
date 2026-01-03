@@ -1,5 +1,6 @@
 use glam::{Mat4, Vec4};
 use glam::*;
+use dashi::SampleCount;
 use furikake::types::*;
 use meshi_ffi_structs::*;
 use noren::meta::DeviceModel;
@@ -163,4 +164,5 @@ pub struct RenderEngineInfo {
     pub headless: bool,
     pub canvas_extent: Option<[u32; 2]>,
     pub renderer: RendererSelect,
+    pub sample_count: Option<SampleCount>,
 }

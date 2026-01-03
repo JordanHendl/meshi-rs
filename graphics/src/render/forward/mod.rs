@@ -32,6 +32,7 @@ pub enum PassMask {
 pub struct ForwardRenderer {
     ctx: Box<Context>,
     viewport: Viewport,
+    sample_count: SampleCount,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene,
@@ -116,7 +117,7 @@ impl ForwardRenderer {
             state.as_mut(),
             EnvironmentRendererInfo {
                 color_format: Format::BGRA8,
-                sample_count: SampleCount::S4,
+                sample_count: info.sample_count,
                 use_depth: true,
                 skybox: super::environment::sky::SkyboxInfo::default(),
             },
@@ -148,6 +149,7 @@ impl ForwardRenderer {
             objects: Default::default(),
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
+            sample_count: info.sample_count,
             cull_queue,
             alloc,
         }
@@ -201,13 +203,13 @@ impl ForwardRenderer {
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,
-            samples: SampleCount::S4,
+            samples: self.sample_count,
         });
 
         let s = state
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
-                sample_count: SampleCount::S4,
+                sample_count: self.sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: true,
@@ -395,7 +397,7 @@ impl ForwardRenderer {
             layers: 1,
             format: Format::BGRA8,
             mip_levels: 1,
-            samples: SampleCount::S4, // JHTODO Make this configurable.
+            samples: self.sample_count,
             initial_data: None,
             ..Default::default()
         };

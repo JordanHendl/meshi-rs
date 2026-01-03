@@ -4,7 +4,7 @@ pub mod forward;
 mod scene;
 
 use crate::{RenderObject, RenderObjectInfo};
-use dashi::{Context, Handle, ImageView, Semaphore, Viewport};
+use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{types::Camera, BindlessState};
 use glam::Mat4;
 use meshi_utils::MeshiError;
@@ -13,6 +13,7 @@ use noren::DB;
 pub struct RendererInfo {
     pub headless: bool,
     pub initial_viewport: Viewport,
+    pub sample_count: SampleCount,
 }
 
 pub struct ViewOutput {
