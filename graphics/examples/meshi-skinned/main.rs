@@ -37,7 +37,7 @@ fn main() {
     // Make window for output to render to.
     let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
-            title: "meshi-cube".to_string(),
+            title: "meshi-skinned".to_string(),
             size: [512, 512],
             resizable: false,
         },
@@ -58,17 +58,17 @@ fn main() {
         100.0, // far
     );
 
-    // Register default cube with the engine as an object.
-    let cube = engine
-        .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/cube").unwrap(),
-        ))
+    let model = db.fetch_gpu_model("model/cube").unwrap();
+    let skinned = engine
+        .register_object(&RenderObjectInfo::SkinnedModel(SkinnedModelInfo {
+            model,
+            animation: AnimationState::default(),
+        }))
         .unwrap();
 
     let translation = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
     let mut transform = translation;
-    // Update object transform to be the center.
-    engine.set_object_transform(cube, &transform);
+    engine.set_object_transform(skinned, &transform);
 
     struct AppData {
         running: bool,
@@ -90,8 +90,10 @@ fn main() {
                 }
             }
 
-            if e.event_type() == EventType::Quit {
-                r.running = false;
+            if e.source() == EventSource::Window {
+                if e.event_type() == EventType::Quit {
+                    r.running = false;
+                }
             }
         }
     }
@@ -112,7 +114,7 @@ fn main() {
             let mut rotation = Mat4::from_rotation_y(angular_velocity * total_time);
             rotation = rotation * Mat4::from_rotation_x(angular_velocity * total_time);
             transform = translation * rotation;
-            engine.set_object_transform(cube, &transform);
+            engine.set_object_transform(skinned, &transform);
         }
         engine.update(dt);
         last_time = now;

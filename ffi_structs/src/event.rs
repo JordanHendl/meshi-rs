@@ -473,7 +473,7 @@ map_keycodes! {
 pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
     match event {
         WEvent::WindowEvent { event, .. } => match event {
-            WindowEvent::CloseRequested => Some(Event {
+            WindowEvent::CloseRequested | WindowEvent::Destroyed => Some(Event {
                 event_type: EventType::Quit,
                 source: EventSource::Window,
                 payload: Payload {

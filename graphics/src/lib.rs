@@ -198,23 +198,26 @@ impl RenderEngine {
     }
 
     fn publish_events(&mut self) {
+        use winit::event::Event as WinitEvent;
         use winit::event_loop::ControlFlow;
         use winit::platform::run_return::EventLoopExtRunReturn;
 
-        if self.event_cb.is_some() {
-            let cb = self.event_cb.as_mut().unwrap();
-            let mut triggered = false;
+        let mut triggered = false;
 
-            if let Some(event_loop) = &mut self.event_loop {
-                event_loop.run_return(|event, _target, control_flow| {
-                    *control_flow = ControlFlow::Exit;
-                    if let Some(mut e) = event::from_winit_event(&event) {
-                        triggered = true;
-                        let c = cb.event_cb;
-                        c(&mut e, cb.user_data);
-                    }
-                });
-            }
+        if let Some(cb) = self.event_cb.as_mut() {
+            self.displays.for_each_occupied_mut(|dis| {
+                if let DisplayImpl::Window(Some(display)) = &mut dis.raw {
+                    let event_loop = display.winit_event_loop();
+                    event_loop.run_return(|event, _target, control_flow| {
+                        *control_flow = ControlFlow::Exit;
+                        if let Some(mut e) = event::from_winit_event(&event) {
+                            triggered = true;
+                            let c = cb.event_cb;
+                            c(&mut e, cb.user_data);
+                        }
+                    });
+                }
+            });
 
             if !triggered {
                 let mut synthetic: event::Event = unsafe { std::mem::zeroed() };
@@ -222,12 +225,15 @@ impl RenderEngine {
                 c(&mut synthetic, cb.user_data);
             }
         } else {
-            if let Some(event_loop) = &mut self.event_loop {
-                event_loop.run_return(|event, _target, control_flow| {
-                    *control_flow = ControlFlow::Exit;
-                    if let Some(mut _e) = event::from_winit_event(&event) {}
-                });
-            }
+            self.displays.for_each_occupied_mut(|dis| {
+                if let DisplayImpl::Window(Some(display)) = &mut dis.raw {
+                    let event_loop = display.winit_event_loop();
+                    event_loop.run_return(|event, _target, control_flow| {
+                        *control_flow = ControlFlow::Exit;
+                        if let Some(mut _e) = event::from_winit_event(&event) {}
+                    });
+                }
+            });
         }
     }
 

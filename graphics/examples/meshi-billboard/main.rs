@@ -37,7 +37,7 @@ fn main() {
     // Make window for output to render to.
     let display = engine.register_window_display(DisplayInfo {
         window: WindowInfo {
-            title: "meshi-cube".to_string(),
+            title: "meshi-billboard".to_string(),
             size: [512, 512],
             resizable: false,
         },
@@ -58,39 +58,27 @@ fn main() {
         100.0, // far
     );
 
-    // Register default cube with the engine as an object.
-    let cube = engine
-        .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/cube").unwrap(),
-        ))
+    let billboard = engine
+        .register_object(&RenderObjectInfo::Billboard(BillboardInfo {
+            texture_id: 0,
+            material: None,
+        }))
         .unwrap();
 
     let translation = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
-    let mut transform = translation;
-    // Update object transform to be the center.
-    engine.set_object_transform(cube, &transform);
+    engine.set_object_transform(billboard, &translation);
 
     struct AppData {
         running: bool,
-        paused: bool,
     }
 
-    let mut data = AppData {
-        running: true,
-        paused: false,
-    };
+    let mut data = AppData { running: true };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
         unsafe {
             let e = &mut (*event);
             let r = &mut (*(data as *mut AppData));
-            if e.source() == EventSource::Key && e.event_type() == EventType::Pressed {
-                if e.key() == KeyCode::Space {
-                    r.paused = !r.paused;
-                }
-            }
-
-            if e.event_type() == EventType::Quit {
+            if e.source() == EventSource::Window && e.event_type() == EventType::Quit {
                 r.running = false;
             }
         }
@@ -100,20 +88,10 @@ fn main() {
     let mut timer = Timer::new();
     timer.start();
     let mut last_time = timer.elapsed_seconds_f32();
-    let mut total_time = 0.0f32;
-    let angular_velocity = 2.0f32;
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
-        let mut dt = now - last_time;
-        dt = dt.min(1.0 / 30.0);
-        if !data.paused {
-            total_time += dt;
-            let mut rotation = Mat4::from_rotation_y(angular_velocity * total_time);
-            rotation = rotation * Mat4::from_rotation_x(angular_velocity * total_time);
-            transform = translation * rotation;
-            engine.set_object_transform(cube, &transform);
-        }
+        let dt = (now - last_time).min(1.0 / 30.0);
         engine.update(dt);
         last_time = now;
     }
