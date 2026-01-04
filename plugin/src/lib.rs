@@ -97,11 +97,13 @@ impl MeshiEngine {
         );
         
         render.initialize_database(database.as_mut());
+        let mut audio = AudioEngine::new(&AudioEngineInfo::default());
+        audio.initialize_database(database.as_mut());
         Some(Box::new(MeshiEngine {
             database,
             render,
             physics: Box::new(PhysicsSimulation::new(&Default::default())),
-            audio: AudioEngine::new(&AudioEngineInfo::default()),
+            audio,
             frame_timer: Timer::new(),
             name: appname.to_string(),
         }))

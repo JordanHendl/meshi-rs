@@ -1,17 +1,22 @@
-use resource_pool::{Handle, Pool};
 use glam::{Mat4, Vec3};
-
+use noren::{rdb::audio::AudioClip, DB};
+use resource_pool::{Handle, Pool};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::io::BufReader;
+use std::io::{BufReader, Cursor, Seek};
 use std::{
     collections::VecDeque,
     ffi::c_void,
     fs::File,
     io::{self, Read},
+    ptr::NonNull,
     sync::mpsc::{channel, Receiver, TryRecvError},
+    sync::Arc,
     thread,
 };
 use tracing::info;
+
+trait AudioReadSeek: Read + Seek + Send + Sync + 'static {}
+impl<T: Read + Seek + Send + Sync + 'static> AudioReadSeek for T {}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[repr(C)]
@@ -73,6 +78,7 @@ pub struct AudioEngine {
     finished_callbacks: Vec<(FinishedCallback, *mut c_void)>,
     rodio_stream: Option<OutputStream>,
     rodio_handle: Option<OutputStreamHandle>,
+    db: Option<NonNull<DB>>,
 }
 
 impl AudioEngine {
@@ -113,13 +119,24 @@ impl AudioEngine {
             finished_callbacks: Vec::new(),
             rodio_stream,
             rodio_handle,
+            db: None,
         }
     }
 
     pub fn create_source(&mut self, path: &str) -> Handle<AudioSource> {
+        let source = self
+            .db
+            .and_then(|mut db| unsafe { db.as_mut().audio_mut().fetch_clip(path).ok() })
+            .map(|clip| AudioSource::new_clip(clip, self.effects_bus))
+            .unwrap_or_else(|| AudioSource::new_file(path, self.effects_bus));
+
         self.sources
-            .insert(AudioSource::new(path, self.effects_bus))
+            .insert(source)
             .unwrap_or_default()
+    }
+
+    pub fn initialize_database(&mut self, db: &mut DB) {
+        self.db = Some(NonNull::new(db).expect("audio db ptr"));
     }
 
     pub fn backend(&self) -> AudioBackend {
@@ -151,20 +168,32 @@ impl AudioEngine {
         if let Some(s) = self.get_source_mut(h) {
             if backend == AudioBackend::Rodio {
                 if let Some(handle) = handle_clone {
-                    if let Ok(file) = File::open(&s.path) {
-                        if let Ok(decoder) = Decoder::new(BufReader::new(file)) {
-                            if let Ok(sink) = Sink::try_new(&handle) {
-                                if s.looping {
-                                    sink.append(decoder.repeat_infinite());
-                                } else {
-                                    sink.append(decoder);
-                                }
-                                sink.set_volume(s.volume);
-                                sink.play();
-                                s.sink = Some(sink);
-                                s.state = PlaybackState::Playing;
-                                return;
+                    let reader: Option<Box<dyn AudioReadSeek>> = match &s.source {
+                        AudioSourceData::FilePath(path) => {
+                            File::open(path).ok().map(|file| Box::new(file) as _)
+                        }
+                        AudioSourceData::Clip { data, .. } => Some(
+                            Box::new(Cursor::new(Arc::clone(data)))
+                                as Box<dyn AudioReadSeek>,
+                        ),
+                    };
+                    if let Some(reader) = reader {
+                        let decoder = Decoder::new(BufReader::new(reader)).ok();
+                        let Some(decoder) = decoder else {
+                            s.state = PlaybackState::Playing;
+                            return;
+                        };
+                        if let Ok(sink) = Sink::try_new(&handle) {
+                            if s.looping {
+                                sink.append(decoder.repeat_infinite());
+                            } else {
+                                sink.append(decoder);
                             }
+                            sink.set_volume(s.volume);
+                            sink.play();
+                            s.sink = Some(sink);
+                            s.state = PlaybackState::Playing;
+                            return;
                         }
                     }
                 }
@@ -323,7 +352,7 @@ pub enum PlaybackState {
 #[repr(C)]
 pub struct AudioSource {
     #[allow(dead_code)]
-    path: String,
+    source: AudioSourceData,
     looping: bool,
     volume: f32,
     pitch: f32,
@@ -336,10 +365,35 @@ pub struct AudioSource {
     sink: Option<Sink>,
 }
 
+#[derive(Debug, Clone)]
+enum AudioSourceData {
+    FilePath(String),
+    Clip { name: String, data: Arc<[u8]> },
+}
+
 impl AudioSource {
-    fn new(path: &str, bus: Handle<Bus>) -> Self {
+    fn new_file(path: &str, bus: Handle<Bus>) -> Self {
         Self {
-            path: path.to_string(),
+            source: AudioSourceData::FilePath(path.to_string()),
+            looping: false,
+            volume: 1.0,
+            pitch: 1.0,
+            state: PlaybackState::Stopped,
+            transform: Mat4::IDENTITY,
+            velocity: Vec3::ZERO,
+            effective_volume: 1.0,
+            effective_pitch: 1.0,
+            bus,
+            sink: None,
+        }
+    }
+
+    fn new_clip(clip: AudioClip, bus: Handle<Bus>) -> Self {
+        Self {
+            source: AudioSourceData::Clip {
+                name: clip.name,
+                data: Arc::from(clip.data.into_boxed_slice()),
+            },
             looping: false,
             volume: 1.0,
             pitch: 1.0,
