@@ -1,7 +1,7 @@
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::skinning::{
-    MAX_SKINNING_DISPATCHES, SkinningDispatch, SkinningDispatcher, SkinnedModelData, SkinningInfo,
+    MAX_SKINNING_DISPATCHES, SkinnedModelData, SkinningDispatch, SkinningDispatcher, SkinningInfo,
     unregister_skinned_model,
 };
 use super::{Renderer, RendererInfo, ViewOutput};
@@ -11,8 +11,11 @@ use dashi::*;
 use driver::command::{Draw, DrawIndexed};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
-use furikake::{BindlessState, reservations::ReservedBinding, types::Material, types::*};
-use glam::Mat4;
+use furikake::{
+    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
+    types::*,
+};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
     DB,
@@ -42,6 +45,7 @@ pub struct ForwardRenderer {
     scene: GPUScene,
     environment: EnvironmentRenderer,
     pipelines: HashMap<Handle<Material>, PSO>,
+    billboard_pso: PSO,
     objects: ResourceList<RenderObjectData>,
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
@@ -59,7 +63,24 @@ struct RenderObjectData {
 enum RenderObjectKind {
     Model(DeviceModel),
     SkinnedModel(SkinnedModelData),
-    Billboard(BillboardInfo),
+    Billboard(BillboardData),
+}
+
+#[derive(Clone)]
+struct BillboardData {
+    info: BillboardInfo,
+    vertex_buffer: Handle<Buffer>,
+    owns_material: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BillboardVertex {
+    center: [f32; 3],
+    offset: [f32; 2],
+    size: [f32; 2],
+    color: [f32; 4],
+    tex_coords: [f32; 2],
 }
 
 struct ViewDrawItem {
@@ -71,7 +92,7 @@ struct ViewDrawItem {
 enum ViewDrawKind {
     Model(DeviceModel),
     SkinnedModel(SkinnedModelData),
-    Billboard(BillboardInfo),
+    Billboard(BillboardData),
 }
 
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
@@ -83,6 +104,53 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl ForwardRenderer {
+    fn build_billboard_pipeline(
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        dynamic: &DynamicAllocator,
+        sample_count: SampleCount,
+    ) -> PSO {
+        let shaders = miso::stdbillboard(&[]);
+
+        let mut pso_builder = PSOBuilder::new()
+            .vertex_compiled(Some(shaders[0].clone()))
+            .fragment_compiled(Some(shaders[1].clone()))
+            .set_attachment_format(0, Format::BGRA8)
+            .add_table_variable_with_resources(
+                "per_obj_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            );
+
+        pso_builder = pso_builder
+            .add_reserved_table_variables(state)
+            .expect("Failed to add reserved tables for billboard pipeline");
+
+        pso_builder = pso_builder.add_depth_target(AttachmentDesc {
+            format: Format::D24S8,
+            samples: sample_count,
+        });
+
+        let pso = pso_builder
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 1],
+                sample_count,
+                depth_test: Some(DepthInfo {
+                    should_test: true,
+                    should_write: false,
+                }),
+                ..Default::default()
+            })
+            .build(ctx)
+            .expect("Failed to build billboard pipeline!");
+
+        state.register_pso_tables(&pso);
+
+        pso
+    }
+
     pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
@@ -129,6 +197,13 @@ impl ForwardRenderer {
             })
             .expect("Unable to create dynamic allocator!");
 
+        let billboard_pso = Self::build_billboard_pipeline(
+            ctx.as_mut(),
+            state.as_mut(),
+            &dynamic,
+            info.sample_count,
+        );
+
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
@@ -167,6 +242,7 @@ impl ForwardRenderer {
             environment,
             dynamic,
             pipelines: Default::default(),
+            billboard_pso,
             objects: Default::default(),
             scene_lookup: Default::default(),
             viewport: info.initial_viewport,
@@ -233,6 +309,148 @@ impl ForwardRenderer {
         s
     }
 
+    fn allocate_billboard_material(&mut self, texture_id: u32) -> Handle<Material> {
+        let mut material_handle = Handle::default();
+        self.state
+            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
+                material_handle = materials.add_material();
+                let material = materials.material_mut(material_handle);
+                *material = Material::default();
+                material.base_color_texture_id = texture_id as u16;
+                material.normal_texture_id = u16::MAX;
+                material.metallic_roughness_texture_id = u16::MAX;
+                material.occlusion_texture_id = u16::MAX;
+                material.emissive_texture_id = u16::MAX;
+            })
+            .expect("Failed to allocate billboard material");
+
+        material_handle
+    }
+
+    fn update_billboard_material_texture(&mut self, material: Handle<Material>, texture_id: u32) {
+        self.state
+            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
+                let material = materials.material_mut(material);
+                material.base_color_texture_id = texture_id as u16;
+            })
+            .expect("Failed to update billboard material texture");
+    }
+
+    fn create_billboard_data(&mut self, mut info: BillboardInfo) -> BillboardData {
+        let vertices = Self::billboard_vertices(Vec3::ZERO, Vec2::ONE, Vec4::ONE);
+        let vertex_buffer = self
+            .ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "[MESHI] Billboard Vertex Buffer",
+                byte_size: (std::mem::size_of::<BillboardVertex>() * vertices.len()) as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::VERTEX,
+                initial_data: Some(unsafe { vertices.align_to::<u8>().1 }),
+            })
+            .expect("Failed to create billboard vertex buffer");
+
+        let mut owns_material = false;
+        if info.material.is_none() {
+            info.material = Some(self.allocate_billboard_material(info.texture_id));
+            owns_material = true;
+        }
+
+        BillboardData {
+            info,
+            vertex_buffer,
+            owns_material,
+        }
+    }
+
+    fn billboard_vertices(center: Vec3, size: Vec2, color: Vec4) -> [BillboardVertex; 6] {
+        let offsets = [
+            Vec2::new(-0.5, -0.5),
+            Vec2::new(0.5, -0.5),
+            Vec2::new(0.5, 0.5),
+            Vec2::new(-0.5, 0.5),
+        ];
+        let tex_coords = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+
+        let color = color.to_array();
+        let center = center.to_array();
+        let size = size.to_array();
+
+        [
+            BillboardVertex {
+                center,
+                offset: offsets[0].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[0].to_array(),
+            },
+            BillboardVertex {
+                center,
+                offset: offsets[1].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[1].to_array(),
+            },
+            BillboardVertex {
+                center,
+                offset: offsets[2].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[2].to_array(),
+            },
+            BillboardVertex {
+                center,
+                offset: offsets[2].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[2].to_array(),
+            },
+            BillboardVertex {
+                center,
+                offset: offsets[3].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[3].to_array(),
+            },
+            BillboardVertex {
+                center,
+                offset: offsets[0].to_array(),
+                size,
+                color,
+                tex_coords: tex_coords[0].to_array(),
+            },
+        ]
+    }
+
+    fn update_billboard_vertices(&mut self, billboard: &BillboardData, transform: Mat4) {
+        let center = transform.transform_point3(Vec3::ZERO);
+        let mut size = Vec2::new(
+            transform.transform_vector3(Vec3::X).length(),
+            transform.transform_vector3(Vec3::Y).length(),
+        );
+
+        if size.x <= 0.0 {
+            size.x = 1.0;
+        }
+        if size.y <= 0.0 {
+            size.y = 1.0;
+        }
+
+        let vertices = Self::billboard_vertices(center, size, Vec4::ONE);
+        let mapped = self
+            .ctx
+            .map_buffer_mut::<BillboardVertex>(BufferView::new(billboard.vertex_buffer))
+            .expect("Failed to map billboard vertex buffer");
+        mapped[..vertices.len()].copy_from_slice(&vertices);
+        self.ctx
+            .unmap_buffer(billboard.vertex_buffer)
+            .expect("Failed to unmap billboard vertex buffer");
+    }
+
     pub fn initialize_database(&mut self, db: &mut DB) {
         db.import_dashi_context(&mut self.ctx);
         db.import_furikake_state(&mut self.state);
@@ -287,8 +505,9 @@ impl ForwardRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::Billboard(billboard) => {
+                let billboard = self.create_billboard_data(billboard.clone());
                 let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::Billboard(billboard.clone()),
+                    kind: RenderObjectKind::Billboard(billboard),
                     scene_handle,
                 });
 
@@ -341,13 +560,23 @@ impl ForwardRenderer {
             return;
         }
 
-        let obj = self.objects.get_ref_mut(from_handle(handle));
-        match &mut obj.kind {
-            RenderObjectKind::Billboard(billboard) => {
-                billboard.texture_id = texture_id;
+        let (owns_material, material_handle) = {
+            let obj = self.objects.get_ref_mut(from_handle(handle));
+            match &mut obj.kind {
+                RenderObjectKind::Billboard(billboard) => {
+                    billboard.info.texture_id = texture_id;
+                    (billboard.owns_material, billboard.info.material)
+                }
+                _ => {
+                    warn!("Attempted to update billboard texture on non-billboard object.");
+                    return;
+                }
             }
-            _ => {
-                warn!("Attempted to update billboard texture on non-billboard object.");
+        };
+
+        if owns_material {
+            if let Some(material) = material_handle {
+                self.update_billboard_material_texture(material, texture_id);
             }
         }
     }
@@ -370,13 +599,43 @@ impl ForwardRenderer {
             return;
         }
 
-        let obj = self.objects.get_ref_mut(from_handle(handle));
-        match &mut obj.kind {
-            RenderObjectKind::Billboard(billboard) => {
-                billboard.material = material;
+        let (owned_material, texture_id) = {
+            let obj = self.objects.get_ref_mut(from_handle(handle));
+            match &mut obj.kind {
+                RenderObjectKind::Billboard(billboard) => {
+                    let owned_material = if billboard.owns_material {
+                        billboard.owns_material = false;
+                        billboard.info.material
+                    } else {
+                        None
+                    };
+                    billboard.info.material = material;
+                    (owned_material, billboard.info.texture_id)
+                }
+                _ => {
+                    warn!("Attempted to update billboard material on non-billboard object.");
+                    return;
+                }
             }
-            _ => {
-                warn!("Attempted to update billboard material on non-billboard object.");
+        };
+
+        if let Some(existing) = owned_material {
+            self.state
+                .reserved_mut::<ReservedBindlessMaterials, _>(
+                    "meshi_bindless_materials",
+                    |materials| {
+                        materials.remove_material(existing);
+                    },
+                )
+                .expect("Failed to remove billboard material");
+        }
+
+        if material.is_none() {
+            let new_material = self.allocate_billboard_material(texture_id);
+            let obj = self.objects.get_ref_mut(from_handle(handle));
+            if let RenderObjectKind::Billboard(billboard) = &mut obj.kind {
+                billboard.info.material = Some(new_material);
+                billboard.owns_material = true;
             }
         }
     }
@@ -390,12 +649,38 @@ impl ForwardRenderer {
             return;
         }
 
-        let obj = self.objects.get_ref(from_handle(handle));
-        if let RenderObjectKind::SkinnedModel(skinned) = &obj.kind {
-            unregister_skinned_model(self.state.as_mut(), skinned);
+        let (skinned, billboard_material) = {
+            let obj = self.objects.get_ref(from_handle(handle));
+            self.scene.release_object(obj.scene_handle);
+            self.scene_lookup.remove(&obj.scene_handle.slot);
+
+            match &obj.kind {
+                RenderObjectKind::SkinnedModel(skinned) => (Some(skinned.clone()), None),
+                RenderObjectKind::Billboard(billboard) => {
+                    if billboard.owns_material {
+                        (None, billboard.info.material)
+                    } else {
+                        (None, None)
+                    }
+                }
+                _ => (None, None),
+            }
+        };
+
+        if let Some(skinned) = skinned {
+            unregister_skinned_model(self.state.as_mut(), &skinned);
         }
-        self.scene.release_object(obj.scene_handle);
-        self.scene_lookup.remove(&obj.scene_handle.slot);
+
+        if let Some(material) = billboard_material {
+            self.state
+                .reserved_mut::<ReservedBindlessMaterials, _>(
+                    "meshi_bindless_materials",
+                    |materials| {
+                        materials.remove_material(material);
+                    },
+                )
+                .expect("Failed to remove billboard material");
+        }
 
         self.objects.release(from_handle(handle));
     }
@@ -569,6 +854,26 @@ impl ForwardRenderer {
 
             let draw_items = &view_draws[view_idx];
             let camera_handle = *camera;
+            struct BillboardDraw {
+                vertex_buffer: Handle<Buffer>,
+                material: Handle<Material>,
+                transformation: Handle<Transformation>,
+                total_transform: Mat4,
+            }
+            let mut billboard_draws = Vec::new();
+            for item in draw_items {
+                if let ViewDrawKind::Billboard(billboard) = &item.kind {
+                    if let Some(material) = billboard.info.material {
+                        self.update_billboard_vertices(billboard, item.total_transform);
+                        billboard_draws.push(BillboardDraw {
+                            vertex_buffer: billboard.vertex_buffer,
+                            material,
+                            transformation: item.transformation,
+                            total_transform: item.total_transform,
+                        });
+                    }
+                }
+            }
 
             // Forward SPLIT pass. Renders the following framebuffers:
             // 1) Color
@@ -591,7 +896,6 @@ impl ForwardRenderer {
                     }
 
                     let mut model_draws = Vec::new();
-                    let mut billboard_draws = Vec::new();
 
                     for item in draw_items {
                         match &item.kind {
@@ -609,9 +913,7 @@ impl ForwardRenderer {
                                     skinning: skinned.skinning_info(),
                                 });
                             }
-                            ViewDrawKind::Billboard(billboard) => {
-                                billboard_draws.push((item, billboard));
-                            }
+                            ViewDrawKind::Billboard(_) => {}
                         }
                     }
 
@@ -678,11 +980,42 @@ impl ForwardRenderer {
                         }
                     }
 
-                    if !billboard_draws.is_empty() {
-                        warn!(
-                            "Forward renderer received {} billboard draw(s) without a billboard pass.",
-                            billboard_draws.len()
-                        );
+                    for draw in &billboard_draws {
+                        let mut alloc = self
+                            .dynamic
+                            .bump()
+                            .expect("Failed to allocate billboard dynamic buffer!");
+
+                        #[repr(C)]
+                        struct PerObj {
+                            transform: Mat4,
+                            transformation: Handle<Transformation>,
+                            material_id: Handle<Material>,
+                            camera: Handle<Camera>,
+                            skeleton_id: Handle<furikake::types::SkeletonHeader>,
+                            animation_state_id: Handle<furikake::types::AnimationState>,
+                        }
+
+                        let per_obj = &mut alloc.slice::<PerObj>()[0];
+                        per_obj.transform = draw.total_transform;
+                        per_obj.transformation = draw.transformation;
+                        per_obj.material_id = draw.material;
+                        per_obj.camera = camera_handle;
+                        per_obj.skeleton_id = Handle::default();
+                        per_obj.animation_state_id = Handle::default();
+
+                        cmd = cmd
+                            .bind_graphics_pipeline(self.billboard_pso.handle)
+                            .update_viewport(&self.viewport)
+                            .draw(&Draw {
+                                vertices: draw.vertex_buffer,
+                                bind_tables: self.billboard_pso.tables(),
+                                dynamic_buffers: [None, Some(alloc), None, None],
+                                instance_count: 1,
+                                count: 6,
+                                ..Default::default()
+                            })
+                            .unbind_graphics_pipeline();
                     }
 
                     cmd
