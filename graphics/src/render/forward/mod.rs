@@ -1,10 +1,11 @@
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
-use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{
-    AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, SkinnedModelInfo,
-    render::scene::*,
+use super::skinning::{
+    MAX_SKINNING_DISPATCHES, SkinningDispatch, SkinningDispatcher, SkinnedModelData, SkinningInfo,
+    unregister_skinned_model,
 };
+use super::{Renderer, RendererInfo, ViewOutput};
+use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
 use driver::command::{Draw, DrawIndexed};
@@ -45,6 +46,7 @@ pub struct ForwardRenderer {
     scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
     cull_queue: CommandRing,
+    skinning: SkinningDispatcher,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -56,7 +58,7 @@ struct RenderObjectData {
 
 enum RenderObjectKind {
     Model(DeviceModel),
-    SkinnedModel(SkinnedModelInfo),
+    SkinnedModel(SkinnedModelData),
     Billboard(BillboardInfo),
 }
 
@@ -68,7 +70,7 @@ struct ViewDrawItem {
 
 enum ViewDrawKind {
     Model(DeviceModel),
-    SkinnedModel(SkinnedModelInfo),
+    SkinnedModel(SkinnedModelData),
     Billboard(BillboardInfo),
 }
 
@@ -150,6 +152,8 @@ impl ForwardRenderer {
             })
             .expect("Failed to make cull command queue");
 
+        let skinning = SkinningDispatcher::new(ctx.as_mut(), state.as_ref());
+
         info!(
             "Initialized Forward Renderer with dimensions [{}, {}]",
             info.initial_viewport.area.w, info.initial_viewport.area.h
@@ -168,6 +172,7 @@ impl ForwardRenderer {
             viewport: info.initial_viewport,
             sample_count: info.sample_count,
             cull_queue,
+            skinning,
             alloc,
         }
     }
@@ -271,8 +276,9 @@ impl ForwardRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::SkinnedModel(skinned) => {
+                let skinned_data = SkinnedModelData::new(skinned.clone(), self.state.as_mut());
                 let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::SkinnedModel(skinned.clone()),
+                    kind: RenderObjectKind::SkinnedModel(skinned_data),
                     scene_handle,
                 });
 
@@ -312,7 +318,8 @@ impl ForwardRenderer {
         let obj = self.objects.get_ref_mut(from_handle(handle));
         match &mut obj.kind {
             RenderObjectKind::SkinnedModel(skinned) => {
-                skinned.animation = state;
+                skinned.info.animation = state;
+                skinned.mark_animation_dirty();
             }
             _ => {
                 warn!("Attempted to update animation on non-skinned object.");
@@ -384,6 +391,9 @@ impl ForwardRenderer {
         }
 
         let obj = self.objects.get_ref(from_handle(handle));
+        if let RenderObjectKind::SkinnedModel(skinned) = &obj.kind {
+            unregister_skinned_model(self.state.as_mut(), skinned);
+        }
         self.scene.release_object(obj.scene_handle);
         self.scene_lookup.remove(&obj.scene_handle.slot);
 
@@ -483,13 +493,20 @@ impl ForwardRenderer {
 
     fn update_skinned_animations(&mut self, delta_time: f32) {
         let entries = self.objects.entries.clone();
+        let mut dispatches = Vec::new();
         for entry in entries {
             let obj = self.objects.get_ref_mut(entry);
 
             if let RenderObjectKind::SkinnedModel(skinned) = &mut obj.kind {
-                skinned.animation.time_seconds += delta_time * skinned.animation.speed;
+                if dispatches.len() >= MAX_SKINNING_DISPATCHES {
+                    break;
+                }
+                dispatches.push(SkinningDispatch::from_model(skinned, delta_time));
+                skinned.clear_animation_dirty();
             }
         }
+
+        self.skinning.update(&dispatches);
     }
 
     pub fn update(
@@ -567,17 +584,30 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    let mut standard_draws = Vec::new();
-                    let mut skinned_draws = Vec::new();
+                    struct ModelDraw<'a> {
+                        item: &'a ViewDrawItem,
+                        model: &'a DeviceModel,
+                        skinning: SkinningInfo,
+                    }
+
+                    let mut model_draws = Vec::new();
                     let mut billboard_draws = Vec::new();
 
                     for item in draw_items {
                         match &item.kind {
                             ViewDrawKind::Model(model) => {
-                                standard_draws.push((item, model));
+                                model_draws.push(ModelDraw {
+                                    item,
+                                    model,
+                                    skinning: SkinningInfo::default(),
+                                });
                             }
                             ViewDrawKind::SkinnedModel(skinned) => {
-                                skinned_draws.push((item, skinned));
+                                model_draws.push(ModelDraw {
+                                    item,
+                                    model: skinned.model(),
+                                    skinning: skinned.skinning_info(),
+                                });
                             }
                             ViewDrawKind::Billboard(billboard) => {
                                 billboard_draws.push((item, billboard));
@@ -585,8 +615,8 @@ impl ForwardRenderer {
                         }
                     }
 
-                    for (item, model) in standard_draws {
-                        for mesh in &model.meshes {
+                    for draw in model_draws {
+                        for mesh in &draw.model.meshes {
                             if let Some(material) = &mesh.material {
                                 if let Some(mat_idx) = material.furikake_material_handle {
                                     if let Some(pso) = self.pipelines.get(&mat_idx) {
@@ -604,13 +634,18 @@ impl ForwardRenderer {
                                             transformation: Handle<Transformation>,
                                             material_id: Handle<Material>,
                                             camera: Handle<Camera>,
+                                            skeleton_id: Handle<furikake::types::SkeletonHeader>,
+                                            animation_state_id:
+                                                Handle<furikake::types::AnimationState>,
                                         }
 
                                         let per_obj = &mut alloc.slice::<PerObj>()[0];
-                                        per_obj.transform = item.total_transform;
-                                        per_obj.transformation = item.transformation;
+                                        per_obj.transform = draw.item.total_transform;
+                                        per_obj.transformation = draw.item.transformation;
                                         per_obj.material_id = mat_idx;
                                         per_obj.camera = camera_handle;
+                                        per_obj.skeleton_id = draw.skinning.skeleton;
+                                        per_obj.animation_state_id = draw.skinning.animation_state;
                                         cmd = cmd
                                             .bind_graphics_pipeline(pso.handle)
                                             .update_viewport(&self.viewport)
@@ -641,13 +676,6 @@ impl ForwardRenderer {
                                 }
                             }
                         }
-                    }
-
-                    if !skinned_draws.is_empty() {
-                        warn!(
-                            "Forward renderer received {} skinned draw(s) without a skinned pass.",
-                            skinned_draws.len()
-                        );
                     }
 
                     if !billboard_draws.is_empty() {

@@ -1,6 +1,7 @@
 pub mod deferred;
 pub mod environment;
 pub mod forward;
+mod skinning;
 mod scene;
 
 use crate::{AnimationState, RenderObject, RenderObjectInfo};
