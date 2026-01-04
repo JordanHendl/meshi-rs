@@ -6,9 +6,10 @@ use dashi::driver::command::*;
 use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
-    Buffer, CommandQueueInfo2, CommandStream, Context, Display as DashiDisplay,
-    DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Handle, ImageView, QueueType, Rect2D,
-    SampleCount, SubmitInfo, SubmitInfo2, Viewport,
+    AspectMask, Buffer, BufferInfo, BufferUsage, BufferView, CommandQueueInfo2, CommandStream,
+    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Format,
+    Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
+    SubresourceRange, SubmitInfo, SubmitInfo2, Viewport,
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
@@ -30,6 +31,10 @@ pub type WindowInfo = dashi::WindowInfo;
 struct CPUImageOutput {
     img: ImageView,
     staging: Handle<Buffer>,
+    width: u32,
+    height: u32,
+    format: Format,
+    pixels: Vec<u8>,
 }
 
 enum DisplayImpl {
@@ -301,7 +306,33 @@ impl RenderEngine {
                         .expect("Failed to present to display!");
                 }
                 DisplayImpl::CPUImage(_cpuimage_output) => {
-                    todo!("CPUImage display not yet implemented.")
+                    self.blit_queue
+                        .record(|c| {
+                            CommandStream::new()
+                                .begin()
+                                .resolve_images(&MSImageResolve {
+                                    src: output.image.img,
+                                    dst: _cpuimage_output.img.img,
+                                    ..Default::default()
+                                })
+                                .copy_image_to_buffer(&CopyImageBuffer {
+                                    src: _cpuimage_output.img.img,
+                                    dst: _cpuimage_output.staging,
+                                    range: _cpuimage_output.img.range,
+                                    dst_offset: 0,
+                                })
+                                .end()
+                                .append(c)
+                                .unwrap();
+                        })
+                        .expect("Failed to make commands");
+
+                    self.blit_queue
+                        .submit(&SubmitInfo {
+                            wait_sems: &[output.semaphore],
+                            signal_sems: &[],
+                        })
+                        .expect("Failed to submit!");
                 }
             }
         });
@@ -336,23 +367,93 @@ impl RenderEngine {
     }
 
     pub fn register_cpu_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
-        todo!("Not yet implemented.");
-        //        let raw = Some(Box::new(
-        //            self.context()
-        //                .make_display(&info)
-        //                .expect("Failed to make display!"),
-        //        ));
-        //        return self
-        //            .displays
-        //            .insert(Display {
-        //                raw: DisplayImpl::Window(raw),
-        //                scene: Default::default(),
-        //            })
-        //            .unwrap();
+        let size = info.window.size;
+        let format = Format::BGRA8;
+        let img = self
+            .context()
+            .make_image(&ImageInfo {
+                debug_name: "[MESHI CPU] Display Image",
+                dim: [size[0], size[1], 1],
+                layers: 1,
+                format,
+                mip_levels: 1,
+                samples: SampleCount::S1,
+                initial_data: None,
+                ..Default::default()
+            })
+            .expect("Failed to make CPU display image");
+        let img = ImageView {
+            img,
+            range: SubresourceRange::default(),
+            aspect: AspectMask::Color,
+            view_type: ImageViewType::Type2D,
+        };
+        let byte_size = size[0] as usize * size[1] as usize * 4;
+        let staging = self
+            .context()
+            .make_buffer(&BufferInfo {
+                debug_name: "[MESHI CPU] Display Staging",
+                byte_size: byte_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::ALL,
+                initial_data: None,
+            })
+            .expect("Failed to make CPU display staging buffer");
+
+        self.displays
+            .insert(Display {
+                raw: DisplayImpl::CPUImage(CPUImageOutput {
+                    img,
+                    staging,
+                    width: size[0],
+                    height: size[1],
+                    format,
+                    pixels: vec![0; byte_size],
+                }),
+                scene: Default::default(),
+            })
+            .unwrap()
     }
 
-    pub fn frame_dump(&mut self, _display: Handle<Display>) -> Option<FFIImage> {
-        None
+    pub fn frame_dump(&mut self, display: Handle<Display>) -> Option<FFIImage> {
+        if !display.valid() {
+            return None;
+        }
+
+        let ctx = unsafe{&mut *(self.context() as *mut Context)};
+        let output = match &mut self.displays.get_mut_ref(display)?.raw {
+            DisplayImpl::CPUImage(output) => output,
+            _ => return None,
+        };
+
+        if let Err(err) = self.blit_queue.wait_all() {
+            warn!("Failed waiting on blit queue: {err:?}");
+            return None;
+        }
+
+        let mapped = match ctx.map_buffer::<u8>(BufferView::new(output.staging)) {
+            Ok(mapped) => mapped,
+            Err(err) => {
+                warn!("Failed to map CPU display buffer: {err:?}");
+                return None;
+            }
+        };
+
+        if output.pixels.len() != mapped.len() {
+            output.pixels.resize(mapped.len(), 0);
+        }
+        output.pixels.copy_from_slice(mapped);
+
+        if let Err(err) = ctx.unmap_buffer(output.staging) {
+            warn!("Failed to unmap CPU display buffer: {err:?}");
+        }
+
+        Some(FFIImage {
+            width: output.width,
+            height: output.height,
+            format: output.format as u32,
+            pixels: output.pixels.as_ptr(),
+        })
     }
 
     pub fn attach_camera_to_display(&mut self, display: Handle<Display>, camera: Handle<Camera>) {
