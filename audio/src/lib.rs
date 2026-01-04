@@ -2,16 +2,11 @@ use glam::{Mat4, Vec3};
 use noren::{rdb::audio::AudioClip, DB};
 use resource_pool::{Handle, Pool};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::io::{BufReader, Cursor, Seek};
+use std::io::{BufReader, Cursor, Read, Seek};
 use std::{
-    collections::VecDeque,
     ffi::c_void,
-    fs::File,
-    io::{self, Read},
     ptr::NonNull,
-    sync::mpsc::{channel, Receiver, TryRecvError},
     sync::Arc,
-    thread,
 };
 use tracing::info;
 
@@ -124,15 +119,21 @@ impl AudioEngine {
     }
 
     pub fn create_source(&mut self, path: &str) -> Handle<AudioSource> {
-        let source = self
-            .db
-            .and_then(|mut db| unsafe { db.as_mut().audio_mut().fetch_clip(path).ok() })
-            .map(|clip| AudioSource::new_clip(clip, self.effects_bus))
-            .unwrap_or_else(|| AudioSource::new_file(path, self.effects_bus));
+        let Some(mut db) = self.db else {
+            info!("Audio database unavailable; cannot load clip '{}'", path);
+            return Handle::default();
+        };
 
-        self.sources
-            .insert(source)
-            .unwrap_or_default()
+        match unsafe { db.as_mut().audio_mut().fetch_clip(path) } {
+            Ok(clip) => self
+                .sources
+                .insert(AudioSource::new_clip(clip, self.effects_bus))
+                .unwrap_or_default(),
+            Err(err) => {
+                info!("Failed to load audio clip '{}': {:?}", path, err);
+                Handle::default()
+            }
+        }
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -169,9 +170,6 @@ impl AudioEngine {
             if backend == AudioBackend::Rodio {
                 if let Some(handle) = handle_clone {
                     let reader: Option<Box<dyn AudioReadSeek>> = match &s.source {
-                        AudioSourceData::FilePath(path) => {
-                            File::open(path).ok().map(|file| Box::new(file) as _)
-                        }
                         AudioSourceData::Clip { data, .. } => Some(
                             Box::new(Cursor::new(Arc::clone(data)))
                                 as Box<dyn AudioReadSeek>,
@@ -282,10 +280,20 @@ impl AudioEngine {
     }
 
     pub fn create_stream(&mut self, path: &str) -> Handle<StreamingSource> {
-        if let Some(stream) = StreamingSource::new(path) {
-            self.streams.insert(stream).unwrap_or_default()
-        } else {
-            Handle::default()
+        let Some(mut db) = self.db else {
+            info!("Audio database unavailable; cannot load stream '{}'", path);
+            return Handle::default();
+        };
+
+        match unsafe { db.as_mut().audio_mut().fetch_clip(path) } {
+            Ok(clip) => self
+                .streams
+                .insert(StreamingSource::new_clip(clip))
+                .unwrap_or_default(),
+            Err(err) => {
+                info!("Failed to load audio stream '{}': {:?}", path, err);
+                Handle::default()
+            }
         }
     }
 
@@ -298,11 +306,6 @@ impl AudioEngine {
     }
 
     pub fn update(&mut self, _dt: f32) {
-        self.streams.for_each_occupied_mut(|s| {
-            if let Err(e) = s.refill() {
-                info!("Streaming read error: {}", e);
-            }
-        });
         self.mix();
     }
 
@@ -367,27 +370,10 @@ pub struct AudioSource {
 
 #[derive(Debug, Clone)]
 enum AudioSourceData {
-    FilePath(String),
     Clip { name: String, data: Arc<[u8]> },
 }
 
 impl AudioSource {
-    fn new_file(path: &str, bus: Handle<Bus>) -> Self {
-        Self {
-            source: AudioSourceData::FilePath(path.to_string()),
-            looping: false,
-            volume: 1.0,
-            pitch: 1.0,
-            state: PlaybackState::Stopped,
-            transform: Mat4::IDENTITY,
-            velocity: Vec3::ZERO,
-            effective_volume: 1.0,
-            effective_pitch: 1.0,
-            bus,
-            sink: None,
-        }
-    }
-
     fn new_clip(clip: AudioClip, bus: Handle<Bus>) -> Self {
         Self {
             source: AudioSourceData::Clip {
@@ -408,14 +394,11 @@ impl AudioSource {
     }
 }
 
-const STREAM_CHUNK: usize = 4096;
-
 pub struct StreamingSource {
     #[allow(dead_code)]
-    path: String,
-    buffer: VecDeque<u8>,
-    finished: bool,
-    rx: Receiver<io::Result<Vec<u8>>>,
+    name: String,
+    data: Arc<[u8]>,
+    cursor: usize,
 }
 
 fn compute_bus_volume(buses: &Pool<Bus>, h: Handle<Bus>) -> f32 {
@@ -431,79 +414,23 @@ fn compute_bus_volume(buses: &Pool<Bus>, h: Handle<Bus>) -> f32 {
 }
 
 impl StreamingSource {
-    fn new(path: &str) -> Option<Self> {
-        let file = File::open(path).ok()?;
-        let (tx, rx) = channel::<io::Result<Vec<u8>>>();
-        thread::spawn(move || {
-            let mut file = file;
-            loop {
-                let mut temp = vec![0u8; STREAM_CHUNK];
-                match file.read(&mut temp) {
-                    Ok(0) => {
-                        let _ = tx.send(Ok(Vec::new()));
-                        break;
-                    }
-                    Ok(n) => {
-                        temp.truncate(n);
-                        if tx.send(Ok(temp)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        break;
-                    }
-                }
-            }
-        });
-
-        Some(Self {
-            path: path.to_string(),
-            buffer: VecDeque::new(),
-            finished: false,
-            rx,
-        })
-    }
-
-    fn refill(&mut self) -> io::Result<()> {
-        if self.finished {
-            return Ok(());
+    fn new_clip(clip: AudioClip) -> Self {
+        Self {
+            name: clip.name,
+            data: Arc::from(clip.data.into_boxed_slice()),
+            cursor: 0,
         }
-
-        loop {
-            match self.rx.try_recv() {
-                Ok(Ok(chunk)) => {
-                    if chunk.is_empty() {
-                        self.finished = true;
-                        break;
-                    } else {
-                        self.buffer.extend(chunk);
-                    }
-                }
-                Ok(Err(e)) => {
-                    self.finished = true;
-                    return Err(e);
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    self.finished = true;
-                    break;
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn pop_into(&mut self, out: &mut [u8]) -> usize {
         let mut count = 0;
         while count < out.len() {
-            if let Some(v) = self.buffer.pop_front() {
-                out[count] = v;
-                count += 1;
-            } else {
+            let Some(v) = self.data.get(self.cursor) else {
                 break;
-            }
+            };
+            out[count] = *v;
+            count += 1;
+            self.cursor += 1;
         }
         count
     }
