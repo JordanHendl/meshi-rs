@@ -198,9 +198,10 @@ impl ForwardRenderer {
                     slot: 0,
                 }],
             );
-        
-        
-        state = state.add_reserved_table_variables(self.state.as_mut()).unwrap();
+
+        state = state
+            .add_reserved_table_variables(self.state.as_mut())
+            .unwrap();
 
         state = state.add_depth_target(AttachmentDesc {
             format: Format::D24S8,

@@ -9,6 +9,7 @@ use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::DB;
+use std::time::Duration;
 
 pub struct RendererInfo {
     pub headless: bool,
@@ -20,6 +21,42 @@ pub struct ViewOutput {
     pub camera: Handle<Camera>,
     pub image: ImageView,
     pub semaphore: Handle<Semaphore>,
+}
+
+pub struct FrameTimer {
+    total: Duration,
+    frames: u64,
+    report_every: u64,
+}
+
+impl FrameTimer {
+    pub fn new(report_every: u64) -> Self {
+        Self {
+            total: Duration::ZERO,
+            frames: 0,
+            report_every,
+        }
+    }
+
+    pub fn record(&mut self, duration: Duration) -> Option<(f64, u64)> {
+        self.total += duration;
+        self.frames += 1;
+
+        if self.report_every > 0 && self.frames % self.report_every == 0 {
+            let avg_ms = self.average_ms().unwrap_or(0.0);
+            Some((avg_ms, self.frames))
+        } else {
+            None
+        }
+    }
+
+    pub fn average_ms(&self) -> Option<f64> {
+        if self.frames == 0 {
+            None
+        } else {
+            Some(self.total.as_secs_f64() * 1000.0 / self.frames as f64)
+        }
+    }
 }
 
 pub trait Renderer {

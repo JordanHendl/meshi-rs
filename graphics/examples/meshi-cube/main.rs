@@ -36,6 +36,7 @@ fn main() {
 
     // Make window for output to render to.
     let display = engine.register_window_display(DisplayInfo {
+        vsync: false,
         window: WindowInfo {
             title: "meshi-cube".to_string(),
             size: [512, 512],

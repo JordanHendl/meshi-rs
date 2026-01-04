@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#b8e4577c24a2543060d59481957cc8c7436c320a"
+source = "git+https://github.com/JordanHendl/gohan#1d3e9467ce7b6638f23b6aa0ad4826d18daa024b"
 dependencies = [
  "bincode",
  "clap",
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#fce305f03e18be37a01a5c398f354c9f328ac5d7"
+source = "git+https://github.com/JordanHendl/dashi#a7fc556ec2ea5a77cc3e8265639c26ae246c6c81"
 dependencies = [
  "anyhow",
  "ash",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#b8e4577c24a2543060d59481957cc8c7436c320a"
+source = "git+https://github.com/JordanHendl/gohan#1d3e9467ce7b6638f23b6aa0ad4826d18daa024b"
 dependencies = [
  "bento",
  "dashi",
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#b8e4577c24a2543060d59481957cc8c7436c320a"
+source = "git+https://github.com/JordanHendl/gohan#1d3e9467ce7b6638f23b6aa0ad4826d18daa024b"
 dependencies = [
  "bento",
  "dashi",
@@ -1916,7 +1916,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 [[package]]
 name = "resource_pool"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/ResourcePool#916566e974ce4074872d58dbd066e7854f877e0c"
+source = "git+https://github.com/JordanHendl/ResourcePool#f73cc83485ed385eb0244af37d7f9511b806ed6d"
 dependencies = [
  "bytemuck",
 ]
@@ -2285,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#b8e4577c24a2543060d59481957cc8c7436c320a"
+source = "git+https://github.com/JordanHendl/gohan#1d3e9467ce7b6638f23b6aa0ad4826d18daa024b"
 dependencies = [
  "bento",
  "dashi",

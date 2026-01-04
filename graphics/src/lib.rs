@@ -18,8 +18,9 @@ use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
 use render::forward::ForwardRenderer;
-use render::{Renderer, RendererInfo};
+use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 use tracing::{error, info, warn};
@@ -48,6 +49,7 @@ pub struct RenderEngine {
     blit_queue: CommandRing,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     db: Option<NonNull<DB>>,
+    frame_timer: FrameTimer,
 }
 
 impl RenderEngine {
@@ -95,12 +97,13 @@ impl RenderEngine {
             .expect("Failed to make render queue");
 
         Ok(Self {
-            displays: Default::default(),
+            displays: Pool::new(8),
             renderer,
             db: None,
             event_cb: None,
             event_loop,
             blit_queue,
+            frame_timer: FrameTimer::new(60),
         })
     }
 
@@ -238,6 +241,7 @@ impl RenderEngine {
     }
 
     pub fn update(&mut self, delta_time: f32) {
+        let frame_start = Instant::now();
         self.publish_events();
         let mut views = Vec::new();
         let mut seen = HashSet::new();
@@ -280,7 +284,7 @@ impl RenderEngine {
                                 })
                                 .prepare_for_presentation(img.img)
                                 .end()
-                                .append(c);
+                                .append(c).unwrap();
                         })
                         .expect("Failed to make commands");
 
@@ -301,6 +305,17 @@ impl RenderEngine {
                 }
             }
         });
+
+        if let Some((avg_ms, frames)) = self.frame_timer.record(frame_start.elapsed()) {
+            info!(
+                "Average frame time: {:.2} ms over {} frame(s).",
+                avg_ms, frames
+            );
+        }
+    }
+
+    pub fn average_frame_time_ms(&self) -> Option<f64> {
+        self.frame_timer.average_ms()
     }
 
     pub fn register_window_display(&mut self, info: dashi::DisplayInfo) -> Handle<Display> {
