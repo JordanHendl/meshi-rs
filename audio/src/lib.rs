@@ -2,6 +2,7 @@ use glam::{Mat4, Vec3};
 use noren::{rdb::audio::AudioClip, DB};
 use resource_pool::{Handle, Pool};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use std::mem::MaybeUninit;
 use std::io::{BufReader, Cursor, Read, Seek};
 use std::{
     ffi::c_void,
@@ -64,7 +65,7 @@ pub struct AudioEngine {
     info: AudioEngineInfo,
     listener_transform: Mat4,
     listener_velocity: Vec3,
-    sources: Pool<AudioSource>,
+    sources: Pool<AudioSourceSlot>,
     streams: Pool<StreamingSource>,
     buses: Pool<Bus>,
     master_bus: Handle<Bus>,
@@ -127,7 +128,11 @@ impl AudioEngine {
         match unsafe { db.as_mut().audio_mut().fetch_clip(path) } {
             Ok(clip) => self
                 .sources
-                .insert(AudioSource::new_clip(clip, self.effects_bus))
+                .insert(AudioSourceSlot::new(AudioSource::new_clip(
+                    clip,
+                    self.effects_bus,
+                )))
+                .map(to_public_source_handle)
                 .unwrap_or_default(),
             Err(err) => {
                 info!("Failed to load audio clip '{}': {:?}", path, err);
@@ -146,21 +151,30 @@ impl AudioEngine {
 
     pub fn destroy_source(&mut self, h: Handle<AudioSource>) {
         if self.info.backend == AudioBackend::Rodio {
-            if let Some(s) = self.sources.get_mut_ref(h) {
-                if let Some(sink) = s.sink.take() {
+            if let Some(s) = self.sources.get_mut_ref(to_slot_handle(h)) {
+                if let Some(sink) = s.as_mut().sink.take() {
                     sink.stop();
                 }
             }
         }
-        self.sources.release(h);
+        if let Some(source) = self.sources.get_mut_ref(to_slot_handle(h)) {
+            unsafe {
+                source.drop_in_place();
+            }
+        }
+        self.sources.release(to_slot_handle(h));
     }
 
     fn get_source_mut(&mut self, h: Handle<AudioSource>) -> Option<&mut AudioSource> {
-        self.sources.get_mut_ref(h)
+        self.sources
+            .get_mut_ref(to_slot_handle(h))
+            .map(AudioSourceSlot::as_mut)
     }
 
     pub fn get_state(&self, h: Handle<AudioSource>) -> Option<PlaybackState> {
-        self.sources.get_ref(h).map(|s| s.state)
+        self.sources
+            .get_ref(to_slot_handle(h))
+            .map(|s| s.as_ref().state)
     }
 
     pub fn play(&mut self, h: Handle<AudioSource>) {
@@ -313,7 +327,8 @@ impl AudioEngine {
         let listener_pos = self.listener_transform.transform_point3(Vec3::ZERO);
         let listener_vel = self.listener_velocity;
         let buses_ptr: *const Pool<Bus> = &self.buses;
-        self.sources.for_each_occupied_mut(|s| {
+        self.sources.for_each_occupied_mut(|slot| {
+            let s = slot.as_mut();
             let src_pos = s.transform.transform_point3(Vec3::ZERO);
             let dir = listener_pos - src_pos;
             let dist = dir.length();
@@ -368,6 +383,30 @@ pub struct AudioSource {
     sink: Option<Sink>,
 }
 
+struct AudioSourceSlot {
+    source: MaybeUninit<AudioSource>,
+}
+
+impl AudioSourceSlot {
+    fn new(source: AudioSource) -> Self {
+        Self {
+            source: MaybeUninit::new(source),
+        }
+    }
+
+    fn as_ref(&self) -> &AudioSource {
+        unsafe { self.source.assume_init_ref() }
+    }
+
+    fn as_mut(&mut self) -> &mut AudioSource {
+        unsafe { self.source.assume_init_mut() }
+    }
+
+    unsafe fn drop_in_place(&mut self) {
+        std::ptr::drop_in_place(self.source.as_mut_ptr());
+    }
+}
+
 #[derive(Debug, Clone)]
 enum AudioSourceData {
     Clip { name: String, data: Arc<[u8]> },
@@ -392,6 +431,14 @@ impl AudioSource {
             sink: None,
         }
     }
+}
+
+fn to_slot_handle(handle: Handle<AudioSource>) -> Handle<AudioSourceSlot> {
+    Handle::new(handle.slot, handle.generation)
+}
+
+fn to_public_source_handle(handle: Handle<AudioSourceSlot>) -> Handle<AudioSource> {
+    Handle::new(handle.slot, handle.generation)
 }
 
 pub struct StreamingSource {
