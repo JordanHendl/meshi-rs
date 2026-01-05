@@ -8,8 +8,12 @@ use dashi::{
 use furikake::BindlessAnimationRegistry;
 use furikake::{
     BindlessState,
-    reservations::ReservedBinding,
-    types::{AnimationState as FurikakeAnimationState, SkeletonHeader},
+    reservations::{
+        ReservedBinding,
+        bindless_joints::ReservedBindlessJoints,
+        bindless_skeletons::ReservedBindlessSkeletons,
+    },
+    types::{AnimationState as FurikakeAnimationState, JointTransform, SkeletonHeader},
 };
 use crate::SkinnedModelInfo;
 use noren::meta::DeviceModel;
@@ -26,15 +30,21 @@ pub struct SkinningInfo {
 pub struct SkinnedModelData {
     pub info: SkinnedModelInfo,
     pub animation_state: Handle<FurikakeAnimationState>,
+    pub instance_skeleton: Handle<SkeletonHeader>,
+    pub instance_joint_count: u32,
     animation_dirty: bool,
 }
 
 impl SkinnedModelData {
     pub fn new(info: SkinnedModelInfo, bindless: &mut BindlessState) -> Self {
         let animation_state = bindless.register_animation_state();
+        let (instance_skeleton, instance_joint_count) =
+            clone_instance_skeleton(&info, bindless);
         Self {
             info,
             animation_state,
+            instance_skeleton,
+            instance_joint_count,
             animation_dirty: true,
         }
     }
@@ -44,13 +54,18 @@ impl SkinnedModelData {
     }
 
     pub fn skinning_info(&self) -> SkinningInfo {
-        let skeleton = self
+        let fallback_skeleton = self
             .info
             .model
             .rig
             .as_ref()
             .map(|rig| rig.skeleton)
             .unwrap_or_default();
+        let skeleton = if self.instance_skeleton.valid() {
+            self.instance_skeleton
+        } else {
+            fallback_skeleton
+        };
 
         SkinningInfo {
             skeleton,
@@ -64,6 +79,10 @@ impl SkinnedModelData {
 
     pub fn clear_animation_dirty(&mut self) {
         self.animation_dirty = false;
+    }
+
+    pub fn dispatch_skeleton(&self) -> Handle<SkeletonHeader> {
+        self.skinning_info().skeleton
     }
 }
 
@@ -91,14 +110,47 @@ impl SkinningDispatcher {
         );
 
         let animation_binding = state.binding("meshi_bindless_animations");
+        let track_binding = state.binding("meshi_bindless_animation_tracks");
+        let keyframe_binding = state.binding("meshi_bindless_animation_keyframes");
+        let skeleton_binding = state.binding("meshi_bindless_skeletons");
+        let joint_binding = state.binding("meshi_bindless_joints");
         let skinning_binding = state.binding("meshi_bindless_skinning");
-        let pipeline = if let (Ok(animation_binding), Ok(skinning_binding)) =
-            (animation_binding, skinning_binding)
+        let pipeline = if let (
+            Ok(animation_binding),
+            Ok(track_binding),
+            Ok(keyframe_binding),
+            Ok(skeleton_binding),
+            Ok(joint_binding),
+            Ok(skinning_binding),
+        ) = (
+            animation_binding,
+            track_binding,
+            keyframe_binding,
+            skeleton_binding,
+            joint_binding,
+            skinning_binding,
+        )
         {
             let ReservedBinding::TableBinding {
                 resources: animation_resources,
                 ..
             } = animation_binding.binding();
+            let ReservedBinding::TableBinding {
+                resources: track_resources,
+                ..
+            } = track_binding.binding();
+            let ReservedBinding::TableBinding {
+                resources: keyframe_resources,
+                ..
+            } = keyframe_binding.binding();
+            let ReservedBinding::TableBinding {
+                resources: skeleton_resources,
+                ..
+            } = skeleton_binding.binding();
+            let ReservedBinding::TableBinding {
+                resources: joint_resources,
+                ..
+            } = joint_binding.binding();
             let ReservedBinding::TableBinding {
                 resources: skinning_resources,
                 ..
@@ -111,6 +163,19 @@ impl SkinningDispatcher {
                     ShaderResource::StorageBuffer(dispatches.device().into()),
                 )
                 .add_variable("meshi_bindless_animations", animation_resources[0].resource.clone())
+                .add_variable(
+                    "meshi_bindless_animation_tracks",
+                    track_resources[0].resource.clone(),
+                )
+                .add_variable(
+                    "meshi_bindless_animation_keyframes",
+                    keyframe_resources[0].resource.clone(),
+                )
+                .add_variable(
+                    "meshi_bindless_skeletons",
+                    skeleton_resources[0].resource.clone(),
+                )
+                .add_variable("meshi_bindless_joints", joint_resources[0].resource.clone())
                 .add_variable("meshi_bindless_skinning", skinning_resources[0].resource.clone())
                 .build(ctx)
                 .ok()
@@ -181,6 +246,29 @@ impl SkinningDispatcher {
 
 pub fn unregister_skinned_model(bindless: &mut BindlessState, skinned: &SkinnedModelData) {
     bindless.unregister_animation_state(skinned.animation_state);
+    if skinned.instance_skeleton.valid() {
+        let header = bindless
+            .reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons")
+            .ok()
+            .map(|skeletons| *skeletons.skeleton(skinned.instance_skeleton));
+        if let Some(header) = header {
+            let joint_count = header.joint_count as usize;
+            let joint_offset = header.joint_offset;
+            let bind_pose_offset = header.bind_pose_offset;
+            let _ = bindless.reserved_mut::<ReservedBindlessJoints, _>(
+                "meshi_bindless_joints",
+                |joints| {
+                    for idx in 0..joint_count {
+                        let joint_slot = (joint_offset + idx as u32) as u16;
+                        let bind_slot = (bind_pose_offset + idx as u32) as u16;
+                        joints.remove_joint(Handle::new(joint_slot, 0));
+                        joints.remove_joint(Handle::new(bind_slot, 0));
+                    }
+                },
+            );
+        }
+        bindless.unregister_skeleton(skinned.instance_skeleton);
+    }
 }
 
 #[repr(C)]
@@ -204,13 +292,7 @@ impl SkinningDispatch {
             .rig
             .as_ref()
             .and_then(|rig| rig.animation);
-        let skeleton_handle = model
-            .info
-            .model
-            .rig
-            .as_ref()
-            .map(|rig| rig.skeleton)
-            .unwrap_or_default();
+        let skeleton_handle = model.dispatch_skeleton();
 
         Self {
             animation_state_id: if model.animation_state.valid() {
@@ -233,5 +315,80 @@ impl SkinningDispatch {
             delta_time,
             looping: model.info.animation.looping as u32,
         }
+    }
+}
+
+fn clone_instance_skeleton(
+    info: &SkinnedModelInfo,
+    bindless: &mut BindlessState,
+) -> (Handle<SkeletonHeader>, u32) {
+    let Some(rig) = info.model.rig.as_ref() else {
+        return (Handle::default(), 0);
+    };
+    if !rig.skeleton.valid() {
+        return (Handle::default(), 0);
+    }
+
+    let Ok(skeletons) = bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons")
+    else {
+        return (Handle::default(), 0);
+    };
+    let Ok(joints) = bindless.reserved::<ReservedBindlessJoints>("meshi_bindless_joints") else {
+        return (Handle::default(), 0);
+    };
+
+    let source = *skeletons.skeleton(rig.skeleton);
+    if source.joint_count == 0 {
+        return (Handle::default(), 0);
+    }
+
+    let joint_count = source.joint_count as usize;
+    let mut joint_data = Vec::with_capacity(joint_count);
+    for idx in 0..joint_count {
+        let joint_slot = (source.bind_pose_offset + idx as u32) as u16;
+        joint_data.push(*joints.joint(Handle::new(joint_slot, 0)));
+    }
+
+    let mut joint_handles: Vec<Handle<JointTransform>> = Vec::with_capacity(joint_count * 2);
+    let _ = bindless.reserved_mut::<ReservedBindlessJoints, _>(
+        "meshi_bindless_joints",
+        |buffer| {
+            for _ in 0..(joint_count * 2) {
+                joint_handles.push(buffer.add_joint());
+            }
+            joint_handles.sort_by_key(|handle| handle.slot);
+            for (idx, joint) in joint_data.iter().enumerate() {
+                let animated = joint_handles[idx];
+                let bind_pose = joint_handles[idx + joint_count];
+                *buffer.joint_mut(animated) = *joint;
+                *buffer.joint_mut(bind_pose) = *joint;
+            }
+        },
+    );
+
+    if joint_handles.len() < joint_count * 2 {
+        return (Handle::default(), 0);
+    }
+
+    let mut instance_skeleton = Handle::default();
+    let _ = bindless.reserved_mut::<ReservedBindlessSkeletons, _>(
+        "meshi_bindless_skeletons",
+        |buffer| {
+            instance_skeleton = buffer.add_skeleton();
+            if instance_skeleton.valid() {
+                *buffer.skeleton_mut(instance_skeleton) = SkeletonHeader {
+                    joint_count: joint_count as u32,
+                    joint_offset: joint_handles[0].slot as u32,
+                    bind_pose_offset: joint_handles[joint_count].slot as u32,
+                    ..Default::default()
+                };
+            }
+        },
+    );
+
+    if instance_skeleton.valid() {
+        (instance_skeleton, joint_count as u32)
+    } else {
+        (Handle::default(), 0)
     }
 }
