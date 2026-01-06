@@ -58,7 +58,7 @@ fn main() {
         100.0, // far
     );
 
-    let model = db.fetch_gpu_model("model/cube").unwrap();
+    let model = db.fetch_gpu_model("model/fox").unwrap();
     let skinned = engine
         .register_object(&RenderObjectInfo::SkinnedModel(SkinnedModelInfo {
             model,

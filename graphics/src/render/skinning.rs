@@ -19,6 +19,7 @@ use crate::SkinnedModelInfo;
 use noren::meta::DeviceModel;
 use resource_pool::Handle;
 use tare::utils::StagedBuffer;
+use tracing::error;
 
 #[derive(Clone, Copy, Default)]
 pub struct SkinningInfo {
@@ -37,9 +38,23 @@ pub struct SkinnedModelData {
 
 impl SkinnedModelData {
     pub fn new(info: SkinnedModelInfo, bindless: &mut BindlessState) -> Self {
-        let animation_state = bindless.register_animation_state();
-        let (instance_skeleton, instance_joint_count) =
-            clone_instance_skeleton(&info, bindless);
+        let rig = info.model.rig.as_ref();
+        if rig.is_none() {
+            error!(
+                "Registered skinned model without a rig; animation handles will be missing."
+            );
+        }
+
+        let animation_state = if rig.is_some() {
+            bindless.register_animation_state()
+        } else {
+            Handle::default()
+        };
+        let (instance_skeleton, instance_joint_count) = if rig.is_some() {
+            clone_instance_skeleton(&info, bindless)
+        } else {
+            (Handle::default(), 0)
+        };
         Self {
             info,
             animation_state,
