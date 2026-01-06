@@ -206,7 +206,6 @@ impl RenderEngine {
     }
 
     fn publish_events(&mut self) {
-        use winit::event::Event as WinitEvent;
         use winit::event_loop::ControlFlow;
         use winit::platform::run_return::EventLoopExtRunReturn;
 

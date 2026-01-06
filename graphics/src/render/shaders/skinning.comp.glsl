@@ -42,8 +42,7 @@ struct SkeletonHeader {
 };
 
 struct JointTransform {
-    int parent_index;
-    uvec3 _padding;
+    ivec4 parent_index;
     mat4 bind_pose;
     mat4 inverse_bind;
 };
@@ -234,7 +233,7 @@ mat4 compute_global_transform(
         skeleton.bind_pose_offset
     );
 
-    int parent = meshi_bindless_joints.joints[skeleton.bind_pose_offset + joint_index].parent_index;
+    int parent = meshi_bindless_joints.joints[skeleton.bind_pose_offset + joint_index].parent_index.x;
     uint remaining = skeleton.joint_count;
     while (parent >= 0 && remaining > 0u) {
         uint parent_index = uint(parent);
@@ -245,7 +244,7 @@ mat4 compute_global_transform(
             skeleton.bind_pose_offset
         );
         world = parent_local * world;
-        parent = meshi_bindless_joints.joints[skeleton.bind_pose_offset + parent_index].parent_index;
+        parent = meshi_bindless_joints.joints[skeleton.bind_pose_offset + parent_index].parent_index.x;
         remaining--;
     }
 
@@ -329,3 +328,4 @@ void main() {
         meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx] = out_joint;
     }
 }
+

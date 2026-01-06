@@ -59,6 +59,15 @@ fn main() {
     );
 
     let model = db.fetch_gpu_model("model/fox").unwrap();
+    let animation_names = model
+        .rig
+        .as_ref()
+        .map(|rig| {
+            let mut names: Vec<String> = rig.animations.keys().cloned().collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default();
     let skinned = engine
         .register_object(&RenderObjectInfo::SkinnedModel(SkinnedModelInfo {
             model,
@@ -66,18 +75,21 @@ fn main() {
         }))
         .unwrap();
 
-    let translation = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
-    let mut transform = translation;
-    engine.set_object_transform(skinned, &transform);
+    let translation = Mat4::from_translation(Vec3::new(0.0, 0.0, -20.0));
+    engine.set_object_transform(skinned, &translation);
 
     struct AppData {
         running: bool,
-        paused: bool,
+        animation_index: usize,
+        animation_count: usize,
+        animation_changed: bool,
     }
 
     let mut data = AppData {
         running: true,
-        paused: false,
+        animation_index: 0,
+        animation_count: animation_names.len(),
+        animation_changed: false,
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -85,8 +97,24 @@ fn main() {
             let e = &mut (*event);
             let r = &mut (*(data as *mut AppData));
             if e.source() == EventSource::Key && e.event_type() == EventType::Pressed {
-                if e.key() == KeyCode::Space {
-                    r.paused = !r.paused;
+                match e.key() {
+                    KeyCode::ArrowLeft => {
+                        if r.animation_count > 0 {
+                            if r.animation_index == 0 {
+                                r.animation_index = r.animation_count - 1;
+                            } else {
+                                r.animation_index -= 1;
+                            }
+                            r.animation_changed = true;
+                        }
+                    }
+                    KeyCode::ArrowRight => {
+                        if r.animation_count > 0 {
+                            r.animation_index = (r.animation_index + 1) % r.animation_count;
+                            r.animation_changed = true;
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -102,19 +130,22 @@ fn main() {
     let mut timer = Timer::new();
     timer.start();
     let mut last_time = timer.elapsed_seconds_f32();
-    let mut total_time = 0.0f32;
-    let angular_velocity = 2.0f32;
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
         let mut dt = now - last_time;
         dt = dt.min(1.0 / 30.0);
-        if !data.paused {
-            total_time += dt;
-            let mut rotation = Mat4::from_rotation_y(angular_velocity * total_time);
-            rotation = rotation * Mat4::from_rotation_x(angular_velocity * total_time);
-            transform = translation * rotation;
-            engine.set_object_transform(skinned, &transform);
+        if data.animation_changed {
+            engine.set_skinned_object_animation(
+                skinned,
+                AnimationState {
+                    clip_index: data.animation_index as u32,
+                    time_seconds: 0.0,
+                    speed: 1.0,
+                    looping: true,
+                },
+            );
+            data.animation_changed = false;
         }
         engine.update(dt);
         last_time = now;

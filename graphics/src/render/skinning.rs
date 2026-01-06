@@ -1,21 +1,18 @@
+use crate::SkinnedModelInfo;
 use bento::builder::CSOBuilder;
 use dashi::{
-    BufferInfo, BufferUsage, CommandStream, CommandQueueInfo2, Context, MemoryVisibility,
-    ShaderResource, UsageBits,
-    driver::command::Dispatch,
-    execution::CommandRing,
+    BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, MemoryVisibility,
+    ShaderResource, UsageBits, driver::command::Dispatch, execution::CommandRing,
 };
+use furikake::PSOBuilderFurikakeExt;
 use furikake::BindlessAnimationRegistry;
 use furikake::{
     BindlessState,
     reservations::{
-        ReservedBinding,
-        bindless_joints::ReservedBindlessJoints,
-        bindless_skeletons::ReservedBindlessSkeletons,
+        bindless_joints::ReservedBindlessJoints, bindless_skeletons::ReservedBindlessSkeletons,
     },
     types::{AnimationState as FurikakeAnimationState, JointTransform, SkeletonHeader},
 };
-use crate::SkinnedModelInfo;
 use noren::meta::DeviceModel;
 use resource_pool::Handle;
 use tare::utils::StagedBuffer;
@@ -33,6 +30,7 @@ pub struct SkinnedModelData {
     pub animation_state: Handle<FurikakeAnimationState>,
     pub instance_skeleton: Handle<SkeletonHeader>,
     pub instance_joint_count: u32,
+    animation_clips: Vec<Handle<furikake::types::AnimationClip>>,
     animation_dirty: bool,
 }
 
@@ -40,10 +38,16 @@ impl SkinnedModelData {
     pub fn new(info: SkinnedModelInfo, bindless: &mut BindlessState) -> Self {
         let rig = info.model.rig.as_ref();
         if rig.is_none() {
-            error!(
-                "Registered skinned model without a rig; animation handles will be missing."
-            );
+            error!("Registered skinned model without a rig; animation handles will be missing.");
         }
+
+        let animation_clips = rig
+            .map(|rig| {
+                let mut entries: Vec<_> = rig.animations.iter().collect();
+                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                entries.into_iter().map(|(_, handle)| *handle).collect()
+            })
+            .unwrap_or_default();
 
         let animation_state = if rig.is_some() {
             bindless.register_animation_state()
@@ -60,6 +64,7 @@ impl SkinnedModelData {
             animation_state,
             instance_skeleton,
             instance_joint_count,
+            animation_clips,
             animation_dirty: true,
         }
     }
@@ -124,79 +129,15 @@ impl SkinningDispatcher {
             },
         );
 
-        let animation_binding = state.binding("meshi_bindless_animations");
-        let track_binding = state.binding("meshi_bindless_animation_tracks");
-        let keyframe_binding = state.binding("meshi_bindless_animation_keyframes");
-        let skeleton_binding = state.binding("meshi_bindless_skeletons");
-        let joint_binding = state.binding("meshi_bindless_joints");
-        let skinning_binding = state.binding("meshi_bindless_skinning");
-        let pipeline = if let (
-            Ok(animation_binding),
-            Ok(track_binding),
-            Ok(keyframe_binding),
-            Ok(skeleton_binding),
-            Ok(joint_binding),
-            Ok(skinning_binding),
-        ) = (
-            animation_binding,
-            track_binding,
-            keyframe_binding,
-            skeleton_binding,
-            joint_binding,
-            skinning_binding,
-        )
-        {
-            let ReservedBinding::TableBinding {
-                resources: animation_resources,
-                ..
-            } = animation_binding.binding();
-            let ReservedBinding::TableBinding {
-                resources: track_resources,
-                ..
-            } = track_binding.binding();
-            let ReservedBinding::TableBinding {
-                resources: keyframe_resources,
-                ..
-            } = keyframe_binding.binding();
-            let ReservedBinding::TableBinding {
-                resources: skeleton_resources,
-                ..
-            } = skeleton_binding.binding();
-            let ReservedBinding::TableBinding {
-                resources: joint_resources,
-                ..
-            } = joint_binding.binding();
-            let ReservedBinding::TableBinding {
-                resources: skinning_resources,
-                ..
-            } = skinning_binding.binding();
-
-            CSOBuilder::new()
-                .shader(Some(include_str!("shaders/skinning.comp.glsl").as_bytes()))
-                .add_variable(
-                    "skinning_dispatches",
-                    ShaderResource::StorageBuffer(dispatches.device().into()),
-                )
-                .add_variable("meshi_bindless_animations", animation_resources[0].resource.clone())
-                .add_variable(
-                    "meshi_bindless_animation_tracks",
-                    track_resources[0].resource.clone(),
-                )
-                .add_variable(
-                    "meshi_bindless_animation_keyframes",
-                    keyframe_resources[0].resource.clone(),
-                )
-                .add_variable(
-                    "meshi_bindless_skeletons",
-                    skeleton_resources[0].resource.clone(),
-                )
-                .add_variable("meshi_bindless_joints", joint_resources[0].resource.clone())
-                .add_variable("meshi_bindless_skinning", skinning_resources[0].resource.clone())
-                .build(ctx)
-                .ok()
-        } else {
-            None
-        };
+        let pipeline = CSOBuilder::new()
+            .shader(Some(include_str!("shaders/skinning.comp.glsl").as_bytes()))
+            .add_variable(
+                "skinning_dispatches",
+                ShaderResource::StorageBuffer(dispatches.device().into()),
+            )
+            .add_reserved_table_variables(state).unwrap()
+            .build(ctx)
+            .ok();
 
         let queue = ctx
             .make_command_ring(&CommandQueueInfo2 {
@@ -213,10 +154,7 @@ impl SkinningDispatcher {
         }
     }
 
-    pub fn update(
-        &mut self,
-        dispatches: &[SkinningDispatch],
-    ) {
+    pub fn update(&mut self, dispatches: &[SkinningDispatch]) {
         let Some(pipeline) = self.pipeline.as_ref() else {
             return;
         };
@@ -254,7 +192,9 @@ impl SkinningDispatcher {
             })
             .expect("record skinning commands");
 
-        self.queue.submit(&Default::default()).expect("submit skinning");
+        self.queue
+            .submit(&Default::default())
+            .expect("submit skinning");
         self.queue.wait_all().expect("wait skinning");
     }
 }
@@ -302,11 +242,9 @@ pub struct SkinningDispatch {
 impl SkinningDispatch {
     pub fn from_model(model: &SkinnedModelData, delta_time: f32) -> Self {
         let clip_handle = model
-            .info
-            .model
-            .rig
-            .as_ref()
-            .and_then(|rig| rig.animation);
+            .animation_clips
+            .get(model.info.animation.clip_index as usize)
+            .copied();
         let skeleton_handle = model.dispatch_skeleton();
 
         Self {
@@ -365,21 +303,18 @@ fn clone_instance_skeleton(
     }
 
     let mut joint_handles: Vec<Handle<JointTransform>> = Vec::with_capacity(joint_count * 2);
-    let _ = bindless.reserved_mut::<ReservedBindlessJoints, _>(
-        "meshi_bindless_joints",
-        |buffer| {
-            for _ in 0..(joint_count * 2) {
-                joint_handles.push(buffer.add_joint());
-            }
-            joint_handles.sort_by_key(|handle| handle.slot);
-            for (idx, joint) in joint_data.iter().enumerate() {
-                let animated = joint_handles[idx];
-                let bind_pose = joint_handles[idx + joint_count];
-                *buffer.joint_mut(animated) = *joint;
-                *buffer.joint_mut(bind_pose) = *joint;
-            }
-        },
-    );
+    let _ = bindless.reserved_mut::<ReservedBindlessJoints, _>("meshi_bindless_joints", |buffer| {
+        for _ in 0..(joint_count * 2) {
+            joint_handles.push(buffer.add_joint());
+        }
+        joint_handles.sort_by_key(|handle| handle.slot);
+        for (idx, joint) in joint_data.iter().enumerate() {
+            let animated = joint_handles[idx];
+            let bind_pose = joint_handles[idx + joint_count];
+            *buffer.joint_mut(animated) = *joint;
+            *buffer.joint_mut(bind_pose) = *joint;
+        }
+    });
 
     if joint_handles.len() < joint_count * 2 {
         return (Handle::default(), 0);
