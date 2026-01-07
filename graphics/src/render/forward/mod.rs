@@ -939,6 +939,7 @@ impl ForwardRenderer {
                                             skeleton_id: Handle<furikake::types::SkeletonHeader>,
                                             animation_state_id:
                                                 Handle<furikake::types::AnimationState>,
+                                            per_obj_joints_id: Handle<furikake::types::JointTransform>,
                                         }
 
                                         let per_obj = &mut alloc.slice::<PerObj>()[0];
@@ -948,6 +949,7 @@ impl ForwardRenderer {
                                         per_obj.camera = camera_handle;
                                         per_obj.skeleton_id = draw.skinning.skeleton;
                                         per_obj.animation_state_id = draw.skinning.animation_state;
+                                        per_obj.per_obj_joints_id = draw.skinning.joints;
                                         cmd = cmd
                                             .bind_graphics_pipeline(pso.handle)
                                             .update_viewport(&self.viewport)
@@ -994,6 +996,7 @@ impl ForwardRenderer {
                             camera: Handle<Camera>,
                             skeleton_id: Handle<furikake::types::SkeletonHeader>,
                             animation_state_id: Handle<furikake::types::AnimationState>,
+                            per_obj_joints_id: Handle<furikake::types::JointTransform>,
                         }
 
                         let per_obj = &mut alloc.slice::<PerObj>()[0];
@@ -1003,6 +1006,7 @@ impl ForwardRenderer {
                         per_obj.camera = camera_handle;
                         per_obj.skeleton_id = Handle::default();
                         per_obj.animation_state_id = Handle::default();
+                        per_obj.per_obj_joints_id = Handle::default();
 
                         cmd = cmd
                             .bind_graphics_pipeline(self.billboard_pso.handle)

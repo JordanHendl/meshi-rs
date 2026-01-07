@@ -22,6 +22,7 @@ use tracing::error;
 pub struct SkinningInfo {
     pub skeleton: Handle<SkeletonHeader>,
     pub animation_state: Handle<FurikakeAnimationState>,
+    pub joints: Handle<JointTransform>,
 }
 
 #[derive(Clone)]
@@ -29,9 +30,11 @@ pub struct SkinnedModelData {
     pub info: SkinnedModelInfo,
     pub animation_state: Handle<FurikakeAnimationState>,
     pub instance_skeleton: Handle<SkeletonHeader>,
+    pub instance_joints: Handle<JointTransform>,
     pub instance_joint_count: u32,
     animation_clips: Vec<Handle<furikake::types::AnimationClip>>,
     animation_dirty: bool,
+    fallback_joints: Handle<JointTransform>,
 }
 
 impl SkinnedModelData {
@@ -54,18 +57,24 @@ impl SkinnedModelData {
         } else {
             Handle::default()
         };
-        let (instance_skeleton, instance_joint_count) = if rig.is_some() {
+        let fallback_joints = rig
+            .and_then(|rig| joint_handle_from_skeleton(bindless, rig.skeleton))
+            .unwrap_or_default();
+
+        let (instance_skeleton, instance_joints, instance_joint_count) = if rig.is_some() {
             clone_instance_skeleton(&info, bindless)
         } else {
-            (Handle::default(), 0)
+            (Handle::default(), Handle::default(), 0)
         };
         Self {
             info,
             animation_state,
             instance_skeleton,
+            instance_joints,
             instance_joint_count,
             animation_clips,
             animation_dirty: true,
+            fallback_joints,
         }
     }
 
@@ -87,9 +96,16 @@ impl SkinnedModelData {
             fallback_skeleton
         };
 
+        let joints = if self.instance_skeleton.valid() && self.instance_joints.valid() {
+            self.instance_joints
+        } else {
+            self.fallback_joints
+        };
+
         SkinningInfo {
             skeleton,
             animation_state: self.animation_state,
+            joints,
         }
     }
 
@@ -274,25 +290,25 @@ impl SkinningDispatch {
 fn clone_instance_skeleton(
     info: &SkinnedModelInfo,
     bindless: &mut BindlessState,
-) -> (Handle<SkeletonHeader>, u32) {
+) -> (Handle<SkeletonHeader>, Handle<JointTransform>, u32) {
     let Some(rig) = info.model.rig.as_ref() else {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     };
     if !rig.skeleton.valid() {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     }
 
     let Ok(skeletons) = bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons")
     else {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     };
     let Ok(joints) = bindless.reserved::<ReservedBindlessJoints>("meshi_bindless_joints") else {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     };
 
     let source = *skeletons.skeleton(rig.skeleton);
     if source.joint_count == 0 {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     }
 
     let joint_count = source.joint_count as usize;
@@ -317,10 +333,11 @@ fn clone_instance_skeleton(
     });
 
     if joint_handles.len() < joint_count * 2 {
-        return (Handle::default(), 0);
+        return (Handle::default(), Handle::default(), 0);
     }
 
     let mut instance_skeleton = Handle::default();
+    let instance_joints = joint_handles[0];
     let _ = bindless.reserved_mut::<ReservedBindlessSkeletons, _>(
         "meshi_bindless_skeletons",
         |buffer| {
@@ -337,8 +354,26 @@ fn clone_instance_skeleton(
     );
 
     if instance_skeleton.valid() {
-        (instance_skeleton, joint_count as u32)
+        (instance_skeleton, instance_joints, joint_count as u32)
     } else {
-        (Handle::default(), 0)
+        (Handle::default(), Handle::default(), 0)
     }
+}
+
+fn joint_handle_from_skeleton(
+    bindless: &BindlessState,
+    skeleton: Handle<SkeletonHeader>,
+) -> Option<Handle<JointTransform>> {
+    if !skeleton.valid() {
+        return None;
+    }
+
+    let skeletons =
+        bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons").ok()?;
+    let header = *skeletons.skeleton(skeleton);
+    if header.joint_count == 0 {
+        return None;
+    }
+
+    Some(Handle::new(header.joint_offset as u16, 0))
 }
