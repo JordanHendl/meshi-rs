@@ -2,10 +2,7 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
-use super::skinning::{
-    MAX_SKINNING_DISPATCHES, SkinnedModelData, SkinningDispatch, SkinningDispatcher, SkinningInfo,
-    unregister_skinned_model,
-};
+use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::AnimationState;
 use crate::{BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
@@ -65,8 +62,15 @@ struct RenderObjectData {
 
 enum RenderObjectKind {
     Model(DeviceModel),
-    SkinnedModel(SkinnedModelData),
+    SkinnedModel(SkinnedRenderData),
     Billboard(BillboardData),
+}
+
+#[derive(Clone)]
+struct SkinnedRenderData {
+    model: DeviceModel,
+    skinning: SkinningInfo,
+    skinning_handle: SkinningHandle,
 }
 
 #[derive(Clone)]
@@ -94,7 +98,7 @@ struct ViewDrawItem {
 
 enum ViewDrawKind {
     Model(DeviceModel),
-    SkinnedModel(SkinnedModelData),
+    SkinnedModel(SkinnedRenderData),
     Billboard(BillboardData),
 }
 
@@ -524,7 +528,13 @@ impl DeferredRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::SkinnedModel(skinned) => {
-                let skinned_data = SkinnedModelData::new(skinned.clone(), self.state.as_mut());
+                let (skinning_handle, skinning_info) =
+                    self.skinning.register(skinned.clone(), self.state.as_mut());
+                let skinned_data = SkinnedRenderData {
+                    model: skinned.model.clone(),
+                    skinning: skinning_info,
+                    skinning_handle,
+                };
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::SkinnedModel(skinned_data),
                     scene_handle,
@@ -568,8 +578,8 @@ impl DeferredRenderer {
 
         match &mut obj.kind {
             RenderObjectKind::SkinnedModel(skinned) => {
-                skinned.info.animation = state;
-                skinned.mark_animation_dirty();
+                self.skinning
+                    .set_animation_state(skinned.skinning_handle, state);
             }
             _ => {
                 warn!("Attempted to update animation on non-skinned object.");
@@ -680,13 +690,13 @@ impl DeferredRenderer {
             return;
         }
 
-        let (skinned, billboard_material) = {
+        let (skinning_handle, billboard_material) = {
             let obj = self.objects.get_ref(from_handle(handle));
             self.scene.release_object(obj.scene_handle);
             self.scene_lookup.remove(&obj.scene_handle.slot);
 
             match &obj.kind {
-                RenderObjectKind::SkinnedModel(skinned) => (Some(skinned.clone()), None),
+                RenderObjectKind::SkinnedModel(skinned) => (Some(skinned.skinning_handle), None),
                 RenderObjectKind::Billboard(billboard) => {
                     if billboard.owns_material {
                         (None, billboard.info.material)
@@ -698,8 +708,9 @@ impl DeferredRenderer {
             }
         };
 
-        if let Some(skinned) = skinned {
-            unregister_skinned_model(self.state.as_mut(), &skinned);
+        if let Some(skinned_handle) = skinning_handle {
+            self.skinning
+                .unregister(skinned_handle, self.state.as_mut());
         }
 
         if let Some(material) = billboard_material {
@@ -807,23 +818,6 @@ impl DeferredRenderer {
         view_draws
     }
 
-    fn update_skinned_animations(&mut self, delta_time: f32) {
-        let entries = self.objects.entries.clone();
-        let mut dispatches = Vec::new();
-        for entry in entries {
-            let obj = self.objects.get_ref_mut(entry);
-            if let RenderObjectKind::SkinnedModel(skinned) = &mut obj.kind {
-                if dispatches.len() >= MAX_SKINNING_DISPATCHES {
-                    break;
-                }
-                dispatches.push(SkinningDispatch::from_model(skinned, delta_time));
-                skinned.clear_animation_dirty();
-            }
-        }
-
-        self.skinning.update(&dispatches);
-    }
-
     pub fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
@@ -838,7 +832,7 @@ impl DeferredRenderer {
             self.environment.reset();
         }
 
-        self.update_skinned_animations(delta_time);
+        self.skinning.update(delta_time);
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
@@ -972,8 +966,8 @@ impl DeferredRenderer {
                             ViewDrawKind::SkinnedModel(skinned) => {
                                 model_draws.push(ModelDraw {
                                     item,
-                                    model: skinned.model(),
-                                    skinning: skinned.skinning_info(),
+                                    model: &skinned.model,
+                                    skinning: skinned.skinning,
                                 });
                             }
                             ViewDrawKind::Billboard(_) => {}

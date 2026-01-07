@@ -1,11 +1,11 @@
-use crate::SkinnedModelInfo;
+use crate::{AnimationState, SkinnedModelInfo};
 use bento::builder::CSOBuilder;
 use dashi::{
     BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, MemoryVisibility,
     ShaderResource, UsageBits, driver::command::Dispatch, execution::CommandRing,
 };
-use furikake::PSOBuilderFurikakeExt;
 use furikake::BindlessAnimationRegistry;
+use furikake::PSOBuilderFurikakeExt;
 use furikake::{
     BindlessState,
     reservations::{
@@ -14,7 +14,7 @@ use furikake::{
     types::{AnimationState as FurikakeAnimationState, JointTransform, SkeletonHeader},
 };
 use noren::meta::DeviceModel;
-use resource_pool::Handle;
+use resource_pool::{Handle, resource_list::ResourceList};
 use tare::utils::StagedBuffer;
 use tracing::error;
 
@@ -126,9 +126,11 @@ pub struct SkinningDispatcher {
     queue: CommandRing,
     pipeline: Option<bento::builder::CSO>,
     dispatches: StagedBuffer,
+    skinned: ResourceList<SkinnedModelData>,
 }
 
 pub const MAX_SKINNING_DISPATCHES: usize = 1024;
+pub type SkinningHandle = Handle<SkinnedModelData>;
 
 impl SkinningDispatcher {
     pub fn new(ctx: &mut Context, state: &BindlessState) -> Self {
@@ -167,10 +169,62 @@ impl SkinningDispatcher {
             queue,
             pipeline,
             dispatches,
+            skinned: Default::default(),
         }
     }
 
-    pub fn update(&mut self, dispatches: &[SkinningDispatch]) {
+    pub fn register(
+        &mut self,
+        info: SkinnedModelInfo,
+        bindless: &mut BindlessState,
+    ) -> (SkinningHandle, SkinningInfo) {
+        let skinned = SkinnedModelData::new(info, bindless);
+        let skinning_info = skinned.skinning_info();
+        let handle = self.skinned.push(skinned);
+        (handle, skinning_info)
+    }
+
+    pub fn unregister(&mut self, handle: SkinningHandle, bindless: &mut BindlessState) {
+        if !handle.valid() {
+            return;
+        }
+
+        if !self.skinned.entries.iter().any(|h| h.slot == handle.slot) {
+            return;
+        }
+
+        let skinned = self.skinned.get_ref(handle).clone();
+        unregister_skinned_model(bindless, &skinned);
+        self.skinned.release(handle);
+    }
+
+    pub fn set_animation_state(&mut self, handle: SkinningHandle, state: AnimationState) {
+        if !handle.valid() {
+            return;
+        }
+
+        if !self.skinned.entries.iter().any(|h| h.slot == handle.slot) {
+            return;
+        }
+
+        let skinned = self.skinned.get_ref_mut(handle);
+        skinned.info.animation = state;
+        skinned.mark_animation_dirty();
+    }
+
+    pub fn skinning_info(&self, handle: SkinningHandle) -> SkinningInfo {
+        if !handle.valid() {
+            return SkinningInfo::default();
+        }
+
+        if !self.skinned.entries.iter().any(|h| h.slot == handle.slot) {
+            return SkinningInfo::default();
+        }
+
+        self.skinned.get_ref(handle).skinning_info()
+    }
+
+    pub fn update(&mut self, delta_time: f32) {
         let Some(pipeline) = self.pipeline.as_ref() else {
             return;
         };
@@ -180,8 +234,17 @@ impl SkinningDispatcher {
             return;
         }
 
-        let dispatch_count = dispatches.len().min(buffer.len());
-        buffer[..dispatch_count].copy_from_slice(&dispatches[..dispatch_count]);
+        let entries = self.skinned.entries.clone();
+        let mut dispatch_count = 0;
+        for entry in entries {
+            if dispatch_count >= buffer.len() || dispatch_count >= MAX_SKINNING_DISPATCHES {
+                break;
+            }
+            let skinned = self.skinned.get_ref_mut(entry);
+            buffer[dispatch_count] = SkinningDispatch::from_model(skinned, delta_time);
+            skinned.clear_animation_dirty();
+            dispatch_count += 1;
+        }
 
         if dispatch_count == 0 {
             return;
