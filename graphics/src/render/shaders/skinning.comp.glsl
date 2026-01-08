@@ -31,7 +31,9 @@ struct AnimationTrack {
 
 struct AnimationKeyframe {
     float time;
-    vec3 _padding;
+    uint _padding0;
+    uint _padding1;
+    uint _padding2;
     vec4 value;
 };
 

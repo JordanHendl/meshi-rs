@@ -45,7 +45,7 @@ fn main() {
     });
 
     // Register a camera and assign it to the display.
-    let camera = engine.register_camera(&Mat4::IDENTITY);
+    let camera = engine.register_camera(&Mat4::from_translation(Vec3::new(4.0, 0.0, 0.0)));
     engine.attach_camera_to_display(display, camera);
 
     // Typical perspective: 60° vertical FOV, window aspect, near/far planes.
@@ -57,6 +57,7 @@ fn main() {
         0.1,   // near
         100.0, // far
     );
+
 
     let model = db.fetch_gpu_model("model/fox").unwrap();
     let animation_names = model
