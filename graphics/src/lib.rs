@@ -9,7 +9,7 @@ use dashi::{
     AspectMask, Buffer, BufferInfo, BufferUsage, BufferView, CommandQueueInfo2, CommandStream,
     Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Format,
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
-    SubresourceRange, SubmitInfo, SubmitInfo2, Viewport,
+    SubmitInfo, SubmitInfo2, SubresourceRange, Viewport,
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
@@ -288,7 +288,8 @@ impl RenderEngine {
                                 })
                                 .prepare_for_presentation(img.img)
                                 .end()
-                                .append(c).unwrap();
+                                .append(c)
+                                .unwrap();
                         })
                         .expect("Failed to make commands");
 
@@ -419,7 +420,7 @@ impl RenderEngine {
             return None;
         }
 
-        let ctx = unsafe{&mut *(self.context() as *mut Context)};
+        let ctx = unsafe { &mut *(self.context() as *mut Context) };
         let output = match &mut self.displays.get_mut_ref(display)?.raw {
             DisplayImpl::CPUImage(output) => output,
             _ => return None,
@@ -483,7 +484,19 @@ impl RenderEngine {
     }
 
     pub fn release_camera(&mut self, camera: Handle<Camera>) {
-        todo!()
+        if !camera.valid() {
+            return;
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    a.remove_camera(camera);
+                },
+            )
+            .unwrap();
     }
 
     pub fn set_camera_perspective(
@@ -507,16 +520,92 @@ impl RenderEngine {
             .unwrap();
     }
 
-    pub fn camera_position(&self, camera: Handle<Camera>) -> Vec3 {
-        todo!()
+    pub fn set_camera_transform(&mut self, camera: Handle<Camera>, transform: &Mat4) {
+        if !camera.valid() {
+            return;
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    let c = a.camera_mut(camera);
+                    c.set_transform(*transform);
+                },
+            )
+            .unwrap();
     }
 
-    pub fn camera_transform(&self, camera: Handle<Camera>) -> Mat4 {
-        todo!()
+    pub fn set_camera_position(&mut self, camera: Handle<Camera>, position: Vec3) {
+        if !camera.valid() {
+            return;
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    let c = a.camera_mut(camera);
+                    c.set_position(position);
+                },
+            )
+            .unwrap();
     }
 
-    pub fn camera_view(&self, camera: Handle<Camera>) -> Mat4 {
-        todo!()
+    pub fn camera_position(&mut self, camera: Handle<Camera>) -> Vec3 {
+        if !camera.valid() {
+            return Vec3::ZERO;
+        }
+
+        let mut position = Vec3::ZERO;
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    position = a.camera(camera).position();
+                },
+            )
+            .unwrap();
+        position
+    }
+
+    pub fn camera_transform(&mut self, camera: Handle<Camera>) -> Mat4 {
+        if !camera.valid() {
+            return Mat4::IDENTITY;
+        }
+
+        let mut transform = Mat4::IDENTITY;
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    transform = a.camera(camera).as_matrix();
+                },
+            )
+            .unwrap();
+        transform
+    }
+
+    pub fn camera_view(&mut self, camera: Handle<Camera>) -> Mat4 {
+        if !camera.valid() {
+            return Mat4::IDENTITY;
+        }
+
+        let mut view = Mat4::IDENTITY;
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    view = a.camera(camera).view_matrix();
+                },
+            )
+            .unwrap();
+        view
     }
 
     pub fn set_event_cb(
