@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#c590d5435336917f10a316eaf5798661d06a6464"
+source = "git+https://github.com/JordanHendl/gohan#054eb20bc7ecf16dadfd80b4f2bc5a07e9d39b7b"
 dependencies = [
  "bincode",
  "clap",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#c590d5435336917f10a316eaf5798661d06a6464"
+source = "git+https://github.com/JordanHendl/gohan#054eb20bc7ecf16dadfd80b4f2bc5a07e9d39b7b"
 dependencies = [
  "bento",
  "dashi",
@@ -1126,9 +1126,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.179"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a2d376baa530d1238d133232d15e239abad80d05838b4b59354e5268af431f"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libloading"
@@ -1347,7 +1347,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#c590d5435336917f10a316eaf5798661d06a6464"
+source = "git+https://github.com/JordanHendl/gohan#054eb20bc7ecf16dadfd80b4f2bc5a07e9d39b7b"
 dependencies = [
  "bento",
  "dashi",
@@ -2246,7 +2246,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#c590d5435336917f10a316eaf5798661d06a6464"
+source = "git+https://github.com/JordanHendl/gohan#054eb20bc7ecf16dadfd80b4f2bc5a07e9d39b7b"
 dependencies = [
  "bento",
  "dashi",

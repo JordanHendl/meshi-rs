@@ -85,6 +85,7 @@ layout(set = 0, binding = 4) buffer Skeletons {
     SkeletonHeader skeletons[];
 } meshi_bindless_skeletons;
 
+// Bindless joint data is read-only metadata (bind poses, inverse binds, parent indices).
 layout(set = 0, binding = 5) buffer Joints {
     JointTransform joints[];
 } meshi_bindless_joints;
@@ -312,21 +313,17 @@ void main() {
         return;
     }
 
+    if (dispatch.per_obj_joints_offset == 0xFFFFu) {
+        return;
+    }
+
     if (dispatch.clip_handle == 0xFFFFu) {
         for (uint joint_idx = 0u; joint_idx < skeleton.joint_count; joint_idx++) {
             JointTransform bind_joint =
                 meshi_bindless_joints.joints[skeleton.bind_pose_offset + joint_idx];
-            JointTransform out_joint =
-                meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx];
-            out_joint.bind_pose = bind_joint.bind_pose;
-            out_joint.inverse_bind = bind_joint.inverse_bind;
-            out_joint.parent_index = bind_joint.parent_index;
-            meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx] = out_joint;
-            if (dispatch.per_obj_joints_offset != 0xFFFFu) {
-                meshi_per_obj_joints
-                    .joints[dispatch.per_obj_joints_offset + joint_idx]
-                    .transform = out_joint.bind_pose * out_joint.inverse_bind;
-            }
+            meshi_per_obj_joints
+                .joints[dispatch.per_obj_joints_offset + joint_idx]
+                .transform = bind_joint.bind_pose * bind_joint.inverse_bind;
         }
         return;
     }
@@ -334,18 +331,10 @@ void main() {
     AnimationClip clip = meshi_bindless_animations.clips[dispatch.clip_handle];
     for (uint joint_idx = 0u; joint_idx < skeleton.joint_count; joint_idx++) {
         mat4 world = compute_global_transform(joint_idx, clip, time, skeleton);
-        JointTransform out_joint =
-            meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx];
         JointTransform bind_joint =
             meshi_bindless_joints.joints[skeleton.bind_pose_offset + joint_idx];
-        out_joint.bind_pose = world;
-        out_joint.inverse_bind = bind_joint.inverse_bind;
-        out_joint.parent_index = bind_joint.parent_index;
-        meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx] = out_joint;
-        if (dispatch.per_obj_joints_offset != 0xFFFFu) {
-            meshi_per_obj_joints
-                .joints[dispatch.per_obj_joints_offset + joint_idx]
-                .transform = out_joint.bind_pose * out_joint.inverse_bind;
-        }
+        meshi_per_obj_joints
+            .joints[dispatch.per_obj_joints_offset + joint_idx]
+            .transform = world * bind_joint.inverse_bind;
     }
 }

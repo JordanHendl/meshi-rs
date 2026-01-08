@@ -35,7 +35,6 @@ pub struct SkinnedModelData {
     pub instance_joint_count: u32,
     animation_clips: Vec<Handle<furikake::types::AnimationClip>>,
     animation_dirty: bool,
-    fallback_joints: Handle<JointTransform>,
     per_obj_joints: Option<PerObjectJointAllocation>,
 }
 
@@ -59,10 +58,12 @@ impl SkinnedModelData {
         } else {
             Handle::default()
         };
-        let fallback_joints = rig
-            .and_then(|rig| joint_handle_from_skeleton(bindless, rig.skeleton))
-            .unwrap_or_default();
         let per_obj_joints = rig.and_then(|rig| reserve_per_obj_joints(bindless, rig.skeleton));
+        if rig.is_some() && per_obj_joints.is_none() {
+            error!(
+                "Failed to reserve per-object joints for skinned model; skinning dispatch will be skipped."
+            );
+        }
 
         let (instance_skeleton, instance_joints, instance_joint_count) = if rig.is_some() {
             clone_instance_skeleton(&info, bindless)
@@ -77,7 +78,6 @@ impl SkinnedModelData {
             instance_joint_count,
             animation_clips,
             animation_dirty: true,
-            fallback_joints,
             per_obj_joints,
         }
     }
@@ -100,14 +100,7 @@ impl SkinnedModelData {
             fallback_skeleton
         };
 
-        let per_obj_joints = self.per_obj_joints_handle();
-        let joints = if per_obj_joints.valid() {
-            per_obj_joints
-        } else if self.instance_skeleton.valid() && self.instance_joints.valid() {
-            self.instance_joints
-        } else {
-            self.fallback_joints
-        };
+        let joints = self.per_obj_joints_handle();
 
         SkinningInfo {
             skeleton,
@@ -254,6 +247,9 @@ impl SkinningDispatcher {
                 break;
             }
             let skinned = self.skinned.get_ref_mut(entry);
+            if skinned.info.model.rig.is_some() && !skinned.per_obj_joints_handle().valid() {
+                continue;
+            }
             buffer[dispatch_count] = SkinningDispatch::from_model(skinned, delta_time);
             skinned.clear_animation_dirty();
             dispatch_count += 1;
@@ -449,24 +445,6 @@ fn clone_instance_skeleton(
     } else {
         (Handle::default(), Handle::default(), 0)
     }
-}
-
-fn joint_handle_from_skeleton(
-    bindless: &BindlessState,
-    skeleton: Handle<SkeletonHeader>,
-) -> Option<Handle<JointTransform>> {
-    if !skeleton.valid() {
-        return None;
-    }
-
-    let skeletons =
-        bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons").ok()?;
-    let header = *skeletons.skeleton(skeleton);
-    if header.joint_count == 0 {
-        return None;
-    }
-
-    Some(Handle::new(header.joint_offset as u16, 0))
 }
 
 fn reserve_per_obj_joints(
