@@ -148,7 +148,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#43f48291ceef093fdbabadfe32b40270163ff1ae"
+source = "git+https://github.com/JordanHendl/gohan#e47b1c4852d83e4457bf210fa449bda4ff8acefc"
 dependencies = [
  "bincode",
  "clap",
@@ -796,7 +796,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#43f48291ceef093fdbabadfe32b40270163ff1ae"
+source = "git+https://github.com/JordanHendl/gohan#e47b1c4852d83e4457bf210fa449bda4ff8acefc"
 dependencies = [
  "bento",
  "dashi",
@@ -1003,9 +1003,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.12.1"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
+checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -1347,7 +1347,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#43f48291ceef093fdbabadfe32b40270163ff1ae"
+source = "git+https://github.com/JordanHendl/gohan#e47b1c4852d83e4457bf210fa449bda4ff8acefc"
 dependencies = [
  "bento",
  "dashi",
@@ -1477,7 +1477,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#957ef2a20e29a320e5dfed25166ec63b5b2d5f4b"
+source = "git+https://github.com/JordanHendl/noren#ccddecd0244c686e0575815d4de5e1644fcc58a3"
 dependencies = [
  "bento",
  "bincode",
@@ -2246,7 +2246,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#43f48291ceef093fdbabadfe32b40270163ff1ae"
+source = "git+https://github.com/JordanHendl/gohan#e47b1c4852d83e4457bf210fa449bda4ff8acefc"
 dependencies = [
  "bento",
  "dashi",
@@ -3009,18 +3009,18 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.32"
+version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fabae64378cb18147bb18bca364e63bdbe72a0ffe4adf0addfec8aa166b2c56"
+checksum = "668f5168d10b9ee831de31933dc111a459c97ec93225beb307aed970d1372dfd"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.32"
+version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9c2d862265a8bb4471d87e033e730f536e2a285cc7cb05dbce09a2a97075f90"
+checksum = "2c7962b26b0a8685668b671ee4b54d007a67d4eaf05fda79ac0ecf41e32270f1"
 dependencies = [
  "proc-macro2",
  "quote",

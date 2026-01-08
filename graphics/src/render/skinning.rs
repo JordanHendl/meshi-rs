@@ -10,6 +10,7 @@ use furikake::{
     BindlessState,
     reservations::{
         bindless_joints::ReservedBindlessJoints, bindless_skeletons::ReservedBindlessSkeletons,
+        per_obj_joints::{PerObjectJointAllocation, ReservedPerObjJoints},
     },
     types::{AnimationState as FurikakeAnimationState, JointTransform, SkeletonHeader},
 };
@@ -35,6 +36,7 @@ pub struct SkinnedModelData {
     animation_clips: Vec<Handle<furikake::types::AnimationClip>>,
     animation_dirty: bool,
     fallback_joints: Handle<JointTransform>,
+    per_obj_joints: Option<PerObjectJointAllocation>,
 }
 
 impl SkinnedModelData {
@@ -60,6 +62,7 @@ impl SkinnedModelData {
         let fallback_joints = rig
             .and_then(|rig| joint_handle_from_skeleton(bindless, rig.skeleton))
             .unwrap_or_default();
+        let per_obj_joints = rig.and_then(|rig| reserve_per_obj_joints(bindless, rig.skeleton));
 
         let (instance_skeleton, instance_joints, instance_joint_count) = if rig.is_some() {
             clone_instance_skeleton(&info, bindless)
@@ -75,6 +78,7 @@ impl SkinnedModelData {
             animation_clips,
             animation_dirty: true,
             fallback_joints,
+            per_obj_joints,
         }
     }
 
@@ -96,7 +100,10 @@ impl SkinnedModelData {
             fallback_skeleton
         };
 
-        let joints = if self.instance_skeleton.valid() && self.instance_joints.valid() {
+        let per_obj_joints = self.per_obj_joints_handle();
+        let joints = if per_obj_joints.valid() {
+            per_obj_joints
+        } else if self.instance_skeleton.valid() && self.instance_joints.valid() {
             self.instance_joints
         } else {
             self.fallback_joints
@@ -119,6 +126,12 @@ impl SkinnedModelData {
 
     pub fn dispatch_skeleton(&self) -> Handle<SkeletonHeader> {
         self.skinning_info().skeleton
+    }
+
+    pub fn per_obj_joints_handle(&self) -> Handle<JointTransform> {
+        self.per_obj_joints
+            .map(|allocation| Handle::new(allocation.offset as u16, 0))
+            .unwrap_or_default()
     }
 }
 
@@ -280,6 +293,14 @@ impl SkinningDispatcher {
 
 pub fn unregister_skinned_model(bindless: &mut BindlessState, skinned: &SkinnedModelData) {
     bindless.unregister_animation_state(skinned.animation_state);
+    if let Some(allocation) = skinned.per_obj_joints {
+        let _ = bindless.reserved_mut::<ReservedPerObjJoints, _>(
+            "meshi_per_obj_joints",
+            |joints| {
+                joints.free(allocation);
+            },
+        );
+    }
     if skinned.instance_skeleton.valid() {
         let header = bindless
             .reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons")
@@ -311,6 +332,7 @@ pub struct SkinningDispatch {
     animation_state_id: u32,
     clip_handle: u32,
     skeleton_handle: u32,
+    per_obj_joints_offset: u32,
     reset_time: u32,
     time_seconds: f32,
     playback_rate: f32,
@@ -325,6 +347,7 @@ impl SkinningDispatch {
             .get(model.info.animation.clip_index as usize)
             .copied();
         let skeleton_handle = model.dispatch_skeleton();
+        let per_obj_joints_handle = model.per_obj_joints_handle();
 
         Self {
             animation_state_id: if model.animation_state.valid() {
@@ -338,6 +361,11 @@ impl SkinningDispatch {
                 .unwrap_or(u16::MAX as u32),
             skeleton_handle: if skeleton_handle.valid() {
                 skeleton_handle.slot as u32
+            } else {
+                u16::MAX as u32
+            },
+            per_obj_joints_offset: if per_obj_joints_handle.valid() {
+                per_obj_joints_handle.slot as u32
             } else {
                 u16::MAX as u32
             },
@@ -439,4 +467,28 @@ fn joint_handle_from_skeleton(
     }
 
     Some(Handle::new(header.joint_offset as u16, 0))
+}
+
+fn reserve_per_obj_joints(
+    bindless: &mut BindlessState,
+    skeleton: Handle<SkeletonHeader>,
+) -> Option<PerObjectJointAllocation> {
+    if !skeleton.valid() {
+        return None;
+    }
+
+    let skeletons =
+        bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons").ok()?;
+    let header = *skeletons.skeleton(skeleton);
+    if header.joint_count == 0 {
+        return None;
+    }
+    
+    let mut h = Option::None;
+    bindless
+        .reserved_mut::<ReservedPerObjJoints, _>("meshi_per_obj_joints", |joints| {
+            h = joints.reserve(header.joint_count)
+        }).unwrap();
+
+    h
 }

@@ -75,7 +75,7 @@ fn main() {
         }))
         .unwrap();
 
-    let translation = Mat4::from_translation(Vec3::new(0.0, 0.0, -20.0));
+    let translation = Mat4::from_translation(Vec3::new(0.0, 0.0, -5.0));
     engine.set_object_transform(skinned, &translation);
 
     struct AppData {

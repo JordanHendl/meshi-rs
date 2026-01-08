@@ -7,6 +7,7 @@ struct SkinningDispatch {
     uint animation_state_id;
     uint clip_handle;
     uint skeleton_handle;
+    uint per_obj_joints_offset;
     uint reset_time;
     float time_seconds;
     float playback_rate;
@@ -58,6 +59,10 @@ struct AnimationState {
     uint _padding2;
 };
 
+struct PerObjectJointTransform {
+    mat4 transform;
+};
+
 layout(set = 0, binding = 0) buffer SkinningDispatches {
     SkinningDispatch dispatches[];
 } skinning_dispatches;
@@ -85,6 +90,10 @@ layout(set = 0, binding = 5) buffer Joints {
 layout(set = 0, binding = 6) buffer SkinningStates {
     AnimationState states[];
 } meshi_bindless_skinning;
+
+layout(set = 0, binding = 7) buffer PerObjectJoints {
+    PerObjectJointTransform joints[];
+} meshi_per_obj_joints;
 
 mat3 quat_to_mat3(vec4 q) {
     q = normalize(q);
@@ -311,6 +320,11 @@ void main() {
             out_joint.inverse_bind = bind_joint.inverse_bind;
             out_joint.parent_index = bind_joint.parent_index;
             meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx] = out_joint;
+            if (dispatch.per_obj_joints_offset != 0xFFFFu) {
+                meshi_per_obj_joints
+                    .joints[dispatch.per_obj_joints_offset + joint_idx]
+                    .transform = out_joint.bind_pose * out_joint.inverse_bind;
+            }
         }
         return;
     }
@@ -326,6 +340,10 @@ void main() {
         out_joint.inverse_bind = bind_joint.inverse_bind;
         out_joint.parent_index = bind_joint.parent_index;
         meshi_bindless_joints.joints[skeleton.joint_offset + joint_idx] = out_joint;
+        if (dispatch.per_obj_joints_offset != 0xFFFFu) {
+            meshi_per_obj_joints
+                .joints[dispatch.per_obj_joints_offset + joint_idx]
+                .transform = out_joint.bind_pose * out_joint.inverse_bind;
+        }
     }
 }
-
