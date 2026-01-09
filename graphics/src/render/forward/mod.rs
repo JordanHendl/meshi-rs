@@ -5,7 +5,8 @@ use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::*;
-use driver::command::{Draw, DrawIndexed};
+use dashi::structs::{IndirectCommand, IndexedIndirectCommand};
+use driver::command::{DrawIndirect, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
@@ -48,6 +49,7 @@ pub struct ForwardRenderer {
     dynamic: DynamicAllocator,
     cull_queue: CommandRing,
     skinning: SkinningDispatcher,
+    skinning_complete: Option<Handle<Semaphore>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -55,6 +57,7 @@ pub struct ForwardRenderer {
 struct RenderObjectData {
     kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
+    draw_range: SceneDrawRange,
 }
 
 enum RenderObjectKind {
@@ -87,18 +90,6 @@ struct BillboardVertex {
     tex_coords: [f32; 2],
 }
 
-struct ViewDrawItem {
-    kind: ViewDrawKind,
-    transformation: Handle<Transformation>,
-    total_transform: Mat4,
-}
-
-enum ViewDrawKind {
-    Model(DeviceModel),
-    SkinnedModel(SkinnedRenderData),
-    Billboard(BillboardData),
-}
-
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
     return Handle::new(h.slot, h.generation);
 }
@@ -111,10 +102,11 @@ impl ForwardRenderer {
     fn build_billboard_pipeline(
         ctx: &mut Context,
         state: &mut BindlessState,
-        dynamic: &DynamicAllocator,
+        per_instance_buffer: Handle<Buffer>,
         sample_count: SampleCount,
     ) -> PSO {
         let shaders = miso::stdbillboard(&[]);
+        let per_obj_resource = ShaderResource::StorageBuffer(per_instance_buffer.into());
 
         let mut pso_builder = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
@@ -123,7 +115,7 @@ impl ForwardRenderer {
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    resource: per_obj_resource,
                     slot: 0,
                 }],
             );
@@ -204,7 +196,7 @@ impl ForwardRenderer {
         let billboard_pso = Self::build_billboard_pipeline(
             ctx.as_mut(),
             state.as_mut(),
-            &dynamic,
+            scene.per_instance_buffer(),
             info.sample_count,
         );
 
@@ -253,6 +245,7 @@ impl ForwardRenderer {
             sample_count: info.sample_count,
             cull_queue,
             skinning,
+            skinning_complete: None,
             alloc,
         }
     }
@@ -271,6 +264,8 @@ impl ForwardRenderer {
         }
 
         let shaders = miso::stdforward(&defines);
+        let per_obj_resource =
+            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
 
         let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
@@ -279,7 +274,7 @@ impl ForwardRenderer {
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(self.dynamic.state()),
+                    resource: per_obj_resource,
                     slot: 0,
                 }],
             );
@@ -488,9 +483,34 @@ impl ForwardRenderer {
 
         match info {
             RenderObjectInfo::Model(m) => {
+                let draws: Vec<SceneIndexedDrawInfo> = m
+                    .meshes
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
+                        mesh_id: idx as u32,
+                        material_id: mesh
+                            .material
+                            .as_ref()
+                            .and_then(|material| material.furikake_material_handle)
+                            .map(GPUScene::pack_handle)
+                            .unwrap_or(u32::MAX),
+                        per_obj_joints_id: u32::MAX,
+                        index_count: mesh.geometry.base.index_count.unwrap(),
+                        first_index: 0,
+                        vertex_offset: 0,
+                    })
+                    .collect();
+                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    Handle::default(),
+                    Handle::default(),
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Model(m.clone()),
                     scene_handle,
+                    draw_range,
                 });
 
                 self.scene_lookup.insert(scene_handle.slot, h);
@@ -505,9 +525,35 @@ impl ForwardRenderer {
                     skinning: skinning_info,
                     skinning_handle,
                 };
+                let draws: Vec<SceneIndexedDrawInfo> = skinned_data
+                    .model
+                    .meshes
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
+                        mesh_id: idx as u32,
+                        material_id: mesh
+                            .material
+                            .as_ref()
+                            .and_then(|material| material.furikake_material_handle)
+                            .map(GPUScene::pack_handle)
+                            .unwrap_or(u32::MAX),
+                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
+                        index_count: mesh.geometry.base.index_count.unwrap(),
+                        first_index: 0,
+                        vertex_offset: 0,
+                    })
+                    .collect();
+                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    skinned_data.skinning.skeleton,
+                    skinned_data.skinning.animation_state,
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::SkinnedModel(skinned_data),
                     scene_handle,
+                    draw_range,
                 });
 
                 self.scene_lookup.insert(scene_handle.slot, h);
@@ -516,9 +562,27 @@ impl ForwardRenderer {
             }
             RenderObjectInfo::Billboard(billboard) => {
                 let billboard = self.create_billboard_data(billboard.clone());
+                let draws = [SceneDrawInfo {
+                    mesh_id: 0,
+                    material_id: billboard
+                        .info
+                        .material
+                        .map(GPUScene::pack_handle)
+                        .unwrap_or(u32::MAX),
+                    per_obj_joints_id: u32::MAX,
+                    vertex_count: 6,
+                    first_vertex: 0,
+                }];
+                let draw_range = self.scene.set_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    Handle::default(),
+                    Handle::default(),
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Billboard(billboard),
                     scene_handle,
+                    draw_range,
                 });
 
                 self.scene_lookup.insert(scene_handle.slot, h);
@@ -648,6 +712,23 @@ impl ForwardRenderer {
                 billboard.owns_material = true;
             }
         }
+
+        let obj = self.objects.get_ref(from_handle(handle));
+        if let RenderObjectKind::Billboard(billboard) = &obj.kind {
+            let material_id = billboard
+                .info
+                .material
+                .map(GPUScene::pack_handle)
+                .unwrap_or(u32::MAX);
+            self.scene.update_draw_metadata(
+                obj.draw_range.non_indexed_offset,
+                SceneDrawMetadata {
+                    mesh_id: 0,
+                    material_id,
+                    per_obj_joints_id: u32::MAX,
+                },
+            );
+        }
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -732,7 +813,7 @@ impl ForwardRenderer {
                     .update()
                     .expect("Failed to update furikake state");
 
-                let cull_cmds = state_update.combine(self.scene.cull_and_sync());
+                let cull_cmds = state_update.combine(self.scene.cull_and_build_draws());
                 cull_cmds.append(c).unwrap();
             })
             .expect("Failed to make commands");
@@ -741,50 +822,6 @@ impl ForwardRenderer {
             .submit(&Default::default())
             .expect("Failed to submit!");
         self.cull_queue.wait_all().unwrap();
-    }
-
-    fn collect_draws(&mut self, views: &[Handle<Camera>]) -> Vec<Vec<ViewDrawItem>> {
-        let num_bins = self.scene.num_bins();
-        let max_objects = self.scene.max_objects_per_bin() as usize;
-        let bin_counts = self.scene.bin_counts();
-        let mut view_draws: Vec<Vec<ViewDrawItem>> = (0..views.len()).map(|_| Vec::new()).collect();
-
-        for (view_idx, _) in views.iter().enumerate() {
-            for bin in 0..num_bins {
-                let bin_offset = view_idx * num_bins + bin;
-                if bin_offset >= bin_counts.len() {
-                    continue;
-                }
-
-                let count = bin_counts[bin_offset] as usize;
-                for draw_idx in 0..count {
-                    let slot = bin_offset * max_objects + draw_idx;
-                    if let Some(culled) = self.scene.culled_object(slot as u32) {
-                        if let Some(obj_handle) = self.scene_lookup.get(&(culled.object_id as u16))
-                        {
-                            let obj = self.objects.get_ref(*obj_handle);
-                            let kind = match &obj.kind {
-                                RenderObjectKind::Model(model) => {
-                                    ViewDrawKind::Model(model.clone())
-                                }
-                                RenderObjectKind::SkinnedModel(skinned) => {
-                                    ViewDrawKind::SkinnedModel(skinned.clone())
-                                }
-                                RenderObjectKind::Billboard(billboard) => {
-                                    ViewDrawKind::Billboard(billboard.clone())
-                                }
-                            };
-                            view_draws[view_idx].push(ViewDrawItem {
-                                kind,
-                                transformation: GPUScene::unpack_handle(culled.transformation),
-                                total_transform: culled.total_transform,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        view_draws
     }
 
     pub fn update(
@@ -801,15 +838,12 @@ impl ForwardRenderer {
             self.environment.reset();
         }
 
-        self.skinning.update(delta_time);
+        self.skinning_complete = self.skinning.update(delta_time);
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
         // Pull scene GPU --> CPU to read.
         self.pull_scene();
-
-        // Manually collect all draws per view.
-        let view_draws = self.collect_draws(views);
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
@@ -845,24 +879,36 @@ impl ForwardRenderer {
             let mut forward_pass_clear: [Option<ClearValue>; 8] = [None; 8];
             forward_pass_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
 
-            let draw_items = &view_draws[view_idx];
             let camera_handle = *camera;
             struct BillboardDraw {
                 vertex_buffer: Handle<Buffer>,
                 material: Handle<Material>,
                 transformation: Handle<Transformation>,
                 total_transform: Mat4,
+                draw_index: u32,
             }
             let mut billboard_draws = Vec::new();
-            for item in draw_items {
-                if let ViewDrawKind::Billboard(billboard) = &item.kind {
+            {
+                let handles = self.objects.entries.clone();
+                for handle in handles {
+                    let (scene_handle, draw_range, billboard) = {
+                        let obj = self.objects.get_ref(handle);
+                        let RenderObjectKind::Billboard(billboard) = &obj.kind else {
+                            continue;
+                        };
+                        (obj.scene_handle, obj.draw_range, billboard.clone())
+                    };
                     if let Some(material) = billboard.info.material {
-                        self.update_billboard_vertices(billboard, item.total_transform);
+                        let transform = self.scene.get_object_transform(scene_handle);
+                        self.update_billboard_vertices(&billboard, transform);
                         billboard_draws.push(BillboardDraw {
                             vertex_buffer: billboard.vertex_buffer,
                             material,
-                            transformation: item.transformation,
-                            total_transform: item.total_transform,
+                            transformation: self
+                                .scene
+                                .object_transformation_handle(scene_handle),
+                            total_transform: transform,
+                            draw_index: draw_range.non_indexed_offset,
                         });
                     }
                 }
@@ -882,135 +928,137 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    struct ModelDraw<'a> {
-                        item: &'a ViewDrawItem,
-                        model: &'a DeviceModel,
-                        skinning: SkinningInfo,
-                    }
+                    {
+                        let indexed_args = self.scene.indexed_draw_args();
+                        let indexed_stride =
+                            std::mem::size_of::<IndexedIndirectCommand>() as u32;
+                        let indexed_base =
+                            self.scene.indexed_draws_per_view() * view_idx as u32;
 
-                    let mut model_draws = Vec::new();
+                        for handle in &self.objects.entries {
+                            let obj = self.objects.get_ref(*handle);
+                            match &obj.kind {
+                                RenderObjectKind::Model(model) => {
+                                    for (mesh_idx, mesh) in
+                                        model.meshes.iter().enumerate()
+                                    {
+                                        if let Some(material) = &mesh.material {
+                                            if let Some(mat_idx) =
+                                                material.furikake_material_handle
+                                            {
+                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                                    let draw_index = obj.draw_range.indexed_offset
+                                                        + mesh_idx as u32;
+                                                    let draw_offset = (indexed_base + draw_index)
+                                                        * indexed_stride;
 
-                    for item in draw_items {
-                        match &item.kind {
-                            ViewDrawKind::Model(model) => {
-                                model_draws.push(ModelDraw {
-                                    item,
-                                    model,
-                                    skinning: SkinningInfo::default(),
-                                });
-                            }
-                            ViewDrawKind::SkinnedModel(skinned) => {
-                                model_draws.push(ModelDraw {
-                                    item,
-                                    model: &skinned.model,
-                                    skinning: skinned.skinning,
-                                });
-                            }
-                            ViewDrawKind::Billboard(_) => {}
-                        }
-                    }
-
-                    for draw in model_draws {
-                        for mesh in &draw.model.meshes {
-                            if let Some(material) = &mesh.material {
-                                if let Some(mat_idx) = material.furikake_material_handle {
-                                    if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                        assert!(pso.handle.valid());
-
-                                        let mut alloc = self
-                                            .dynamic
-                                            .bump()
-                                            .expect("Failed to allocate dynamic buffer!");
-
-                                        // Per Object dynamic structure.
-                                        #[repr(C)]
-                                        struct PerObj {
-                                            transform: Mat4, // Backup transform
-                                            transformation: Handle<Transformation>,
-                                            material_id: Handle<Material>,
-                                            camera: Handle<Camera>,
-                                            skeleton_id: Handle<furikake::types::SkeletonHeader>,
-                                            animation_state_id:
-                                                Handle<furikake::types::AnimationState>,
-                                            per_obj_joints_id: Handle<furikake::types::JointTransform>,
+                                                    cmd = cmd
+                                                        .bind_graphics_pipeline(pso.handle)
+                                                        .update_viewport(&self.viewport)
+                                                        .draw_indexed_indirect(
+                                                            &DrawIndexedIndirect {
+                                                                vertices: mesh
+                                                                    .geometry
+                                                                    .base
+                                                                    .vertices
+                                                                    .handle()
+                                                                    .unwrap(),
+                                                                indices: mesh
+                                                                    .geometry
+                                                                    .base
+                                                                    .indices
+                                                                    .handle()
+                                                                    .unwrap(),
+                                                                indirect: indexed_args,
+                                                                offset: draw_offset,
+                                                                draw_count: 1,
+                                                                stride: indexed_stride,
+                                                                bind_tables: pso.tables(),
+                                                                dynamic_buffers: [
+                                                                    None,
+                                                                    None,
+                                                                    None,
+                                                                    None,
+                                                                ],
+                                                            },
+                                                        )
+                                                        .unbind_graphics_pipeline();
+                                                }
+                                            }
                                         }
-
-                                        let per_obj = &mut alloc.slice::<PerObj>()[0];
-                                        per_obj.transform = draw.item.total_transform;
-                                        per_obj.transformation = draw.item.transformation;
-                                        per_obj.material_id = mat_idx;
-                                        per_obj.camera = camera_handle;
-                                        per_obj.skeleton_id = draw.skinning.skeleton;
-                                        per_obj.animation_state_id = draw.skinning.animation_state;
-                                        per_obj.per_obj_joints_id = draw.skinning.joints;
-                                        cmd = cmd
-                                            .bind_graphics_pipeline(pso.handle)
-                                            .update_viewport(&self.viewport)
-                                            .draw_indexed(&DrawIndexed {
-                                                vertices: mesh
-                                                    .geometry
-                                                    .base
-                                                    .vertices
-                                                    .handle()
-                                                    .unwrap(),
-                                                indices: mesh
-                                                    .geometry
-                                                    .base
-                                                    .indices
-                                                    .handle()
-                                                    .unwrap(),
-                                                index_count: mesh
-                                                    .geometry
-                                                    .base
-                                                    .index_count
-                                                    .unwrap(),
-                                                bind_tables: pso.tables(),
-                                                dynamic_buffers: [None, Some(alloc), None, None],
-                                                ..Default::default()
-                                            })
-                                            .unbind_graphics_pipeline();
                                     }
                                 }
+                                RenderObjectKind::SkinnedModel(skinned) => {
+                                    for (mesh_idx, mesh) in
+                                        skinned.model.meshes.iter().enumerate()
+                                    {
+                                        if let Some(material) = &mesh.material {
+                                            if let Some(mat_idx) =
+                                                material.furikake_material_handle
+                                            {
+                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
+                                                    let draw_index = obj.draw_range.indexed_offset
+                                                        + mesh_idx as u32;
+                                                    let draw_offset = (indexed_base + draw_index)
+                                                        * indexed_stride;
+
+                                                    cmd = cmd
+                                                        .bind_graphics_pipeline(pso.handle)
+                                                        .update_viewport(&self.viewport)
+                                                        .draw_indexed_indirect(
+                                                            &DrawIndexedIndirect {
+                                                                vertices: mesh
+                                                                    .geometry
+                                                                    .base
+                                                                    .vertices
+                                                                    .handle()
+                                                                    .unwrap(),
+                                                                indices: mesh
+                                                                    .geometry
+                                                                    .base
+                                                                    .indices
+                                                                    .handle()
+                                                                    .unwrap(),
+                                                                indirect: indexed_args,
+                                                                offset: draw_offset,
+                                                                draw_count: 1,
+                                                                stride: indexed_stride,
+                                                                bind_tables: pso.tables(),
+                                                                dynamic_buffers: [
+                                                                    None,
+                                                                    None,
+                                                                    None,
+                                                                    None,
+                                                                ],
+                                                            },
+                                                        )
+                                                        .unbind_graphics_pipeline();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                RenderObjectKind::Billboard(_) => {}
                             }
                         }
                     }
 
+                    let draw_args = self.scene.draw_args();
+                    let draw_stride = std::mem::size_of::<IndirectCommand>() as u32;
+                    let draw_base = self.scene.non_indexed_draws_per_view() * view_idx as u32;
                     for draw in &billboard_draws {
-                        let mut alloc = self
-                            .dynamic
-                            .bump()
-                            .expect("Failed to allocate billboard dynamic buffer!");
-
-                        #[repr(C)]
-                        struct PerObj {
-                            transform: Mat4,
-                            transformation: Handle<Transformation>,
-                            material_id: Handle<Material>,
-                            camera: Handle<Camera>,
-                            skeleton_id: Handle<furikake::types::SkeletonHeader>,
-                            animation_state_id: Handle<furikake::types::AnimationState>,
-                            per_obj_joints_id: Handle<furikake::types::JointTransform>,
-                        }
-
-                        let per_obj = &mut alloc.slice::<PerObj>()[0];
-                        per_obj.transform = draw.total_transform;
-                        per_obj.transformation = draw.transformation;
-                        per_obj.material_id = draw.material;
-                        per_obj.camera = camera_handle;
-                        per_obj.skeleton_id = Handle::default();
-                        per_obj.animation_state_id = Handle::default();
-                        per_obj.per_obj_joints_id = Handle::default();
-
+                        let draw_offset = (draw_base + draw.draw_index) * draw_stride;
                         cmd = cmd
                             .bind_graphics_pipeline(self.billboard_pso.handle)
                             .update_viewport(&self.viewport)
-                            .draw(&Draw {
+                            .draw_indirect(&DrawIndirect {
                                 vertices: draw.vertex_buffer,
+                                indirect: draw_args,
                                 bind_tables: self.billboard_pso.tables(),
-                                dynamic_buffers: [None, Some(alloc), None, None],
-                                instance_count: 1,
-                                count: 6,
-                                ..Default::default()
+                                dynamic_buffers: [None, None, None, None],
+                                draw_count: 1,
+                                offset: draw_offset,
+                                stride: draw_stride,
                             })
                             .unbind_graphics_pipeline();
                     }
@@ -1035,8 +1083,14 @@ impl ForwardRenderer {
             });
         }
 
+        let mut wait_sems = Vec::with_capacity(sems.len() + 1);
+        wait_sems.extend_from_slice(sems);
+        if let Some(semaphore) = self.skinning_complete {
+            wait_sems.push(semaphore);
+        }
+
         self.graph.execute_with(&SubmitInfo {
-            wait_sems: sems,
+            wait_sems: &wait_sems,
             signal_sems: &[semaphores[0]],
         });
 
