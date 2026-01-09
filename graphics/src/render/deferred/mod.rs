@@ -125,9 +125,20 @@ impl DeferredRenderer {
         ctx: &mut Context,
         state: &mut BindlessState,
         dynamic: &DynamicAllocator,
+        per_instance_buffer: Handle<Buffer>,
         sample_count: SampleCount,
     ) -> PSO {
         let shaders = miso::stdbillboard(&[]);
+        let per_obj_resource = {
+            #[cfg(feature = "cpu_cull_debug")]
+            {
+                ShaderResource::DynamicStorage(dynamic.state())
+            }
+            #[cfg(not(feature = "cpu_cull_debug"))]
+            {
+                ShaderResource::StorageBuffer(per_instance_buffer.into())
+            }
+        };
 
         let mut pso_builder = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
@@ -136,7 +147,7 @@ impl DeferredRenderer {
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    resource: per_obj_resource,
                     slot: 0,
                 }],
             );
@@ -218,6 +229,7 @@ impl DeferredRenderer {
             ctx.as_mut(),
             state.as_mut(),
             &dynamic,
+            scene.per_instance_buffer(),
             info.sample_count,
         );
 
@@ -313,6 +325,16 @@ impl DeferredRenderer {
         }
 
         let shaders = miso::stddeferred(&defines);
+        let per_obj_resource = {
+            #[cfg(feature = "cpu_cull_debug")]
+            {
+                ShaderResource::DynamicStorage(self.dynamic.state())
+            }
+            #[cfg(not(feature = "cpu_cull_debug"))]
+            {
+                ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into())
+            }
+        };
 
         let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
@@ -320,7 +342,7 @@ impl DeferredRenderer {
             .add_table_variable_with_resources(
                 "per_obj_ssbo",
                 vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(self.dynamic.state()),
+                    resource: per_obj_resource,
                     slot: 0,
                 }],
             );
@@ -548,6 +570,11 @@ impl DeferredRenderer {
                     })
                     .collect();
                 let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    Handle::default(),
+                    Handle::default(),
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Model(m.clone()),
                     scene_handle,
@@ -586,6 +613,11 @@ impl DeferredRenderer {
                     })
                     .collect();
                 let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    skinned_data.skinning.skeleton,
+                    skinned_data.skinning.animation_state,
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::SkinnedModel(skinned_data),
                     scene_handle,
@@ -610,6 +642,11 @@ impl DeferredRenderer {
                     first_vertex: 0,
                 }];
                 let draw_range = self.scene.set_draws(scene_handle, &draws);
+                self.scene.set_object_skinning_info(
+                    scene_handle,
+                    Handle::default(),
+                    Handle::default(),
+                );
                 let h = self.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Billboard(billboard),
                     scene_handle,
@@ -1177,9 +1214,6 @@ impl DeferredRenderer {
 
                         for handle in &self.objects.entries {
                             let obj = self.objects.get_ref(*handle);
-                            let transform = self.scene.get_object_transform(obj.scene_handle);
-                            let transformation =
-                                self.scene.object_transformation_handle(obj.scene_handle);
                             match &obj.kind {
                                 RenderObjectKind::Model(model) => {
                                     for (mesh_idx, mesh) in
@@ -1190,39 +1224,6 @@ impl DeferredRenderer {
                                                 material.furikake_material_handle
                                             {
                                                 if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let mut alloc = self
-                                                        .dynamic
-                                                        .bump()
-                                                        .expect("Failed to allocate dynamic buffer!");
-
-                                                    #[repr(C)]
-                                                    #[derive(Default)]
-                                                    struct PerObj {
-                                                        transform: Mat4, // Backup transform
-                                                        transformation: Handle<Transformation>,
-                                                        material_id: Handle<Material>,
-                                                        camera: Handle<Camera>,
-                                                        skeleton_id: Handle<
-                                                            furikake::types::SkeletonHeader,
-                                                        >,
-                                                        animation_state_id: Handle<
-                                                            furikake::types::AnimationState,
-                                                        >,
-                                                        per_obj_joints_id: Handle<
-                                                            furikake::types::JointTransform,
-                                                        >,
-                                                    }
-
-                                                    let per_obj = &mut alloc.slice::<PerObj>()[0];
-                                                    *per_obj = Default::default();
-                                                    per_obj.transform = transform;
-                                                    per_obj.transformation = transformation;
-                                                    per_obj.material_id = mat_idx;
-                                                    per_obj.camera = camera_handle;
-                                                    per_obj.skeleton_id = Handle::default();
-                                                    per_obj.animation_state_id = Handle::default();
-                                                    per_obj.per_obj_joints_id = Handle::default();
-
                                                     let draw_index = obj.draw_range.indexed_offset
                                                         + mesh_idx as u32;
                                                     let draw_offset = (indexed_base + draw_index)
@@ -1252,7 +1253,7 @@ impl DeferredRenderer {
                                                                 bind_tables: pso.tables(),
                                                                 dynamic_buffers: [
                                                                     None,
-                                                                    Some(alloc),
+                                                                    None,
                                                                     None,
                                                                     None,
                                                                 ],
@@ -1273,41 +1274,6 @@ impl DeferredRenderer {
                                                 material.furikake_material_handle
                                             {
                                                 if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let mut alloc = self
-                                                        .dynamic
-                                                        .bump()
-                                                        .expect("Failed to allocate dynamic buffer!");
-
-                                                    #[repr(C)]
-                                                    #[derive(Default)]
-                                                    struct PerObj {
-                                                        transform: Mat4, // Backup transform
-                                                        transformation: Handle<Transformation>,
-                                                        material_id: Handle<Material>,
-                                                        camera: Handle<Camera>,
-                                                        skeleton_id: Handle<
-                                                            furikake::types::SkeletonHeader,
-                                                        >,
-                                                        animation_state_id: Handle<
-                                                            furikake::types::AnimationState,
-                                                        >,
-                                                        per_obj_joints_id: Handle<
-                                                            furikake::types::JointTransform,
-                                                        >,
-                                                    }
-
-                                                    let per_obj = &mut alloc.slice::<PerObj>()[0];
-                                                    *per_obj = Default::default();
-                                                    per_obj.transform = transform;
-                                                    per_obj.transformation = transformation;
-                                                    per_obj.material_id = mat_idx;
-                                                    per_obj.camera = camera_handle;
-                                                    per_obj.skeleton_id = skinned.skinning.skeleton;
-                                                    per_obj.animation_state_id =
-                                                        skinned.skinning.animation_state;
-                                                    per_obj.per_obj_joints_id =
-                                                        skinned.skinning.joints;
-
                                                     let draw_index = obj.draw_range.indexed_offset
                                                         + mesh_idx as u32;
                                                     let draw_offset = (indexed_base + draw_index)
@@ -1337,7 +1303,7 @@ impl DeferredRenderer {
                                                                 bind_tables: pso.tables(),
                                                                 dynamic_buffers: [
                                                                     None,
-                                                                    Some(alloc),
+                                                                    None,
                                                                     None,
                                                                     None,
                                                                 ],
@@ -1431,30 +1397,34 @@ impl DeferredRenderer {
                     #[cfg(not(feature = "cpu_cull_debug"))]
                     let draw_base = self.scene.non_indexed_draws_per_view() * view_idx as u32;
                     for draw in &billboard_draws {
-                        let mut alloc = self
-                            .dynamic
-                            .bump()
-                            .expect("Failed to allocate billboard dynamic buffer!");
+                        #[cfg(feature = "cpu_cull_debug")]
+                        let mut alloc = {
+                            let mut alloc = self
+                                .dynamic
+                                .bump()
+                                .expect("Failed to allocate billboard dynamic buffer!");
 
-                        #[repr(C)]
-                        struct PerObj {
-                            transform: Mat4,
-                            transformation: Handle<Transformation>,
-                            material_id: Handle<Material>,
-                            camera: Handle<Camera>,
-                            skeleton_id: Handle<furikake::types::SkeletonHeader>,
-                            animation_state_id: Handle<furikake::types::AnimationState>,
-                            per_obj_joints_id: Handle<furikake::types::JointTransform>,
-                        }
+                            #[repr(C)]
+                            struct PerObj {
+                                transform: Mat4,
+                                transformation: Handle<Transformation>,
+                                material_id: Handle<Material>,
+                                camera: Handle<Camera>,
+                                skeleton_id: Handle<furikake::types::SkeletonHeader>,
+                                animation_state_id: Handle<furikake::types::AnimationState>,
+                                per_obj_joints_id: Handle<furikake::types::JointTransform>,
+                            }
 
-                        let per_obj = &mut alloc.slice::<PerObj>()[0];
-                        per_obj.transform = draw.total_transform;
-                        per_obj.transformation = draw.transformation;
-                        per_obj.material_id = draw.material;
-                        per_obj.camera = camera_handle;
-                        per_obj.skeleton_id = Handle::default();
-                        per_obj.animation_state_id = Handle::default();
-                        per_obj.per_obj_joints_id = Handle::default();
+                            let per_obj = &mut alloc.slice::<PerObj>()[0];
+                            per_obj.transform = draw.total_transform;
+                            per_obj.transformation = draw.transformation;
+                            per_obj.material_id = draw.material;
+                            per_obj.camera = camera_handle;
+                            per_obj.skeleton_id = Handle::default();
+                            per_obj.animation_state_id = Handle::default();
+                            per_obj.per_obj_joints_id = Handle::default();
+                            alloc
+                        };
 
                         #[cfg(feature = "cpu_cull_debug")]
                         {
@@ -1481,7 +1451,7 @@ impl DeferredRenderer {
                                     vertices: draw.vertex_buffer,
                                     indirect: draw_args,
                                     bind_tables: self.billboard_pso.tables(),
-                                    dynamic_buffers: [None, Some(alloc), None, None],
+                                    dynamic_buffers: [None, None, None, None],
                                     draw_count: 1,
                                     offset: draw_offset,
                                     stride: draw_stride,

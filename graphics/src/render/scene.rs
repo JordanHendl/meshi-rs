@@ -13,7 +13,7 @@ use dashi::{
 use furikake::{
     BindlessState, GPUState,
     reservations::bindless_transformations::ReservedBindlessTransformations,
-    types::{Camera, Transformation},
+    types::{AnimationState, Camera, SkeletonHeader, Transformation},
 };
 use glam::Mat4;
 use tare::utils::StagedBuffer;
@@ -44,6 +44,35 @@ pub struct CulledObject {
     pub transformation: u32,
     pub object_id: u32,
     pub bin_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct ScenePerInstanceData {
+    pub transform: Mat4,
+    pub transformation: u32,
+    pub material_id: u32,
+    pub camera: u32,
+    pub skeleton_id: u32,
+    pub animation_state_id: u32,
+    pub per_obj_joints_id: u32,
+    pub _padding: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SceneObjectSkinningInfo {
+    pub skeleton_id: u32,
+    pub animation_state_id: u32,
+}
+
+impl Default for SceneObjectSkinningInfo {
+    fn default() -> Self {
+        Self {
+            skeleton_id: u32::MAX,
+            animation_state_id: u32::MAX,
+        }
+    }
 }
 
 #[repr(C)]
@@ -140,6 +169,7 @@ struct SceneData {
     indexed_draws_per_view: u32,
     non_indexed_draws_per_view: u32,
     draw_list_capacity: u32,
+    per_instance_stride: u32,
     next_indexed_draw: u32,
     next_draw: u32,
     transformations: ShaderResource,
@@ -147,6 +177,8 @@ struct SceneData {
     bin_descriptions: Vec<SceneBin>,
     active_objects: Vec<Handle<SceneObject>>,
     max_views: u32,
+    object_skinning: StagedBuffer,
+    per_instance_data: Handle<Buffer>,
 }
 
 #[derive(Default)]
@@ -363,6 +395,18 @@ impl GPUScene {
                 ShaderResource::StorageBuffer(self.data.draw_list_counts.into()),
             )
             .add_variable(
+                "object_skinning",
+                ShaderResource::StorageBuffer(self.data.object_skinning.device().into()),
+            )
+            .add_variable(
+                "instance_data",
+                ShaderResource::StorageBuffer(self.data.per_instance_data.into()),
+            )
+            .add_variable(
+                "active_cameras",
+                ShaderResource::ConstBuffer(self.camera.device().into()),
+            )
+            .add_variable(
                 "params",
                 ShaderResource::ConstBuffer(self.data.draw_dispatch.device().into()),
             )
@@ -388,6 +432,7 @@ impl GPUScene {
             info.limits.max_num_scene_objects * info.limits.max_draws_per_object;
         let non_indexed_draws_per_view =
             info.limits.max_num_scene_objects * info.limits.max_draws_per_object;
+        let per_instance_stride = indexed_draws_per_view + non_indexed_draws_per_view;
         let draw_list_capacity = indexed_draws_per_view + non_indexed_draws_per_view;
         let draw_list_size = (draw_list_capacity as usize
             * max_views
@@ -408,6 +453,12 @@ impl GPUScene {
             .max(256);
         let draw_metadata_size = (non_indexed_draws_per_view as usize
             * std::mem::size_of::<SceneDrawMetadata>())
+            .max(256);
+        let object_skinning_size = (info.limits.max_num_scene_objects as usize
+            * std::mem::size_of::<SceneObjectSkinningInfo>())
+            .max(256);
+        let per_instance_size = ((per_instance_stride as usize * max_views)
+            * std::mem::size_of::<ScenePerInstanceData>())
             .max(256);
 
         if BindlessState::reserved_names()
@@ -586,6 +637,17 @@ impl GPUScene {
             },
         );
 
+        let mut object_skinning = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Object Skinning", info.name),
+                byte_size: object_skinning_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
         for entry in indexed_draw_templates.as_slice_mut::<IndexedIndirectCommand>() {
             *entry = IndexedIndirectCommand::default();
         }
@@ -597,6 +659,9 @@ impl GPUScene {
         }
         for entry in draw_metadata.as_slice_mut::<SceneDrawMetadata>() {
             *entry = SceneDrawMetadata::default();
+        }
+        for entry in object_skinning.as_slice_mut::<SceneObjectSkinningInfo>() {
+            *entry = SceneObjectSkinningInfo::default();
         }
 
         let indexed_draw_args = ctx
@@ -638,6 +703,16 @@ impl GPUScene {
                 initial_data: None,
             })
             .expect("create draw list counts buffer");
+
+        let per_instance_data = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{} Scene Per Instance Data", info.name),
+                byte_size: per_instance_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("create per instance data buffer");
 
         let ctx_ptr: *mut Context = ctx;
         let stream = CommandStream::new()
@@ -695,6 +770,7 @@ impl GPUScene {
             indexed_draws_per_view,
             non_indexed_draws_per_view,
             draw_list_capacity,
+            per_instance_stride,
             next_indexed_draw: 0,
             next_draw: 0,
             transformations,
@@ -702,6 +778,8 @@ impl GPUScene {
             bin_descriptions: info.draw_bins.to_vec(),
             active_objects: Vec::new(),
             max_views: info.limits.max_num_views,
+            object_skinning,
+            per_instance_data,
         };
 
         let mut s = Self {
@@ -756,6 +834,15 @@ impl GPUScene {
             })
             .unwrap();
 
+        if let Some(entry) = self
+            .data
+            .object_skinning
+            .as_slice_mut::<SceneObjectSkinningInfo>()
+            .get_mut(handle.slot as usize)
+        {
+            *entry = SceneObjectSkinningInfo::default();
+        }
+
         //        self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].max_objects = self.data.objects_to_process.len() as u32;
         self.data.active_objects.push(handle);
         handle
@@ -782,6 +869,14 @@ impl GPUScene {
         if let Some(object) = self.data.objects_to_process.get_mut_ref(handle) {
             object.active = 0;
             object.dirty = 0;
+        }
+        if let Some(entry) = self
+            .data
+            .object_skinning
+            .as_slice_mut::<SceneObjectSkinningInfo>()
+            .get_mut(handle.slot as usize)
+        {
+            *entry = SceneObjectSkinningInfo::default();
         }
 
         self.data.objects_to_process.release(handle);
@@ -958,6 +1053,8 @@ impl GPUScene {
             .combine(self.data.draw_templates.sync_up())
             .combine(self.data.indexed_draw_metadata.sync_up())
             .combine(self.data.draw_metadata.sync_up())
+            .combine(self.data.object_skinning.sync_up())
+            .combine(self.camera.sync_up())
             .combine(self.data.draw_dispatch.sync_up())
             .prepare_buffer(
                 self.data.draw_ranges.device().handle,
@@ -979,11 +1076,17 @@ impl GPUScene {
                 self.data.draw_metadata.device().handle,
                 UsageBits::COMPUTE_SHADER,
             )
+            .prepare_buffer(
+                self.data.object_skinning.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_dispatch.device().handle, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.indexed_draw_args, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_args, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_list, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_list_counts, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.per_instance_data, UsageBits::COMPUTE_SHADER)
             .dispatch(&Dispatch {
                 x: clear_dispatch,
                 y: 1,
@@ -1007,6 +1110,7 @@ impl GPUScene {
                 self.data.bin_counts.device().handle,
                 UsageBits::COMPUTE_SHADER,
             )
+            .prepare_buffer(self.data.per_instance_data, UsageBits::COMPUTE_SHADER)
             .dispatch(&Dispatch {
                 x: build_dispatch,
                 y: 1,
@@ -1062,6 +1166,10 @@ impl GPUScene {
         self.data.draw_args
     }
 
+    pub fn per_instance_buffer(&self) -> Handle<Buffer> {
+        self.data.per_instance_data
+    }
+
     pub fn num_bins(&self) -> usize {
         self.data.bin_descriptions.len()
     }
@@ -1078,6 +1186,25 @@ impl GPUScene {
             .get_ref(handle)
             .map(|object| Self::unpack_handle(object.transformation))
             .unwrap_or_default()
+    }
+
+    pub fn set_object_skinning_info(
+        &mut self,
+        object: Handle<SceneObject>,
+        skeleton: Handle<SkeletonHeader>,
+        animation_state: Handle<AnimationState>,
+    ) {
+        if let Some(entry) = self
+            .data
+            .object_skinning
+            .as_slice_mut::<SceneObjectSkinningInfo>()
+            .get_mut(object.slot as usize)
+        {
+            *entry = SceneObjectSkinningInfo {
+                skeleton_id: Self::pack_handle(skeleton),
+                animation_state_id: Self::pack_handle(animation_state),
+            };
+        }
     }
 
     pub fn set_indexed_draws(
