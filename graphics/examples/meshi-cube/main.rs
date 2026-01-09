@@ -67,7 +67,7 @@ fn main() {
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/cube").unwrap(),
+            db.fetch_gpu_model("model/witch").unwrap(),
         ))
         .unwrap();
 

@@ -10,6 +10,8 @@ use winit::{
     window::WindowBuilder,
 };
 
+mod panels;
+
 fn main() {
     let preview_extent = [512, 512];
     let mut render_engine = RenderEngine::new(&RenderEngineInfo {
@@ -54,6 +56,7 @@ fn main() {
     let mut last_frame_time = Instant::now();
     let mut preview_texture: Option<egui::TextureHandle> = None;
     let mut preview_ready = false;
+    let script_provider = panels::scripts::DummyScriptProvider;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -114,6 +117,10 @@ fn main() {
 
                 let raw_input = egui_state.take_egui_input(&window);
                 let full_output = egui_ctx.run(raw_input, |ui| {
+                    egui::SidePanel::left("scripts_panel").show(&egui_ctx, |ui| {
+                        panels::scripts::render_scripts_panel(ui, &script_provider);
+                    });
+
                     egui::CentralPanel::default().show(ui, |ui| {
                         ui.heading("Preview");
                         if preview_ready {
