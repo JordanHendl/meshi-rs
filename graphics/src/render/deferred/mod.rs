@@ -290,7 +290,7 @@ impl DeferredRenderer {
 
         let mut defines = Vec::new();
 
-        if mat.material.render_mask & PassMask::MAIN_COLOR as u16 > 0 {
+        if mat.material.render_mask & PassMask::MAIN_COLOR as u32 > 0 {
             defines.push("-DLMAO".to_string());
         }
 
@@ -345,11 +345,11 @@ impl DeferredRenderer {
                 material_handle = materials.add_material();
                 let material = materials.material_mut(material_handle);
                 *material = Material::default();
-                material.base_color_texture_id = texture_id as u16;
-                material.normal_texture_id = u16::MAX;
-                material.metallic_roughness_texture_id = u16::MAX;
-                material.occlusion_texture_id = u16::MAX;
-                material.emissive_texture_id = u16::MAX;
+                material.base_color_texture_id = texture_id as u32;
+                material.normal_texture_id = u32::MAX;
+                material.metallic_roughness_texture_id = u32::MAX;
+                material.occlusion_texture_id = u32::MAX;
+                material.emissive_texture_id = u32::MAX;
             })
             .expect("Failed to allocate billboard material");
 
@@ -360,7 +360,7 @@ impl DeferredRenderer {
         self.state
             .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
                 let material = materials.material_mut(material);
-                material.base_color_texture_id = texture_id as u16;
+                material.base_color_texture_id = texture_id as u32;
             })
             .expect("Failed to update billboard material texture");
     }

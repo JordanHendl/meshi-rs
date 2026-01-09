@@ -282,6 +282,7 @@ struct MeshiContactInfo {
 
 using MeshiMeshObjectHandle = MeshiHandle;
 using MeshiDirectionalLightHandle = MeshiHandle;
+using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;
 using MeshiAudioSourceHandle = MeshiHandle;

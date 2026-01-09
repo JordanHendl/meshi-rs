@@ -67,7 +67,7 @@ fn main() {
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/cube").unwrap(),
+            db.fetch_gpu_model("model/witch").unwrap(),
         ))
         .unwrap();
 
@@ -93,7 +93,7 @@ fn main() {
             let e = &mut (*event);
             let r = &mut (*(data as *mut AppData));
             if e.source() == EventSource::Key && e.event_type() == EventType::Pressed {
-                if e.key() == KeyCode::Space {
+                if e.key() == KeyCode::Enter {
                     r.paused = !r.paused;
                 }
             }

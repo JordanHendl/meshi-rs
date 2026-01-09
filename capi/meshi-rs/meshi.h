@@ -17,7 +17,7 @@ struct MeshiEngine* meshi_make_engine_headless(const char* application_name, con
 void meshi_destroy_engine(struct MeshiEngine* engine);
 void meshi_register_event_callback(struct MeshiEngine* engine, void* user_data, MeshiEventCallback cb);
 float meshi_update(struct MeshiEngine* engine);
-struct MeshiRenderEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
+struct MeshiEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
 struct MeshiAudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
 
 // Audio
@@ -37,32 +37,29 @@ size_t meshi_audio_update_stream(
     uint8_t* out_samples,
     size_t max);
 void meshi_audio_set_source_transform(
-    struct AudioEngine* audio,
-    struct Handle h,
-    const struct Mat4* transform,
-    struct Vec3 velocity);
+    struct MeshiAudioEngine* audio,
+    MeshiAudioSourceHandle h,
+    const MeshiMat4* transform,
+    MeshiVec3 velocity);
 void meshi_audio_set_listener_transform(
-    struct AudioEngine* audio,
-    const struct Mat4* transform,
-    struct Vec3 velocity);
+    struct MeshiAudioEngine* audio,
+    const MeshiMat4* transform,
+    MeshiVec3 velocity);
 void meshi_audio_set_bus_volume(struct MeshiAudioEngine* audio, MeshiAudioBusHandle h, float volume);
 void meshi_audio_register_finished_callback(struct MeshiAudioEngine* audio, void* user_data, MeshiAudioFinishedCallback cb);
 
 // Graphics
-MeshiMeshObjectHandle meshi_gfx_create_renderable(struct MeshiRenderEngine* render, const MeshiFFIMeshObjectInfo* info);
-MeshiMeshObjectHandle meshi_gfx_create_cube(struct MeshiRenderEngine* render);
-MeshiMeshObjectHandle meshi_gfx_create_sphere(struct MeshiRenderEngine* render);
-MeshiMeshObjectHandle meshi_gfx_create_cylinder(struct MeshiRenderEngine* render);
-MeshiMeshObjectHandle meshi_gfx_create_plane(struct MeshiRenderEngine* render);
-MeshiMeshObjectHandle meshi_gfx_create_cone(struct MeshiRenderEngine* render);
-MeshiMeshObjectHandle meshi_gfx_create_triangle(struct MeshiRenderEngine* render);
-void meshi_gfx_set_renderable_transform(struct MeshiRenderEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
-MeshiDirectionalLightHandle meshi_gfx_create_directional_light(struct MeshiRenderEngine* render, const MeshiDirectionalLightInfo* info);
-void meshi_gfx_set_directional_light_transform(struct MeshiRenderEngine* render, MeshiDirectionalLightHandle h, const MeshiMat4* transform);
-void meshi_gfx_set_directional_light_info(struct MeshiRenderEngine* render, MeshiDirectionalLightHandle h, const MeshiDirectionalLightInfo* info);
-void meshi_gfx_set_camera(struct MeshiRenderEngine* render, const MeshiMat4* transform);
-void meshi_gfx_set_projection(struct MeshiRenderEngine* render, const MeshiMat4* transform);
-void meshi_gfx_capture_mouse(struct MeshiRenderEngine* render, int32_t value);
+MeshiMeshObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiFFIMeshObjectInfo* info);
+void meshi_gfx_release_render_object(struct MeshiEngine* render, const MeshiMeshObjectHandle* h);
+void meshi_gfx_set_transform(struct MeshiEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
+MeshiDirectionalLightHandle meshi_gfx_create_light(struct MeshiEngine* render, const MeshiDirectionalLightInfo* info);
+void meshi_gfx_release_light(struct MeshiEngine* render, const MeshiDirectionalLightHandle* h);
+void meshi_gfx_set_light_transform(struct MeshiEngine* render, MeshiDirectionalLightHandle h, const MeshiMat4* transform);
+void meshi_gfx_set_light_info(struct MeshiEngine* render, MeshiDirectionalLightHandle h, const MeshiDirectionalLightInfo* info);
+void meshi_gfx_set_camera_transform(struct MeshiEngine* render, const MeshiMat4* transform);
+MeshiCameraHandle meshi_gfx_register_camera(struct MeshiEngine* render, const MeshiMat4* initial_transform);
+void meshi_gfx_set_camera_projection(struct MeshiEngine* render, const MeshiMat4* transform);
+void meshi_gfx_capture_mouse(struct MeshiEngine* render, int32_t value);
 
 
 // Physics
@@ -86,4 +83,3 @@ MeshiCollisionShape meshi_physx_collision_shape_capsule(float half_height, float
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
