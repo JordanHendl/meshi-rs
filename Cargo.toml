@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["plugin", "graphics", "physics", "audio", "utils", "ffi_structs"]
+members = ["plugin", "graphics", "physics", "audio", "utils", "ffi_structs", "gui"]
 
 #[package]
 #name = "meshi"
