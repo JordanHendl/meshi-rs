@@ -114,13 +114,13 @@ layout(set = 1, binding = 5) buffer InstanceData {
     PerInstanceData entries[];
 } instance_data;
 
-layout(set = 1, binding = 6) uniform ActiveCameras {
+layout(set = 1, binding = 6) buffer ActiveViews {
     uint count;
     uint padding0;
     uint padding1;
     uint padding2;
     uint slots[8];
-} active_cameras;
+} active_views;
 
 layout(set = 1, binding = 7) uniform DrawParams {
     uint num_bins;
@@ -158,11 +158,14 @@ void build_draws(uint idx) {
     }
 
     uint view = view_bin / params.num_bins;
+    if (view >= active_views.count) {
+        return;
+    }
     uint instance_stride = params.indexed_draws_per_view + params.non_indexed_draws_per_view;
     CulledObject culled = culled.culled[idx];
     SceneDrawRange range = draw_ranges.ranges[culled.object_id];
     SceneObjectSkinningInfo skinning = object_skinning.entries[culled.object_id];
-    uint camera_slot = active_cameras.slots[view];
+    uint camera_slot = active_views.slots[view];
 
     uint indexed_base = view * params.indexed_draws_per_view;
     for (uint i = 0u; i < range.indexed_count; ++i) {

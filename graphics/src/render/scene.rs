@@ -133,13 +133,13 @@ const MAX_ACTIVE_VIEWS: usize = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ActiveCameras {
+struct ActiveViews {
     pub count: u32,
     pub _padding: [u32; 3],
     pub slots: [u32; MAX_ACTIVE_VIEWS],
 }
 
-impl Default for ActiveCameras {
+impl Default for ActiveViews {
     fn default() -> Self {
         Self {
             count: 0,
@@ -193,7 +193,7 @@ pub struct GPUScene {
     ctx: NonNull<Context>,
     data: SceneData,
     pipelines: SceneComputePipelines,
-    camera: StagedBuffer,
+    active_views: StagedBuffer,
 }
 
 #[repr(C)]
@@ -337,8 +337,8 @@ impl GPUScene {
                 ShaderResource::StorageBuffer(self.data.bin_counts.device().into()),
             )
             .add_variable(
-                "camera",
-                ShaderResource::ConstBuffer(self.camera.device().into()),
+                "active_views",
+                ShaderResource::StorageBuffer(self.active_views.device().into()),
             )
             .add_variable(
                 "params",
@@ -403,8 +403,8 @@ impl GPUScene {
                 ShaderResource::StorageBuffer(self.data.per_instance_data.into()),
             )
             .add_variable(
-                "active_cameras",
-                ShaderResource::ConstBuffer(self.camera.device().into()),
+                "active_views",
+                ShaderResource::StorageBuffer(self.active_views.device().into()),
             )
             .add_variable(
                 "params",
@@ -506,13 +506,13 @@ impl GPUScene {
             },
         )
         .unwrap();
-        let mut active_camera = StagedBuffer::new(
+        let mut active_views = StagedBuffer::new(
             ctx,
             BufferInfo {
-                debug_name: &format!("{} camera buffer", info.name),
-                byte_size: (std::mem::size_of::<ActiveCameras>() as u32).max(256),
+                debug_name: &format!("{} active views", info.name),
+                byte_size: (std::mem::size_of::<ActiveViews>() as u32).max(256),
                 visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::UNIFORM,
+                usage: BufferUsage::STORAGE,
                 initial_data: None,
             },
         );
@@ -748,8 +748,8 @@ impl GPUScene {
         };
 
         {
-            let camera_info = active_camera.as_slice_mut::<ActiveCameras>();
-            camera_info[0] = ActiveCameras::default();
+            let camera_info = active_views.as_slice_mut::<ActiveViews>();
+            camera_info[0] = ActiveViews::default();
         }
         let data = SceneData {
             scene_bins,
@@ -786,7 +786,7 @@ impl GPUScene {
             state: NonNull::new(state).unwrap(),
             ctx: NonNull::new(info.ctx).unwrap(),
             data,
-            camera: active_camera,
+            active_views,
             pipelines: Default::default(),
         };
 
@@ -800,7 +800,7 @@ impl GPUScene {
     }
 
     pub fn set_active_cameras(&mut self, cameras: &[Handle<Camera>]) {
-        let active_cameras = self.camera.as_slice_mut::<ActiveCameras>();
+        let active_cameras = self.active_views.as_slice_mut::<ActiveViews>();
         let count = cameras
             .len()
             .min(MAX_ACTIVE_VIEWS)
@@ -811,8 +811,6 @@ impl GPUScene {
         for (idx, handle) in cameras.iter().take(count).enumerate() {
             active_cameras[0].slots[idx] = handle.slot as u32;
         }
-
-        self.data.dispatch.as_slice_mut::<SceneDispatchInfo>()[0].num_views = count as u32;
     }
 
     pub fn register_object(&mut self, info: &SceneObjectInfo) -> Handle<SceneObject> {
@@ -983,12 +981,12 @@ impl GPUScene {
             .combine(self.data.objects_to_process.sync_up().unwrap())
             .combine(self.data.dispatch.sync_up())
             .combine(self.data.bin_counts.sync_up())
-            .combine(self.camera.sync_up())
+            .combine(self.active_views.sync_up())
             .prepare_buffer(
                 self.data.bin_counts.device().handle,
                 UsageBits::COMPUTE_SHADER,
             )
-            .prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.active_views.device().handle, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(
                 self.data.dispatch.device().handle,
                 UsageBits::COMPUTE_SHADER,
@@ -1029,10 +1027,9 @@ impl GPUScene {
         };
 
         let workgroup_size = 64u32;
-        let num_views = self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].num_views;
-        let total_cull_slots = (self.data.bin_descriptions.len() as u32
-            * self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects)
-            * num_views;
+        let num_views = self.data.max_views;
+        let total_cull_slots =
+            (self.data.bin_descriptions.len() as u32 * self.max_objects_per_bin()) * num_views;
         let clear_max = (self.data.indexed_draws_per_view * num_views)
             .max(self.data.non_indexed_draws_per_view * num_views)
             .max(num_views);
@@ -1054,7 +1051,7 @@ impl GPUScene {
             .combine(self.data.indexed_draw_metadata.sync_up())
             .combine(self.data.draw_metadata.sync_up())
             .combine(self.data.object_skinning.sync_up())
-            .combine(self.camera.sync_up())
+            .combine(self.active_views.sync_up())
             .combine(self.data.draw_dispatch.sync_up())
             .prepare_buffer(
                 self.data.draw_ranges.device().handle,
@@ -1080,7 +1077,7 @@ impl GPUScene {
                 self.data.object_skinning.device().handle,
                 UsageBits::COMPUTE_SHADER,
             )
-            .prepare_buffer(self.camera.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.active_views.device().handle, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_dispatch.device().handle, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.indexed_draw_args, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.data.draw_args, UsageBits::COMPUTE_SHADER)
@@ -1473,7 +1470,7 @@ mod tests {
         let handle = Handle::<Camera>::new(expected_slot, 1);
         scene.set_active_camera(handle);
 
-        let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
+        let camera_state = scene.active_views.as_slice::<ActiveViews>()[0];
         assert_eq!(camera_state.count, 1);
         assert_eq!(camera_state.slots[0], expected_slot as u32);
         assert!(camera_state.slots[1..].iter().all(|slot| *slot == u32::MAX));
@@ -1490,7 +1487,7 @@ mod tests {
 
         scene.set_active_cameras(&handles);
 
-        let camera_state = scene.camera.as_slice::<ActiveCameras>()[0];
+        let camera_state = scene.active_views.as_slice::<ActiveViews>()[0];
         assert_eq!(camera_state.count as usize, MAX_ACTIVE_VIEWS);
         for i in 0..MAX_ACTIVE_VIEWS {
             assert_eq!(camera_state.slots[i], i as u32);

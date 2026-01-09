@@ -128,10 +128,13 @@ layout(set = 0, binding = 4) uniform SceneParams {
     uint num_views;
 } params;
 
-layout(set = 0, binding = 5) uniform SceneCameras {
+layout(set = 0, binding = 5) buffer ActiveViews {
     uint count;
+    uint padding0;
+    uint padding1;
+    uint padding2;
     uint slots[8];
-} camera;
+} active_views;
 
 layout(set = 1, binding = 0) buffer Cameras {
     Camera cameras[];
@@ -153,15 +156,15 @@ void main() {
         return;
     }
 
-    if (camera.count == 0u) {
+    if (active_views.count == 0u) {
         return;
     }
 
-    uint view_count = min(camera.count, params.num_views);
+    uint view_count = min(active_views.count, params.num_views);
     vec3 world_position = obj.world_transform[3].xyz;
 
     for (uint view = 0; view < view_count; ++view) {
-        uint slot = camera.slots[view];
+        uint slot = active_views.slots[view];
         if (slot == 0xffffffffu) {
             continue;
         }
