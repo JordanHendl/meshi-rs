@@ -119,6 +119,8 @@ fn main() {
             mouse_delta: Vec2::ZERO,
         },
     };
+    
+    assert!(data.animation_count > 0);
 
     if data.animation_count > 0 {
         engine.set_skinned_object_animation(
@@ -126,7 +128,7 @@ fn main() {
             AnimationState {
                 clip_index: data.animation_index as u32,
                 time_seconds: 0.0,
-                speed: 0.01,
+                speed: 1.0,
                 looping: true,
             },
         );
