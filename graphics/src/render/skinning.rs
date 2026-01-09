@@ -2,7 +2,8 @@ use crate::{AnimationState, SkinnedModelInfo};
 use bento::builder::CSOBuilder;
 use dashi::{
     BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, MemoryVisibility,
-    ShaderResource, UsageBits, driver::command::Dispatch, execution::CommandRing,
+    Semaphore, ShaderResource, SubmitInfo, UsageBits, driver::command::Dispatch,
+    execution::CommandRing,
 };
 use furikake::BindlessAnimationRegistry;
 use furikake::PSOBuilderFurikakeExt;
@@ -144,6 +145,7 @@ pub struct SkinningDispatcher {
     pipeline: Option<bento::builder::CSO>,
     dispatches: StagedBuffer,
     skinned: ResourceList<SkinnedModelData>,
+    completion_semaphore: Handle<Semaphore>,
 }
 
 pub const MAX_SKINNING_DISPATCHES: usize = 1024;
@@ -181,12 +183,16 @@ impl SkinningDispatcher {
                 queue_type: dashi::QueueType::Compute,
             })
             .expect("create skinning compute queue");
+        let completion_semaphore = ctx
+            .make_semaphore()
+            .expect("create skinning completion semaphore");
 
         Self {
             queue,
             pipeline,
             dispatches,
             skinned: Default::default(),
+            completion_semaphore,
         }
     }
 
@@ -241,14 +247,14 @@ impl SkinningDispatcher {
         self.skinned.get_ref(handle).skinning_info()
     }
 
-    pub fn update(&mut self, delta_time: f32) {
+    pub fn update(&mut self, delta_time: f32) -> Option<Handle<Semaphore>> {
         let Some(pipeline) = self.pipeline.as_ref() else {
-            return;
+            return None;
         };
 
         let buffer = self.dispatches.as_slice_mut::<SkinningDispatch>();
         if buffer.is_empty() {
-            return;
+            return None;
         }
 
         let entries = self.skinned.entries.clone();
@@ -268,7 +274,7 @@ impl SkinningDispatcher {
         }
 
         if dispatch_count == 0 {
-            return;
+            return None;
         }
 
         self.queue
@@ -293,9 +299,12 @@ impl SkinningDispatcher {
             .expect("record skinning commands");
 
         self.queue
-            .submit(&Default::default())
+            .submit(&SubmitInfo {
+                wait_sems: &[],
+                signal_sems: &[self.completion_semaphore],
+            })
             .expect("submit skinning");
-        self.queue.wait_all().expect("wait skinning");
+        Some(self.completion_semaphore)
     }
 }
 

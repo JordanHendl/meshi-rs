@@ -57,6 +57,7 @@ pub struct DeferredRenderer {
     cull_queue: CommandRing,
     combine_pso: PSO,
     skinning: SkinningDispatcher,
+    skinning_complete: Option<Handle<Semaphore>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -293,6 +294,7 @@ impl DeferredRenderer {
             sample_count: info.sample_count,
             cull_queue,
             skinning,
+            skinning_complete: None,
             alloc,
         }
     }
@@ -539,6 +541,7 @@ impl DeferredRenderer {
                             .and_then(|material| material.furikake_material_handle)
                             .map(GPUScene::pack_handle)
                             .unwrap_or(u32::MAX),
+                        per_obj_joints_id: u32::MAX,
                         index_count: mesh.geometry.base.index_count.unwrap(),
                         first_index: 0,
                         vertex_offset: 0,
@@ -576,6 +579,7 @@ impl DeferredRenderer {
                             .and_then(|material| material.furikake_material_handle)
                             .map(GPUScene::pack_handle)
                             .unwrap_or(u32::MAX),
+                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
                         index_count: mesh.geometry.base.index_count.unwrap(),
                         first_index: 0,
                         vertex_offset: 0,
@@ -601,6 +605,7 @@ impl DeferredRenderer {
                         .material
                         .map(GPUScene::pack_handle)
                         .unwrap_or(u32::MAX),
+                    per_obj_joints_id: u32::MAX,
                     vertex_count: 6,
                     first_vertex: 0,
                 }];
@@ -752,6 +757,7 @@ impl DeferredRenderer {
                 SceneDrawMetadata {
                     mesh_id: 0,
                     material_id,
+                    per_obj_joints_id: u32::MAX,
                 },
             );
         }
@@ -912,7 +918,7 @@ impl DeferredRenderer {
             self.environment.reset();
         }
 
-        self.skinning.update(delta_time);
+        self.skinning_complete = self.skinning.update(delta_time);
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
@@ -1495,8 +1501,14 @@ impl DeferredRenderer {
             });
         }
 
+        let mut wait_sems = Vec::with_capacity(sems.len() + 1);
+        wait_sems.extend_from_slice(sems);
+        if let Some(semaphore) = self.skinning_complete {
+            wait_sems.push(semaphore);
+        }
+
         self.graph.execute_with(&SubmitInfo {
-            wait_sems: sems,
+            wait_sems: &wait_sems,
             signal_sems: &[semaphores[0]],
         });
 

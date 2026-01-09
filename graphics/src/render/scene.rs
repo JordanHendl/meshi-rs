@@ -178,6 +178,7 @@ pub struct SceneDrawRange {
 pub struct SceneDrawMetadata {
     pub mesh_id: u32,
     pub material_id: u32,
+    pub per_obj_joints_id: u32,
 }
 
 #[repr(C)]
@@ -186,6 +187,7 @@ pub struct SceneDrawListEntry {
     pub draw_index: u32,
     pub mesh_id: u32,
     pub material_id: u32,
+    pub per_obj_joints_id: u32,
     pub object_id: u32,
     pub draw_type: u32,
 }
@@ -195,6 +197,7 @@ pub struct SceneDrawListEntry {
 pub struct SceneIndexedDrawInfo {
     pub mesh_id: u32,
     pub material_id: u32,
+    pub per_obj_joints_id: u32,
     pub index_count: u32,
     pub first_index: u32,
     pub vertex_offset: i32,
@@ -205,6 +208,7 @@ pub struct SceneIndexedDrawInfo {
 pub struct SceneDrawInfo {
     pub mesh_id: u32,
     pub material_id: u32,
+    pub per_obj_joints_id: u32,
     pub vertex_count: u32,
     pub first_vertex: i32,
 }
@@ -1115,6 +1119,7 @@ impl GPUScene {
             metadata[draw_index] = SceneDrawMetadata {
                 mesh_id: draw.mesh_id,
                 material_id: draw.material_id,
+                per_obj_joints_id: draw.per_obj_joints_id,
             };
         }
 
@@ -1149,6 +1154,7 @@ impl GPUScene {
             metadata[draw_index] = SceneDrawMetadata {
                 mesh_id: draw.mesh_id,
                 material_id: draw.material_id,
+                per_obj_joints_id: draw.per_obj_joints_id,
             };
         }
 

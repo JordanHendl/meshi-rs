@@ -19,12 +19,14 @@ struct SceneDrawRange {
 struct SceneDrawMetadata {
     uint mesh_id;
     uint material_id;
+    uint per_obj_joints_id;
 };
 
 struct SceneDrawListEntry {
     uint draw_index;
     uint mesh_id;
     uint material_id;
+    uint per_obj_joints_id;
     uint object_id;
     uint draw_type;
 };
@@ -142,6 +144,7 @@ void build_draws(uint idx) {
             draw_list.entries[list_offset].draw_index = draw_index;
             draw_list.entries[list_offset].mesh_id = meta.mesh_id;
             draw_list.entries[list_offset].material_id = meta.material_id;
+            draw_list.entries[list_offset].per_obj_joints_id = meta.per_obj_joints_id;
             draw_list.entries[list_offset].object_id = culled.object_id;
             draw_list.entries[list_offset].draw_type = 0u;
         }
@@ -162,6 +165,7 @@ void build_draws(uint idx) {
             draw_list.entries[list_offset].draw_index = draw_index;
             draw_list.entries[list_offset].mesh_id = meta.mesh_id;
             draw_list.entries[list_offset].material_id = meta.material_id;
+            draw_list.entries[list_offset].per_obj_joints_id = meta.per_obj_joints_id;
             draw_list.entries[list_offset].object_id = culled.object_id;
             draw_list.entries[list_offset].draw_type = 1u;
         }
