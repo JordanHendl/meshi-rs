@@ -7,6 +7,7 @@ use dashi::{
     ShaderResource, UsageBits,
     cmd::Executable,
     driver::command::Dispatch,
+    structs::{IndirectCommand, IndexedIndirectCommand},
     utils::gpupool::{DynamicGPUPool, GPUPool},
 };
 use furikake::{
@@ -54,6 +55,18 @@ struct SceneDispatchInfo {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct SceneDrawDispatchInfo {
+    pub num_bins: u32,
+    pub max_objects: u32,
+    pub num_views: u32,
+    pub indexed_draws_per_view: u32,
+    pub non_indexed_draws_per_view: u32,
+    pub draw_list_capacity: u32,
+    pub mode: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct SceneBin {
     pub id: u32,
     pub mask: u32,
@@ -62,6 +75,7 @@ pub struct SceneBin {
 pub struct GPUSceneLimits {
     pub max_num_scene_objects: u32,
     pub max_num_views: u32,
+    pub max_draws_per_object: u32,
 }
 
 pub struct GPUSceneInfo<'a> {
@@ -80,6 +94,7 @@ impl<'a> Default for GPUSceneInfo<'a> {
             limits: GPUSceneLimits {
                 max_num_scene_objects: 2048,
                 max_num_views: 4,
+                max_draws_per_object: 16,
             },
         }
     }
@@ -112,6 +127,21 @@ struct SceneData {
     draw_bins: DynamicGPUPool,                // In format [0..num_bins][0..max_bin_size] but flat.
     bin_counts: StagedBuffer,
     dispatch: StagedBuffer,
+    draw_dispatch: StagedBuffer,
+    draw_ranges: StagedBuffer,
+    indexed_draw_templates: StagedBuffer,
+    draw_templates: StagedBuffer,
+    indexed_draw_metadata: StagedBuffer,
+    draw_metadata: StagedBuffer,
+    indexed_draw_args: Handle<Buffer>,
+    draw_args: Handle<Buffer>,
+    draw_list: Handle<Buffer>,
+    draw_list_counts: Handle<Buffer>,
+    indexed_draws_per_view: u32,
+    non_indexed_draws_per_view: u32,
+    draw_list_capacity: u32,
+    next_indexed_draw: u32,
+    next_draw: u32,
     transformations: ShaderResource,
     transformations_buffer: BufferView,
     bin_descriptions: Vec<SceneBin>,
@@ -123,6 +153,7 @@ struct SceneData {
 struct SceneComputePipelines {
     cull_state: Option<bento::builder::CSO>,
     transform_state: Option<bento::builder::CSO>,
+    build_draws_state: Option<bento::builder::CSO>,
 }
 
 pub struct GPUScene {
@@ -131,6 +162,51 @@ pub struct GPUScene {
     data: SceneData,
     pipelines: SceneComputePipelines,
     camera: StagedBuffer,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SceneDrawRange {
+    pub indexed_offset: u32,
+    pub indexed_count: u32,
+    pub non_indexed_offset: u32,
+    pub non_indexed_count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SceneDrawMetadata {
+    pub mesh_id: u32,
+    pub material_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SceneDrawListEntry {
+    pub draw_index: u32,
+    pub mesh_id: u32,
+    pub material_id: u32,
+    pub object_id: u32,
+    pub draw_type: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SceneIndexedDrawInfo {
+    pub mesh_id: u32,
+    pub material_id: u32,
+    pub index_count: u32,
+    pub first_index: u32,
+    pub vertex_offset: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SceneDrawInfo {
+    pub mesh_id: u32,
+    pub material_id: u32,
+    pub vertex_count: u32,
+    pub first_vertex: i32,
 }
 
 impl GPUScene {
@@ -234,9 +310,64 @@ impl GPUScene {
             )
             .build(&mut ctx);
 
+        let build_draws_state = CSOBuilder::new()
+            .shader(Some(
+                include_str!("shaders/scene_build_draws.comp.glsl").as_bytes(),
+            ))
+            .add_variable(
+                "culled",
+                ShaderResource::StorageBuffer(self.data.draw_bins.get_gpu_handle().into()),
+            )
+            .add_variable(
+                "counts",
+                ShaderResource::StorageBuffer(self.data.bin_counts.device().into()),
+            )
+            .add_variable(
+                "draw_ranges",
+                ShaderResource::StorageBuffer(self.data.draw_ranges.device().into()),
+            )
+            .add_variable(
+                "indexed_templates",
+                ShaderResource::StorageBuffer(self.data.indexed_draw_templates.device().into()),
+            )
+            .add_variable(
+                "draw_templates",
+                ShaderResource::StorageBuffer(self.data.draw_templates.device().into()),
+            )
+            .add_variable(
+                "indexed_metadata",
+                ShaderResource::StorageBuffer(self.data.indexed_draw_metadata.device().into()),
+            )
+            .add_variable(
+                "draw_metadata",
+                ShaderResource::StorageBuffer(self.data.draw_metadata.device().into()),
+            )
+            .add_variable(
+                "indexed_args",
+                ShaderResource::StorageBuffer(self.data.indexed_draw_args.into()),
+            )
+            .add_variable(
+                "draw_args",
+                ShaderResource::StorageBuffer(self.data.draw_args.into()),
+            )
+            .add_variable(
+                "draw_list",
+                ShaderResource::StorageBuffer(self.data.draw_list.into()),
+            )
+            .add_variable(
+                "draw_list_counts",
+                ShaderResource::StorageBuffer(self.data.draw_list_counts.into()),
+            )
+            .add_variable(
+                "params",
+                ShaderResource::ConstBuffer(self.data.draw_dispatch.device().into()),
+            )
+            .build(&mut ctx);
+
         Ok(SceneComputePipelines {
             cull_state: cull_state.ok(),
             transform_state: transform_state.ok(),
+            build_draws_state: build_draws_state.ok(),
         })
     }
 
@@ -249,6 +380,31 @@ impl GPUScene {
         let max_views = info.limits.max_num_views as usize;
         let total_cull_slots = max_scene_objects * info.draw_bins.len() * max_views;
         let bin_counter_size = std::mem::size_of::<u32>() * info.draw_bins.len() * max_views;
+        let indexed_draws_per_view =
+            info.limits.max_num_scene_objects * info.limits.max_draws_per_object;
+        let non_indexed_draws_per_view =
+            info.limits.max_num_scene_objects * info.limits.max_draws_per_object;
+        let draw_list_capacity = indexed_draws_per_view + non_indexed_draws_per_view;
+        let draw_list_size = (draw_list_capacity as usize
+            * max_views
+            * std::mem::size_of::<SceneDrawListEntry>())
+            .max(256);
+        let draw_list_counts_size = (max_views * std::mem::size_of::<u32>()).max(256);
+        let draw_ranges_size =
+            (info.limits.max_num_scene_objects as usize * std::mem::size_of::<SceneDrawRange>())
+                .max(256);
+        let indexed_draw_templates_size = (indexed_draws_per_view as usize
+            * std::mem::size_of::<IndexedIndirectCommand>())
+            .max(256);
+        let draw_templates_size = (non_indexed_draws_per_view as usize
+            * std::mem::size_of::<IndirectCommand>())
+            .max(256);
+        let indexed_draw_metadata_size = (indexed_draws_per_view as usize
+            * std::mem::size_of::<SceneDrawMetadata>())
+            .max(256);
+        let draw_metadata_size = (non_indexed_draws_per_view as usize
+            * std::mem::size_of::<SceneDrawMetadata>())
+            .max(256);
 
         if BindlessState::reserved_names()
             .iter()
@@ -356,6 +512,129 @@ impl GPUScene {
             },
         );
 
+        let mut draw_dispatch = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Draw Dispatch", info.name),
+                byte_size: (std::mem::size_of::<SceneDrawDispatchInfo>() as u32).max(256),
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::UNIFORM,
+                initial_data: None,
+            },
+        );
+
+        let mut draw_ranges = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Draw Ranges", info.name),
+                byte_size: draw_ranges_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
+        for range in draw_ranges.as_slice_mut::<SceneDrawRange>() {
+            *range = SceneDrawRange::default();
+        }
+
+        let mut indexed_draw_templates = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Indexed Draw Templates", info.name),
+                byte_size: indexed_draw_templates_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
+        let mut draw_templates = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Draw Templates", info.name),
+                byte_size: draw_templates_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
+        let mut indexed_draw_metadata = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Indexed Draw Metadata", info.name),
+                byte_size: indexed_draw_metadata_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
+        let mut draw_metadata = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: &format!("{} Scene Draw Metadata", info.name),
+                byte_size: draw_metadata_size as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+
+        for entry in indexed_draw_templates.as_slice_mut::<IndexedIndirectCommand>() {
+            *entry = IndexedIndirectCommand::default();
+        }
+        for entry in draw_templates.as_slice_mut::<IndirectCommand>() {
+            *entry = IndirectCommand::default();
+        }
+        for entry in indexed_draw_metadata.as_slice_mut::<SceneDrawMetadata>() {
+            *entry = SceneDrawMetadata::default();
+        }
+        for entry in draw_metadata.as_slice_mut::<SceneDrawMetadata>() {
+            *entry = SceneDrawMetadata::default();
+        }
+
+        let indexed_draw_args = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{} Scene Indexed Draw Args", info.name),
+                byte_size: (indexed_draw_templates_size * max_views) as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("create indexed draw args buffer");
+
+        let draw_args = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{} Scene Draw Args", info.name),
+                byte_size: (draw_templates_size * max_views) as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("create draw args buffer");
+
+        let draw_list = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{} Scene Draw List", info.name),
+                byte_size: draw_list_size as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("create draw list buffer");
+
+        let draw_list_counts = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: &format!("{} Scene Draw List Counts", info.name),
+                byte_size: draw_list_counts_size as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("create draw list counts buffer");
+
         let ctx_ptr: *mut Context = ctx;
         let stream = CommandStream::new()
             .begin()
@@ -379,6 +658,16 @@ impl GPUScene {
             num_views: info.limits.max_num_views,
         };
 
+        draw_dispatch.as_slice_mut()[0] = SceneDrawDispatchInfo {
+            num_bins: info.draw_bins.len() as u32,
+            max_objects: objects_to_process.len() as u32,
+            num_views: info.limits.max_num_views,
+            indexed_draws_per_view,
+            non_indexed_draws_per_view,
+            draw_list_capacity,
+            mode: 0,
+        };
+
         {
             let camera_info = active_camera.as_slice_mut::<ActiveCameras>();
             camera_info[0] = ActiveCameras::default();
@@ -389,6 +678,21 @@ impl GPUScene {
             draw_bins,
             bin_counts,
             dispatch,
+            draw_dispatch,
+            draw_ranges,
+            indexed_draw_templates,
+            draw_templates,
+            indexed_draw_metadata,
+            draw_metadata,
+            indexed_draw_args,
+            draw_args,
+            draw_list,
+            draw_list_counts,
+            indexed_draws_per_view,
+            non_indexed_draws_per_view,
+            draw_list_capacity,
+            next_indexed_draw: 0,
+            next_draw: 0,
             transformations,
             transformations_buffer,
             bin_descriptions: info.draw_bins.to_vec(),
@@ -619,6 +923,99 @@ impl GPUScene {
         &self.data.draw_bins
     }
 
+    pub fn build_draws(&mut self) -> CommandStream<Executable> {
+        let mut stream = CommandStream::new().begin();
+        let Some(build_draws_state) = self.pipelines.build_draws_state.as_ref() else {
+            return stream.end();
+        };
+
+        let workgroup_size = 64u32;
+        let num_views = self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].num_views;
+        let total_cull_slots = (self.data.bin_descriptions.len() as u32
+            * self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects)
+            * num_views;
+        let clear_max = (self.data.indexed_draws_per_view * num_views)
+            .max(self.data.non_indexed_draws_per_view * num_views)
+            .max(num_views);
+        let clear_dispatch =
+            ((clear_max.max(1) + workgroup_size - 1) / workgroup_size).max(1);
+        let build_dispatch =
+            ((total_cull_slots.max(1) + workgroup_size - 1) / workgroup_size).max(1);
+
+        {
+            let params = self.data.draw_dispatch.as_slice_mut::<SceneDrawDispatchInfo>();
+            params[0].num_views = num_views;
+            params[0].mode = 0;
+        }
+
+        stream = stream
+            .combine(self.data.draw_ranges.sync_up())
+            .combine(self.data.indexed_draw_templates.sync_up())
+            .combine(self.data.draw_templates.sync_up())
+            .combine(self.data.indexed_draw_metadata.sync_up())
+            .combine(self.data.draw_metadata.sync_up())
+            .combine(self.data.draw_dispatch.sync_up())
+            .prepare_buffer(
+                self.data.draw_ranges.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.indexed_draw_templates.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.draw_templates.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.indexed_draw_metadata.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(
+                self.data.draw_metadata.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.data.draw_dispatch.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.indexed_draw_args, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.draw_args, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.draw_list, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.draw_list_counts, UsageBits::COMPUTE_SHADER)
+            .dispatch(&Dispatch {
+                x: clear_dispatch,
+                y: 1,
+                z: 1,
+                pipeline: build_draws_state.handle,
+                bind_tables: build_draws_state.tables(),
+                dynamic_buffers: Default::default(),
+            })
+            .unbind_pipeline();
+
+        {
+            let params = self.data.draw_dispatch.as_slice_mut::<SceneDrawDispatchInfo>();
+            params[0].mode = 1;
+        }
+
+        stream = stream
+            .combine(self.data.draw_dispatch.sync_up())
+            .prepare_buffer(self.data.draw_dispatch.device().handle, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.data.draw_bins.get_gpu_handle(), UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(
+                self.data.bin_counts.device().handle,
+                UsageBits::COMPUTE_SHADER,
+            )
+            .dispatch(&Dispatch {
+                x: build_dispatch,
+                y: 1,
+                z: 1,
+                pipeline: build_draws_state.handle,
+                bind_tables: build_draws_state.tables(),
+                dynamic_buffers: Default::default(),
+            })
+            .unbind_pipeline();
+
+        stream.end()
+    }
+
     pub fn cull_and_sync(&mut self) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
@@ -626,6 +1023,14 @@ impl GPUScene {
             .combine(self.data.draw_bins.sync_down().expect("sync culled bins"))
             .combine(self.data.bin_counts.sync_down())
             .combine(self.data.dispatch.sync_down())
+            .end()
+    }
+
+    pub fn cull_and_build_draws(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.cull())
+            .combine(self.build_draws())
             .end()
     }
 
@@ -637,6 +1042,22 @@ impl GPUScene {
         self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects
     }
 
+    pub fn indexed_draws_per_view(&self) -> u32 {
+        self.data.indexed_draws_per_view
+    }
+
+    pub fn non_indexed_draws_per_view(&self) -> u32 {
+        self.data.non_indexed_draws_per_view
+    }
+
+    pub fn indexed_draw_args(&self) -> Handle<Buffer> {
+        self.data.indexed_draw_args
+    }
+
+    pub fn draw_args(&self) -> Handle<Buffer> {
+        self.data.draw_args
+    }
+
     pub fn num_bins(&self) -> usize {
         self.data.bin_descriptions.len()
     }
@@ -645,6 +1066,115 @@ impl GPUScene {
         self.data
             .draw_bins
             .get_ref::<CulledObject>(Handle::new(index as u16, 0))
+    }
+
+    pub fn object_transformation_handle(&self, handle: Handle<SceneObject>) -> Handle<Transformation> {
+        self.data
+            .objects_to_process
+            .get_ref(handle)
+            .map(|object| Self::unpack_handle(object.transformation))
+            .unwrap_or_default()
+    }
+
+    pub fn set_indexed_draws(
+        &mut self,
+        object: Handle<SceneObject>,
+        draws: &[SceneIndexedDrawInfo],
+    ) -> SceneDrawRange {
+        let offset = self.data.next_indexed_draw;
+        let count = draws.len() as u32;
+        self.data.next_indexed_draw = self.data.next_indexed_draw.saturating_add(count);
+        assert!(
+            self.data.next_indexed_draw <= self.data.indexed_draws_per_view,
+            "indexed draw capacity exceeded"
+        );
+
+        let ranges = self.data.draw_ranges.as_slice_mut::<SceneDrawRange>();
+        let range = &mut ranges[object.slot as usize];
+        range.indexed_offset = offset;
+        range.indexed_count = count;
+
+        let templates = self
+            .data
+            .indexed_draw_templates
+            .as_slice_mut::<IndexedIndirectCommand>();
+        let metadata = self
+            .data
+            .indexed_draw_metadata
+            .as_slice_mut::<SceneDrawMetadata>();
+
+        for (idx, draw) in draws.iter().enumerate() {
+            let draw_index = offset as usize + idx;
+            templates[draw_index] = IndexedIndirectCommand {
+                index_count: draw.index_count,
+                instance_count: 1,
+                first_index: draw.first_index,
+                vertex_offset: draw.vertex_offset,
+                first_instance: 0,
+            };
+            metadata[draw_index] = SceneDrawMetadata {
+                mesh_id: draw.mesh_id,
+                material_id: draw.material_id,
+            };
+        }
+
+        *range
+    }
+
+    pub fn set_draws(&mut self, object: Handle<SceneObject>, draws: &[SceneDrawInfo]) -> SceneDrawRange {
+        let offset = self.data.next_draw;
+        let count = draws.len() as u32;
+        self.data.next_draw = self.data.next_draw.saturating_add(count);
+        assert!(
+            self.data.next_draw <= self.data.non_indexed_draws_per_view,
+            "draw capacity exceeded"
+        );
+
+        let ranges = self.data.draw_ranges.as_slice_mut::<SceneDrawRange>();
+        let range = &mut ranges[object.slot as usize];
+        range.non_indexed_offset = offset;
+        range.non_indexed_count = count;
+
+        let templates = self.data.draw_templates.as_slice_mut::<IndirectCommand>();
+        let metadata = self.data.draw_metadata.as_slice_mut::<SceneDrawMetadata>();
+
+        for (idx, draw) in draws.iter().enumerate() {
+            let draw_index = offset as usize + idx;
+            templates[draw_index] = IndirectCommand {
+                vertex_count: draw.vertex_count,
+                instance_count: 1,
+                first_vertex: draw.first_vertex,
+                first_instance: 0,
+            };
+            metadata[draw_index] = SceneDrawMetadata {
+                mesh_id: draw.mesh_id,
+                material_id: draw.material_id,
+            };
+        }
+
+        *range
+    }
+
+    pub fn update_indexed_draw_metadata(&mut self, draw_index: u32, metadata: SceneDrawMetadata) {
+        if let Some(entry) = self
+            .data
+            .indexed_draw_metadata
+            .as_slice_mut::<SceneDrawMetadata>()
+            .get_mut(draw_index as usize)
+        {
+            *entry = metadata;
+        }
+    }
+
+    pub fn update_draw_metadata(&mut self, draw_index: u32, metadata: SceneDrawMetadata) {
+        if let Some(entry) = self
+            .data
+            .draw_metadata
+            .as_slice_mut::<SceneDrawMetadata>()
+            .get_mut(draw_index as usize)
+        {
+            *entry = metadata;
+        }
     }
 }
 
@@ -669,6 +1199,7 @@ mod tests {
                 limits: GPUSceneLimits {
                     max_num_scene_objects: 1024,
                     max_num_views: MAX_ACTIVE_VIEWS as u32,
+                    max_draws_per_object: 16,
                 },
             },
             state,
