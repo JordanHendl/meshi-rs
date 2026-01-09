@@ -615,6 +615,7 @@ impl GPUScene {
             .end()
     }
 
+    #[allow(dead_code)]
     pub fn output_bins(&self) -> &DynamicGPUPool {
         &self.data.draw_bins
     }
@@ -701,7 +702,7 @@ mod tests {
 
     #[test]
     fn registering_object_tracks_state() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, state, mut scene) = setup_scene();
 
         let info = make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 0xFF);
 
@@ -719,7 +720,7 @@ mod tests {
 
     #[test]
     fn releasing_object_clears_tracking() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -731,7 +732,7 @@ mod tests {
 
     #[test]
     fn transforming_object_marks_dirty() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, _state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -745,7 +746,7 @@ mod tests {
 
     #[test]
     fn setting_object_transform_replaces_value() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, _state, mut scene) = setup_scene();
 
         let handle = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
@@ -759,7 +760,7 @@ mod tests {
 
     #[test]
     fn adding_and_removing_child_updates_relationships() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, _state, mut scene) = setup_scene();
 
         let parent = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
         let child = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
@@ -788,7 +789,7 @@ mod tests {
 
     #[test]
     fn releasing_child_detaches_from_parent() {
-        let (_ctx, mut state, mut scene) = setup_scene();
+        let (_ctx, _state, mut scene) = setup_scene();
 
         let parent = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
         let child = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
@@ -867,7 +868,7 @@ mod tests {
         // properly constructed.
         let commands = scene.cull();
 
-        let mut readback = CommandStream::new()
+        let readback = CommandStream::new()
             .begin()
             .combine(commands)
             .combine(
