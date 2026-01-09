@@ -33,6 +33,7 @@ pub struct SkinnedModelData {
     pub instance_skeleton: Handle<SkeletonHeader>,
     pub instance_joints: Handle<JointTransform>,
     pub instance_joint_count: u32,
+    accumulated_time: f32,
     animation_clips: Vec<Handle<furikake::types::AnimationClip>>,
     animation_dirty: bool,
     per_obj_joints: Option<PerObjectJointAllocation>,
@@ -70,12 +71,14 @@ impl SkinnedModelData {
         } else {
             (Handle::default(), Handle::default(), 0)
         };
+        let accumulated_time = info.animation.time_seconds;
         Self {
             info,
             animation_state,
             instance_skeleton,
             instance_joints,
             instance_joint_count,
+            accumulated_time,
             animation_clips,
             animation_dirty: true,
             per_obj_joints,
@@ -125,6 +128,14 @@ impl SkinnedModelData {
         self.per_obj_joints
             .map(|allocation| Handle::new(allocation.offset as u16, 0))
             .unwrap_or_default()
+    }
+
+    fn advance_time(&mut self, delta_time: f32) -> f32 {
+        if self.animation_dirty {
+            self.accumulated_time = self.info.animation.time_seconds;
+        }
+        self.accumulated_time += delta_time * self.info.animation.speed;
+        self.accumulated_time
     }
 }
 
@@ -250,7 +261,8 @@ impl SkinningDispatcher {
             if skinned.info.model.rig.is_some() && !skinned.per_obj_joints_handle().valid() {
                 continue;
             }
-            buffer[dispatch_count] = SkinningDispatch::from_model(skinned, delta_time);
+            let time_seconds = skinned.advance_time(delta_time);
+            buffer[dispatch_count] = SkinningDispatch::from_model(skinned, delta_time, time_seconds);
             skinned.clear_animation_dirty();
             dispatch_count += 1;
         }
@@ -337,7 +349,7 @@ pub struct SkinningDispatch {
 }
 
 impl SkinningDispatch {
-    pub fn from_model(model: &SkinnedModelData, delta_time: f32) -> Self {
+    pub fn from_model(model: &SkinnedModelData, delta_time: f32, time_seconds: f32) -> Self {
         let clip_handle = model
             .animation_clips
             .get(model.info.animation.clip_index as usize)
@@ -366,7 +378,7 @@ impl SkinningDispatch {
                 u16::MAX as u32
             },
             reset_time: model.animation_dirty as u32,
-            time_seconds: model.info.animation.time_seconds,
+            time_seconds,
             playback_rate: model.info.animation.speed,
             delta_time,
             looping: model.info.animation.looping as u32,

@@ -90,7 +90,7 @@ layout(set = 0, binding = 5) buffer Joints {
     JointTransform joints[];
 } meshi_bindless_joints;
 
-layout(set = 0, binding = 6) buffer SkinningStates {
+layout(set = 0, binding = 6) readonly buffer SkinningStates {
     AnimationState states[];
 } meshi_bindless_skinning;
 
@@ -274,12 +274,7 @@ void main() {
         return;
     }
 
-    AnimationState state = meshi_bindless_skinning.states[dispatch.animation_state_id];
-    if (dispatch.reset_time != 0u) {
-        state.start_time = dispatch.time_seconds;
-    }
-
-    float time = state.start_time + dispatch.delta_time * dispatch.playback_rate;
+    float time = dispatch.time_seconds;
     float duration = 0.0;
     if (dispatch.clip_handle != 0xFFFFu) {
         duration = meshi_bindless_animations.clips[dispatch.clip_handle].duration;
@@ -295,14 +290,6 @@ void main() {
             time = min(time, duration);
         }
     }
-
-    state.start_time = time;
-    state.playback_rate = dispatch.playback_rate;
-    state.looping = dispatch.looping;
-    state.clip_handle = dispatch.clip_handle;
-    state.skeleton_handle = dispatch.skeleton_handle;
-
-    meshi_bindless_skinning.states[dispatch.animation_state_id] = state;
 
     if (dispatch.skeleton_handle == 0xFFFFu) {
         return;
