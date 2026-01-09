@@ -52,10 +52,10 @@ fn main() {
     engine.set_camera_perspective(
         camera,
         60f32.to_radians(),
-        512.0, // width
-        512.0, // height
-        0.1,   // near
-        100.0, // far
+        512.0,   // width
+        512.0,   // height
+        0.1,     // near
+        10000.0, // far
     );
 
     let model = db.fetch_gpu_model("model/fox").unwrap();
@@ -120,6 +120,17 @@ fn main() {
         },
     };
 
+    if data.animation_count > 0 {
+        engine.set_skinned_object_animation(
+            skinned,
+            AnimationState {
+                clip_index: data.animation_index as u32,
+                time_seconds: 0.0,
+                speed: 0.01,
+                looping: true,
+            },
+        );
+    }
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
         unsafe {
             let e = &mut (*event);

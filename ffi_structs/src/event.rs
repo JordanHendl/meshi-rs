@@ -9,6 +9,11 @@ pub enum EventType {
     Released = 3,
     Joystick = 4,
     Motion2D = 5,
+    CursorMoved = 6,
+    WindowResized = 7,
+    WindowMoved = 8,
+    WindowFocused = 9,
+    WindowUnfocused = 10,
 }
 
 #[repr(C)]
@@ -508,7 +513,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => Some(Event {
-                event_type: EventType::Motion2D,
+                event_type: EventType::CursorMoved,
                 source: EventSource::Mouse,
                 payload: Payload {
                     motion2d: Motion2DPayload {
@@ -555,7 +560,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                 })
             }
             WindowEvent::Resized(size) => Some(Event {
-                event_type: EventType::Motion2D,
+                event_type: EventType::WindowResized,
                 source: EventSource::Window,
                 payload: Payload {
                     motion2d: Motion2DPayload {
@@ -565,7 +570,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                 timestamp: 0,
             }),
             WindowEvent::Moved(position) => Some(Event {
-                event_type: EventType::Motion2D,
+                event_type: EventType::WindowMoved,
                 source: EventSource::Window,
                 payload: Payload {
                     motion2d: Motion2DPayload {
@@ -576,9 +581,9 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
             }),
             WindowEvent::Focused(focused) => {
                 let et = if *focused {
-                    EventType::Pressed
+                    EventType::WindowFocused
                 } else {
-                    EventType::Released
+                    EventType::WindowUnfocused
                 };
                 Some(Event {
                     event_type: et,

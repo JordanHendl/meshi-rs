@@ -68,6 +68,11 @@ enum class MeshiEventType : std::uint32_t {
     Released = 3,
     Joystick = 4,
     Motion2D = 5,
+    CursorMoved = 6,
+    WindowResized = 7,
+    WindowMoved = 8,
+    WindowFocused = 9,
+    WindowUnfocused = 10,
 };
 
 enum class MeshiEventSource : std::uint32_t {
@@ -281,4 +286,3 @@ using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;
 using MeshiAudioSourceHandle = MeshiHandle;
 using MeshiAudioBusHandle = MeshiHandle;
-
