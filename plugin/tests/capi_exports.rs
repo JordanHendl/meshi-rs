@@ -62,6 +62,9 @@ fn declared_functions_from_header(contents: &str) -> BTreeSet<String> {
         if statement.starts_with("typedef") || statement.starts_with('#') {
             continue;
         }
+        if statement.contains('{') {
+            continue;
+        }
         if !statement.contains('(') || !statement.contains(')') {
             continue;
         }
