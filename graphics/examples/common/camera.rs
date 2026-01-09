@@ -29,6 +29,7 @@ struct CameraInput {
     up: bool,
     down: bool,
     fast: bool,
+    move_active: bool,
 }
 
 pub struct CameraController {
@@ -77,6 +78,7 @@ impl CameraController {
                         KeyCode::E => self.input.up = is_pressed,
                         KeyCode::Q => self.input.down = is_pressed,
                         KeyCode::Shift => self.input.fast = is_pressed,
+                        KeyCode::Space => self.input.move_active = is_pressed,
                         _ => {}
                     }
                 }
@@ -116,29 +118,31 @@ impl CameraController {
     pub fn update(&mut self, dt: f32) -> Mat4 {
         let mouse_delta = self.mouse_delta;
         self.mouse_delta = Vec2::ZERO;
-        self.yaw += mouse_delta.x * self.settings.sensitivity;
-        self.pitch = (self.pitch + mouse_delta.y * self.settings.sensitivity)
-            .clamp(-self.settings.pitch_limit, self.settings.pitch_limit);
+        if self.input.move_active {
+            self.yaw += mouse_delta.x * self.settings.sensitivity;
+            self.pitch = (self.pitch + mouse_delta.y * self.settings.sensitivity)
+                .clamp(-self.settings.pitch_limit, self.settings.pitch_limit);
+        }
 
         let rotation = Quat::from_axis_angle(Vec3::Y, self.yaw)
             * Quat::from_axis_angle(Vec3::X, self.pitch);
         let mut direction = Vec3::ZERO;
-        if self.input.forward {
+        if self.input.move_active && self.input.forward {
             direction += rotation * Vec3::NEG_Z;
         }
-        if self.input.back {
+        if self.input.move_active && self.input.back {
             direction += rotation * Vec3::Z;
         }
-        if self.input.right {
+        if self.input.move_active && self.input.right {
             direction += rotation * Vec3::X;
         }
-        if self.input.left {
+        if self.input.move_active && self.input.left {
             direction += rotation * Vec3::NEG_X;
         }
-        if self.input.up {
+        if self.input.move_active && self.input.up {
             direction += Vec3::Y;
         }
-        if self.input.down {
+        if self.input.move_active && self.input.down {
             direction += Vec3::NEG_Y;
         }
         if direction.length_squared() > 0.0 {
