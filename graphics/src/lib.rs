@@ -336,13 +336,6 @@ impl RenderEngine {
                 }
             }
         });
-
-        if let Some((avg_ms, frames)) = self.frame_timer.record(frame_start.elapsed()) {
-            info!(
-                "Average frame time: {:.2} ms over {} frame(s).",
-                avg_ms, frames
-            );
-        }
     }
 
     pub fn average_frame_time_ms(&self) -> Option<f64> {

@@ -16,6 +16,7 @@ use furikake::{
 };
 use glam::Mat4;
 use tare::utils::StagedBuffer;
+use tracing::error;
 #[repr(C)]
 pub struct SceneObjectInfo {
     pub local: Mat4,
@@ -232,10 +233,10 @@ impl GPUScene {
                 "params",
                 ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
             )
-            .build(&mut ctx);
+            .build(&mut ctx).unwrap();
 
         Ok(SceneComputePipelines {
-            cull_state: cull_state.ok(),
+            cull_state: Some(cull_state),
             transform_state: transform_state.ok(),
         })
     }
@@ -377,7 +378,7 @@ impl GPUScene {
 
         dispatch.as_slice_mut()[0] = SceneDispatchInfo {
             num_bins: info.draw_bins.len() as u32,
-            max_objects: objects_to_process.len() as u32,
+            max_objects: info.limits.max_num_scene_objects,
             num_views: info.limits.max_num_views,
         };
 
@@ -571,9 +572,11 @@ impl GPUScene {
         let dispatch_x = ((num_objects.max(1) + workgroup_size - 1) / workgroup_size).max(1);
 
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
+            error!("No transform state to dispatch!");
             return stream.end();
         };
         let Some(cull_state) = self.pipelines.cull_state.as_ref() else {
+            error!("No cull state to dispatch!");
             return stream.end();
         };
 

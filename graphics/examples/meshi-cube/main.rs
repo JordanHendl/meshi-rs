@@ -4,6 +4,7 @@ use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
+use tracing::info;
 use std::env::*;
 
 #[path = "../common/camera.rs"]
@@ -113,6 +114,12 @@ fn main() {
     let angular_velocity = 2.0f32;
 
     while data.running {
+        if let Some(avg_ms) =  engine.average_frame_time_ms() {
+            info!(
+                "Average frame time: {:.2} ms",
+                avg_ms
+            );
+        }
         let now = timer.elapsed_seconds_f32();
         let mut dt = now - last_time;
         dt = dt.min(1.0 / 30.0);

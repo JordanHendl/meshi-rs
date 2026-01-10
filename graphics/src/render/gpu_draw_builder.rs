@@ -28,6 +28,7 @@ pub struct GPUDrawBuilderInfo<'a> {
     pub ctx: *mut Context,
     pub cull_results: Handle<Buffer>,
     pub bin_counts: Handle<Buffer>,
+    pub num_bins: u32,
     pub limits: GPUDrawBuilderLimits,
 }
 
@@ -41,6 +42,7 @@ impl<'a> Default for GPUDrawBuilderInfo<'a> {
             },
             cull_results: Default::default(),
             bin_counts: Default::default(),
+            num_bins: 0,
         }
     }
 }
@@ -48,6 +50,10 @@ impl<'a> Default for GPUDrawBuilderInfo<'a> {
 struct GPUDrawBuilderData {
     draw_objects: GPUPool<PerDrawData>,
     draw_list: Handle<Buffer>,
+    cull_results: Handle<Buffer>,
+    bin_counts: Handle<Buffer>,
+    num_bins: u32,
+    max_objects: u32,
     active_objects: Vec<Handle<PerDrawData>>,
     alloc: DynamicAllocator,
 }
@@ -76,6 +82,22 @@ impl GPUDrawBuilder {
             .add_variable(
                 "draws",
                 ShaderResource::StorageBuffer(self.data.draw_objects.get_gpu_handle().into()),
+            )
+            .add_variable(
+                "culled",
+                ShaderResource::StorageBuffer(self.data.cull_results.into()),
+            )
+            .add_variable(
+                "counts",
+                ShaderResource::StorageBuffer(self.data.bin_counts.into()),
+            )
+            .add_variable(
+                "draw_list",
+                ShaderResource::StorageBuffer(self.data.draw_list.into()),
+            )
+            .add_variable(
+                "params",
+                ShaderResource::DynamicStorage(self.data.alloc.state()),
             )
             .build(&mut ctx)
             .ok();
@@ -120,6 +142,10 @@ impl GPUDrawBuilder {
             draw_objects,
             alloc,
             draw_list,
+            cull_results: info.cull_results,
+            bin_counts: info.bin_counts,
+            num_bins: info.num_bins,
+            max_objects: info.limits.max_num_objects,
         };
 
         let mut s = Self {
@@ -141,9 +167,21 @@ impl GPUDrawBuilder {
     pub fn release_draw(&mut self, handle: Handle<PerDrawData>) {
         self.data.draw_objects.release(handle);
     }
+    
+    pub fn per_draw_data(&self) -> Handle<Buffer> {
+        self.data.draw_objects.get_gpu_handle()
+    }
+    
+    pub fn draw_count(&self) -> u32 {
+        self.data.draw_objects.len() as u32 
+    }
 
     pub fn draw_list(&self) -> Handle<Buffer> {
         self.data.draw_list
+    }
+    
+    pub fn reset(&mut self) {
+        self.data.alloc.reset();
     }
 
     pub fn build_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
@@ -160,12 +198,20 @@ impl GPUDrawBuilder {
         struct PerDispatch {
             bin: u32,
             view: u32,
+            num_bins: u32,
+            max_objects: u32,
+            num_draws: u32,
+            _padding: [u32; 3],
         }
 
         let mut alloc = self.data.alloc.bump().expect("Failed to bump alloc!");
         let per_dispatch = &mut alloc.slice::<PerDispatch>()[0];
         per_dispatch.bin = bin;
         per_dispatch.view = view;
+        per_dispatch.num_bins = self.data.num_bins;
+        per_dispatch.max_objects = self.data.max_objects;
+        per_dispatch.num_draws = num_objects;
+        per_dispatch._padding = [0; 3];
 
         stream
             .combine(self.data.draw_objects.sync_up().unwrap())

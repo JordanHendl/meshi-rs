@@ -5,8 +5,8 @@ use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::AnimationState;
+use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
@@ -15,6 +15,8 @@ use dashi::*;
 use driver::command::{Draw, DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
+use furikake::reservations::ReservedBinding;
+use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::{
     BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
     types::*,
@@ -47,9 +49,9 @@ pub struct PerDrawData {
     scene_id: Handle<SceneObject>,
     transform_id: Handle<Transformation>,
     material_id: Handle<Material>,
-    skeleton_id: Handle<Skeleton>,
-    animation_state_id: Handle<AnimationState>,
-    per_obj_joints_id: Handle<u32>,
+    skeleton_id: Handle<SkeletonHeader>,
+    animation_state_id: Handle<FurikakeAnimationState>,
+    per_obj_joints_id: Handle<JointTransform>,
     vertex_id: u32,
     vertex_count: u32,
     index_id: u32,
@@ -61,6 +63,7 @@ struct RendererData {
     objects: ResourceList<RenderObjectData>,
     lookup: HashMap<u16, Handle<RenderObjectData>>,
     renderables: GPUPool<PerDrawData>,
+    dynamic: DynamicAllocator,
 }
 
 struct DataProcessors {
@@ -75,6 +78,7 @@ struct Renderers {
 
 struct DeferredPSO {
     pipelines: HashMap<Handle<Material>, PSO>,
+    standard: PSO,
     combine_pso: PSO,
 }
 
@@ -92,8 +96,6 @@ pub struct DeferredRenderer {
     exec: DeferredExecution,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
-    scene: GPUScene,
-    dynamic: DynamicAllocator,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -225,7 +227,7 @@ impl DeferredRenderer {
                 ..Default::default()
             })
             .add_table_variable_with_resources(
-            "per_obj_ssbo",
+                "per_obj_ssbo",
                 vec![IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
                     slot: 0,
@@ -248,21 +250,39 @@ impl DeferredRenderer {
 
         let data = RendererData {
             viewport: info.initial_viewport,
-            objects: todo!(),
+            objects: ResourceList::default(),
             lookup: Default::default(),
-            renderables: todo!(),
+            renderables: GPUPool::new(
+                ctx.as_mut(),
+                &BufferInfo {
+                    debug_name: "[MESHI] Deferred Renderer Per Draw Data Pool",
+                    byte_size: (std::mem::size_of::<PerDrawData>() * 4096) as u32,
+                    visibility: MemoryVisibility::CpuAndGpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                },
+            )
+            .expect("Failed to create renderables pool!"),
+            dynamic,
         };
 
+        let cull_results = scene.output_bins().get_gpu_handle();
+        let bin_counts = scene.bin_counts_gpu().handle;
+        let num_bins = scene.num_bins() as u32;
         let proc = DataProcessors {
             scene,
             skinning,
-            draw_builder: GPUDrawBuilder::new(&GPUDrawBuilderInfo {
-                name: "[MESHI] Deferred Renderer GPU Draw Builder",
-                ctx: ctx.as_mut(),
-                cull_results: scene.output_bins().get_gpu_handle(),
-                bin_counts: scene.bin_counts_gpu().handle,
-                ..Default::default()
-            },  state.as_mut()),
+            draw_builder: GPUDrawBuilder::new(
+                &GPUDrawBuilderInfo {
+                    name: "[MESHI] Deferred Renderer GPU Draw Builder",
+                    ctx: ctx.as_mut(),
+                    cull_results,
+                    bin_counts,
+                    num_bins,
+                    ..Default::default()
+                },
+                state.as_mut(),
+            ),
         };
 
         let subrender = Renderers { environment };
@@ -270,19 +290,22 @@ impl DeferredRenderer {
         let psos = DeferredPSO {
             pipelines: Default::default(),
             combine_pso: pso,
+            standard: Self::build_pipeline(
+                ctx.as_mut(),
+                &mut state,
+                info.sample_count,
+                &proc,
+                &data,
+            ),
         };
 
-        let exec = DeferredExecution {
-            cull_queue,
-        };
+        let exec = DeferredExecution { cull_queue };
         Self {
             ctx,
             state,
-            scene,
             graph,
             exec,
             db: None,
-            dynamic,
             sample_count: info.sample_count,
             alloc,
             data,
@@ -296,43 +319,43 @@ impl DeferredRenderer {
         &mut self.alloc
     }
 
-    fn build_pipeline(&mut self, mat: &HostMaterial) -> PSO {
-        let ctx: *mut Context = self.ctx.as_mut();
+    fn build_pipeline(
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        sample_count: SampleCount,
+        proc: &DataProcessors,
+        data: &RendererData,
+    ) -> PSO {
+        let shaders = miso::gpudeferred(&[]);
 
-        let mut defines = Vec::new();
-
-        if mat.material.render_mask & PassMask::MAIN_COLOR as u32 > 0 {
-            defines.push("-DLMAO".to_string());
-        }
-
-        let shaders = miso::stddeferred(&defines);
-//        let per_obj_resource =
-//            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
-
-        let mut state = PSOBuilder::new()
+        let s = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()));
-//            .add_table_variable_with_resources(
-//                "per_obj_ssbo",
-//                vec![IndexedResource {
-//                    resource: per_obj_resource,
-//                    slot: 0,
-//                }],
-//            );
-
-        state = state
-            .add_reserved_table_variables(self.state.as_mut())
-            .unwrap();
-
-        state = state.add_depth_target(AttachmentDesc {
-            format: Format::D24S8,
-            samples: self.sample_count,
-        });
-
-        let s = state
+            .fragment_compiled(Some(shaders[1].clone()))
+            .add_table_variable_with_resources(
+                "per_draw_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::StorageBuffer(
+                        proc.draw_builder.per_draw_data().into(),
+                    ),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "per_scene_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(data.dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_reserved_table_variables(state)
+            .unwrap()
+            .add_depth_target(AttachmentDesc {
+                format: Format::D24S8,
+                samples: sample_count,
+            })
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 4],
-                sample_count: self.sample_count,
+                sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: true,
@@ -345,7 +368,7 @@ impl DeferredRenderer {
         assert!(s.bind_table[0].is_some());
         assert!(s.bind_table[1].is_some());
 
-        self.state.register_pso_tables(&s);
+        state.register_pso_tables(&s);
         s
     }
 
@@ -495,20 +518,6 @@ impl DeferredRenderer {
         db.import_dashi_context(&mut self.ctx);
         db.import_furikake_state(&mut self.state);
         self.alloc.set_bindless_registry(self.state.as_mut());
-
-        let materials = db.enumerate_materials();
-
-        for name in materials {
-            let (mat, handle) = db.fetch_host_material(&name).unwrap();
-            let p = self.build_pipeline(&mat);
-            info!(
-                "[MESHI/GFX] Creating pipelines for material {} (Handle => {}).",
-                name,
-                handle.as_ref().unwrap().slot
-            );
-            self.psos.pipelines.insert(handle.unwrap(), p);
-        }
-
         self.db = Some(NonNull::new(db).expect("lmao"));
     }
 
@@ -516,7 +525,7 @@ impl DeferredRenderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let (scene_handle, transform_handle) = self.scene.register_object(&SceneObjectInfo {
+        let (scene_handle, transform_handle) = self.proc.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
             scene_mask: PassMask::MAIN_COLOR as u32,
@@ -528,21 +537,23 @@ impl DeferredRenderer {
                     .meshes
                     .iter()
                     .enumerate()
-                    .map(|(idx, mesh)| self.proc.draw_builder.register_draw(&PerDrawData {
-                        scene_id: scene_handle,
-                        transform_id:transform_handle,
-                        material_id: mesh
-                                            .material
-                                            .as_ref()
-                                            .and_then(|material| material.furikake_material_handle)
-                                            .unwrap_or_default(),
+                    .map(|(idx, mesh)| {
+                        self.proc.draw_builder.register_draw(&PerDrawData {
+                            scene_id: scene_handle,
+                            transform_id: transform_handle,
+                            material_id: mesh
+                                .material
+                                .as_ref()
+                                .and_then(|material| material.furikake_material_handle)
+                                .unwrap_or_default(),
 
-                        vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
-                        vertex_count: mesh.geometry.base.vertex_count,
-                        index_id: mesh.geometry.base.furikake_index_id.unwrap(),
-                        index_count: mesh.geometry.base.index_count.unwrap(),
-                        ..Default::default()
-                    }))
+                            vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                            vertex_count: mesh.geometry.base.vertex_count,
+                            index_id: mesh.geometry.base.furikake_index_id.unwrap(),
+                            index_count: mesh.geometry.base.index_count.unwrap(),
+                            ..Default::default()
+                        })
+                    })
                     .collect();
 
                 let h = self.data.objects.push(RenderObjectData {
@@ -553,66 +564,48 @@ impl DeferredRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::SkinnedModel(skinned) => {
-                                let (skinning_handle, skinning_info) =
-                                    self.proc.skinning.register(skinned.clone(), self.state.as_mut());
-                                let skinned_data = SkinnedRenderData {
-                                    model: skinned.model.clone(),
-                                    skinning: skinning_info,
-                                    skinning_handle,
-                                };
-                
-                let draws: Vec<Handle<PerDrawData>> = skinned_data.model.meshes
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, mesh)| self.proc.draw_builder.register_draw(&PerDrawData {
-                        scene_id: scene_handle,
-                        transform_id:transform_handle,
-                        material_id: mesh
-                                            .material
-                                            .as_ref()
-                                            .and_then(|material| material.furikake_material_handle)
-                                            .unwrap_or_default(),
+                let (skinning_handle, skinning_info) = self
+                    .proc
+                    .skinning
+                    .register(skinned.clone(), self.state.as_mut());
+                let skinned_data = SkinnedRenderData {
+                    model: skinned.model.clone(),
+                    skinning: skinning_info,
+                    skinning_handle,
+                };
 
-                        vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
-                        vertex_count: mesh.geometry.base.vertex_count,
-                        index_id: mesh.geometry.base.furikake_index_id.unwrap(),
-                        index_count: mesh.geometry.base.index_count.unwrap(),
-                        ..Default::default()
-                    }))
+                let draws: Vec<Handle<PerDrawData>> = skinned_data
+                    .model
+                    .meshes
+                    .iter()
+                    .map(|mesh| {
+                        self.proc.draw_builder.register_draw(&PerDrawData {
+                            scene_id: scene_handle,
+                            transform_id: transform_handle,
+                            material_id: mesh
+                                .material
+                                .as_ref()
+                                .and_then(|material| material.furikake_material_handle)
+                                .unwrap_or_default(),
+
+                            vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                            vertex_count: mesh.geometry.base.vertex_count,
+                            index_id: mesh.geometry.base.furikake_index_id.unwrap(),
+                            index_count: mesh.geometry.base.index_count.unwrap(),
+                            skeleton_id: skinned_data.skinning.skeleton,
+                            animation_state_id: skinned_data.skinning.animation_state,
+                            per_obj_joints_id: skinned_data.skinning.joints,
+                            ..Default::default()
+                        })
+                    })
                     .collect();
 
-
-                //                let draws: Vec<SceneIndexedDrawInfo> = skinned_data
-                //                    .model
-                //                    .meshes
-                //                    .iter()
-                //                    .enumerate()
-                //                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
-                //                        mesh_id: idx as u32,
-                //                        material_id: mesh
-                //                            .material
-                //                            .as_ref()
-                //                            .and_then(|material| material.furikake_material_handle)
-                //                            .map(GPUScene::pack_handle)
-                //                            .unwrap_or(u32::MAX),
-                //                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
-                //                        index_count: mesh.geometry.base.index_count.unwrap(),
-                //                        first_index: 0,
-                //                        vertex_offset: 0,
-                //                    })
-                //                    .collect();
-                //                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
-                //                self.scene.set_object_skinning_info(
-                //                    scene_handle,
-                //                    skinned_data.skinning.skeleton,
-                //                    skinned_data.skinning.animation_state,
-                //                );
-                                let h = self.data.objects.push(RenderObjectData {
-                                    kind: RenderObjectKind::SkinnedModel(skinned_data),
-                                    scene_handle,
-                                    draws,
-                                });
-               Ok(to_handle(h))
+                let h = self.data.objects.push(RenderObjectData {
+                    kind: RenderObjectKind::SkinnedModel(skinned_data),
+                    scene_handle,
+                    draws,
+                });
+                Ok(to_handle(h))
             }
             RenderObjectInfo::Billboard(billboard) => {
                 todo!()
@@ -631,7 +624,13 @@ impl DeferredRenderer {
             return;
         }
 
-        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
             warn!("Failed to update animation for object {}", handle.slot);
             return;
         }
@@ -640,7 +639,8 @@ impl DeferredRenderer {
 
         match &mut obj.kind {
             RenderObjectKind::SkinnedModel(skinned) => {
-                self.proc.skinning
+                self.proc
+                    .skinning
                     .set_animation_state(skinned.skinning_handle, state);
             }
             _ => {
@@ -654,7 +654,6 @@ impl DeferredRenderer {
             warn!("Attempted to update billboard texture on invalid handle.");
             return;
         }
-
     }
 
     pub fn set_billboard_material(
@@ -676,12 +675,18 @@ impl DeferredRenderer {
             return Default::default();
         }
 
-        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
             return Default::default();
         }
 
         let obj = self.data.objects.get_ref(from_handle(handle));
-        self.scene.get_object_transform(obj.scene_handle)
+        self.proc.scene.get_object_transform(obj.scene_handle)
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
@@ -690,30 +695,40 @@ impl DeferredRenderer {
             return;
         }
 
-        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
             warn!("Failed to update transform for object {}", handle.slot);
             return;
         }
 
         let obj = self.data.objects.get_ref(from_handle(handle));
-        self.scene.set_object_transform(obj.scene_handle, transform);
+        self.proc
+            .scene
+            .set_object_transform(obj.scene_handle, transform);
     }
 
     fn pull_scene(&mut self) -> Handle<Semaphore> {
         let wait = self.graph.make_semaphore();
-        self.exec.cull_queue
+        self.exec
+            .cull_queue
             .record(|c| {
                 let state_update = self
                     .state
                     .update()
                     .expect("Failed to update furikake state");
 
-                let cull_cmds = state_update.combine(self.scene.cull());
+                let cull_cmds = state_update.combine(self.proc.scene.cull());
                 cull_cmds.append(c).unwrap();
             })
             .expect("Failed to make commands");
 
-        self.exec.cull_queue
+        self.exec
+            .cull_queue
             .submit(&SubmitInfo {
                 signal_sems: &[wait],
                 ..Default::default()
@@ -732,21 +747,26 @@ impl DeferredRenderer {
             return Vec::new();
         }
         if self.exec.cull_queue.current_index() == 0 {
-            self.dynamic.reset();
+            self.data.dynamic.reset();
             self.subrender.environment.reset();
+            self.proc.draw_builder.reset();
         }
 
         let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
-        self.scene.set_active_cameras(views);
+        self.proc.scene.set_active_cameras(views);
         // Pull scene GPU --> CPU to read.
         let scene_processing = self.pull_scene();
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
-            dim: [self.data.viewport.area.w as u32, self.data.viewport.area.h as u32, 1],
+            dim: [
+                self.data.viewport.area.w as u32,
+                self.data.viewport.area.h as u32,
+                1,
+            ],
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
@@ -809,6 +829,11 @@ impl DeferredRenderer {
 
             let camera_handle = *camera;
 
+            self.graph.add_compute_pass(|mut cmd| {
+                cmd.combine(self.proc.draw_builder.build_draws(0, view_idx as u32))
+                    .end()
+            });
+
             // Deferred SPLIT pass. Renders the following framebuffers:
             // 1) Position
             // 2) Albedo (or diffuse)
@@ -825,7 +850,49 @@ impl DeferredRenderer {
                         stencil: 0,
                     }),
                 },
-                |mut cmd| cmd,
+                |mut cmd| {
+                    struct PerSceneData {
+                        camera: Handle<Camera>,
+                    }
+                    let mut alloc = self
+                        .data
+                        .dynamic
+                        .bump()
+                        .expect("Failed to allocate dynamic buffer!");
+
+                    alloc.slice::<PerSceneData>()[0].camera = camera_handle;
+
+                    let indices = self
+                        .state
+                        .binding("meshi_bindless_indices")
+                        .unwrap()
+                        .binding();
+
+                    match indices {
+                        ReservedBinding::TableBinding { binding, resources } => {
+                            match resources[0].resource {
+                                ShaderResource::StorageBuffer(view) => {
+                                    return cmd
+                                        .bind_graphics_pipeline(self.psos.standard.handle)
+                                        .update_viewport(&self.data.viewport)
+                                        .draw_indexed_indirect(&DrawIndexedIndirect {
+                                            indices: view.handle,
+                                            indirect: self.proc.draw_builder.draw_list(),
+                                            bind_tables: self.psos.standard.tables(),
+                                            dynamic_buffers: [None, None, Some(alloc), None],
+                                            draw_count:  self.proc.draw_builder.draw_count(),
+                                            ..Default::default()
+                                        })
+                                        .unbind_graphics_pipeline();
+                                }
+                                _ => (),
+                            }
+                        }
+                        _ => (),
+                    }
+
+                    return cmd;
+                },
             );
 
             ///////////////////////////////////////////////////////////////////
@@ -843,6 +910,7 @@ impl DeferredRenderer {
                 },
                 |mut cmd| {
                     let mut alloc = self
+                        .data
                         .dynamic
                         .bump()
                         .expect("Failed to allocate dynamic buffer!");
