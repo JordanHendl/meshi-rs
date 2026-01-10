@@ -1,15 +1,18 @@
 use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
+use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::{Renderer, RendererInfo, ViewOutput};
+use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::AnimationState;
 use crate::{BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
+use dashi::utils::gpupool::GPUPool;
 use dashi::*;
-use dashi::structs::{IndirectCommand, IndexedIndirectCommand};
-use driver::command::{Draw, DrawIndirect, DrawIndexedIndirect};
+use driver::command::{Draw, DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
@@ -18,6 +21,8 @@ use furikake::{
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
+use noren::rdb::Skeleton;
+use noren::rdb::primitives::Vertex;
 use noren::{
     DB,
     meta::{DeviceModel, HostMaterial},
@@ -36,23 +41,59 @@ pub enum PassMask {
     MAIN_COLOR = 0x00000001,
 }
 
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct PerDrawData {
+    scene_id: Handle<SceneObject>,
+    transform_id: Handle<Transformation>,
+    material_id: Handle<Material>,
+    skeleton_id: Handle<Skeleton>,
+    animation_state_id: Handle<AnimationState>,
+    per_obj_joints_id: Handle<u32>,
+    vertex_id: u32,
+    vertex_count: u32,
+    index_id: u32,
+    index_count: u32,
+}
+
+struct RendererData {
+    viewport: Viewport,
+    objects: ResourceList<RenderObjectData>,
+    lookup: HashMap<u16, Handle<RenderObjectData>>,
+    renderables: GPUPool<PerDrawData>,
+}
+
+struct DataProcessors {
+    scene: GPUScene,
+    skinning: SkinningDispatcher,
+    draw_builder: GPUDrawBuilder,
+}
+
+struct Renderers {
+    environment: EnvironmentRenderer,
+}
+
+struct DeferredPSO {
+    pipelines: HashMap<Handle<Material>, PSO>,
+    combine_pso: PSO,
+}
+
+struct DeferredExecution {
+    cull_queue: CommandRing,
+}
+
 pub struct DeferredRenderer {
     ctx: Box<Context>,
-    viewport: Viewport,
+    data: RendererData,
+    proc: DataProcessors,
+    subrender: Renderers,
+    psos: DeferredPSO,
     sample_count: SampleCount,
+    exec: DeferredExecution,
     state: Box<BindlessState>,
     db: Option<NonNull<DB>>,
     scene: GPUScene,
-    environment: EnvironmentRenderer,
-    pipelines: HashMap<Handle<Material>, PSO>,
-    billboard_pso: PSO,
-    objects: ResourceList<RenderObjectData>,
-    scene_lookup: HashMap<u16, Handle<RenderObjectData>>,
     dynamic: DynamicAllocator,
-    cull_queue: CommandRing,
-    combine_pso: PSO,
-    skinning: SkinningDispatcher,
-    skinning_complete: Option<Handle<Semaphore>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
 }
@@ -60,7 +101,7 @@ pub struct DeferredRenderer {
 struct RenderObjectData {
     kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
-    draw_range: SceneDrawRange,
+    draws: Vec<Handle<PerDrawData>>,
 }
 
 enum RenderObjectKind {
@@ -102,54 +143,6 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
-    fn build_billboard_pipeline(
-        ctx: &mut Context,
-        state: &mut BindlessState,
-        per_instance_buffer: Handle<Buffer>,
-        sample_count: SampleCount,
-    ) -> PSO {
-        let shaders = miso::stdbillboard(&[]);
-        let per_obj_resource = ShaderResource::StorageBuffer(per_instance_buffer.into());
-
-        let mut pso_builder = PSOBuilder::new()
-            .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
-            .set_attachment_format(0, Format::BGRA8)
-            .add_table_variable_with_resources(
-                "per_obj_ssbo",
-                vec![IndexedResource {
-                    resource: per_obj_resource,
-                    slot: 0,
-                }],
-            );
-
-        pso_builder = pso_builder
-            .add_reserved_table_variables(state)
-            .expect("Failed to add reserved tables for billboard pipeline");
-
-        pso_builder = pso_builder.add_depth_target(AttachmentDesc {
-            format: Format::D24S8,
-            samples: sample_count,
-        });
-
-        let pso = pso_builder
-            .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 1],
-                sample_count,
-                depth_test: Some(DepthInfo {
-                    should_test: true,
-                    should_write: false,
-                }),
-                ..Default::default()
-            })
-            .build(ctx)
-            .expect("Failed to build billboard pipeline!");
-
-        state.register_pso_tables(&pso);
-
-        pso
-    }
-
     pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
@@ -196,13 +189,6 @@ impl DeferredRenderer {
             })
             .expect("Unable to create dynamic allocator!");
 
-        let billboard_pso = Self::build_billboard_pipeline(
-            ctx.as_mut(),
-            state.as_mut(),
-            scene.per_instance_buffer(),
-            info.sample_count,
-        );
-
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
@@ -239,7 +225,7 @@ impl DeferredRenderer {
                 ..Default::default()
             })
             .add_table_variable_with_resources(
-                "per_obj_ssbo",
+            "per_obj_ssbo",
                 vec![IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
                     slot: 0,
@@ -259,25 +245,50 @@ impl DeferredRenderer {
             "Initialized Deferred Renderer with dimensions [{}, {}]",
             info.initial_viewport.area.w, info.initial_viewport.area.h
         );
+
+        let data = RendererData {
+            viewport: info.initial_viewport,
+            objects: todo!(),
+            lookup: Default::default(),
+            renderables: todo!(),
+        };
+
+        let proc = DataProcessors {
+            scene,
+            skinning,
+            draw_builder: GPUDrawBuilder::new(&GPUDrawBuilderInfo {
+                name: "[MESHI] Deferred Renderer GPU Draw Builder",
+                ctx: ctx.as_mut(),
+                cull_results: scene.output_bins().get_gpu_handle(),
+                bin_counts: scene.bin_counts_gpu().handle,
+                ..Default::default()
+            },  state.as_mut()),
+        };
+
+        let subrender = Renderers { environment };
+
+        let psos = DeferredPSO {
+            pipelines: Default::default(),
+            combine_pso: pso,
+        };
+
+        let exec = DeferredExecution {
+            cull_queue,
+        };
         Self {
             ctx,
-            combine_pso: pso,
             state,
             scene,
             graph,
+            exec,
             db: None,
-            environment,
             dynamic,
-            pipelines: Default::default(),
-            billboard_pso,
-            objects: Default::default(),
-            scene_lookup: Default::default(),
-            viewport: info.initial_viewport,
             sample_count: info.sample_count,
-            cull_queue,
-            skinning,
-            skinning_complete: None,
             alloc,
+            data,
+            proc,
+            subrender,
+            psos,
         }
     }
 
@@ -295,19 +306,19 @@ impl DeferredRenderer {
         }
 
         let shaders = miso::stddeferred(&defines);
-        let per_obj_resource =
-            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
+//        let per_obj_resource =
+//            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
 
         let mut state = PSOBuilder::new()
             .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
-            .add_table_variable_with_resources(
-                "per_obj_ssbo",
-                vec![IndexedResource {
-                    resource: per_obj_resource,
-                    slot: 0,
-                }],
-            );
+            .fragment_compiled(Some(shaders[1].clone()));
+//            .add_table_variable_with_resources(
+//                "per_obj_ssbo",
+//                vec![IndexedResource {
+//                    resource: per_obj_resource,
+//                    slot: 0,
+//                }],
+//            );
 
         state = state
             .add_reserved_table_variables(self.state.as_mut())
@@ -495,7 +506,7 @@ impl DeferredRenderer {
                 name,
                 handle.as_ref().unwrap().slot
             );
-            self.pipelines.insert(handle.unwrap(), p);
+            self.psos.pipelines.insert(handle.unwrap(), p);
         }
 
         self.db = Some(NonNull::new(db).expect("lmao"));
@@ -505,7 +516,7 @@ impl DeferredRenderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let scene_handle = self.scene.register_object(&SceneObjectInfo {
+        let (scene_handle, transform_handle) = self.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
             scene_mask: PassMask::MAIN_COLOR as u32,
@@ -513,111 +524,98 @@ impl DeferredRenderer {
 
         match info {
             RenderObjectInfo::Model(m) => {
-                let draws: Vec<SceneIndexedDrawInfo> = m
+                let draws: Vec<Handle<PerDrawData>> = m
                     .meshes
                     .iter()
                     .enumerate()
-                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
-                        mesh_id: idx as u32,
+                    .map(|(idx, mesh)| self.proc.draw_builder.register_draw(&PerDrawData {
+                        scene_id: scene_handle,
+                        transform_id:transform_handle,
                         material_id: mesh
-                            .material
-                            .as_ref()
-                            .and_then(|material| material.furikake_material_handle)
-                            .map(GPUScene::pack_handle)
-                            .unwrap_or(u32::MAX),
-                        per_obj_joints_id: u32::MAX,
+                                            .material
+                                            .as_ref()
+                                            .and_then(|material| material.furikake_material_handle)
+                                            .unwrap_or_default(),
+
+                        vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                        vertex_count: mesh.geometry.base.vertex_count,
+                        index_id: mesh.geometry.base.furikake_index_id.unwrap(),
                         index_count: mesh.geometry.base.index_count.unwrap(),
-                        first_index: 0,
-                        vertex_offset: 0,
-                    })
+                        ..Default::default()
+                    }))
                     .collect();
-                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    Handle::default(),
-                    Handle::default(),
-                );
-                let h = self.objects.push(RenderObjectData {
+
+                let h = self.data.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Model(m.clone()),
                     scene_handle,
-                    draw_range,
+                    draws,
                 });
-
-                self.scene_lookup.insert(scene_handle.slot, h);
-
                 Ok(to_handle(h))
             }
             RenderObjectInfo::SkinnedModel(skinned) => {
-                let (skinning_handle, skinning_info) =
-                    self.skinning.register(skinned.clone(), self.state.as_mut());
-                let skinned_data = SkinnedRenderData {
-                    model: skinned.model.clone(),
-                    skinning: skinning_info,
-                    skinning_handle,
-                };
-                let draws: Vec<SceneIndexedDrawInfo> = skinned_data
-                    .model
-                    .meshes
+                                let (skinning_handle, skinning_info) =
+                                    self.proc.skinning.register(skinned.clone(), self.state.as_mut());
+                                let skinned_data = SkinnedRenderData {
+                                    model: skinned.model.clone(),
+                                    skinning: skinning_info,
+                                    skinning_handle,
+                                };
+                
+                let draws: Vec<Handle<PerDrawData>> = skinned_data.model.meshes
                     .iter()
                     .enumerate()
-                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
-                        mesh_id: idx as u32,
+                    .map(|(idx, mesh)| self.proc.draw_builder.register_draw(&PerDrawData {
+                        scene_id: scene_handle,
+                        transform_id:transform_handle,
                         material_id: mesh
-                            .material
-                            .as_ref()
-                            .and_then(|material| material.furikake_material_handle)
-                            .map(GPUScene::pack_handle)
-                            .unwrap_or(u32::MAX),
-                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
+                                            .material
+                                            .as_ref()
+                                            .and_then(|material| material.furikake_material_handle)
+                                            .unwrap_or_default(),
+
+                        vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                        vertex_count: mesh.geometry.base.vertex_count,
+                        index_id: mesh.geometry.base.furikake_index_id.unwrap(),
                         index_count: mesh.geometry.base.index_count.unwrap(),
-                        first_index: 0,
-                        vertex_offset: 0,
-                    })
+                        ..Default::default()
+                    }))
                     .collect();
-                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    skinned_data.skinning.skeleton,
-                    skinned_data.skinning.animation_state,
-                );
-                let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::SkinnedModel(skinned_data),
-                    scene_handle,
-                    draw_range,
-                });
 
-                self.scene_lookup.insert(scene_handle.slot, h);
 
-                Ok(to_handle(h))
+                //                let draws: Vec<SceneIndexedDrawInfo> = skinned_data
+                //                    .model
+                //                    .meshes
+                //                    .iter()
+                //                    .enumerate()
+                //                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
+                //                        mesh_id: idx as u32,
+                //                        material_id: mesh
+                //                            .material
+                //                            .as_ref()
+                //                            .and_then(|material| material.furikake_material_handle)
+                //                            .map(GPUScene::pack_handle)
+                //                            .unwrap_or(u32::MAX),
+                //                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
+                //                        index_count: mesh.geometry.base.index_count.unwrap(),
+                //                        first_index: 0,
+                //                        vertex_offset: 0,
+                //                    })
+                //                    .collect();
+                //                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
+                //                self.scene.set_object_skinning_info(
+                //                    scene_handle,
+                //                    skinned_data.skinning.skeleton,
+                //                    skinned_data.skinning.animation_state,
+                //                );
+                                let h = self.data.objects.push(RenderObjectData {
+                                    kind: RenderObjectKind::SkinnedModel(skinned_data),
+                                    scene_handle,
+                                    draws,
+                                });
+               Ok(to_handle(h))
             }
             RenderObjectInfo::Billboard(billboard) => {
-                let billboard = self.create_billboard_data(billboard.clone());
-                let draws = [SceneDrawInfo {
-                    mesh_id: 0,
-                    material_id: billboard
-                        .info
-                        .material
-                        .map(GPUScene::pack_handle)
-                        .unwrap_or(u32::MAX),
-                    per_obj_joints_id: u32::MAX,
-                    vertex_count: 6,
-                    first_vertex: 0,
-                }];
-                let draw_range = self.scene.set_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    Handle::default(),
-                    Handle::default(),
-                );
-                let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::Billboard(billboard),
-                    scene_handle,
-                    draw_range,
-                });
-
-                self.scene_lookup.insert(scene_handle.slot, h);
-
-                Ok(to_handle(h))
+                todo!()
             }
             RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
         }
@@ -633,16 +631,16 @@ impl DeferredRenderer {
             return;
         }
 
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
             warn!("Failed to update animation for object {}", handle.slot);
             return;
         }
 
-        let obj = self.objects.get_ref_mut(from_handle(handle));
+        let obj = self.data.objects.get_ref_mut(from_handle(handle));
 
         match &mut obj.kind {
             RenderObjectKind::SkinnedModel(skinned) => {
-                self.skinning
+                self.proc.skinning
                     .set_animation_state(skinned.skinning_handle, state);
             }
             _ => {
@@ -657,33 +655,6 @@ impl DeferredRenderer {
             return;
         }
 
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
-            warn!(
-                "Failed to update billboard texture for object {}",
-                handle.slot
-            );
-            return;
-        }
-
-        let (owns_material, material_handle) = {
-            let obj = self.objects.get_ref_mut(from_handle(handle));
-            match &mut obj.kind {
-                RenderObjectKind::Billboard(billboard) => {
-                    billboard.info.texture_id = texture_id;
-                    (billboard.owns_material, billboard.info.material)
-                }
-                _ => {
-                    warn!("Attempted to update billboard texture on non-billboard object.");
-                    return;
-                }
-            }
-        };
-
-        if owns_material {
-            if let Some(material) = material_handle {
-                self.update_billboard_material_texture(material, texture_id);
-            }
-        }
     }
 
     pub fn set_billboard_material(
@@ -691,121 +662,13 @@ impl DeferredRenderer {
         handle: Handle<RenderObject>,
         material: Option<Handle<Material>>,
     ) {
-        if !handle.valid() {
-            warn!("Attempted to update billboard material on invalid handle.");
-            return;
-        }
-
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
-            warn!(
-                "Failed to update billboard material for object {}",
-                handle.slot
-            );
-            return;
-        }
-
-        let (owned_material, texture_id) = {
-            let obj = self.objects.get_ref_mut(from_handle(handle));
-            match &mut obj.kind {
-                RenderObjectKind::Billboard(billboard) => {
-                    let owned_material = if billboard.owns_material {
-                        billboard.owns_material = false;
-                        billboard.info.material
-                    } else {
-                        None
-                    };
-                    billboard.info.material = material;
-                    (owned_material, billboard.info.texture_id)
-                }
-                _ => {
-                    warn!("Attempted to update billboard material on non-billboard object.");
-                    return;
-                }
-            }
-        };
-
-        if let Some(existing) = owned_material {
-            self.state
-                .reserved_mut::<ReservedBindlessMaterials, _>(
-                    "meshi_bindless_materials",
-                    |materials| {
-                        materials.remove_material(existing);
-                    },
-                )
-                .expect("Failed to remove billboard material");
-        }
-
-        if material.is_none() {
-            let new_material = self.allocate_billboard_material(texture_id);
-            let obj = self.objects.get_ref_mut(from_handle(handle));
-            if let RenderObjectKind::Billboard(billboard) = &mut obj.kind {
-                billboard.info.material = Some(new_material);
-                billboard.owns_material = true;
-            }
-        }
-
-        let obj = self.objects.get_ref(from_handle(handle));
-        if let RenderObjectKind::Billboard(billboard) = &obj.kind {
-            let material_id = billboard
-                .info
-                .material
-                .map(GPUScene::pack_handle)
-                .unwrap_or(u32::MAX);
-            self.scene.update_draw_metadata(
-                obj.draw_range.non_indexed_offset,
-                SceneDrawMetadata {
-                    mesh_id: 0,
-                    material_id,
-                    per_obj_joints_id: u32::MAX,
-                },
-            );
-        }
+        todo!()
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
         if !handle.valid() {
             return;
         }
-
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
-            return;
-        }
-
-        let (skinning_handle, billboard_material) = {
-            let obj = self.objects.get_ref(from_handle(handle));
-            self.scene.release_object(obj.scene_handle);
-            self.scene_lookup.remove(&obj.scene_handle.slot);
-
-            match &obj.kind {
-                RenderObjectKind::SkinnedModel(skinned) => (Some(skinned.skinning_handle), None),
-                RenderObjectKind::Billboard(billboard) => {
-                    if billboard.owns_material {
-                        (None, billboard.info.material)
-                    } else {
-                        (None, None)
-                    }
-                }
-                _ => (None, None),
-            }
-        };
-
-        if let Some(skinned_handle) = skinning_handle {
-            self.skinning
-                .unregister(skinned_handle, self.state.as_mut());
-        }
-
-        if let Some(material) = billboard_material {
-            self.state
-                .reserved_mut::<ReservedBindlessMaterials, _>(
-                    "meshi_bindless_materials",
-                    |materials| {
-                        materials.remove_material(material);
-                    },
-                )
-                .expect("Failed to remove billboard material");
-        }
-
-        self.objects.release(from_handle(handle));
     }
 
     pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
@@ -813,11 +676,11 @@ impl DeferredRenderer {
             return Default::default();
         }
 
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
             return Default::default();
         }
 
-        let obj = self.objects.get_ref(from_handle(handle));
+        let obj = self.data.objects.get_ref(from_handle(handle));
         self.scene.get_object_transform(obj.scene_handle)
     }
 
@@ -827,32 +690,36 @@ impl DeferredRenderer {
             return;
         }
 
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
+        if !self.data.objects.entries.iter().any(|h| h.slot == handle.slot) {
             warn!("Failed to update transform for object {}", handle.slot);
             return;
         }
 
-        let obj = self.objects.get_ref(from_handle(handle));
+        let obj = self.data.objects.get_ref(from_handle(handle));
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
-    fn pull_scene(&mut self) {
-        self.cull_queue
+    fn pull_scene(&mut self) -> Handle<Semaphore> {
+        let wait = self.graph.make_semaphore();
+        self.exec.cull_queue
             .record(|c| {
                 let state_update = self
                     .state
                     .update()
                     .expect("Failed to update furikake state");
 
-                let cull_cmds = state_update.combine(self.scene.cull_and_build_draws());
+                let cull_cmds = state_update.combine(self.scene.cull());
                 cull_cmds.append(c).unwrap();
             })
             .expect("Failed to make commands");
 
-        self.cull_queue
-            .submit(&Default::default())
+        self.exec.cull_queue
+            .submit(&SubmitInfo {
+                signal_sems: &[wait],
+                ..Default::default()
+            })
             .expect("Failed to submit!");
-        self.cull_queue.wait_all().unwrap();
+        wait
     }
 
     pub fn update(
@@ -864,22 +731,22 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        if self.cull_queue.current_index() == 0 {
+        if self.exec.cull_queue.current_index() == 0 {
             self.dynamic.reset();
-            self.environment.reset();
+            self.subrender.environment.reset();
         }
 
-        self.skinning_complete = self.skinning.update(delta_time);
+        let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
         self.scene.set_active_cameras(views);
         // Pull scene GPU --> CPU to read.
-        self.pull_scene();
+        let scene_processing = self.pull_scene();
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
             debug_name: "",
-            dim: [self.viewport.area.w as u32, self.viewport.area.h as u32, 1],
+            dim: [self.data.viewport.area.w as u32, self.data.viewport.area.h as u32, 1],
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
@@ -941,39 +808,6 @@ impl DeferredRenderer {
             deferred_combine_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
 
             let camera_handle = *camera;
-            struct BillboardDraw {
-                vertex_buffer: Handle<Buffer>,
-                material: Handle<Material>,
-                transformation: Handle<Transformation>,
-                total_transform: Mat4,
-                draw_index: u32,
-            }
-            let mut billboard_draws = Vec::new();
-            {
-                let handles = self.objects.entries.clone();
-                for handle in handles {
-                    let (scene_handle, draw_range, billboard) = {
-                        let obj = self.objects.get_ref(handle);
-                        let RenderObjectKind::Billboard(billboard) = &obj.kind else {
-                            continue;
-                        };
-                        (obj.scene_handle, obj.draw_range, billboard.clone())
-                    };
-                    if let Some(material) = billboard.info.material {
-                        let transform = self.scene.get_object_transform(scene_handle);
-                        self.update_billboard_vertices(&billboard, transform);
-                        billboard_draws.push(BillboardDraw {
-                            vertex_buffer: billboard.vertex_buffer,
-                            material,
-                            transformation: self
-                                .scene
-                                .object_transformation_handle(scene_handle),
-                            total_transform: transform,
-                            draw_index: draw_range.non_indexed_offset,
-                        });
-                    }
-                }
-            }
 
             // Deferred SPLIT pass. Renders the following framebuffers:
             // 1) Position
@@ -982,7 +816,7 @@ impl DeferredRenderer {
             // 4) Material Code
             self.graph.add_subpass(
                 &SubpassInfo {
-                    viewport: self.viewport,
+                    viewport: self.data.viewport,
                     color_attachments: deferred_pass_attachments,
                     depth_attachment: Some(depth.view),
                     clear_values: deferred_pass_clear,
@@ -991,129 +825,17 @@ impl DeferredRenderer {
                         stencil: 0,
                     }),
                 },
-                |mut cmd| {
-                    {
-                        let indexed_args = self.scene.indexed_draw_args();
-                        let indexed_stride =
-                            std::mem::size_of::<IndexedIndirectCommand>() as u32;
-                        let indexed_base =
-                            self.scene.indexed_draws_per_view() * view_idx as u32;
-
-                        for handle in &self.objects.entries {
-                            let obj = self.objects.get_ref(*handle);
-                            match &obj.kind {
-                                RenderObjectKind::Model(model) => {
-                                    for (mesh_idx, mesh) in
-                                        model.meshes.iter().enumerate()
-                                    {
-                                        if let Some(material) = &mesh.material {
-                                            if let Some(mat_idx) =
-                                                material.furikake_material_handle
-                                            {
-                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let draw_index = obj.draw_range.indexed_offset
-                                                        + mesh_idx as u32;
-                                                    let draw_offset = (indexed_base + draw_index)
-                                                        * indexed_stride;
-
-                                                    cmd = cmd
-                                                        .bind_graphics_pipeline(pso.handle)
-                                                        .update_viewport(&self.viewport)
-                                                        .draw_indexed_indirect(
-                                                            &DrawIndexedIndirect {
-                                                                vertices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .vertices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .indices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indirect: indexed_args,
-                                                                offset: draw_offset,
-                                                                draw_count: 1,
-                                                                stride: indexed_stride,
-                                                                bind_tables: pso.tables(),
-                                                                dynamic_buffers: [
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                ],
-                                                            },
-                                                        )
-                                                        .unbind_graphics_pipeline();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                RenderObjectKind::SkinnedModel(skinned) => {
-                                    for (mesh_idx, mesh) in
-                                        skinned.model.meshes.iter().enumerate()
-                                    {
-                                        if let Some(material) = &mesh.material {
-                                            if let Some(mat_idx) =
-                                                material.furikake_material_handle
-                                            {
-                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let draw_index = obj.draw_range.indexed_offset
-                                                        + mesh_idx as u32;
-                                                    let draw_offset = (indexed_base + draw_index)
-                                                        * indexed_stride;
-
-                                                    cmd = cmd
-                                                        .bind_graphics_pipeline(pso.handle)
-                                                        .update_viewport(&self.viewport)
-                                                        .draw_indexed_indirect(
-                                                            &DrawIndexedIndirect {
-                                                                vertices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .vertices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .indices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indirect: indexed_args,
-                                                                offset: draw_offset,
-                                                                draw_count: 1,
-                                                                stride: indexed_stride,
-                                                                bind_tables: pso.tables(),
-                                                                dynamic_buffers: [
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                ],
-                                                            },
-                                                        )
-                                                        .unbind_graphics_pipeline();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                RenderObjectKind::Billboard(_) => {}
-                            }
-                        }
-                    }
-
-                    cmd
-                },
+                |mut cmd| cmd,
             );
 
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            // Deferred COMBINE pass. Combines all deferred attachments.     //
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
             self.graph.add_subpass(
                 &SubpassInfo {
-                    viewport: self.viewport,
+                    viewport: self.data.viewport,
                     color_attachments: deferred_combine_attachments,
                     depth_attachment: None,
                     clear_values: deferred_combine_clear,
@@ -1140,10 +862,10 @@ impl DeferredRenderer {
                     per_obj.mat = material_code.bindless_id.unwrap() as u32;
 
                     cmd = cmd
-                        .bind_graphics_pipeline(self.combine_pso.handle)
-                        .update_viewport(&self.viewport)
+                        .bind_graphics_pipeline(self.psos.combine_pso.handle)
+                        .update_viewport(&self.data.viewport)
                         .draw(&Draw {
-                            bind_tables: self.combine_pso.tables(),
+                            bind_tables: self.psos.combine_pso.tables(),
                             dynamic_buffers: [None, Some(alloc), None, None],
                             instance_count: 1,
                             count: 3,
@@ -1155,9 +877,9 @@ impl DeferredRenderer {
                 },
             );
 
-            self.environment.render(
+            self.subrender.environment.render(
                 &mut self.graph,
-                &self.viewport,
+                &self.data.viewport,
                 final_combine.view,
                 Some(depth.view),
                 camera_handle,
@@ -1170,35 +892,13 @@ impl DeferredRenderer {
 
             self.graph.add_subpass(
                 &SubpassInfo {
-                    viewport: self.viewport,
+                    viewport: self.data.viewport,
                     color_attachments: transparent_attachments,
                     depth_attachment: Some(depth.view),
                     clear_values: transparent_clear,
                     depth_clear: None,
                 },
-                |mut cmd| {
-                    let draw_args = self.scene.draw_args();
-                    let draw_stride = std::mem::size_of::<IndirectCommand>() as u32;
-                    let draw_base = self.scene.non_indexed_draws_per_view() * view_idx as u32;
-                    for draw in &billboard_draws {
-                        let draw_offset = (draw_base + draw.draw_index) * draw_stride;
-                        cmd = cmd
-                            .bind_graphics_pipeline(self.billboard_pso.handle)
-                            .update_viewport(&self.viewport)
-                            .draw_indirect(&DrawIndirect {
-                                vertices: draw.vertex_buffer,
-                                indirect: draw_args,
-                                bind_tables: self.billboard_pso.tables(),
-                                dynamic_buffers: [None, None, None, None],
-                                draw_count: 1,
-                                offset: draw_offset,
-                                stride: draw_stride,
-                            })
-                            .unbind_graphics_pipeline();
-                    }
-
-                    cmd
-                },
+                |mut cmd| cmd,
             );
 
             outputs.push(ViewOutput {
@@ -1210,9 +910,11 @@ impl DeferredRenderer {
 
         let mut wait_sems = Vec::with_capacity(sems.len() + 1);
         wait_sems.extend_from_slice(sems);
-        if let Some(semaphore) = self.skinning_complete {
+        if let Some(semaphore) = skinning_complete {
             wait_sems.push(semaphore);
         }
+
+        wait_sems.push(scene_processing);
 
         self.graph.execute_with(&SubmitInfo {
             wait_sems: &wait_sems,

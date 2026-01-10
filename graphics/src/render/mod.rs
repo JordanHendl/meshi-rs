@@ -1,6 +1,7 @@
 pub mod deferred;
 pub mod environment;
 pub mod forward;
+mod gpu_draw_builder;
 mod skinning;
 mod scene;
 
