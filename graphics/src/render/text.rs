@@ -13,7 +13,7 @@ use dashi::{
 use furikake::PSOBuilderFurikakeExt;
 use noren::{DB, meta::DeviceSDFFont};
 use resource_pool::{Handle, resource_list::ResourceList};
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::{TextInfo, TextObject, TextRenderMode};
 
@@ -280,10 +280,12 @@ impl TextRenderer {
 
     fn upload_text_glyphs(&mut self, ctx: &mut Context, glyphs: &[TextGlyph]) -> usize {
         if glyphs.is_empty() {
+            println!("1");
             return 0;
         }
 
         let Some(buffer) = self.glyph_buffer else {
+            println!("2");
             return 0;
         };
 
@@ -316,10 +318,12 @@ impl TextRenderer {
         let glyph_count = self.upload_text_glyphs(ctx, &glyphs);
 
         let Some(pso) = self.text_pso.as_ref() else {
+            error!("Failed to  build text without a text pso");
             return cmd;
         };
 
         if glyph_count == 0 {
+            error!("Skipping text render due to zero glyph count.");
             return cmd;
         }
 
@@ -394,6 +398,7 @@ impl TextRenderer {
 
         let handles: Vec<_> = self.objects.entries.clone();
         for handle in handles {
+            println!("b");
             let info = {
                 let obj = self.objects.get_ref_mut(handle);
                 obj.dirty = false;
@@ -406,6 +411,8 @@ impl TextRenderer {
                     font: self.fetch_sdf_font(font),
                 },
             };
+
+            println!("a");
             self.draws.push(TextDraw {
                 text: info.text,
                 position: info.position,

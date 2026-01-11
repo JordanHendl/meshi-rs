@@ -969,14 +969,11 @@ impl DeferredRenderer {
                 },
             );
 
-            self.subrender.environment.render(
-                &mut self.graph,
-                &self.data.viewport,
-                final_combine.view,
-                Some(depth.view),
-                camera_handle,
-                delta_time,
-            );
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            // Transparent forward pass.                                      //
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
 
             let mut transparent_attachments: [Option<ImageView>; 8] = [None; 8];
             transparent_attachments[0] = Some(final_combine.view);
@@ -991,6 +988,17 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
+
+                    // TODO this should combine instead
+                    //            self.subrender.environment.render(
+                    //                &mut self.graph,
+                    //                &self.data.viewport,
+                    //                final_combine.view,
+                    //                Some(depth.view),
+                    //                camera_handle,
+                    //                delta_time,
+                    //            );
+
                     let c =
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.data.viewport, cmd);
