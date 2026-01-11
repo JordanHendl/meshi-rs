@@ -251,6 +251,7 @@ impl ForwardRenderer {
         }
 
         self.db = Some(NonNull::new(db).expect("lmao"));
+        self.text.initialize_database(db);
     }
 
     pub fn register_object(

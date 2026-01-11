@@ -2,13 +2,15 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
-use super::text::TextRenderer;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
+use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::AnimationState;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
+use crate::{
+    BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*,
+};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::utils::gpupool::GPUPool;
@@ -302,6 +304,8 @@ impl DeferredRenderer {
         };
 
         let exec = DeferredExecution { cull_queue };
+        let mut text = TextRenderer::new();
+        text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
         Self {
             ctx,
             state,
@@ -314,7 +318,7 @@ impl DeferredRenderer {
             proc,
             subrender,
             psos,
-            text: TextRenderer::new(),
+            text,
         }
     }
 
@@ -522,6 +526,7 @@ impl DeferredRenderer {
         db.import_furikake_state(&mut self.state);
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.db = Some(NonNull::new(db).expect("lmao"));
+        self.text.initialize_database(db);
     }
 
     pub fn register_object(
@@ -771,8 +776,6 @@ impl DeferredRenderer {
             self.proc.draw_builder.reset();
         }
 
-        let _ = self.text.emit_draws();
-
         let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
@@ -901,7 +904,7 @@ impl DeferredRenderer {
                                             indirect: self.proc.draw_builder.draw_list(),
                                             bind_tables: self.psos.standard.tables(),
                                             dynamic_buffers: [None, None, Some(alloc), None],
-                                            draw_count:  self.proc.draw_builder.draw_count(),
+                                            draw_count: self.proc.draw_builder.draw_count(),
                                             ..Default::default()
                                         })
                                         .unbind_graphics_pipeline();
@@ -987,7 +990,13 @@ impl DeferredRenderer {
                     clear_values: transparent_clear,
                     depth_clear: None,
                 },
-                |mut cmd| cmd,
+                |mut cmd| {
+                    let c =
+                        self.text
+                            .render_transparent(self.ctx.as_mut(), &self.data.viewport, cmd);
+
+                    c
+                },
             );
 
             outputs.push(ViewOutput {

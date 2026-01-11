@@ -7,9 +7,9 @@ use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
     AspectMask, Buffer, BufferInfo, BufferUsage, BufferView, CommandQueueInfo2, CommandStream,
-    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Format,
+    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Format,
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
-    SubmitInfo, SubmitInfo2, SubresourceRange, Viewport,
+    SubmitInfo, SubresourceRange, Viewport,
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
 pub type WindowInfo = dashi::WindowInfo;

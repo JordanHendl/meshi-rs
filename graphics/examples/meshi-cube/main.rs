@@ -65,6 +65,20 @@ fn main() {
         100.0, // far
     );
 
+    let sdf_font = db.enumerate_sdf_fonts().into_iter().next();
+    if sdf_font.is_none() {
+        tracing::warn!("No SDF fonts found in database; text will be skipped.");
+    }
+    let _text_handle = engine.register_text(&TextInfo {
+        text: "meshi-cube".to_string(),
+        position: Vec2::new(16.0, 32.0),
+        color: Vec4::ONE,
+        scale: 32.0,
+        render_mode: sdf_font
+            .map(|font| TextRenderMode::Sdf { font })
+            .unwrap_or(TextRenderMode::Plain),
+    });
+
     // Register default cube with the engine as an object.
     let cube = engine
         .register_object(&RenderObjectInfo::Model(

@@ -664,9 +664,7 @@ impl GPUScene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashi::{
-        ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo, SubmitInfo2,
-    };
+    use dashi::{ContextInfo, DeviceFilter, DeviceSelector, DeviceType, QueueType, SubmitInfo2};
     use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
     use glam::Vec3;
 

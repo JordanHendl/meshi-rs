@@ -3,19 +3,13 @@ use std::ptr::NonNull;
 use bento::builder::CSOBuilder;
 use dashi::*;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
-    ShaderResource, UsageBits,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility,
+    ShaderResource,
     cmd::Executable,
     driver::command::Dispatch,
-    utils::gpupool::{DynamicGPUPool, GPUPool},
+    utils::gpupool::GPUPool,
 };
-use furikake::{
-    BindlessState, GPUState,
-    reservations::bindless_transformations::ReservedBindlessTransformations,
-    types::{Camera, Transformation},
-};
-use glam::Mat4;
-use tare::utils::StagedBuffer;
+use furikake::BindlessState;
 
 use super::deferred::PerDrawData;
 
