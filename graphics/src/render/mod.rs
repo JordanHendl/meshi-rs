@@ -1,11 +1,12 @@
 pub mod deferred;
 pub mod environment;
 pub mod forward;
+pub mod text;
 mod gpu_draw_builder;
 mod skinning;
 mod scene;
 
-use crate::{AnimationState, RenderObject, RenderObjectInfo};
+use crate::{AnimationState, RenderObject, RenderObjectInfo, TextInfo, TextObject};
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
@@ -78,6 +79,10 @@ pub trait Renderer {
     );
     fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &Mat4);
     fn object_transform(&self, handle: Handle<RenderObject>) -> Mat4;
+    fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject>;
+    fn release_text(&mut self, handle: Handle<TextObject>);
+    fn set_text(&mut self, handle: Handle<TextObject>, text: &str);
+    fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo);
     fn update(
         &mut self,
         sems: &[Handle<Semaphore>],

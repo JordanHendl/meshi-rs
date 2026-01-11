@@ -1,8 +1,9 @@
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
+use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
+use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
@@ -52,6 +53,7 @@ pub struct ForwardRenderer {
     skinning_complete: Option<Handle<Semaphore>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
+    text: TextRenderer,
 }
 
 struct RenderObjectData {
@@ -402,6 +404,22 @@ impl ForwardRenderer {
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
+    pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.text.register_text(info)
+    }
+
+    pub fn release_text(&mut self, handle: Handle<TextObject>) {
+        self.text.release_text(handle);
+    }
+
+    pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        self.text.set_text(handle, text);
+    }
+
+    pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        self.text.set_text_info(handle, info);
+    }
+
     fn pull_scene(&mut self) {
         todo!()
     }
@@ -419,6 +437,8 @@ impl ForwardRenderer {
             self.dynamic.reset();
             self.environment.reset();
         }
+
+        let _ = self.text.emit_draws();
 
         self.skinning_complete = self.skinning.update(delta_time);
 
@@ -589,6 +609,22 @@ impl Renderer for ForwardRenderer {
 
     fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
         ForwardRenderer::object_transform(self, handle)
+    }
+
+    fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        ForwardRenderer::register_text(self, info)
+    }
+
+    fn release_text(&mut self, handle: Handle<TextObject>) {
+        ForwardRenderer::release_text(self, handle);
+    }
+
+    fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        ForwardRenderer::set_text(self, handle, text);
+    }
+
+    fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        ForwardRenderer::set_text_info(self, handle, info);
     }
 
     fn update(

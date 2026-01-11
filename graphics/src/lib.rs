@@ -173,6 +173,10 @@ impl RenderEngine {
         self.renderer.register_object(info)
     }
 
+    pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.renderer.register_text(info)
+    }
+
     pub fn set_skinned_object_animation(
         &mut self,
         handle: Handle<RenderObject>,
@@ -195,6 +199,18 @@ impl RenderEngine {
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
         todo!()
+    }
+
+    pub fn release_text(&mut self, handle: Handle<TextObject>) {
+        self.renderer.release_text(handle);
+    }
+
+    pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        self.renderer.set_text(handle, text);
+    }
+
+    pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        self.renderer.set_text_info(handle, info);
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {

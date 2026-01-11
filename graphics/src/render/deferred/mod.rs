@@ -2,12 +2,13 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
+use super::text::TextRenderer;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::AnimationState;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
+use crate::{BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::utils::gpupool::GPUPool;
@@ -98,6 +99,7 @@ pub struct DeferredRenderer {
     db: Option<NonNull<DB>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
+    text: TextRenderer,
 }
 
 struct RenderObjectData {
@@ -312,6 +314,7 @@ impl DeferredRenderer {
             proc,
             subrender,
             psos,
+            text: TextRenderer::new(),
         }
     }
 
@@ -712,6 +715,22 @@ impl DeferredRenderer {
             .set_object_transform(obj.scene_handle, transform);
     }
 
+    pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.text.register_text(info)
+    }
+
+    pub fn release_text(&mut self, handle: Handle<TextObject>) {
+        self.text.release_text(handle);
+    }
+
+    pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        self.text.set_text(handle, text);
+    }
+
+    pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        self.text.set_text_info(handle, info);
+    }
+
     fn pull_scene(&mut self) -> Handle<Semaphore> {
         let wait = self.graph.make_semaphore();
         self.exec
@@ -751,6 +770,8 @@ impl DeferredRenderer {
             self.subrender.environment.reset();
             self.proc.draw_builder.reset();
         }
+
+        let _ = self.text.emit_draws();
 
         let skinning_complete = self.proc.skinning.update(delta_time);
 
@@ -1039,6 +1060,22 @@ impl Renderer for DeferredRenderer {
 
     fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
         DeferredRenderer::object_transform(self, handle)
+    }
+
+    fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        DeferredRenderer::register_text(self, info)
+    }
+
+    fn release_text(&mut self, handle: Handle<TextObject>) {
+        DeferredRenderer::release_text(self, handle);
+    }
+
+    fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        DeferredRenderer::set_text(self, handle, text);
+    }
+
+    fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        DeferredRenderer::set_text_info(self, handle, info);
     }
 
     fn update(
