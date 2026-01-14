@@ -64,6 +64,10 @@ fn main() {
         0.1,   // near
         100.0, // far
     );
+    
+    for t in db.enumerate_images() {
+        info!("IMAGE: {}", &t);
+    }
 
     let sdf_font = db.enumerate_sdf_fonts().into_iter().next();
     if sdf_font.is_none() {

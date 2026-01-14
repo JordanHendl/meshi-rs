@@ -9,7 +9,7 @@ meshi-utils = {path = "../utils"}
 resource_pool = {git = "https://github.com/JordanHendl/ResourcePool"}
 dashi = {git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"]}
 #noren = {git = "https://github.com/JordanHendl/noren", rev = "c29f312"}
-noren = {git = "https://github.com/JordanHendl/noren", rev = "6a9e6a5"}
+noren = {git = "https://github.com/JordanHendl/noren", rev = "b3041dd"}
 bento = {git = "https://github.com/JordanHendl/gohan", rev = "471abe6"}
 miso =  {git = "https://github.com/JordanHendl/gohan", rev = "471abe6"}
 tare =  {git = "https://github.com/JordanHendl/gohan", rev = "471abe6"}

@@ -1543,7 +1543,7 @@ dependencies = [
  "meshi-graphics",
  "meshi-physics",
  "meshi-utils",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
  "resource_pool",
  "serial_test",
  "tempfile",
@@ -1560,7 +1560,7 @@ dependencies = [
  "glam 0.29.3",
  "libc",
  "meshi-ffi-structs",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
  "resource_pool",
  "rodio",
  "serial_test",
@@ -1593,7 +1593,7 @@ dependencies = [
  "meshi-ffi-structs",
  "meshi-utils",
  "miso",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
  "resource_pool",
  "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "tracing",
@@ -1839,7 +1839,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren?rev=6a9e6a5#6a9e6a58d22815a21d12698bcb81d59f90ca91a7"
+source = "git+https://github.com/JordanHendl/noren?rev=b3041dd#b3041dd60686379a05c971f447aa69c875a42add"
 dependencies = [
  "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "bincode",
@@ -1854,6 +1854,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "tracing",
  "unzip3",
  "winit",
