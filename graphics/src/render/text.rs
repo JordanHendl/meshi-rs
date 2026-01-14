@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ptr::NonNull};
 
-use bento::builder::PSOBuilder;
+use bento::builder::{AttachmentDesc, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use bytemuck::{Pod, Zeroable};
 use dashi::cmd::{Executable, PendingGraphics};
@@ -162,6 +162,10 @@ impl TextRenderer {
             )
             .add_reserved_table_variables(state)
             .unwrap()
+            .add_depth_target(AttachmentDesc {
+                format: Format::D24S8,
+                samples: sample_count,
+            })
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],

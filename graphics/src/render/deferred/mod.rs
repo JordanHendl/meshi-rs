@@ -738,6 +738,7 @@ impl DeferredRenderer {
 
     fn pull_scene(&mut self) -> Handle<Semaphore> {
         let wait = self.graph.make_semaphore();
+        let state_update = self.state.update().unwrap();
         self.exec
             .cull_queue
             .record(|c| {
@@ -767,6 +768,7 @@ impl DeferredRenderer {
         views: &[Handle<Camera>],
         delta_time: f32,
     ) -> Vec<ViewOutput> {
+        dbg!("DEBUG NEW LINE");
         if views.is_empty() {
             return Vec::new();
         }
