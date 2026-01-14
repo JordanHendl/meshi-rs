@@ -284,12 +284,10 @@ impl TextRenderer {
 
     fn upload_text_glyphs(&mut self, ctx: &mut Context, glyphs: &[TextGlyph]) -> usize {
         if glyphs.is_empty() {
-            println!("1");
             return 0;
         }
 
         let Some(buffer) = self.glyph_buffer else {
-            println!("2");
             return 0;
         };
 
@@ -402,7 +400,6 @@ impl TextRenderer {
 
         let handles: Vec<_> = self.objects.entries.clone();
         for handle in handles {
-            println!("b");
             let info = {
                 let obj = self.objects.get_ref_mut(handle);
                 obj.dirty = false;
@@ -416,7 +413,6 @@ impl TextRenderer {
                 },
             };
 
-            println!("a");
             self.draws.push(TextDraw {
                 text: info.text,
                 position: info.position,
