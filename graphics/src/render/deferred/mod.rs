@@ -522,8 +522,8 @@ impl DeferredRenderer {
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
-        db.import_dashi_context(&mut self.ctx);
-        db.import_furikake_state(&mut self.state);
+        db.import_dashi_context(self.ctx.as_mut());
+        db.import_furikake_state(self.state.as_mut());
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.db = Some(NonNull::new(db).expect("lmao"));
         self.text.initialize_database(db);
@@ -738,7 +738,6 @@ impl DeferredRenderer {
 
     fn pull_scene(&mut self) -> Handle<Semaphore> {
         let wait = self.graph.make_semaphore();
-        let state_update = self.state.update().unwrap();
         self.exec
             .cull_queue
             .record(|c| {
@@ -768,7 +767,6 @@ impl DeferredRenderer {
         views: &[Handle<Camera>],
         delta_time: f32,
     ) -> Vec<ViewOutput> {
-        dbg!("DEBUG NEW LINE");
         if views.is_empty() {
             return Vec::new();
         }

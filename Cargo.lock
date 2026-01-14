@@ -198,7 +198,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=cdddbd5#cdddbd5301fe52c99d1a5d55a368f8780164d54d"
+source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
 dependencies = [
  "bincode",
  "clap",
@@ -950,12 +950,12 @@ dependencies = [
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=cdddbd5#cdddbd5301fe52c99d1a5d55a368f8780164d54d"
+source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "dashi",
  "glam 0.29.3",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
 ]
 
 [[package]]
@@ -1543,7 +1543,7 @@ dependencies = [
  "meshi-graphics",
  "meshi-physics",
  "meshi-utils",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=48a688b)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
  "resource_pool",
  "serial_test",
  "tempfile",
@@ -1560,7 +1560,7 @@ dependencies = [
  "glam 0.29.3",
  "libc",
  "meshi-ffi-structs",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=48a688b)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
  "resource_pool",
  "rodio",
  "serial_test",
@@ -1584,18 +1584,18 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "base64 0.22.1",
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "bitflags 2.10.0",
  "bytemuck",
  "dashi",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "glam 0.29.3",
  "meshi-ffi-structs",
  "meshi-utils",
  "miso",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=48a688b)",
+ "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=6a9e6a5)",
  "resource_pool",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "tracing",
  "tracing-subscriber",
  "winit",
@@ -1666,9 +1666,9 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=cdddbd5#cdddbd5301fe52c99d1a5d55a368f8780164d54d"
+source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "dashi",
 ]
 
@@ -1839,14 +1839,14 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren?rev=48a688b#48a688bd547b68690d1e6f0239ad7fbda756f54a"
+source = "git+https://github.com/JordanHendl/noren?rev=6a9e6a5#6a9e6a58d22815a21d12698bcb81d59f90ca91a7"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "bincode",
  "bytemuck",
  "dashi",
  "fontdue",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "glam 0.29.3",
  "gltf",
  "image 0.24.9",
@@ -2693,9 +2693,9 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=cdddbd5#cdddbd5301fe52c99d1a5d55a368f8780164d54d"
+source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=cdddbd5)",
+ "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
  "dashi",
  "glam 0.24.2",
 ]
