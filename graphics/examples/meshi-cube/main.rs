@@ -73,7 +73,7 @@ fn main() {
         text: "meshi-cube".to_string(),
         position: Vec2::new(16.0, 32.0),
         color: Vec4::ONE,
-        scale: 1.0,
+        scale: 2.0,
         render_mode: sdf_font
             .map(|font| TextRenderMode::Sdf { font })
             .unwrap_or(TextRenderMode::Plain),
