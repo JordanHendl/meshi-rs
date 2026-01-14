@@ -12,7 +12,7 @@ struct FSInput {
 float4 main(FSInput input) : SV_Target {
     const float4 sample = meshi_bindless_textures[input.texture_id]
         .Sample(meshi_bindless_samplers[input.texture_id], input.tex_coords);
-    const float distance = sample.r;
+    const float distance = sample.a;
     const float width = fwidth(distance);
     const float alpha = smoothstep(0.5 - width, 0.5 + width, distance);
     return float4(input.color.rgb, input.color.a * alpha);

@@ -34,9 +34,9 @@ VSOutput main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
     const uint indices[6] = {0, 1, 2, 2, 3, 0};
     const float2 corner = corners[indices[vertex_id]];
 
-    const float2 position = glyph.origin + glyph.size * corner;
+    float2 position = glyph.origin + glyph.size * corner;
     const float2 uv = lerp(glyph.uv_min, glyph.uv_max, corner);
-
+    position.y = -position.y;
     output.position = float4(position, 0.0, 1.0);
     output.tex_coords = uv;
     output.color = glyph.color;
