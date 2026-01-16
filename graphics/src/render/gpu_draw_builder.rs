@@ -120,7 +120,7 @@ impl GPUDrawBuilder {
                 byte_size: (std::mem::size_of::<IndexedIndirectCommand>() as u32
                     * info.limits.max_num_objects) as u32,
                 visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::STORAGE,
+                usage: BufferUsage::STORAGE | BufferUsage::INDIRECT,
                 initial_data: None,
             })
             .unwrap();

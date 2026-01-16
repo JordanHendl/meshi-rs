@@ -6,7 +6,7 @@ use bytemuck::{Pod, Zeroable};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::Draw;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Format,
+    Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, DepthInfo, Format,
     GraphicsPipelineDetails, Handle as DashiHandle, IndexedResource, MemoryVisibility, SampleCount,
     ShaderResource, ShaderType, Viewport,
 };
@@ -170,7 +170,10 @@ impl TextRenderer {
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
                 sample_count,
-                depth_test: None,
+                depth_test: Some(DepthInfo {
+                    should_test: false,
+                    should_write: false,
+                }),
                 ..Default::default()
             })
             .build(ctx)
