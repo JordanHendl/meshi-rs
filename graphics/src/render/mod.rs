@@ -12,7 +12,7 @@ use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::DB;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct RendererInfo {
     pub headless: bool,
@@ -30,6 +30,7 @@ pub struct FrameTimer {
     total: Duration,
     frames: u64,
     report_every: u64,
+    last_frame: Option<Instant>,
 }
 
 impl FrameTimer {
@@ -38,10 +39,24 @@ impl FrameTimer {
             total: Duration::ZERO,
             frames: 0,
             report_every,
+            last_frame: None,
         }
     }
 
-    pub fn record(&mut self, duration: Duration) -> Option<(f64, u64)> {
+    pub fn start(&mut self) {
+        self.last_frame = Some(Instant::now());
+    }
+
+    pub fn record_frame(&mut self) -> Option<(f64, u64)> {
+        let now = Instant::now();
+        let Some(last_frame) = self.last_frame.replace(now) else {
+            return None;
+        };
+        let duration = now.saturating_duration_since(last_frame);
+        self.record_duration(duration)
+    }
+
+    pub fn record_duration(&mut self, duration: Duration) -> Option<(f64, u64)> {
         self.total += duration;
         self.frames += 1;
 

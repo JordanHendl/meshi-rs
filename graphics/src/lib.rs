@@ -21,7 +21,6 @@ use render::deferred::DeferredRenderer;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
 use tracing::{info, warn};
@@ -261,7 +260,6 @@ impl RenderEngine {
     }
 
     pub fn update(&mut self, delta_time: f32) {
-        let frame_start = Instant::now();
         self.publish_events();
         let mut views = Vec::new();
         let mut seen = HashSet::new();
@@ -352,6 +350,7 @@ impl RenderEngine {
                 }
             }
         });
+        self.frame_timer.record_frame();
     }
 
     pub fn average_frame_time_ms(&self) -> Option<f64> {

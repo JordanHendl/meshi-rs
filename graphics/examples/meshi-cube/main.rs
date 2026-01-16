@@ -4,8 +4,8 @@ use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use tracing::info;
 use std::env::*;
+use tracing::info;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
@@ -64,14 +64,14 @@ fn main() {
         0.1,   // near
         100.0, // far
     );
-    
+
     let sdf_font = db.enumerate_sdf_fonts().into_iter().next();
     if sdf_font.is_none() {
         tracing::warn!("No SDF fonts found in database; text will be skipped.");
     }
-    let _text_handle = engine.register_text(&TextInfo {
-        text: "meshi-cube".to_string(),
-        position: Vec2::new(16.0, 32.0),
+    let text_handle = engine.register_text(&TextInfo {
+        text: "avg fps: --".to_string(),
+        position: Vec2::new(3.0, 3.0),
         color: Vec4::ONE,
         scale: 2.0,
         render_mode: sdf_font
@@ -128,11 +128,10 @@ fn main() {
     let angular_velocity = 2.0f32;
 
     while data.running {
-        if let Some(avg_ms) =  engine.average_frame_time_ms() {
-            info!(
-                "Average frame time: {:.2} ms",
-                avg_ms
-            );
+        if let Some(avg_ms) = engine.average_frame_time_ms() {
+            let avg_fps = 1000.0 / avg_ms;
+            let text = format!("avg fps: {:.1}", avg_fps);
+            engine.set_text(text_handle, &text);
         }
         let now = timer.elapsed_seconds_f32();
         let mut dt = now - last_time;
