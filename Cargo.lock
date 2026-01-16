@@ -198,24 +198,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
-dependencies = [
- "bincode",
- "clap",
- "dashi",
- "regex",
- "rspirv",
- "rspirv-reflect",
- "serde",
- "serde_json",
- "shaderc",
- "thiserror",
-]
-
-[[package]]
-name = "bento"
-version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#395ba43923c153378658e92e44fec33096d07234"
+source = "git+https://github.com/JordanHendl/gohan#abbfe7be884e2fdf60351f521e72d624b502f7f4"
 dependencies = [
  "bincode",
  "clap",
@@ -953,23 +936,12 @@ dependencies = [
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
+source = "git+https://github.com/JordanHendl/gohan#abbfe7be884e2fdf60351f521e72d624b502f7f4"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "bento",
  "dashi",
  "glam 0.29.3",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
-]
-
-[[package]]
-name = "furikake"
-version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#395ba43923c153378658e92e44fec33096d07234"
-dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan)",
- "dashi",
- "glam 0.29.3",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan)",
+ "tare",
 ]
 
 [[package]]
@@ -1546,7 +1518,7 @@ dependencies = [
  "meshi-graphics",
  "meshi-physics",
  "meshi-utils",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
+ "noren",
  "resource_pool",
  "serial_test",
  "tempfile",
@@ -1563,7 +1535,7 @@ dependencies = [
  "glam 0.29.3",
  "libc",
  "meshi-ffi-structs",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
+ "noren",
  "resource_pool",
  "rodio",
  "serial_test",
@@ -1587,18 +1559,18 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "base64 0.22.1",
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "bento",
  "bitflags 2.10.0",
  "bytemuck",
  "dashi",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "furikake",
  "glam 0.29.3",
  "meshi-ffi-structs",
  "meshi-utils",
  "miso",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren?rev=b3041dd)",
+ "noren",
  "resource_pool",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "tare",
  "tracing",
  "tracing-subscriber",
  "winit",
@@ -1632,10 +1604,10 @@ dependencies = [
 name = "meshi-utils"
 version = "0.1.0"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan)",
+ "bento",
  "dashi",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan)",
- "noren 0.1.0 (git+https://github.com/JordanHendl/noren)",
+ "furikake",
+ "noren",
 ]
 
 [[package]]
@@ -1669,9 +1641,9 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
+source = "git+https://github.com/JordanHendl/gohan#abbfe7be884e2fdf60351f521e72d624b502f7f4"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "bento",
  "dashi",
 ]
 
@@ -1842,14 +1814,14 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren?rev=b3041dd#b3041dd60686379a05c971f447aa69c875a42add"
+source = "git+https://github.com/JordanHendl/noren#89f904a66e03c0b04f47e0b7838d229907ca4cad"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "bento",
  "bincode",
  "bytemuck",
  "dashi",
  "fontdue",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
+ "furikake",
  "glam 0.29.3",
  "gltf",
  "image 0.24.9",
@@ -1857,30 +1829,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "tare 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
- "tracing",
- "unzip3",
- "winit",
-]
-
-[[package]]
-name = "noren"
-version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#6473a1cff107a8bf8fca476521bbbcc1acaa8d26"
-dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan)",
- "bincode",
- "bytemuck",
- "dashi",
- "fontdue",
- "furikake 0.1.0 (git+https://github.com/JordanHendl/gohan)",
- "glam 0.29.3",
- "gltf",
- "image 0.24.9",
- "memmap2 0.9.9",
- "serde",
- "serde_json",
- "serde_yaml",
+ "tare",
  "tracing",
  "unzip3",
  "winit",
@@ -2697,19 +2646,9 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan?rev=471abe6#471abe642425f64b15d06f80d6d1c5cf68fd7205"
+source = "git+https://github.com/JordanHendl/gohan#abbfe7be884e2fdf60351f521e72d624b502f7f4"
 dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan?rev=471abe6)",
- "dashi",
- "glam 0.24.2",
-]
-
-[[package]]
-name = "tare"
-version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#395ba43923c153378658e92e44fec33096d07234"
-dependencies = [
- "bento 0.1.0 (git+https://github.com/JordanHendl/gohan)",
+ "bento",
  "dashi",
  "glam 0.24.2",
 ]
