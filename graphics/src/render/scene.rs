@@ -22,6 +22,20 @@ pub struct SceneObjectInfo {
     pub local: Mat4,
     pub global: Mat4,
     pub scene_mask: u32,
+    pub scene_type: SceneNodeType,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SceneNodeType {
+    Renderable = 0,
+    SkipSubtree = 1,
+}
+
+impl Default for SceneNodeType {
+    fn default() -> Self {
+        Self::Renderable
+    }
 }
 
 #[repr(C)]
@@ -29,6 +43,7 @@ pub struct SceneObject {
     pub local_transform: Mat4,
     pub world_transform: Mat4,
     pub scene_mask: u32,
+    pub scene_type: u32,
     pub transformation: u32,
     pub parent_slot: u32,
     pub dirty: u32,
@@ -444,6 +459,7 @@ impl GPUScene {
                 local_transform: info.local,
                 world_transform: info.global,
                 scene_mask: info.scene_mask,
+                scene_type: info.scene_type as u32,
                 transformation: Self::pack_handle(transformation),
                 parent_slot: u32::MAX,
                 active: 1,
@@ -707,6 +723,7 @@ mod tests {
             local,
             global,
             scene_mask,
+            scene_type: SceneNodeType::Renderable,
         }
     }
 
@@ -723,6 +740,7 @@ mod tests {
 
         let stored = scene.data.objects_to_process.get_ref(handle).unwrap();
         assert_eq!(stored.scene_mask, info.scene_mask);
+        assert_eq!(stored.scene_type, info.scene_type as u32);
         assert_eq!(stored.active, 1);
         assert_eq!(stored.local_transform, info.local);
         assert_eq!(stored.world_transform, info.global);

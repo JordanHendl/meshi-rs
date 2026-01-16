@@ -537,6 +537,7 @@ impl DeferredRenderer {
             local: Default::default(),
             global: Default::default(),
             scene_mask: PassMask::MAIN_COLOR as u32,
+            scene_type: SceneNodeType::Renderable,
         });
 
         match info {
