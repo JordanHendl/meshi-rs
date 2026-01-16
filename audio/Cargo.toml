@@ -13,7 +13,9 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.0"
 base64 = "0.22.1"
 rodio = { version = "0.17" }
-noren = {git = "https://github.com/JordanHendl/noren"}
+#noren = {git = "https://github.com/JordanHendl/noren", rev = "c29f312"}
+noren = {git = "https://github.com/JordanHendl/noren", rev = "b3041dd"}
+#noren = {git = "https://github.com/JordanHendl/noren"}
 
 [dev-dependencies]
 tempfile = "3"

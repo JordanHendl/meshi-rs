@@ -7,9 +7,9 @@ use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
     AspectMask, Buffer, BufferInfo, BufferUsage, BufferView, CommandQueueInfo2, CommandStream,
-    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Filter, Format,
+    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Format,
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
-    SubmitInfo, SubmitInfo2, SubresourceRange, Viewport,
+    SubmitInfo, SubresourceRange, Viewport,
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
 pub type WindowInfo = dashi::WindowInfo;
@@ -173,6 +173,10 @@ impl RenderEngine {
         self.renderer.register_object(info)
     }
 
+    pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.renderer.register_text(info)
+    }
+
     pub fn set_skinned_object_animation(
         &mut self,
         handle: Handle<RenderObject>,
@@ -195,6 +199,18 @@ impl RenderEngine {
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
         todo!()
+    }
+
+    pub fn release_text(&mut self, handle: Handle<TextObject>) {
+        self.renderer.release_text(handle);
+    }
+
+    pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        self.renderer.set_text(handle, text);
+    }
+
+    pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        self.renderer.set_text_info(handle, info);
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
@@ -336,13 +352,6 @@ impl RenderEngine {
                 }
             }
         });
-
-        if let Some((avg_ms, frames)) = self.frame_timer.record(frame_start.elapsed()) {
-            info!(
-                "Average frame time: {:.2} ms over {} frame(s).",
-                avg_ms, frames
-            );
-        }
     }
 
     pub fn average_frame_time_ms(&self) -> Option<f64> {

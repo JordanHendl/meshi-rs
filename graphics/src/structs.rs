@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec2, Vec4};
 use glam::*;
 use dashi::SampleCount;
 use furikake::types::*;
@@ -21,6 +21,41 @@ pub enum RenderObjectInfo {
     Billboard(BillboardInfo),
 }
 pub struct RenderObject;
+
+pub struct TextObject;
+
+#[derive(Clone, Debug)]
+pub enum TextRenderMode {
+    Plain,
+    Sdf { font: String },
+}
+
+impl Default for TextRenderMode {
+    fn default() -> Self {
+        Self::Plain
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TextInfo {
+    pub text: String,
+    pub position: Vec2,
+    pub color: Vec4,
+    pub scale: f32,
+    pub render_mode: TextRenderMode,
+}
+
+impl Default for TextInfo {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            position: Vec2::ZERO,
+            color: Vec4::ONE,
+            scale: 1.0,
+            render_mode: TextRenderMode::Plain,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SkinnedModelInfo {

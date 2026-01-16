@@ -1,12 +1,13 @@
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
+use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, render::scene::*};
+use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
-use dashi::structs::{IndirectCommand, IndexedIndirectCommand};
-use driver::command::{DrawIndirect, DrawIndexedIndirect};
+use driver::command::{DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
@@ -52,12 +53,13 @@ pub struct ForwardRenderer {
     skinning_complete: Option<Handle<Semaphore>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
+    text: TextRenderer,
 }
 
 struct RenderObjectData {
     kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
-    draw_range: SceneDrawRange,
+    draw_range: RenderObjectKind,
 }
 
 enum RenderObjectKind {
@@ -148,106 +150,7 @@ impl ForwardRenderer {
     }
 
     pub fn new(info: &RendererInfo) -> Self {
-        let device = DeviceSelector::new()
-            .unwrap()
-            .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
-            .unwrap();
-        let mut ctx = if info.headless {
-            Box::new(
-                Context::headless(&ContextInfo {
-                    device,
-                    ..Default::default()
-                })
-                .expect(""),
-            )
-        } else {
-            Box::new(
-                Context::new(&ContextInfo {
-                    device,
-                    ..Default::default()
-                })
-                .expect(""),
-            )
-        };
-
-        CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
-        let mut state = Box::new(BindlessState::new(&mut ctx));
-        let scene = GPUScene::new(
-            &GPUSceneInfo {
-                name: "[MESHI] Forward Renderer Scene",
-                ctx: ctx.as_mut(),
-                draw_bins: &[SceneBin {
-                    id: 0,
-                    mask: PassMask::MAIN_COLOR as u32,
-                }],
-                ..Default::default()
-            },
-            state.as_mut(),
-        );
-
-        let mut alloc = Box::new(TransientAllocator::new(ctx.as_mut()));
-
-        let dynamic = ctx
-            .make_dynamic_allocator(&DynamicAllocatorInfo {
-                ..Default::default()
-            })
-            .expect("Unable to create dynamic allocator!");
-
-        let billboard_pso = Self::build_billboard_pipeline(
-            ctx.as_mut(),
-            state.as_mut(),
-            scene.per_instance_buffer(),
-            info.sample_count,
-        );
-
-        let environment = EnvironmentRenderer::new(
-            ctx.as_mut(),
-            state.as_mut(),
-            EnvironmentRendererInfo {
-                color_format: Format::BGRA8,
-                sample_count: info.sample_count,
-                use_depth: true,
-                skybox: super::environment::sky::SkyboxInfo::default(),
-                ocean: super::environment::ocean::OceanInfo::default(),
-                terrain: super::environment::terrain::TerrainInfo::default(),
-            },
-        );
-
-        let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
-
-        let cull_queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[CULL]",
-                parent: None,
-                queue_type: QueueType::Graphics,
-            })
-            .expect("Failed to make cull command queue");
-
-        let skinning = SkinningDispatcher::new(ctx.as_mut(), state.as_ref());
-
-        info!(
-            "Initialized Forward Renderer with dimensions [{}, {}]",
-            info.initial_viewport.area.w, info.initial_viewport.area.h
-        );
-        Self {
-            ctx,
-            state,
-            scene,
-            graph,
-            db: None,
-            environment,
-            dynamic,
-            pipelines: Default::default(),
-            billboard_pso,
-            objects: Default::default(),
-            scene_lookup: Default::default(),
-            viewport: info.initial_viewport,
-            sample_count: info.sample_count,
-            cull_queue,
-            skinning,
-            skinning_complete: None,
-            alloc,
-        }
+        todo!()
     }
 
     pub fn alloc(&mut self) -> &mut TransientAllocator {
@@ -255,199 +158,78 @@ impl ForwardRenderer {
     }
 
     fn build_pipeline(&mut self, mat: &HostMaterial) -> PSO {
-        let ctx: *mut Context = self.ctx.as_mut();
-
-        let mut defines = Vec::new();
-
-        if mat.material.render_mask & PassMask::MAIN_COLOR as u32 > 0 {
-            defines.push("-DLMAO".to_string());
-        }
-
-        let shaders = miso::stdforward(&defines);
-        let per_obj_resource =
-            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
-
-        let mut state = PSOBuilder::new()
-            .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
-            .set_attachment_format(0, Format::BGRA8)
-            .add_table_variable_with_resources(
-                "per_obj_ssbo",
-                vec![IndexedResource {
-                    resource: per_obj_resource,
-                    slot: 0,
-                }],
-            );
-
-        state = state
-            .add_reserved_table_variables(self.state.as_mut())
-            .unwrap();
-
-        state = state.add_depth_target(AttachmentDesc {
-            format: Format::D24S8,
-            samples: self.sample_count,
-        });
-
-        let s = state
-            .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 1],
-                sample_count: self.sample_count,
-                depth_test: Some(DepthInfo {
-                    should_test: true,
-                    should_write: true,
-                }),
-                ..Default::default()
-            })
-            .build(unsafe { &mut (*ctx) })
-            .expect("Failed to build material!");
-
-        assert!(s.bind_table[0].is_some());
-        assert!(s.bind_table[1].is_some());
-
-        self.state.register_pso_tables(&s);
-        s
+        todo!()
+        //        let ctx: *mut Context = self.ctx.as_mut();
+        //
+        //        let mut defines = Vec::new();
+        //
+        //        if mat.material.render_mask & PassMask::MAIN_COLOR as u32 > 0 {
+        //            defines.push("-DLMAO".to_string());
+        //        }
+        //
+        //        let shaders = miso::stdforward(&defines);
+        //        let per_obj_resource =
+        //            ShaderResource::StorageBuffer(self.scene.per_instance_buffer().into());
+        //
+        //        let mut state = PSOBuilder::new()
+        //            .vertex_compiled(Some(shaders[0].clone()))
+        //            .fragment_compiled(Some(shaders[1].clone()))
+        //            .set_attachment_format(0, Format::BGRA8)
+        //            .add_table_variable_with_resources(
+        //                "per_obj_ssbo",
+        //                vec![IndexedResource {
+        //                    resource: per_obj_resource,
+        //                    slot: 0,
+        //                }],
+        //            );
+        //
+        //        state = state
+        //            .add_reserved_table_variables(self.state.as_mut())
+        //            .unwrap();
+        //
+        //        state = state.add_depth_target(AttachmentDesc {
+        //            format: Format::D24S8,
+        //            samples: self.sample_count,
+        //        });
+        //
+        //        let s = state
+        //            .set_details(GraphicsPipelineDetails {
+        //                color_blend_states: vec![Default::default(); 1],
+        //                sample_count: self.sample_count,
+        //                depth_test: Some(DepthInfo {
+        //                    should_test: true,
+        //                    should_write: true,
+        //                }),
+        //                ..Default::default()
+        //            })
+        //            .build(unsafe { &mut (*ctx) })
+        //            .expect("Failed to build material!");
+        //
+        //        assert!(s.bind_table[0].is_some());
+        //        assert!(s.bind_table[1].is_some());
+        //
+        //        self.state.register_pso_tables(&s);
+        //        s
     }
 
     fn allocate_billboard_material(&mut self, texture_id: u32) -> Handle<Material> {
-        let mut material_handle = Handle::default();
-        self.state
-            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
-                material_handle = materials.add_material();
-                let material = materials.material_mut(material_handle);
-                *material = Material::default();
-                material.base_color_texture_id = texture_id as u32;
-                material.normal_texture_id = u32::MAX;
-                material.metallic_roughness_texture_id = u32::MAX;
-                material.occlusion_texture_id = u32::MAX;
-                material.emissive_texture_id = u32::MAX;
-            })
-            .expect("Failed to allocate billboard material");
-
-        material_handle
+        todo!()
     }
 
     fn update_billboard_material_texture(&mut self, material: Handle<Material>, texture_id: u32) {
-        self.state
-            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
-                let material = materials.material_mut(material);
-                material.base_color_texture_id = texture_id as u32;
-            })
-            .expect("Failed to update billboard material texture");
+        todo!()
     }
 
     fn create_billboard_data(&mut self, mut info: BillboardInfo) -> BillboardData {
-        let vertices = Self::billboard_vertices(Vec3::ZERO, Vec2::ONE, Vec4::ONE);
-        let vertex_buffer = self
-            .ctx
-            .make_buffer(&BufferInfo {
-                debug_name: "[MESHI] Billboard Vertex Buffer",
-                byte_size: (std::mem::size_of::<BillboardVertex>() * vertices.len()) as u32,
-                visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::VERTEX,
-                initial_data: Some(unsafe { vertices.align_to::<u8>().1 }),
-            })
-            .expect("Failed to create billboard vertex buffer");
-
-        let mut owns_material = false;
-        if info.material.is_none() {
-            info.material = Some(self.allocate_billboard_material(info.texture_id));
-            owns_material = true;
-        }
-
-        BillboardData {
-            info,
-            vertex_buffer,
-            owns_material,
-        }
+        todo!()
     }
 
     fn billboard_vertices(center: Vec3, size: Vec2, color: Vec4) -> [BillboardVertex; 6] {
-        let offsets = [
-            Vec2::new(-0.5, -0.5),
-            Vec2::new(0.5, -0.5),
-            Vec2::new(0.5, 0.5),
-            Vec2::new(-0.5, 0.5),
-        ];
-        let tex_coords = [
-            Vec2::new(0.0, 0.0),
-            Vec2::new(1.0, 0.0),
-            Vec2::new(1.0, 1.0),
-            Vec2::new(0.0, 1.0),
-        ];
-
-        let color = color.to_array();
-        let center = center.to_array();
-        let size = size.to_array();
-
-        [
-            BillboardVertex {
-                center,
-                offset: offsets[0].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[1].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[1].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[2].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[2].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[3].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[3].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[0].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-        ]
+        todo!()
     }
 
     fn update_billboard_vertices(&mut self, billboard: &BillboardData, transform: Mat4) {
-        let center = transform.transform_point3(Vec3::ZERO);
-        let mut size = Vec2::new(
-            transform.transform_vector3(Vec3::X).length(),
-            transform.transform_vector3(Vec3::Y).length(),
-        );
-
-        if size.x <= 0.0 {
-            size.x = 1.0;
-        }
-        if size.y <= 0.0 {
-            size.y = 1.0;
-        }
-
-        let vertices = Self::billboard_vertices(center, size, Vec4::ONE);
-        let mapped = self
-            .ctx
-            .map_buffer_mut::<BillboardVertex>(BufferView::new(billboard.vertex_buffer))
-            .expect("Failed to map billboard vertex buffer");
-        mapped[..vertices.len()].copy_from_slice(&vertices);
-        self.ctx
-            .unmap_buffer(billboard.vertex_buffer)
-            .expect("Failed to unmap billboard vertex buffer");
+        todo!()
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -469,128 +251,14 @@ impl ForwardRenderer {
         }
 
         self.db = Some(NonNull::new(db).expect("lmao"));
+        self.text.initialize_database(db);
     }
 
     pub fn register_object(
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
-        let scene_handle = self.scene.register_object(&SceneObjectInfo {
-            local: Default::default(),
-            global: Default::default(),
-            scene_mask: PassMask::MAIN_COLOR as u32,
-        });
-
-        match info {
-            RenderObjectInfo::Model(m) => {
-                let draws: Vec<SceneIndexedDrawInfo> = m
-                    .meshes
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
-                        mesh_id: idx as u32,
-                        material_id: mesh
-                            .material
-                            .as_ref()
-                            .and_then(|material| material.furikake_material_handle)
-                            .map(GPUScene::pack_handle)
-                            .unwrap_or(u32::MAX),
-                        per_obj_joints_id: u32::MAX,
-                        index_count: mesh.geometry.base.index_count.unwrap(),
-                        first_index: 0,
-                        vertex_offset: 0,
-                    })
-                    .collect();
-                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    Handle::default(),
-                    Handle::default(),
-                );
-                let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::Model(m.clone()),
-                    scene_handle,
-                    draw_range,
-                });
-
-                self.scene_lookup.insert(scene_handle.slot, h);
-
-                Ok(to_handle(h))
-            }
-            RenderObjectInfo::SkinnedModel(skinned) => {
-                let (skinning_handle, skinning_info) =
-                    self.skinning.register(skinned.clone(), self.state.as_mut());
-                let skinned_data = SkinnedRenderData {
-                    model: skinned.model.clone(),
-                    skinning: skinning_info,
-                    skinning_handle,
-                };
-                let draws: Vec<SceneIndexedDrawInfo> = skinned_data
-                    .model
-                    .meshes
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, mesh)| SceneIndexedDrawInfo {
-                        mesh_id: idx as u32,
-                        material_id: mesh
-                            .material
-                            .as_ref()
-                            .and_then(|material| material.furikake_material_handle)
-                            .map(GPUScene::pack_handle)
-                            .unwrap_or(u32::MAX),
-                        per_obj_joints_id: GPUScene::pack_handle(skinned_data.skinning.joints),
-                        index_count: mesh.geometry.base.index_count.unwrap(),
-                        first_index: 0,
-                        vertex_offset: 0,
-                    })
-                    .collect();
-                let draw_range = self.scene.set_indexed_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    skinned_data.skinning.skeleton,
-                    skinned_data.skinning.animation_state,
-                );
-                let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::SkinnedModel(skinned_data),
-                    scene_handle,
-                    draw_range,
-                });
-
-                self.scene_lookup.insert(scene_handle.slot, h);
-
-                Ok(to_handle(h))
-            }
-            RenderObjectInfo::Billboard(billboard) => {
-                let billboard = self.create_billboard_data(billboard.clone());
-                let draws = [SceneDrawInfo {
-                    mesh_id: 0,
-                    material_id: billboard
-                        .info
-                        .material
-                        .map(GPUScene::pack_handle)
-                        .unwrap_or(u32::MAX),
-                    per_obj_joints_id: u32::MAX,
-                    vertex_count: 6,
-                    first_vertex: 0,
-                }];
-                let draw_range = self.scene.set_draws(scene_handle, &draws);
-                self.scene.set_object_skinning_info(
-                    scene_handle,
-                    Handle::default(),
-                    Handle::default(),
-                );
-                let h = self.objects.push(RenderObjectData {
-                    kind: RenderObjectKind::Billboard(billboard),
-                    scene_handle,
-                    draw_range,
-                });
-
-                self.scene_lookup.insert(scene_handle.slot, h);
-
-                Ok(to_handle(h))
-            }
-            RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
-        }
+        todo!()
     }
 
     pub fn set_skinned_animation_state(
@@ -660,75 +328,7 @@ impl ForwardRenderer {
         handle: Handle<RenderObject>,
         material: Option<Handle<Material>>,
     ) {
-        if !handle.valid() {
-            warn!("Attempted to update billboard material on invalid handle.");
-            return;
-        }
-
-        if !self.objects.entries.iter().any(|h| h.slot == handle.slot) {
-            warn!(
-                "Failed to update billboard material for object {}",
-                handle.slot
-            );
-            return;
-        }
-
-        let (owned_material, texture_id) = {
-            let obj = self.objects.get_ref_mut(from_handle(handle));
-            match &mut obj.kind {
-                RenderObjectKind::Billboard(billboard) => {
-                    let owned_material = if billboard.owns_material {
-                        billboard.owns_material = false;
-                        billboard.info.material
-                    } else {
-                        None
-                    };
-                    billboard.info.material = material;
-                    (owned_material, billboard.info.texture_id)
-                }
-                _ => {
-                    warn!("Attempted to update billboard material on non-billboard object.");
-                    return;
-                }
-            }
-        };
-
-        if let Some(existing) = owned_material {
-            self.state
-                .reserved_mut::<ReservedBindlessMaterials, _>(
-                    "meshi_bindless_materials",
-                    |materials| {
-                        materials.remove_material(existing);
-                    },
-                )
-                .expect("Failed to remove billboard material");
-        }
-
-        if material.is_none() {
-            let new_material = self.allocate_billboard_material(texture_id);
-            let obj = self.objects.get_ref_mut(from_handle(handle));
-            if let RenderObjectKind::Billboard(billboard) = &mut obj.kind {
-                billboard.info.material = Some(new_material);
-                billboard.owns_material = true;
-            }
-        }
-
-        let obj = self.objects.get_ref(from_handle(handle));
-        if let RenderObjectKind::Billboard(billboard) = &obj.kind {
-            let material_id = billboard
-                .info
-                .material
-                .map(GPUScene::pack_handle)
-                .unwrap_or(u32::MAX);
-            self.scene.update_draw_metadata(
-                obj.draw_range.non_indexed_offset,
-                SceneDrawMetadata {
-                    mesh_id: 0,
-                    material_id,
-                    per_obj_joints_id: u32::MAX,
-                },
-            );
-        }
+        todo!()
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -805,23 +405,24 @@ impl ForwardRenderer {
         self.scene.set_object_transform(obj.scene_handle, transform);
     }
 
+    pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.text.register_text(info)
+    }
+
+    pub fn release_text(&mut self, handle: Handle<TextObject>) {
+        self.text.release_text(handle);
+    }
+
+    pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        self.text.set_text(handle, text);
+    }
+
+    pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        self.text.set_text_info(handle, info);
+    }
+
     fn pull_scene(&mut self) {
-        self.cull_queue
-            .record(|c| {
-                let state_update = self
-                    .state
-                    .update()
-                    .expect("Failed to update furikake state");
-
-                let cull_cmds = state_update.combine(self.scene.cull_and_build_draws());
-                cull_cmds.append(c).unwrap();
-            })
-            .expect("Failed to make commands");
-
-        self.cull_queue
-            .submit(&Default::default())
-            .expect("Failed to submit!");
-        self.cull_queue.wait_all().unwrap();
+        todo!()
     }
 
     pub fn update(
@@ -837,6 +438,8 @@ impl ForwardRenderer {
             self.dynamic.reset();
             self.environment.reset();
         }
+
+        let _ = self.text.emit_draws();
 
         self.skinning_complete = self.skinning.update(delta_time);
 
@@ -896,7 +499,7 @@ impl ForwardRenderer {
                         let RenderObjectKind::Billboard(billboard) = &obj.kind else {
                             continue;
                         };
-                        (obj.scene_handle, obj.draw_range, billboard.clone())
+                        (obj.scene_handle, todo!(), billboard.clone())
                     };
                     if let Some(material) = billboard.info.material {
                         let transform = self.scene.get_object_transform(scene_handle);
@@ -904,11 +507,9 @@ impl ForwardRenderer {
                         billboard_draws.push(BillboardDraw {
                             vertex_buffer: billboard.vertex_buffer,
                             material,
-                            transformation: self
-                                .scene
-                                .object_transformation_handle(scene_handle),
+                            transformation: todo!(),
                             total_transform: transform,
-                            draw_index: draw_range.non_indexed_offset,
+                            draw_index: todo!(),
                         });
                     }
                 }
@@ -928,141 +529,6 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    {
-                        let indexed_args = self.scene.indexed_draw_args();
-                        let indexed_stride =
-                            std::mem::size_of::<IndexedIndirectCommand>() as u32;
-                        let indexed_base =
-                            self.scene.indexed_draws_per_view() * view_idx as u32;
-
-                        for handle in &self.objects.entries {
-                            let obj = self.objects.get_ref(*handle);
-                            match &obj.kind {
-                                RenderObjectKind::Model(model) => {
-                                    for (mesh_idx, mesh) in
-                                        model.meshes.iter().enumerate()
-                                    {
-                                        if let Some(material) = &mesh.material {
-                                            if let Some(mat_idx) =
-                                                material.furikake_material_handle
-                                            {
-                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let draw_index = obj.draw_range.indexed_offset
-                                                        + mesh_idx as u32;
-                                                    let draw_offset = (indexed_base + draw_index)
-                                                        * indexed_stride;
-
-                                                    cmd = cmd
-                                                        .bind_graphics_pipeline(pso.handle)
-                                                        .update_viewport(&self.viewport)
-                                                        .draw_indexed_indirect(
-                                                            &DrawIndexedIndirect {
-                                                                vertices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .vertices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .indices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indirect: indexed_args,
-                                                                offset: draw_offset,
-                                                                draw_count: 1,
-                                                                stride: indexed_stride,
-                                                                bind_tables: pso.tables(),
-                                                                dynamic_buffers: [
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                ],
-                                                            },
-                                                        )
-                                                        .unbind_graphics_pipeline();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                RenderObjectKind::SkinnedModel(skinned) => {
-                                    for (mesh_idx, mesh) in
-                                        skinned.model.meshes.iter().enumerate()
-                                    {
-                                        if let Some(material) = &mesh.material {
-                                            if let Some(mat_idx) =
-                                                material.furikake_material_handle
-                                            {
-                                                if let Some(pso) = self.pipelines.get(&mat_idx) {
-                                                    let draw_index = obj.draw_range.indexed_offset
-                                                        + mesh_idx as u32;
-                                                    let draw_offset = (indexed_base + draw_index)
-                                                        * indexed_stride;
-
-                                                    cmd = cmd
-                                                        .bind_graphics_pipeline(pso.handle)
-                                                        .update_viewport(&self.viewport)
-                                                        .draw_indexed_indirect(
-                                                            &DrawIndexedIndirect {
-                                                                vertices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .vertices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indices: mesh
-                                                                    .geometry
-                                                                    .base
-                                                                    .indices
-                                                                    .handle()
-                                                                    .unwrap(),
-                                                                indirect: indexed_args,
-                                                                offset: draw_offset,
-                                                                draw_count: 1,
-                                                                stride: indexed_stride,
-                                                                bind_tables: pso.tables(),
-                                                                dynamic_buffers: [
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                    None,
-                                                                ],
-                                                            },
-                                                        )
-                                                        .unbind_graphics_pipeline();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                RenderObjectKind::Billboard(_) => {}
-                            }
-                        }
-                    }
-
-                    let draw_args = self.scene.draw_args();
-                    let draw_stride = std::mem::size_of::<IndirectCommand>() as u32;
-                    let draw_base = self.scene.non_indexed_draws_per_view() * view_idx as u32;
-                    for draw in &billboard_draws {
-                        let draw_offset = (draw_base + draw.draw_index) * draw_stride;
-                        cmd = cmd
-                            .bind_graphics_pipeline(self.billboard_pso.handle)
-                            .update_viewport(&self.viewport)
-                            .draw_indirect(&DrawIndirect {
-                                vertices: draw.vertex_buffer,
-                                indirect: draw_args,
-                                bind_tables: self.billboard_pso.tables(),
-                                dynamic_buffers: [None, None, None, None],
-                                draw_count: 1,
-                                offset: draw_offset,
-                                stride: draw_stride,
-                            })
-                            .unbind_graphics_pipeline();
-                    }
-
                     cmd
                 },
             );
@@ -1144,6 +610,22 @@ impl Renderer for ForwardRenderer {
 
     fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
         ForwardRenderer::object_transform(self, handle)
+    }
+
+    fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        ForwardRenderer::register_text(self, info)
+    }
+
+    fn release_text(&mut self, handle: Handle<TextObject>) {
+        ForwardRenderer::release_text(self, handle);
+    }
+
+    fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
+        ForwardRenderer::set_text(self, handle, text);
+    }
+
+    fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
+        ForwardRenderer::set_text_info(self, handle, info);
     }
 
     fn update(
