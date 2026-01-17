@@ -3,6 +3,7 @@ pub mod environment;
 pub mod forward;
 pub mod text;
 mod gpu_draw_builder;
+mod particle_system;
 mod skinning;
 mod scene;
 
