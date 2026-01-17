@@ -36,11 +36,21 @@ fn main() {
     let mut billboards = Vec::new();
     for z in -2..=2 {
         for x in -2..=2 {
+
+            let ty = if x == -2 {
+                BillboardType::Fixed
+            } else if  x == 1 {
+                BillboardType::AxisAligned
+            } else {
+                BillboardType::ScreenAligned
+            };
+
             let billboard = setup
                 .engine
                 .register_object(&RenderObjectInfo::Billboard(BillboardInfo {
                     texture_id: 0,
                     material: None,
+                    billboard_type: ty,
                 }))
                 .unwrap();
             let translation = Mat4::from_translation(Vec3::new(

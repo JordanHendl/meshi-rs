@@ -228,7 +228,12 @@ impl ForwardRenderer {
         todo!()
     }
 
-    fn update_billboard_vertices(&mut self, billboard: &BillboardData, transform: Mat4) {
+    fn update_billboard_vertices(
+        &mut self,
+        billboard: &BillboardData,
+        transform: Mat4,
+        camera: Handle<Camera>,
+    ) {
         todo!()
     }
 
@@ -503,7 +508,7 @@ impl ForwardRenderer {
                     };
                     if let Some(material) = billboard.info.material {
                         let transform = self.scene.get_object_transform(scene_handle);
-                        self.update_billboard_vertices(&billboard, transform);
+                        self.update_billboard_vertices(&billboard, transform, camera_handle);
                         billboard_draws.push(BillboardDraw {
                             vertex_buffer: billboard.vertex_buffer,
                             material,

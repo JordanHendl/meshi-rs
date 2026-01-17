@@ -12,7 +12,8 @@ use super::{Renderer, RendererInfo, ViewOutput};
 use crate::AnimationState;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{
-    BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*,
+    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextInfo, TextObject,
+    render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
@@ -22,6 +23,7 @@ use driver::command::{Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::reservations::ReservedBinding;
+use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::{
     BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
@@ -581,7 +583,73 @@ impl DeferredRenderer {
         ]
     }
 
-    fn update_billboard_vertices(&mut self, billboard: &BillboardData, transform: Mat4) {
+    fn billboard_vertices_world(
+        corners: [Vec3; 4],
+        color: Vec4,
+    ) -> [BillboardVertex; 6] {
+        let tex_coords = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+
+        let color = color.to_array();
+        let size = Vec2::ZERO.to_array();
+        let offset = Vec2::ZERO.to_array();
+
+        [
+            BillboardVertex {
+                center: corners[0].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[0].to_array(),
+            },
+            BillboardVertex {
+                center: corners[1].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[1].to_array(),
+            },
+            BillboardVertex {
+                center: corners[2].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[2].to_array(),
+            },
+            BillboardVertex {
+                center: corners[2].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[2].to_array(),
+            },
+            BillboardVertex {
+                center: corners[3].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[3].to_array(),
+            },
+            BillboardVertex {
+                center: corners[0].to_array(),
+                offset,
+                size,
+                color,
+                tex_coords: tex_coords[0].to_array(),
+            },
+        ]
+    }
+
+    fn update_billboard_vertices(
+        &mut self,
+        billboard: &BillboardData,
+        transform: Mat4,
+        camera: Handle<Camera>,
+    ) {
         let center = transform.transform_point3(Vec3::ZERO);
         let mut size = Vec2::new(
             transform.transform_vector3(Vec3::X).length(),
@@ -595,7 +663,73 @@ impl DeferredRenderer {
             size.y = 1.0;
         }
 
-        let vertices = Self::billboard_vertices(center, size, Vec4::ONE);
+        let vertices = match billboard.info.billboard_type {
+            BillboardType::ScreenAligned => Self::billboard_vertices(center, size, Vec4::ONE),
+            BillboardType::AxisAligned => {
+                let mut camera_position = Vec3::ZERO;
+                if camera.valid() {
+                    self.state
+                        .reserved_mut(
+                            "meshi_bindless_cameras",
+                            |a: &mut ReservedBindlessCamera| {
+                                camera_position = a.camera(camera).position();
+                            },
+                        )
+                        .expect("Failed to read camera for billboard alignment");
+                }
+
+                let mut forward = camera_position - center;
+                forward.y = 0.0;
+                if forward.length_squared() <= 1e-6 {
+                    forward = Vec3::Z;
+                } else {
+                    forward = forward.normalize();
+                }
+
+                let mut right = forward.cross(Vec3::Y);
+                if right.length_squared() <= 1e-6 {
+                    right = Vec3::X;
+                } else {
+                    right = right.normalize();
+                }
+
+                let up = Vec3::Y;
+                let half_right = right * (size.x * 0.5);
+                let half_up = up * (size.y * 0.5);
+                let corners = [
+                    center - half_right - half_up,
+                    center + half_right - half_up,
+                    center + half_right + half_up,
+                    center - half_right + half_up,
+                ];
+                Self::billboard_vertices_world(corners, Vec4::ONE)
+            }
+            BillboardType::Fixed => {
+                let right_axis = transform.transform_vector3(Vec3::X);
+                let up_axis = transform.transform_vector3(Vec3::Y);
+
+                let right = if right_axis.length_squared() <= 1e-6 {
+                    Vec3::X
+                } else {
+                    right_axis.normalize()
+                };
+                let up = if up_axis.length_squared() <= 1e-6 {
+                    Vec3::Y
+                } else {
+                    up_axis.normalize()
+                };
+
+                let half_right = right * (size.x * 0.5);
+                let half_up = up * (size.y * 0.5);
+                let corners = [
+                    center - half_right - half_up,
+                    center + half_right - half_up,
+                    center + half_right + half_up,
+                    center - half_right + half_up,
+                ];
+                Self::billboard_vertices_world(corners, Vec4::ONE)
+            }
+        };
         let mapped = self
             .ctx
             .map_buffer_mut::<BillboardVertex>(BufferView::new(billboard.vertex_buffer))
@@ -1228,7 +1362,7 @@ impl DeferredRenderer {
 
                 if let Some(material) = billboard.info.material {
                     let transform = self.proc.scene.get_object_transform(scene_handle);
-                    self.update_billboard_vertices(&billboard, transform);
+                    self.update_billboard_vertices(&billboard, transform, camera_handle);
                     billboard_draws.push(BillboardDraw {
                         vertex_buffer: billboard.vertex_buffer,
                         material,

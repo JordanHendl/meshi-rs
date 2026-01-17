@@ -86,6 +86,15 @@ impl Default for AnimationState {
 pub struct BillboardInfo {
     pub texture_id: u32,
     pub material: Option<Handle<Material>>,
+    pub billboard_type: BillboardType,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BillboardType {
+    #[default]
+    ScreenAligned,
+    AxisAligned,
+    Fixed,
 }
 
 #[repr(C)]
