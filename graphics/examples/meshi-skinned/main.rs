@@ -8,62 +8,27 @@ use std::env::*;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
+#[path = "../common/setup.rs"]
+mod common_setup;
 
 use common_camera::CameraController;
 
 fn main() {
     tracing_subscriber::fmt::init();
     let args: Vec<String> = args().collect();
-    let mut renderer = RendererSelect::Deferred;
-    if args.len() > 1 {
-        if args[1] == "--forward" {
-            renderer = RendererSelect::Forward;
-        }
-    }
-    let mut engine = RenderEngine::new(&RenderEngineInfo {
-        headless: false,
-        canvas_extent: Some([512, 512]),
-        renderer,
-        sample_count: None,
-    })
-    .unwrap();
-
-    // Default database. Given bogus directory so all we have to work with is the default
-    // models/materials...
-    let mut db = DB::new(&DBInfo {
-        base_dir: "",
-        layout_file: None,
-        pooled_geometry_uploads: false,
-    })
-    .expect("Unable to create database");
-
-    engine.initialize_database(&mut db);
-
-    // Make window for output to render to.
-    let display = engine.register_window_display(DisplayInfo {
-        window: WindowInfo {
-            title: "meshi-skinned".to_string(),
-            size: [512, 512],
-            resizable: false,
+    let renderer = common_setup::renderer_from_args(&args, RendererSelect::Deferred);
+    let mut setup = common_setup::init(
+        "meshi-skinned",
+        [512, 512],
+        common_setup::CameraSetup {
+            transform: Mat4::from_translation(Vec3::new(4.0, 0.0, 0.0)),
+            far: 10_000.0,
+            ..Default::default()
         },
-        ..Default::default()
-    });
-
-    // Register a camera and assign it to the display.
-    let camera = engine.register_camera(&Mat4::from_translation(Vec3::new(4.0, 0.0, 0.0)));
-    engine.attach_camera_to_display(display, camera);
-
-    // Typical perspective: 60° vertical FOV, window aspect, near/far planes.
-    engine.set_camera_perspective(
-        camera,
-        60f32.to_radians(),
-        512.0,   // width
-        512.0,   // height
-        0.1,     // near
-        10000.0, // far
+        renderer,
     );
 
-    let model = db.fetch_gpu_model("model/fox").unwrap();
+    let model = setup.db.fetch_gpu_model("model/fox").unwrap();
     let animation_names = model
         .rig
         .as_ref()
@@ -73,7 +38,8 @@ fn main() {
             names
         })
         .unwrap_or_default();
-    let skinned = engine
+    let skinned = setup
+        .engine
         .register_object(&RenderObjectInfo::SkinnedModel(SkinnedModelInfo {
             model,
             animation: AnimationState::default(),
@@ -81,7 +47,15 @@ fn main() {
         .unwrap();
 
     let translation = Mat4::from_translation(Vec3::new(0.0, 0.0, -5.0));
-    engine.set_object_transform(skinned, &translation);
+    setup.engine.set_object_transform(skinned, &translation);
+
+    let status_text = setup.engine.register_text(&TextInfo {
+        text: "Animation: -- (use ←/→ to switch)".to_string(),
+        position: Vec2::new(12.0, 12.0),
+        color: Vec4::ONE,
+        scale: 2.0,
+        render_mode: common_setup::text_render_mode(&setup.db),
+    });
 
     struct AppData {
         running: bool,
@@ -96,13 +70,13 @@ fn main() {
         animation_index: 0,
         animation_count: animation_names.len(),
         animation_changed: false,
-        camera: CameraController::new(Vec3::new(4.0, 0.0, 0.0), Vec2::new(512.0, 512.0)),
+        camera: CameraController::new(Vec3::new(4.0, 0.0, 0.0), setup.window_size),
     };
-    
+
     assert!(data.animation_count > 0);
 
     if data.animation_count > 0 {
-        engine.set_skinned_object_animation(
+        setup.engine.set_skinned_object_animation(
             skinned,
             AnimationState {
                 clip_index: data.animation_index as u32,
@@ -111,6 +85,12 @@ fn main() {
                 looping: true,
             },
         );
+        if let Some(name) = animation_names.get(data.animation_index) {
+            setup.engine.set_text(
+                status_text,
+                &format!("Animation: {} (use ←/→ to switch)", name),
+            );
+        }
     }
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
         unsafe {
@@ -147,7 +127,9 @@ fn main() {
         }
     }
 
-    engine.set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
+    setup
+        .engine
+        .set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
     let mut timer = Timer::new();
     timer.start();
     let mut last_time = timer.elapsed_seconds_f32();
@@ -157,7 +139,7 @@ fn main() {
         let mut dt = now - last_time;
         dt = dt.min(1.0 / 30.0);
         if data.animation_changed {
-            engine.set_skinned_object_animation(
+            setup.engine.set_skinned_object_animation(
                 skinned,
                 AnimationState {
                     clip_index: data.animation_index as u32,
@@ -166,15 +148,23 @@ fn main() {
                     looping: true,
                 },
             );
+            if let Some(name) = animation_names.get(data.animation_index) {
+                setup.engine.set_text(
+                    status_text,
+                    &format!("Animation: {} (use ←/→ to switch)", name),
+                );
+            }
             data.animation_changed = false;
         }
 
         let camera_transform = data.camera.update(dt);
-        engine.set_camera_transform(camera, &camera_transform);
+        setup
+            .engine
+            .set_camera_transform(setup.camera, &camera_transform);
 
-        engine.update(dt);
+        setup.engine.update(dt);
         last_time = now;
     }
 
-    engine.shut_down();
+    setup.engine.shut_down();
 }

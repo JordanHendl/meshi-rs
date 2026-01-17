@@ -5,91 +5,48 @@ use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
 use std::env::*;
-use tracing::info;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
+#[path = "../common/setup.rs"]
+mod common_setup;
 
 use common_camera::CameraController;
 
 fn main() {
     tracing_subscriber::fmt::init();
     let args: Vec<String> = args().collect();
-    let mut renderer = RendererSelect::Deferred;
-    if args.len() > 1 {
-        if args[1] == "--forward" {
-            renderer = RendererSelect::Forward;
-        }
-    }
-    let mut engine = RenderEngine::new(&RenderEngineInfo {
-        headless: false,
-        canvas_extent: Some([512, 512]),
+    let renderer = common_setup::renderer_from_args(&args, RendererSelect::Deferred);
+    let mut setup = common_setup::init(
+        "meshi-cube",
+        [512, 512],
+        common_setup::CameraSetup::default(),
         renderer,
-        sample_count: None,
-    })
-    .unwrap();
-
-    // Default database. Given bogus directory so all we have to work with is the default
-    // models/materials...
-    let mut db = DB::new(&DBInfo {
-        base_dir: "",
-        layout_file: None,
-        pooled_geometry_uploads: false,
-    })
-    .expect("Unable to create database");
-
-    engine.initialize_database(&mut db);
-
-    // Make window for output to render to.
-    let display = engine.register_window_display(DisplayInfo {
-        vsync: false,
-        window: WindowInfo {
-            title: "meshi-cube".to_string(),
-            size: [512, 512],
-            resizable: false,
-        },
-        ..Default::default()
-    });
-
-    // Register a camera and assign it to the display.
-    let camera = engine.register_camera(&Mat4::IDENTITY);
-    engine.attach_camera_to_display(display, camera);
-
-    // Typical perspective: 60° vertical FOV, window aspect, near/far planes.
-    engine.set_camera_perspective(
-        camera,
-        60f32.to_radians(),
-        512.0, // width
-        512.0, // height
-        0.1,   // near
-        100.0, // far
     );
 
-    let sdf_font = db.enumerate_sdf_fonts().into_iter().next();
-    if sdf_font.is_none() {
-        tracing::warn!("No SDF fonts found in database; text will be skipped.");
-    }
-    let text_handle = engine.register_text(&TextInfo {
+    let text_handle = setup.engine.register_text(&TextInfo {
         text: "avg fps: --".to_string(),
-        position: Vec2::new(3.0, 3.0),
+        position: Vec2::new(12.0, 12.0),
         color: Vec4::ONE,
         scale: 2.0,
-        render_mode: sdf_font
-            .map(|font| TextRenderMode::Sdf { font })
-            .unwrap_or(TextRenderMode::Plain),
+        render_mode: common_setup::text_render_mode(&setup.db),
     });
 
-    // Register default cube with the engine as an object.
-    let cube = engine
-        .register_object(&RenderObjectInfo::Model(
-            db.fetch_gpu_model("model/witch").unwrap(),
-        ))
+    let quad_model = setup
+        .db
+        .fetch_gpu_model("model/cube")
+        .or_else(|_| setup.db.fetch_gpu_model("model/plane"))
+        .or_else(|_| setup.db.fetch_gpu_model("model/witch"))
+        .expect("Expected a quad-like model in the database");
+    let quad = setup
+        .engine
+        .register_object(&RenderObjectInfo::Model(quad_model))
         .unwrap();
 
     let translation = Mat4::from_translation(Vec3::new(0.0, 0.25, -2.5));
     let mut transform = translation;
     // Update object transform to be the center.
-    engine.set_object_transform(cube, &transform);
+    setup.engine.set_object_transform(quad, &transform);
 
     struct AppData {
         running: bool,
@@ -100,7 +57,7 @@ fn main() {
     let mut data = AppData {
         running: true,
         paused: false,
-        camera: CameraController::new(Vec3::ZERO, Vec2::new(512.0, 512.0)),
+        camera: CameraController::new(Vec3::ZERO, setup.window_size),
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -120,18 +77,20 @@ fn main() {
         }
     }
 
-    engine.set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
+    setup
+        .engine
+        .set_event_cb(callback, (&mut data as *mut AppData) as *mut c_void);
     let mut timer = Timer::new();
     timer.start();
     let mut last_time = timer.elapsed_seconds_f32();
     let mut total_time = 0.0f32;
     let angular_velocity = 2.0f32;
-
+    
     while data.running {
-        if let Some(avg_ms) = engine.average_frame_time_ms() {
+        if let Some(avg_ms) = setup.engine.average_frame_time_ms() {
             let avg_fps = 1000.0 / avg_ms;
             let text = format!("avg fps: {:.1}", avg_fps);
-            engine.set_text(text_handle, &text);
+            setup.engine.set_text(text_handle, &text);
         }
         let now = timer.elapsed_seconds_f32();
         let mut dt = now - last_time;
@@ -141,15 +100,15 @@ fn main() {
             let mut rotation = Mat4::from_rotation_y(angular_velocity * total_time);
             rotation = rotation * Mat4::from_rotation_x(angular_velocity * total_time);
             transform = translation * rotation;
-            engine.set_object_transform(cube, &transform);
+            setup.engine.set_object_transform(quad, &transform);
         }
 
         let camera_transform = data.camera.update(dt);
-        engine.set_camera_transform(camera, &camera_transform);
+        setup.engine.set_camera_transform(setup.camera, &camera_transform);
 
-        engine.update(dt);
+        setup.engine.update(dt);
         last_time = now;
     }
 
-    engine.shut_down();
+    setup.engine.shut_down();
 }

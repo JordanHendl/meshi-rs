@@ -5,7 +5,6 @@ use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use std::env::*;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
@@ -16,65 +15,46 @@ use common_camera::CameraController;
 
 fn main() {
     tracing_subscriber::fmt::init();
-    let args: Vec<String> = args().collect();
-    let renderer = common_setup::renderer_from_args(&args, RendererSelect::Deferred);
+    let renderer = RendererSelect::Forward;
     let mut setup = common_setup::init(
-        "meshi-billboard",
-        [768, 512],
-        common_setup::CameraSetup::default(),
+        "meshi-environment",
+        [1280, 720],
+        common_setup::CameraSetup {
+            transform: Mat4::from_translation(Vec3::new(0.0, 6.0, 8.0)),
+            far: 50_000.0,
+            ..Default::default()
+        },
         renderer,
     );
 
-    let hint_text = setup.engine.register_text(&TextInfo {
-        text: "Hold Space + WASDQE to move around billboards.".to_string(),
+    let instruction_text = setup.engine.register_text(&TextInfo {
+        text: "Hold Space + WASDQE to fly. Mouse to look around.".to_string(),
         position: Vec2::new(12.0, 12.0),
         color: Vec4::ONE,
-        scale: 1.5,
+        scale: 1.6,
         render_mode: common_setup::text_render_mode(&setup.db),
     });
-
-    let mut billboards = Vec::new();
-    for z in -2..=2 {
-        for x in -2..=2 {
-            let billboard = setup
-                .engine
-                .register_object(&RenderObjectInfo::Billboard(BillboardInfo {
-                    texture_id: 0,
-                    material: None,
-                }))
-                .unwrap();
-            let translation = Mat4::from_translation(Vec3::new(
-                x as f32 * 1.5,
-                0.5,
-                -3.0 + z as f32 * 1.5,
-            ));
-            setup.engine.set_object_transform(billboard, &translation);
-            billboards.push(billboard);
-        }
-    }
 
     struct AppData {
         running: bool,
         camera: CameraController,
-        _hint_text: Handle<TextObject>,
-        _billboards: Vec<Handle<RenderObject>>,
+        _instruction_text: Handle<TextObject>,
     }
 
     let mut data = AppData {
         running: true,
-        camera: CameraController::new(Vec3::ZERO, setup.window_size),
-        _hint_text: hint_text,
-        _billboards: billboards,
+        camera: CameraController::new(Vec3::new(0.0, 6.0, 8.0), setup.window_size),
+        _instruction_text: instruction_text,
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
         unsafe {
             let e = &mut (*event);
             let r = &mut (*(data as *mut AppData));
-            if e.source() == EventSource::Window && e.event_type() == EventType::Quit {
+            r.camera.handle_event(e);
+            if e.event_type() == EventType::Quit {
                 r.running = false;
             }
-            r.camera.handle_event(e);
         }
     }
 
