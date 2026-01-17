@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ptr::NonNull};
+use std::{
+    collections::{HashMap, HashSet},
+    ptr::NonNull,
+};
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
@@ -15,7 +18,7 @@ use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
-use driver::command::{Draw, DrawIndexedIndirect, DrawIndirect};
+use driver::command::{Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::reservations::ReservedBinding;
@@ -43,8 +46,14 @@ use tracing::{info, warn};
 
 #[repr(u32)]
 pub enum PassMask {
-    MAIN_COLOR = 0x00000001,
+    OPAQUE_MODEL = 0x00000001,
+    OPAQUE_SKINNED = 0x00000002,
+    TRANSPARENT_BILLBOARD = 0x00000004,
 }
+
+const BIN_OPAQUE_MODEL: u32 = 0;
+const BIN_OPAQUE_SKINNED: u32 = 1;
+const BIN_TRANSPARENT_BILLBOARD: u32 = 2;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -59,6 +68,18 @@ pub struct PerDrawData {
     vertex_count: u32,
     index_id: u32,
     index_count: u32,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+struct PerObjectInfo {
+    transform: Mat4,
+    scene_id: Handle<SceneObject>,
+    material_id: Handle<Material>,
+    camera_id: Handle<Camera>,
+    skeleton_id: Handle<SkeletonHeader>,
+    animation_state_id: Handle<FurikakeAnimationState>,
+    per_obj_joints_id: Handle<JointTransform>,
 }
 
 struct RendererData {
@@ -82,6 +103,7 @@ struct Renderers {
 struct DeferredPSO {
     pipelines: HashMap<Handle<Material>, PSO>,
     standard: PSO,
+    billboard: PSO,
     combine_pso: PSO,
 }
 
@@ -178,10 +200,20 @@ impl DeferredRenderer {
             &GPUSceneInfo {
                 name: "[MESHI] Deferred Renderer Scene",
                 ctx: ctx.as_mut(),
-                draw_bins: &[SceneBin {
-                    id: 0,
-                    mask: PassMask::MAIN_COLOR as u32,
-                }],
+                draw_bins: &[
+                    SceneBin {
+                        id: BIN_OPAQUE_MODEL,
+                        mask: PassMask::OPAQUE_MODEL as u32,
+                    },
+                    SceneBin {
+                        id: BIN_OPAQUE_SKINNED,
+                        mask: PassMask::OPAQUE_SKINNED as u32,
+                    },
+                    SceneBin {
+                        id: BIN_TRANSPARENT_BILLBOARD,
+                        mask: PassMask::TRANSPARENT_BILLBOARD as u32,
+                    },
+                ],
                 ..Default::default()
             },
             state.as_mut(),
@@ -301,6 +333,12 @@ impl DeferredRenderer {
                 &proc,
                 &data,
             ),
+            billboard: Self::build_billboard_pipeline(
+                ctx.as_mut(),
+                &mut state,
+                info.sample_count,
+                &data,
+            ),
         };
 
         let exec = DeferredExecution { cull_queue };
@@ -377,6 +415,53 @@ impl DeferredRenderer {
 
         state.register_pso_tables(&s);
         s
+    }
+
+    fn build_billboard_pipeline(
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        sample_count: SampleCount,
+        data: &RendererData,
+    ) -> PSO {
+        let shaders = miso::stdbillboard(&[]);
+
+        let mut pso_builder = PSOBuilder::new()
+            .vertex_compiled(Some(shaders[0].clone()))
+            .fragment_compiled(Some(shaders[1].clone()))
+            .set_attachment_format(0, Format::BGRA8)
+            .add_table_variable_with_resources(
+                "per_obj_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(data.dynamic.state()),
+                    slot: 0,
+                }],
+            );
+
+        pso_builder = pso_builder
+            .add_reserved_table_variables(state)
+            .expect("Failed to add reserved tables for billboard pipeline");
+
+        pso_builder = pso_builder.add_depth_target(AttachmentDesc {
+            format: Format::D24S8,
+            samples: sample_count,
+        });
+
+        let pso = pso_builder
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 1],
+                sample_count,
+                depth_test: Some(DepthInfo {
+                    should_test: true,
+                    should_write: false,
+                }),
+                ..Default::default()
+            })
+            .build(ctx)
+            .expect("Failed to build billboard pipeline!");
+
+        state.register_pso_tables(&pso);
+
+        pso
     }
 
     fn allocate_billboard_material(&mut self, texture_id: u32) -> Handle<Material> {
@@ -533,10 +618,16 @@ impl DeferredRenderer {
         &mut self,
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
+        let scene_mask = match info {
+            RenderObjectInfo::Model(_) => PassMask::OPAQUE_MODEL as u32,
+            RenderObjectInfo::SkinnedModel(_) => PassMask::OPAQUE_SKINNED as u32,
+            RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT_BILLBOARD as u32,
+            RenderObjectInfo::Empty => PassMask::OPAQUE_MODEL as u32,
+        };
         let (scene_handle, transform_handle) = self.proc.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
             global: Default::default(),
-            scene_mask: PassMask::MAIN_COLOR as u32,
+            scene_mask,
             scene_type: SceneNodeType::Renderable,
         });
 
@@ -617,7 +708,13 @@ impl DeferredRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::Billboard(billboard) => {
-                todo!()
+                let billboard_data = self.create_billboard_data(billboard.clone());
+                let h = self.data.objects.push(RenderObjectData {
+                    kind: RenderObjectKind::Billboard(billboard_data),
+                    scene_handle,
+                    draws: Vec::new(),
+                });
+                Ok(to_handle(h))
             }
             RenderObjectInfo::Empty => todo!(), //Err(MeshiError::ResourceUnavailable),
         }
@@ -663,6 +760,40 @@ impl DeferredRenderer {
             warn!("Attempted to update billboard texture on invalid handle.");
             return;
         }
+
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
+            warn!(
+                "Failed to update billboard texture for object {}",
+                handle.slot
+            );
+            return;
+        }
+
+        let (owns_material, material_handle) = {
+            let obj = self.data.objects.get_ref_mut(from_handle(handle));
+            match &mut obj.kind {
+                RenderObjectKind::Billboard(billboard) => {
+                    billboard.info.texture_id = texture_id;
+                    (billboard.owns_material, billboard.info.material)
+                }
+                _ => {
+                    warn!("Attempted to update billboard texture on non-billboard object.");
+                    return;
+                }
+            }
+        };
+
+        if owns_material {
+            if let Some(material) = material_handle {
+                self.update_billboard_material_texture(material, texture_id);
+            }
+        }
     }
 
     pub fn set_billboard_material(
@@ -670,7 +801,65 @@ impl DeferredRenderer {
         handle: Handle<RenderObject>,
         material: Option<Handle<Material>>,
     ) {
-        todo!()
+        if !handle.valid() {
+            warn!("Attempted to update billboard material on invalid handle.");
+            return;
+        }
+
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
+            warn!(
+                "Failed to update billboard material for object {}",
+                handle.slot
+            );
+            return;
+        }
+
+        let (owns_material, current_material, texture_id) = {
+            let obj = self.data.objects.get_ref_mut(from_handle(handle));
+            match &mut obj.kind {
+                RenderObjectKind::Billboard(billboard) => (
+                    billboard.owns_material,
+                    billboard.info.material,
+                    billboard.info.texture_id,
+                ),
+                _ => {
+                    warn!("Attempted to update billboard material on non-billboard object.");
+                    return;
+                }
+            }
+        };
+
+        if owns_material {
+            if let Some(material) = current_material {
+                let _ = self.state.reserved_mut::<ReservedBindlessMaterials, _>(
+                    "meshi_bindless_materials",
+                    |materials| {
+                        materials.remove_material(material);
+                    },
+                );
+            }
+        }
+
+        let s = self as *mut Self;
+        let obj = self.data.objects.get_ref_mut(from_handle(handle));
+        let RenderObjectKind::Billboard(billboard) = &mut obj.kind else {
+            return;
+        };
+
+        if let Some(material) = material {
+            billboard.info.material = Some(material);
+            billboard.owns_material = false;
+        } else {
+            let new_material = Self::allocate_billboard_material(unsafe { &mut (*s) }, texture_id);
+            billboard.info.material = Some(new_material);
+            billboard.owns_material = true;
+        }
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -747,7 +936,7 @@ impl DeferredRenderer {
                     .update()
                     .expect("Failed to update furikake state");
 
-                let cull_cmds = state_update.combine(self.proc.scene.cull());
+                let cull_cmds = state_update.combine(self.proc.scene.cull_and_sync());
                 cull_cmds.append(c).unwrap();
             })
             .expect("Failed to make commands");
@@ -783,6 +972,10 @@ impl DeferredRenderer {
         self.proc.scene.set_active_cameras(views);
         // Pull scene GPU --> CPU to read.
         let scene_processing = self.pull_scene();
+        self.exec
+            .cull_queue
+            .wait_all()
+            .expect("Failed to wait for cull queue");
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
@@ -854,48 +1047,63 @@ impl DeferredRenderer {
 
             let camera_handle = *camera;
 
-            self.graph.add_compute_pass(|mut cmd| {
-                cmd.combine(self.proc.draw_builder.build_draws(0, view_idx as u32))
-                    .end()
-            });
+            let deferred_bins = [BIN_OPAQUE_MODEL, BIN_OPAQUE_SKINNED];
+            for (bin_idx, bin) in deferred_bins.iter().enumerate() {
+                self.graph.add_compute_pass(|mut cmd| {
+                    cmd.combine(self.proc.draw_builder.build_draws(*bin, view_idx as u32))
+                        .end()
+                });
 
-            // Deferred SPLIT pass. Renders the following framebuffers:
-            // 1) Position
-            // 2) Albedo (or diffuse)
-            // 3) Normal
-            // 4) Material Code
-            self.graph.add_subpass(
-                &SubpassInfo {
-                    viewport: self.data.viewport,
-                    color_attachments: deferred_pass_attachments,
-                    depth_attachment: Some(depth.view),
-                    clear_values: deferred_pass_clear,
-                    depth_clear: Some(ClearValue::DepthStencil {
+                let clear_values = if bin_idx == 0 {
+                    deferred_pass_clear
+                } else {
+                    [None; 8]
+                };
+                let depth_clear = if bin_idx == 0 {
+                    Some(ClearValue::DepthStencil {
                         depth: 1.0,
                         stencil: 0,
-                    }),
-                },
-                |mut cmd| {
-                    struct PerSceneData {
-                        camera: Handle<Camera>,
-                    }
-                    let mut alloc = self
-                        .data
-                        .dynamic
-                        .bump()
-                        .expect("Failed to allocate dynamic buffer!");
+                    })
+                } else {
+                    None
+                };
 
-                    alloc.slice::<PerSceneData>()[0].camera = camera_handle;
+                // Deferred SPLIT pass. Renders the following framebuffers:
+                // 1) Position
+                // 2) Albedo (or diffuse)
+                // 3) Normal
+                // 4) Material Code
+                self.graph.add_subpass(
+                    &SubpassInfo {
+                        viewport: self.data.viewport,
+                        color_attachments: deferred_pass_attachments,
+                        depth_attachment: Some(depth.view),
+                        clear_values,
+                        depth_clear,
+                    },
+                    |mut cmd| {
+                        struct PerSceneData {
+                            camera: Handle<Camera>,
+                        }
+                        let mut alloc = self
+                            .data
+                            .dynamic
+                            .bump()
+                            .expect("Failed to allocate dynamic buffer!");
 
-                    let indices = self
-                        .state
-                        .binding("meshi_bindless_indices")
-                        .unwrap()
-                        .binding();
+                        alloc.slice::<PerSceneData>()[0].camera = camera_handle;
 
-                    match indices {
-                        ReservedBinding::TableBinding { binding, resources } => {
-                            match resources[0].resource {
+                        let indices = self
+                            .state
+                            .binding("meshi_bindless_indices")
+                            .unwrap()
+                            .binding();
+
+                        match indices {
+                            ReservedBinding::TableBinding {
+                                binding: _,
+                                resources,
+                            } => match resources[0].resource {
                                 ShaderResource::StorageBuffer(view) => {
                                     return cmd
                                         .bind_graphics_pipeline(self.psos.standard.handle)
@@ -911,14 +1119,14 @@ impl DeferredRenderer {
                                         .unbind_graphics_pipeline();
                                 }
                                 _ => (),
-                            }
+                            },
+                            _ => (),
                         }
-                        _ => (),
-                    }
 
-                    return cmd;
-                },
-            );
+                        return cmd;
+                    },
+                );
+            }
 
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
@@ -976,6 +1184,60 @@ impl DeferredRenderer {
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
 
+            let mut visible_billboard_ids = HashSet::new();
+            let num_bins = self.proc.scene.num_bins() as u32;
+            let max_objects = self.proc.scene.max_objects_per_bin();
+            let billboard_bin_offset = view_idx as u32 * num_bins + BIN_TRANSPARENT_BILLBOARD;
+            if let Some(bin_count) = self
+                .proc
+                .scene
+                .bin_counts()
+                .get(billboard_bin_offset as usize)
+                .copied()
+            {
+                let capped_count = bin_count.min(max_objects);
+                for i in 0..capped_count {
+                    let cull_index = billboard_bin_offset * max_objects + i;
+                    if let Some(culled) = self.proc.scene.culled_object(cull_index) {
+                        visible_billboard_ids.insert(culled.object_id);
+                    }
+                }
+            }
+
+            struct BillboardDraw {
+                vertex_buffer: Handle<Buffer>,
+                material: Handle<Material>,
+                scene_handle: Handle<SceneObject>,
+                transform: Mat4,
+            }
+
+            let mut billboard_draws = Vec::new();
+            let handles = self.data.objects.entries.clone();
+            for handle in handles {
+                let (scene_handle, billboard) = {
+                    let obj = self.data.objects.get_ref(handle);
+                    let RenderObjectKind::Billboard(billboard) = &obj.kind else {
+                        continue;
+                    };
+                    (obj.scene_handle, billboard.clone())
+                };
+
+                if !visible_billboard_ids.contains(&(scene_handle.slot as u32)) {
+                    continue;
+                }
+
+                if let Some(material) = billboard.info.material {
+                    let transform = self.proc.scene.get_object_transform(scene_handle);
+                    self.update_billboard_vertices(&billboard, transform);
+                    billboard_draws.push(BillboardDraw {
+                        vertex_buffer: billboard.vertex_buffer,
+                        material,
+                        scene_handle,
+                        transform,
+                    });
+                }
+            }
+
             let mut transparent_attachments: [Option<ImageView>; 8] = [None; 8];
             transparent_attachments[0] = Some(final_combine.view);
             let transparent_clear: [Option<ClearValue>; 8] = [None; 8];
@@ -989,7 +1251,6 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-
                     // TODO this should combine instead
                     //            self.subrender.environment.render(
                     //                &mut self.graph,
@@ -1000,11 +1261,40 @@ impl DeferredRenderer {
                     //                delta_time,
                     //            );
 
-                    let c =
-                        self.text
-                            .render_transparent(self.ctx.as_mut(), &self.data.viewport, cmd);
+                    if !billboard_draws.is_empty() {
+                        let mut c = cmd
+                            .bind_graphics_pipeline(self.psos.billboard.handle)
+                            .update_viewport(&self.data.viewport);
 
-                    c
+                        for draw in billboard_draws.iter() {
+                            let mut alloc = self
+                                .data
+                                .dynamic
+                                .bump()
+                                .expect("Failed to allocate billboard draw buffer!");
+                            let per_obj = &mut alloc.slice::<PerObjectInfo>()[0];
+                            per_obj.transform = draw.transform;
+                            per_obj.scene_id = draw.scene_handle;
+                            per_obj.material_id = draw.material;
+                            per_obj.camera_id = camera_handle;
+                            per_obj.skeleton_id = Handle::default();
+                            per_obj.animation_state_id = Handle::default();
+                            per_obj.per_obj_joints_id = Handle::default();
+
+                            c = c.draw(&Draw {
+                                vertices: draw.vertex_buffer,
+                                bind_tables: self.psos.billboard.tables(),
+                                dynamic_buffers: [None, Some(alloc), None, None],
+                                instance_count: 1,
+                                count: 6,
+                            });
+                        }
+
+                        cmd = c.unbind_graphics_pipeline();
+                    }
+
+                    self.text
+                        .render_transparent(self.ctx.as_mut(), &self.data.viewport, cmd)
                 },
             );
 
