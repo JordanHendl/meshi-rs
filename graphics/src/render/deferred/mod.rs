@@ -1382,15 +1382,11 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    // TODO this should combine instead
-                    //            self.subrender.environment.render(
-                    //                &mut self.graph,
-                    //                &self.data.viewport,
-                    //                final_combine.view,
-                    //                Some(depth.view),
-                    //                camera_handle,
-                    //                delta_time,
-                    //            );
+                    cmd = cmd.combine(self.subrender.environment.render(
+                        &self.data.viewport,
+                        camera_handle,
+                        delta_time,
+                    ));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd

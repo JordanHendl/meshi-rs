@@ -2,15 +2,13 @@ pub mod ocean;
 pub mod sky;
 pub mod terrain;
 
-use dashi::{ClearValue, Context, DynamicAllocator, Format, ImageView, SampleCount, Viewport};
+use dashi::cmd::PendingGraphics;
+use dashi::{CommandStream, Context, DynamicAllocator, Format, SampleCount, Viewport};
 use furikake::{BindlessState, types::Camera};
-use tare::graph::{RenderGraph, SubpassInfo};
 
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
 use terrain::TerrainRenderer;
-
-use super::ViewOutput;
 
 #[derive(Clone)]
 pub struct EnvironmentRendererInfo {
@@ -71,53 +69,26 @@ impl EnvironmentRenderer {
 
     pub fn render(
         &mut self,
-        graph: &mut RenderGraph,
         viewport: &Viewport,
-        fb: ImageView,
-        depth: Option<ImageView>,
         camera: dashi::Handle<Camera>,
         delta_time: f32,
-    ) -> ViewOutput {
+    ) -> CommandStream<PendingGraphics> {
         self.time += delta_time;
 
-        let mut attachments: [Option<ImageView>; 8] = [None; 8];
-        attachments[0] = Some(fb);
-
-        let clear_values: [Option<ClearValue>; 8] = [None; 8];
-
-        let info = SubpassInfo {
-            viewport: viewport.clone(),
-            color_attachments: attachments,
-            depth_attachment: depth,
-            clear_values,
-            depth_clear: None,
-        };
-
-        self.sky.add_pass(
-            graph,
-            viewport,
-            &mut self.dynamic,
-            info.clone(),
-            camera,
-            self.time,
-            delta_time,
-        );
-
-        self.ocean.add_pass(
-            graph,
-            viewport,
-            &mut self.dynamic,
-            info.clone(),
-            self.time,
-        );
-
-        self.terrain.add_pass(graph, viewport, &mut self.dynamic, info);
-
-        ViewOutput {
-            camera,
-            image: fb,
-            semaphore: Default::default(),
-        }
+        CommandStream::<PendingGraphics>::subdraw()
+            .combine(self.sky.record_draws(
+                viewport,
+                &mut self.dynamic,
+                camera,
+                self.time,
+                delta_time,
+            ))
+           // .combine(self.ocean.record_draws(
+           //     viewport,
+           //     &mut self.dynamic,
+           //     self.time,
+           // ))
+           // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }
 
     pub fn color_format(&self) -> Format {

@@ -1,16 +1,16 @@
 use super::EnvironmentRendererInfo;
 use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
+use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
-use furikake::PSOBuilderFurikakeExt;
 use dashi::execution::CommandRing;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, DynamicAllocator,
     Format, Handle, MemoryVisibility, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
+use furikake::PSOBuilderFurikakeExt;
 use glam::Vec3;
-use tare::graph::{RenderGraph, SubpassInfo};
 
 #[derive(Clone, Copy)]
 pub struct TerrainInfo {
@@ -310,14 +310,11 @@ impl TerrainRenderer {
         self.camera_position = settings.camera_position;
     }
 
-    pub fn add_pass(
+    pub fn record_draws(
         &mut self,
-        graph: &mut RenderGraph,
         viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
-        mut subpass_info: SubpassInfo,
-    ) {
-        return;
+    ) -> CommandStream<PendingGraphics> {
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
                 .bump()
@@ -362,39 +359,30 @@ impl TerrainRenderer {
             self.queue.wait_all().expect("wait terrain compute");
         }
 
-        if !self.use_depth {
-            subpass_info.depth_attachment = None;
-            subpass_info.depth_clear = None;
-        }
+        let mut alloc = dynamic
+            .bump()
+            .expect("Failed to allocate terrain draw params");
 
-        graph.add_subpass(&subpass_info, |mut cmd| {
-            let mut alloc = dynamic
-                .bump()
-                .expect("Failed to allocate terrain draw params");
+        let params = &mut alloc.slice::<TerrainDrawParams>()[0];
+        *params = TerrainDrawParams {
+            camera_position: self.camera_position,
+            lod_levels: self.lod_levels,
+            patch_size: self.patch_size,
+            max_tiles: self.max_tiles,
+            height_scale: 5.0,
+            _padding: 0.0,
+        };
 
-            let params = &mut alloc.slice::<TerrainDrawParams>()[0];
-            *params = TerrainDrawParams {
-                camera_position: self.camera_position,
-                lod_levels: self.lod_levels,
-                patch_size: self.patch_size,
-                max_tiles: self.max_tiles,
-                height_scale: 5.0,
-                _padding: 0.0,
-            };
-
-            cmd = cmd
-                .bind_graphics_pipeline(self.pipeline.handle)
-                .update_viewport(viewport)
-                .draw(&Draw {
-                    bind_tables: self.pipeline.tables(),
-                    dynamic_buffers: [None, Some(alloc), None, None],
-                    instance_count: self.max_tiles.max(1),
-                    count: 6,
-                    ..Default::default()
-                })
-                .unbind_graphics_pipeline();
-
-            cmd
-        });
+        CommandStream::<PendingGraphics>::subdraw()
+            .bind_graphics_pipeline(self.pipeline.handle)
+            .update_viewport(viewport)
+            .draw(&Draw {
+                bind_tables: self.pipeline.tables(),
+                dynamic_buffers: [None, Some(alloc), None, None],
+                instance_count: self.max_tiles.max(1),
+                count: 6,
+                ..Default::default()
+            })
+            .unbind_graphics_pipeline()
     }
 }

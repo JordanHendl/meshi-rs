@@ -4,18 +4,18 @@ use super::EnvironmentRendererInfo;
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use cloud::CloudSimulation;
+use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::Draw;
 use dashi::structs::*;
 use dashi::*;
 use dashi::{
-    AspectMask, ClearValue, DynamicAllocator, Format, ImageView, ImageViewType, Sampler,
+    AspectMask, CommandStream, DynamicAllocator, Format, ImageView, ImageViewType, Sampler,
     SamplerInfo, ShaderResource, SubresourceRange, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{BindlessState, types::Camera};
 use glam::*;
 use noren::rdb::imagery::{HostCubemap, ImageInfo as NorenImageInfo};
-use tare::graph::{RenderGraph, SubpassInfo};
 use tare::utils::StagedBuffer;
 
 #[derive(Clone)]
@@ -291,40 +291,35 @@ impl SkyRenderer {
         }
     }
 
-    pub fn add_pass(
+    pub fn record_draws(
         &mut self,
-        graph: &mut RenderGraph,
         viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
-        subpass_info: SubpassInfo,
         camera: dashi::Handle<Camera>,
         time: f32,
         delta_time: f32,
-    ) {
+    ) -> CommandStream<PendingGraphics> {
         self.clouds.update(time, delta_time);
 
-        graph.add_subpass(&subpass_info, |mut cmd| {
-            let mut alloc = dynamic
-                .bump()
-                .expect("Failed to allocate sky dynamic buffer");
+        let mut alloc = dynamic
+            .bump()
+            .expect("Failed to allocate sky dynamic buffer");
 
-            let params = &mut alloc.slice::<SkyboxParams>()[0];
-            params.camera_index = camera.slot as u32;
-            params.intensity = self.skybox_intensity;
-            params._padding = [0.0; 2];
-            cmd = cmd
-                .bind_graphics_pipeline(self.skybox_pipeline.handle)
-                .update_viewport(viewport)
-                .draw(&Draw {
-                    bind_tables: self.skybox_pipeline.tables(),
-                    dynamic_buffers: [None, Some(alloc), None, None],
-                    instance_count: 1,
-                    count: 3,
-                    ..Default::default()
-                })
-                .unbind_graphics_pipeline();
+        let params = &mut alloc.slice::<SkyboxParams>()[0];
+        params.camera_index = camera.slot as u32;
+        params.intensity = self.skybox_intensity;
+        params._padding = [0.0; 2];
 
-            cmd
-        });
+        CommandStream::<PendingGraphics>::subdraw()
+            .bind_graphics_pipeline(self.skybox_pipeline.handle)
+            .update_viewport(viewport)
+            .draw(&Draw {
+                bind_tables: self.skybox_pipeline.tables(),
+                dynamic_buffers: [None, Some(alloc), None, None],
+                instance_count: 1,
+                count: 3,
+                ..Default::default()
+            })
+            .unbind_graphics_pipeline()
     }
 }

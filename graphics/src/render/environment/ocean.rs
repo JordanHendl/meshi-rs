@@ -1,6 +1,7 @@
 use super::EnvironmentRendererInfo;
 use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
+use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
 use dashi::execution::CommandRing;
 use dashi::{
@@ -9,7 +10,6 @@ use dashi::{
 };
 use furikake::BindlessState;
 use glam::Vec2;
-use tare::graph::{RenderGraph, SubpassInfo};
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -208,14 +208,12 @@ impl OceanRenderer {
         self.wind_speed = settings.wind_speed;
     }
 
-    pub fn add_pass(
+    pub fn record_draws(
         &mut self,
-        graph: &mut RenderGraph,
         viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
-        mut subpass_info: SubpassInfo,
         time: f32,
-    ) {
+    ) -> CommandStream<PendingGraphics> {
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
                 .bump()
@@ -255,40 +253,31 @@ impl OceanRenderer {
             self.queue.wait_all().expect("wait ocean compute");
         }
 
-        if !self.use_depth {
-            subpass_info.depth_attachment = None;
-            subpass_info.depth_clear = None;
-        }
+        let mut alloc = dynamic
+            .bump()
+            .expect("Failed to allocate ocean draw params");
 
-        graph.add_subpass(&subpass_info, |mut cmd| {
-            let mut alloc = dynamic
-                .bump()
-                .expect("Failed to allocate ocean draw params");
+        let params = &mut alloc.slice::<OceanDrawParams>()[0];
+        *params = OceanDrawParams {
+            fft_size: self.fft_size,
+            vertex_resolution: self.vertex_resolution,
+            patch_size: self.patch_size,
+            time,
+            wind_dir: self.wind_dir,
+            wind_speed: self.wind_speed,
+            _padding: 0.0,
+        };
 
-            let params = &mut alloc.slice::<OceanDrawParams>()[0];
-            *params = OceanDrawParams {
-                fft_size: self.fft_size,
-                vertex_resolution: self.vertex_resolution,
-                patch_size: self.patch_size,
-                time,
-                wind_dir: self.wind_dir,
-                wind_speed: self.wind_speed,
-                _padding: 0.0,
-            };
-
-            cmd = cmd
-                .bind_graphics_pipeline(self.pipeline.handle)
-                .update_viewport(viewport)
-                .draw(&Draw {
-                    bind_tables: self.pipeline.tables(),
-                    dynamic_buffers: [None, Some(alloc), None, None],
-                    instance_count: 1,
-                    count: 6,
-                    ..Default::default()
-                })
-                .unbind_graphics_pipeline();
-
-            cmd
-        });
+        CommandStream::<PendingGraphics>::subdraw()
+            .bind_graphics_pipeline(self.pipeline.handle)
+            .update_viewport(viewport)
+            .draw(&Draw {
+                bind_tables: self.pipeline.tables(),
+                dynamic_buffers: [None, Some(alloc), None, None],
+                instance_count: 1,
+                count: 6,
+                ..Default::default()
+            })
+            .unbind_graphics_pipeline()
     }
 }

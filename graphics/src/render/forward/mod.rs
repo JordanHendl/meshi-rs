@@ -534,17 +534,12 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    cmd
+                    cmd.combine(self.environment.render(
+                        &self.viewport,
+                        camera_handle,
+                        delta_time,
+                    ))
                 },
-            );
-
-            self.environment.render(
-                &mut self.graph,
-                &self.viewport,
-                color.view,
-                Some(depth.view),
-                camera_handle,
-                delta_time,
             );
 
             outputs.push(ViewOutput {
