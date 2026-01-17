@@ -316,12 +316,12 @@ impl TextRenderer {
         &mut self,
         ctx: &mut Context,
         viewport: &Viewport,
-        mut cmd: CommandStream<PendingGraphics>,
     ) -> CommandStream<PendingGraphics> {
         let draws = self.emit_draws().to_vec();
         let glyphs = self.build_text_glyphs(&draws, viewport);
         let glyph_count = self.upload_text_glyphs(ctx, &glyphs);
-
+        
+        let mut cmd = CommandStream::<PendingGraphics>::subdraw();
         let Some(pso) = self.text_pso.as_ref() else {
             error!("Failed to  build text without a text pso");
             return cmd;

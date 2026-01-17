@@ -711,7 +711,7 @@ mod tests {
             Some(d) => d,
         };
 
-        let mut ctx = Box::new(Context::headless(&ContextInfo { device }).expect("create context"));
+        let mut ctx = Box::new(Context::headless(&ContextInfo { device, profiles: Default::default() }).expect("create context"));
         let mut state = Box::new(BindlessState::new(ctx.as_mut()));
         let scene = make_test_scene(&mut ctx, &mut state);
 

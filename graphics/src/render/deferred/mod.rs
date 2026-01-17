@@ -583,10 +583,7 @@ impl DeferredRenderer {
         ]
     }
 
-    fn billboard_vertices_world(
-        corners: [Vec3; 4],
-        color: Vec4,
-    ) -> [BillboardVertex; 6] {
+    fn billboard_vertices_world(corners: [Vec3; 4], color: Vec4) -> [BillboardVertex; 6] {
         let tex_coords = [
             Vec2::new(0.0, 0.0),
             Vec2::new(1.0, 0.0),
@@ -1427,8 +1424,10 @@ impl DeferredRenderer {
                         cmd = c.unbind_graphics_pipeline();
                     }
 
-                    self.text
-                        .render_transparent(self.ctx.as_mut(), &self.data.viewport, cmd)
+                    cmd.combine(
+                        self.text
+                            .render_transparent(self.ctx.as_mut(), &self.data.viewport),
+                    )
                 },
             );
 
