@@ -83,11 +83,12 @@ impl EnvironmentRenderer {
                 self.time,
                 delta_time,
             ))
-           // .combine(self.ocean.record_draws(
-           //     viewport,
-           //     &mut self.dynamic,
-           //     self.time,
-           // ))
+            .combine(self.ocean.record_draws(
+                viewport,
+                &mut self.dynamic,
+                camera,
+                self.time,
+            ))
            // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }
 

@@ -9,6 +9,8 @@ use dashi::{
     Format, Handle, MemoryVisibility, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
+use furikake::PSOBuilderFurikakeExt;
+use furikake::types::Camera;
 use glam::Vec2;
 
 #[derive(Clone, Copy)]
@@ -23,7 +25,7 @@ impl Default for OceanInfo {
         Self {
             fft_size: 64,
             patch_size: 100.0,
-            vertex_resolution: 2,
+            vertex_resolution: 128,
         }
     }
 }
@@ -53,6 +55,7 @@ struct OceanDrawParams {
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
+    camera_index: u32,
     _padding: f32,
 }
 
@@ -105,7 +108,7 @@ fn compile_ocean_shaders() -> [bento::CompilationResult; 2] {
 impl OceanRenderer {
     pub fn new(
         ctx: &mut Context,
-        _state: &mut BindlessState,
+        state: &mut BindlessState,
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
@@ -154,6 +157,10 @@ impl OceanRenderer {
                     slot: 0,
                 }],
             );
+
+        pso_builder = pso_builder
+            .add_reserved_table_variable(state, "meshi_bindless_cameras")
+            .unwrap();
 
         if info.use_depth {
             pso_builder = pso_builder.add_depth_target(AttachmentDesc {
@@ -212,6 +219,7 @@ impl OceanRenderer {
         &mut self,
         viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
+        camera: Handle<Camera>,
         time: f32,
     ) -> CommandStream<PendingGraphics> {
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
@@ -265,8 +273,13 @@ impl OceanRenderer {
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
+            camera_index: camera.slot as u32,
             _padding: 0.0,
         };
+
+        let grid_resolution = self.vertex_resolution.max(2);
+        let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
+        let vertex_count = quad_count * 6;
 
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.pipeline.handle)
@@ -275,7 +288,7 @@ impl OceanRenderer {
                 bind_tables: self.pipeline.tables(),
                 dynamic_buffers: [None, Some(alloc), None, None],
                 instance_count: 1,
-                count: 6,
+                count: vertex_count,
                 ..Default::default()
             })
             .unbind_graphics_pipeline()
