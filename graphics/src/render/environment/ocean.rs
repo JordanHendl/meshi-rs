@@ -128,14 +128,13 @@ impl OceanRenderer {
             .shader(Some(
                 include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
             ))
+            .add_reserved_table_variables(state)
+            .unwrap()
             .add_variable(
                 "ocean_waves",
                 ShaderResource::StorageBuffer(wave_buffer.into()),
             )
-            .add_variable(
-                "params",
-                ShaderResource::DynamicStorage(dynamic.state()),
-            )
+            .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
             .build(ctx)
         {
             Ok(pipeline) => Some(pipeline),
@@ -152,6 +151,7 @@ impl OceanRenderer {
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .set_attachment_format(0, info.color_format)
+            .add_reserved_table_variables(state).unwrap()
             .add_table_variable_with_resources(
                 "ocean_waves",
                 vec![dashi::IndexedResource {

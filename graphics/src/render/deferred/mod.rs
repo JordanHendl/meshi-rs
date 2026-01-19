@@ -43,14 +43,16 @@ use tracing::{info, warn};
 
 #[repr(u32)]
 pub enum PassMask {
-    OPAQUE_MODEL = 0x00000001,
-    OPAQUE_SKINNED = 0x00000002,
-    TRANSPARENT_BILLBOARD = 0x00000004,
+    PRE_Z = 0x00000001,
+    OPAQUE_GEOMETRY = 0x00000002,
+    SHADOW = 0x00000004,
+    TRANSPARENT = 0x00000008,
 }
 
-const BIN_OPAQUE_MODEL: u32 = 0;
-const BIN_OPAQUE_SKINNED: u32 = 1;
-const BIN_TRANSPARENT_BILLBOARD: u32 = 2;
+const BIN_PRE_Z: u32 = 0;
+const BIN_GBUFFER_OPAQUE: u32 = 1;
+const BIN_SHADOW: u32 = 2;
+const BIN_TRANSPARENT: u32 = 3;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -202,16 +204,20 @@ impl DeferredRenderer {
                 ctx: ctx.as_mut(),
                 draw_bins: &[
                     SceneBin {
-                        id: BIN_OPAQUE_MODEL,
-                        mask: PassMask::OPAQUE_MODEL as u32,
+                        id: BIN_PRE_Z,
+                        mask: PassMask::PRE_Z as u32,
                     },
                     SceneBin {
-                        id: BIN_OPAQUE_SKINNED,
-                        mask: PassMask::OPAQUE_SKINNED as u32,
+                        id: BIN_GBUFFER_OPAQUE,
+                        mask: PassMask::OPAQUE_GEOMETRY as u32,
                     },
                     SceneBin {
-                        id: BIN_TRANSPARENT_BILLBOARD,
-                        mask: PassMask::TRANSPARENT_BILLBOARD as u32,
+                        id: BIN_SHADOW,
+                        mask: PassMask::SHADOW as u32,
+                    },
+                    SceneBin {
+                        id: BIN_TRANSPARENT,
+                        mask: PassMask::TRANSPARENT as u32,
                     },
                 ],
                 ..Default::default()
@@ -791,10 +797,10 @@ impl DeferredRenderer {
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
         let scene_mask = match info {
-            RenderObjectInfo::Model(_) => PassMask::OPAQUE_MODEL as u32,
-            RenderObjectInfo::SkinnedModel(_) => PassMask::OPAQUE_SKINNED as u32,
-            RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT_BILLBOARD as u32,
-            RenderObjectInfo::Empty => PassMask::OPAQUE_MODEL as u32,
+            RenderObjectInfo::Model(_) => PassMask::OPAQUE_GEOMETRY as u32,
+            RenderObjectInfo::SkinnedModel(_) => PassMask::OPAQUE_GEOMETRY as u32,
+            RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT as u32,
+            RenderObjectInfo::Empty => PassMask::OPAQUE_GEOMETRY as u32,
         };
         let (scene_handle, transform_handle) = self.proc.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
@@ -1213,86 +1219,76 @@ impl DeferredRenderer {
 
             let camera_handle = *camera;
 
-            let deferred_bins = [BIN_OPAQUE_MODEL, BIN_OPAQUE_SKINNED];
-            for (bin_idx, bin) in deferred_bins.iter().enumerate() {
-                self.graph.add_compute_pass(|mut cmd| {
-                    cmd.combine(self.proc.draw_builder.build_draws(*bin, view_idx as u32))
-                        .end()
-                });
+            self.graph.add_compute_pass(|mut cmd| {
+                cmd.combine(
+                    self.proc
+                        .draw_builder
+                        .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                )
+                .end()
+            });
 
-                let clear_values = if bin_idx == 0 {
-                    deferred_pass_clear
-                } else {
-                    [None; 8]
-                };
-                let depth_clear = if bin_idx == 0 {
-                    Some(ClearValue::DepthStencil {
+            // Deferred SPLIT pass. Renders the following framebuffers:
+            // 1) Position
+            // 2) Albedo (or diffuse)
+            // 3) Normal
+            // 4) Material Code
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.data.viewport,
+                    color_attachments: deferred_pass_attachments,
+                    depth_attachment: Some(depth),
+                    clear_values: deferred_pass_clear,
+                    depth_clear: Some(ClearValue::DepthStencil {
                         depth: 1.0,
                         stencil: 0,
-                    })
-                } else {
-                    None
-                };
+                    }),
+                },
+                |mut cmd| {
+                    struct PerSceneData {
+                        camera: Handle<Camera>,
+                    }
+                    let mut alloc = self
+                        .data
+                        .dynamic
+                        .bump()
+                        .expect("Failed to allocate dynamic buffer!");
 
-                // Deferred SPLIT pass. Renders the following framebuffers:
-                // 1) Position
-                // 2) Albedo (or diffuse)
-                // 3) Normal
-                // 4) Material Code
-                self.graph.add_subpass(
-                    &SubpassInfo {
-                        viewport: self.data.viewport,
-                        color_attachments: deferred_pass_attachments,
-                        depth_attachment: Some(depth),
-                        clear_values,
-                        depth_clear,
-                    },
-                    |mut cmd| {
-                        struct PerSceneData {
-                            camera: Handle<Camera>,
-                        }
-                        let mut alloc = self
-                            .data
-                            .dynamic
-                            .bump()
-                            .expect("Failed to allocate dynamic buffer!");
+                    alloc.slice::<PerSceneData>()[0].camera = camera_handle;
 
-                        alloc.slice::<PerSceneData>()[0].camera = camera_handle;
+                    let indices = self
+                        .state
+                        .binding("meshi_bindless_indices")
+                        .unwrap()
+                        .binding();
 
-                        let indices = self
-                            .state
-                            .binding("meshi_bindless_indices")
-                            .unwrap()
-                            .binding();
-
-                        match indices {
-                            ReservedBinding::TableBinding {
-                                binding: _,
-                                resources,
-                            } => match resources[0].resource {
-                                ShaderResource::StorageBuffer(view) => {
-                                    return cmd
-                                        .bind_graphics_pipeline(self.psos.standard.handle)
-                                        .update_viewport(&self.data.viewport)
-                                        .draw_indexed_indirect(&DrawIndexedIndirect {
-                                            indices: view.handle,
-                                            indirect: self.proc.draw_builder.draw_list(),
-                                            bind_tables: self.psos.standard.tables(),
-                                            dynamic_buffers: [None, None, Some(alloc), None],
-                                            draw_count: self.proc.draw_builder.draw_count(),
-                                            ..Default::default()
-                                        })
-                                        .unbind_graphics_pipeline();
-                                }
-                                _ => (),
-                            },
+                    match indices {
+                        ReservedBinding::TableBinding {
+                            binding: _,
+                            resources,
+                        } => match resources[0].resource {
+                            ShaderResource::StorageBuffer(view) => {
+                                return cmd
+                                    .bind_graphics_pipeline(self.psos.standard.handle)
+                                    .update_viewport(&self.data.viewport)
+                                    .draw_indexed_indirect(&DrawIndexedIndirect {
+                                        indices: view.handle,
+                                        indirect: self.proc.draw_builder.draw_list(),
+                                        bind_tables: self.psos.standard.tables(),
+                                        dynamic_buffers: [None, None, Some(alloc), None],
+                                        draw_count: self.proc.draw_builder.draw_count(),
+                                        ..Default::default()
+                                    })
+                                    .unbind_graphics_pipeline();
+                            }
                             _ => (),
-                        }
+                        },
+                        _ => (),
+                    }
 
-                        return cmd;
-                    },
-                );
-            }
+                    return cmd;
+                },
+            );
 
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
@@ -1363,7 +1359,7 @@ impl DeferredRenderer {
             let mut visible_billboard_ids = HashSet::new();
             let num_bins = self.proc.scene.num_bins() as u32;
             let max_objects = self.proc.scene.max_objects_per_bin();
-            let billboard_bin_offset = view_idx as u32 * num_bins + BIN_TRANSPARENT_BILLBOARD;
+            let billboard_bin_offset = view_idx as u32 * num_bins + BIN_TRANSPARENT;
             if let Some(bin_count) = self
                 .proc
                 .scene
