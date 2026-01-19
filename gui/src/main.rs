@@ -1,6 +1,6 @@
 use egui::ColorImage;
-use egui_glow::glow::{self, HasContext as _};
 use egui_glow::EguiGlow;
+use egui_glow::glow::{self, HasContext as _};
 use glam::Mat4;
 use meshi_graphics::*;
 use meshi_graphics::{DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect, WindowInfo};
@@ -66,6 +66,43 @@ fn main() {
     let mut last_frame_time = Instant::now();
     let mut preview_texture: Option<egui::TextureHandle> = None;
     let mut preview_ready = false;
+    let mut show_scene_hierarchy = true;
+    let mut show_inspector = true;
+    let mut show_assets = true;
+    let mut show_console = true;
+    let mut selected_entity = "Player".to_string();
+    let mut hierarchy_filter = String::new();
+    let mut transform_position = [0.0_f32, 1.0, 2.0];
+    let mut transform_rotation = [0.0_f32, 45.0, 0.0];
+    let mut transform_scale = [1.0_f32, 1.0, 1.0];
+    let mut renderer_visible = true;
+    let mut physics_enabled = true;
+    let mut collider_enabled = true;
+    let mut rigidbody_mass = 75.0_f32;
+    let mut script_enabled = true;
+    let mut gizmo_mode = GizmoMode::Translate;
+    let scene_tree = SceneNode::new(
+        "Root",
+        vec![
+            SceneNode::new("Camera", vec![]),
+            SceneNode::new("Directional Light", vec![]),
+            SceneNode::new(
+                "Player",
+                vec![
+                    SceneNode::new("Weapon", vec![]),
+                    SceneNode::new("Camera Pivot", vec![]),
+                ],
+            ),
+            SceneNode::new(
+                "Environment",
+                vec![
+                    SceneNode::new("Ground", vec![]),
+                    SceneNode::new("Rocks", vec![]),
+                    SceneNode::new("Foliage", vec![]),
+                ],
+            ),
+        ],
+    );
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -128,9 +165,8 @@ fn main() {
                             if let Some(texture) = preview_texture.as_mut() {
                                 texture.set(color_image);
                             } else {
-                                preview_texture = Some(
-                                    egui_glow.egui_ctx.load_texture("preview", color_image),
-                                );
+                                preview_texture =
+                                    Some(egui_glow.egui_ctx.load_texture("preview", color_image));
                             }
                             preview_ready = true;
                         }
@@ -138,13 +174,6 @@ fn main() {
                 }
 
                 egui_glow.run(windowed_context.window(), |ctx| {
-                    let mut show_scene_hierarchy = true;
-                    let mut show_inspector = true;
-                    let mut show_assets = true;
-                    let mut show_console = true;
-                    let mut position = [0.0_f32, 1.0, 2.0];
-                    let mut visible = true;
-
                     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
                         egui::menu::bar(ui, |ui| {
                             ui.menu_button("File", |ui| {
@@ -188,13 +217,14 @@ fn main() {
                         .show(ctx, |ui| {
                             ui.heading("Scene Hierarchy");
                             ui.separator();
-                            ui.label("Root");
-                            ui.indent("scene_nodes", |ui| {
-                                ui.label("Camera");
-                                ui.label("Directional Light");
-                                ui.label("Player");
-                                ui.label("Environment");
-                            });
+                            ui.label("Filter");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut hierarchy_filter)
+                                    .hint_text("Search...")
+                                    .desired_width(f32::INFINITY),
+                            );
+                            ui.add_space(6.0);
+                            draw_scene_tree(ui, &scene_tree, &mut selected_entity);
                         });
 
                     egui::SidePanel::right("inspector_panel")
@@ -202,20 +232,98 @@ fn main() {
                         .show(ctx, |ui| {
                             ui.heading("Inspector");
                             ui.separator();
-                            ui.label("Selected: Player");
+                            ui.label(format!("Selected: {selected_entity}"));
                             ui.add_space(8.0);
-                            ui.group(|ui| {
-                                ui.label("Transform");
-                                ui.add(egui::DragValue::new(&mut position[0]).prefix("X "));
-                                ui.add(egui::DragValue::new(&mut position[1]).prefix("Y "));
-                                ui.add(egui::DragValue::new(&mut position[2]).prefix("Z "));
-                            });
+                            egui::CollapsingHeader::new("Transform")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Position");
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_position[0])
+                                                .prefix("X "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_position[1])
+                                                .prefix("Y "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_position[2])
+                                                .prefix("Z "),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Rotation");
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_rotation[0])
+                                                .prefix("X "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_rotation[1])
+                                                .prefix("Y "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_rotation[2])
+                                                .prefix("Z "),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Scale");
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_scale[0])
+                                                .prefix("X "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_scale[1])
+                                                .prefix("Y "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut transform_scale[2])
+                                                .prefix("Z "),
+                                        );
+                                    });
+                                });
                             ui.add_space(8.0);
-                            ui.group(|ui| {
-                                ui.label("Mesh Renderer");
-                                ui.checkbox(&mut visible, "Visible");
-                                ui.label("Material: Starter");
-                            });
+                            egui::CollapsingHeader::new("Render")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.checkbox(&mut renderer_visible, "Visible");
+                                    ui.horizontal(|ui| {
+                                        ui.label("Mesh");
+                                        ui.label("player_mesh.fbx");
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Material");
+                                        ui.label("Starter");
+                                    });
+                                });
+                            ui.add_space(8.0);
+                            egui::CollapsingHeader::new("Physics")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.checkbox(&mut physics_enabled, "Rigid Body");
+                                    ui.checkbox(&mut collider_enabled, "Collider");
+                                    ui.horizontal(|ui| {
+                                        ui.label("Mass");
+                                        ui.add(
+                                            egui::DragValue::new(&mut rigidbody_mass).suffix(" kg"),
+                                        );
+                                    });
+                                });
+                            ui.add_space(8.0);
+                            egui::CollapsingHeader::new("Script")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.checkbox(&mut script_enabled, "Enabled");
+                                    ui.horizontal(|ui| {
+                                        ui.label("Script");
+                                        ui.label("player_controller.rs");
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Update");
+                                        ui.label("OnTick");
+                                    });
+                                });
                         });
 
                     egui::TopBottomPanel::bottom("assets_console_panel")
@@ -240,6 +348,15 @@ fn main() {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         ui.heading("Viewport");
                         ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Gizmo");
+                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Translate, "Translate");
+                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Rotate, "Rotate");
+                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Scale, "Scale");
+                            ui.separator();
+                            ui.label(format!("Mode: {}", gizmo_mode.label()));
+                        });
+                        ui.add_space(8.0);
                         if preview_ready {
                             if let Some(texture) = preview_texture.as_ref() {
                                 let preview_size = egui::Vec2::new(
@@ -266,4 +383,52 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[derive(Clone)]
+struct SceneNode {
+    name: &'static str,
+    children: Vec<SceneNode>,
+}
+
+impl SceneNode {
+    fn new(name: &'static str, children: Vec<SceneNode>) -> Self {
+        Self { name, children }
+    }
+}
+
+fn draw_scene_tree(ui: &mut egui::Ui, node: &SceneNode, selected: &mut String) {
+    if node.children.is_empty() {
+        let is_selected = selected == node.name;
+        if ui.selectable_label(is_selected, node.name).clicked() {
+            *selected = node.name.to_string();
+        }
+        return;
+    }
+
+    let response = ui.collapsing(node.name, |ui| {
+        for child in &node.children {
+            draw_scene_tree(ui, child, selected);
+        }
+    });
+    if response.header_response.clicked() {
+        *selected = node.name.to_string();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GizmoMode {
+    Translate,
+    Rotate,
+    Scale,
+}
+
+impl GizmoMode {
+    fn label(self) -> &'static str {
+        match self {
+            GizmoMode::Translate => "Translate",
+            GizmoMode::Rotate => "Rotate",
+            GizmoMode::Scale => "Scale",
+        }
+    }
 }
