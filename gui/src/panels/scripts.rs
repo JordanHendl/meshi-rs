@@ -20,19 +20,6 @@ pub trait ScriptProvider {
     fn empty_message(&self) -> &'static str;
 }
 
-pub struct DummyScriptProvider;
-
-impl ScriptProvider for DummyScriptProvider {
-    fn scripts(&self) -> Vec<ScriptStatus> {
-        // ScriptProvider TODO: replace DummyScriptProvider with real script system hook.
-        Vec::new()
-    }
-
-    fn empty_message(&self) -> &'static str {
-        "no scripts registered"
-    }
-}
-
 pub fn render_scripts_panel(ui: &mut Ui, provider: &dyn ScriptProvider) {
     ui.heading("Scripts");
     ui.separator();

@@ -1,12 +1,14 @@
 mod panels;
+mod state;
 
 use egui::ColorImage;
 use egui_glow::glow::{self, HasContext as _};
 use egui_glow::EguiGlow;
 use glam::Mat4;
-use panels::assets::{
-    render_assets_panel, AssetBrowserState, AssetEntry, AssetFilter, AssetMetadata, ImportJob,
-};
+use panels::assets::{render_assets_panel, AssetBrowserState, AssetFilter};
+use panels::projects::render_projects_panel;
+use panels::scripts::render_scripts_panel;
+use state::{EditorState, SceneNode};
 use meshi_graphics::*;
 use meshi_graphics::{DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect, WindowInfo};
 use std::rc::Rc;
@@ -86,93 +88,11 @@ fn main() {
     let mut rigidbody_mass = 75.0_f32;
     let mut script_enabled = true;
     let mut gizmo_mode = GizmoMode::Translate;
+    let mut editor_state = EditorState::new();
     let mut asset_browser_state = AssetBrowserState {
         search: String::new(),
         filter: AssetFilter::All,
     };
-    let asset_entries = vec![
-        AssetEntry {
-            name: "Player".to_string(),
-            asset_type: "Models".to_string(),
-            path: "Assets/Models/player.fbx".to_string(),
-            status: "Imported".to_string(),
-            thumbnail_label: "FBX".to_string(),
-        },
-        AssetEntry {
-            name: "Hero Texture".to_string(),
-            asset_type: "Textures".to_string(),
-            path: "Assets/Textures/hero_albedo.png".to_string(),
-            status: "Ready".to_string(),
-            thumbnail_label: "PNG".to_string(),
-        },
-        AssetEntry {
-            name: "Starter Material".to_string(),
-            asset_type: "Materials".to_string(),
-            path: "Assets/Materials/starter.mat".to_string(),
-            status: "Linked".to_string(),
-            thumbnail_label: "MAT".to_string(),
-        },
-        AssetEntry {
-            name: "Wind Loop".to_string(),
-            asset_type: "Audio".to_string(),
-            path: "Assets/Audio/wind_loop.ogg".to_string(),
-            status: "Streaming".to_string(),
-            thumbnail_label: "OGG".to_string(),
-        },
-        AssetEntry {
-            name: "Player Controller".to_string(),
-            asset_type: "Scripts".to_string(),
-            path: "Assets/Scripts/player_controller.rs".to_string(),
-            status: "Compiled".to_string(),
-            thumbnail_label: "RS".to_string(),
-        },
-    ];
-    let import_jobs = vec![
-        ImportJob {
-            source_file: "~/Downloads/robot.glb".to_string(),
-            asset_name: "Robot".to_string(),
-            asset_type: "Models".to_string(),
-            status: "Waiting".to_string(),
-            last_imported: "Never".to_string(),
-        },
-        ImportJob {
-            source_file: "~/Downloads/terrain_albedo.tif".to_string(),
-            asset_name: "Terrain Albedo".to_string(),
-            asset_type: "Textures".to_string(),
-            status: "Queued".to_string(),
-            last_imported: "2 days ago".to_string(),
-        },
-    ];
-    let asset_metadata = AssetMetadata {
-        asset_name: "Player".to_string(),
-        source_file: "Assets/Models/player.fbx".to_string(),
-        import_preset: "Character: High".to_string(),
-        vertex_count: "24,320".to_string(),
-        material_count: "3".to_string(),
-        tags: vec!["character".to_string(), "biped".to_string(), "hero".to_string()],
-    };
-    let scene_tree = SceneNode::new(
-        "Root",
-        vec![
-            SceneNode::new("Camera", vec![]),
-            SceneNode::new("Directional Light", vec![]),
-            SceneNode::new(
-                "Player",
-                vec![
-                    SceneNode::new("Weapon", vec![]),
-                    SceneNode::new("Camera Pivot", vec![]),
-                ],
-            ),
-            SceneNode::new(
-                "Environment",
-                vec![
-                    SceneNode::new("Ground", vec![]),
-                    SceneNode::new("Rocks", vec![]),
-                    SceneNode::new("Foliage", vec![]),
-                ],
-            ),
-        ],
-    );
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -285,16 +205,24 @@ fn main() {
                     egui::SidePanel::left("scene_hierarchy")
                         .resizable(true)
                         .show(ctx, |ui| {
-                            ui.heading("Scene Hierarchy");
-                            ui.separator();
-                            ui.label("Filter");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut hierarchy_filter)
-                                    .hint_text("Search...")
-                                    .desired_width(f32::INFINITY),
-                            );
-                            ui.add_space(6.0);
-                            draw_scene_tree(ui, &scene_tree, &mut selected_entity);
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                render_projects_panel(ui, &editor_state);
+                                ui.add_space(12.0);
+                                ui.heading("Scene Hierarchy");
+                                ui.separator();
+                                ui.label("Filter");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut hierarchy_filter)
+                                        .hint_text("Search...")
+                                        .desired_width(f32::INFINITY),
+                                );
+                                ui.add_space(6.0);
+                                draw_scene_tree(
+                                    ui,
+                                    &editor_state.scene_tree,
+                                    &mut selected_entity,
+                                );
+                            });
                         });
 
                     egui::SidePanel::right("inspector_panel")
@@ -404,9 +332,9 @@ fn main() {
                                     render_assets_panel(
                                         &mut columns[0],
                                         &mut asset_browser_state,
-                                        &asset_entries,
-                                        &import_jobs,
-                                        &asset_metadata,
+                                        &editor_state.asset_entries,
+                                        &editor_state.import_jobs,
+                                        &editor_state.asset_metadata,
                                     );
                                 } else {
                                     columns[0].heading("Assets");
@@ -420,11 +348,15 @@ fn main() {
                                     columns[1].label("[Info] Editor ready.");
                                     columns[1].label("[Warn] Lighting bake pending.");
                                     columns[1].label("[Error] Missing texture: brick_albedo.png");
+                                    columns[1].add_space(12.0);
                                 } else {
                                     columns[1].heading("Console");
                                     columns[1].separator();
                                     columns[1].label("Console hidden.");
+                                    columns[1].add_space(12.0);
                                 }
+
+                                render_scripts_panel(&mut columns[1], &editor_state);
                             });
                         });
 
@@ -468,34 +400,22 @@ fn main() {
     });
 }
 
-#[derive(Clone)]
-struct SceneNode {
-    name: &'static str,
-    children: Vec<SceneNode>,
-}
-
-impl SceneNode {
-    fn new(name: &'static str, children: Vec<SceneNode>) -> Self {
-        Self { name, children }
-    }
-}
-
 fn draw_scene_tree(ui: &mut egui::Ui, node: &SceneNode, selected: &mut String) {
     if node.children.is_empty() {
-        let is_selected = selected == node.name;
-        if ui.selectable_label(is_selected, node.name).clicked() {
-            *selected = node.name.to_string();
+        let is_selected = *selected == node.name;
+        if ui.selectable_label(is_selected, &node.name).clicked() {
+            *selected = node.name.clone();
         }
         return;
     }
 
-    let response = ui.collapsing(node.name, |ui| {
+    let response = ui.collapsing(&node.name, |ui| {
         for child in &node.children {
             draw_scene_tree(ui, child, selected);
         }
     });
     if response.header_response.clicked() {
-        *selected = node.name.to_string();
+        *selected = node.name.clone();
     }
 }
 

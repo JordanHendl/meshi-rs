@@ -11,26 +11,6 @@ pub trait ProjectProvider {
     fn recent_projects(&self) -> Vec<ProjectSummary>;
 }
 
-pub struct DummyProjectProvider;
-
-impl ProjectProvider for DummyProjectProvider {
-    fn recent_projects(&self) -> Vec<ProjectSummary> {
-        // ProjectProvider TODO: replace DummyProjectProvider with real project system hook.
-        vec![
-            ProjectSummary {
-                name: "New Prototype".to_string(),
-                path: "~/meshi/projects/new-prototype".to_string(),
-                last_opened: "Today".to_string(),
-            },
-            ProjectSummary {
-                name: "Sandbox".to_string(),
-                path: "~/meshi/projects/sandbox".to_string(),
-                last_opened: "Yesterday".to_string(),
-            },
-        ]
-    }
-}
-
 pub fn render_projects_panel(ui: &mut Ui, provider: &dyn ProjectProvider) {
     ui.heading("Project");
     ui.separator();
