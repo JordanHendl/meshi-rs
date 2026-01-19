@@ -1,8 +1,10 @@
-use egui::{ColorImage, Context};
-use egui_winit::State;
+use egui::ColorImage;
+use egui_glow::glow::{self, HasContext as _};
+use egui_glow::EguiGlow;
 use glam::Mat4;
 use meshi_graphics::*;
 use meshi_graphics::{DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect, WindowInfo};
+use std::rc::Rc;
 use std::time::Instant;
 use winit::{
     event::{Event, WindowEvent},
@@ -46,32 +48,55 @@ fn main() {
     render_engine.attach_camera_to_display(display, camera);
 
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Meshi GUI")
-        .build(&event_loop)
+    let window_builder = WindowBuilder::new().with_title("Meshi GUI");
+    let windowed_context = glutin::ContextBuilder::new()
+        .with_vsync(true)
+        .build_windowed(window_builder, &event_loop)
         .expect("failed to build window");
-
-    let mut egui_ctx = Context::default();
-    let mut egui_state = State::new(0, &window);
+    let windowed_context = unsafe {
+        windowed_context
+            .make_current()
+            .expect("failed to make GL context current")
+    };
+    let gl = unsafe {
+        glow::Context::from_loader_function(|symbol| {
+            windowed_context.get_proc_address(symbol) as *const _
+        })
+    };
+    let gl = Rc::new(gl);
+    let mut egui_glow = EguiGlow::new(windowed_context.window(), gl.clone());
     let mut last_frame_time = Instant::now();
     let mut preview_texture: Option<egui::TextureHandle> = None;
     let mut preview_ready = false;
-    let script_provider = panels::scripts::DummyScriptProvider;
+    let project_provider = panels::projects::DummyProjectProvider;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match &event {
-            Event::WindowEvent { event, window_id } if *window_id == window.id() => {
+            Event::WindowEvent { event, window_id }
+                if *window_id == windowed_context.window().id() =>
+            {
                 if matches!(event, WindowEvent::CloseRequested) {
+                    egui_glow.destroy();
                     *control_flow = ControlFlow::Exit;
                     return;
                 }
 
-                let _ = egui_state.on_event(&egui_ctx, event);
+                let _ = egui_glow.on_event(event);
+
+                match event {
+                    WindowEvent::Resized(physical_size) => {
+                        windowed_context.resize(*physical_size);
+                    }
+                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                        windowed_context.resize(**new_inner_size);
+                    }
+                    _ => {}
+                }
             }
             Event::MainEventsCleared => {
-                window.request_redraw();
+                windowed_context.window().request_redraw();
             }
             Event::RedrawRequested(_) => {
                 let now = Instant::now();
@@ -107,22 +132,22 @@ fn main() {
                             if let Some(texture) = preview_texture.as_mut() {
                                 texture.set(color_image);
                             } else {
-                                preview_texture =
-                                    Some(egui_ctx.load_texture("preview", color_image));
+                                preview_texture = Some(
+                                    egui_glow.egui_ctx.load_texture("preview", color_image),
+                                );
                             }
                             preview_ready = true;
                         }
                     }
                 }
 
-                let raw_input = egui_state.take_egui_input(&window);
-                let full_output = egui_ctx.run(raw_input, |ui| {
-                    egui::SidePanel::left("scripts_panel").show(&egui_ctx, |ui| {
-                        panels::scripts::render_scripts_panel(ui, &script_provider);
+                egui_glow.run(windowed_context.window(), |ctx| {
+                    egui::SidePanel::left("projects_panel").show(ctx, |ui| {
+                        panels::projects::render_projects_panel(ui, &project_provider);
                     });
 
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        ui.heading("Preview");
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.heading("Game Preview");
                         if preview_ready {
                             if let Some(texture) = preview_texture.as_ref() {
                                 let preview_size = egui::Vec2::new(
@@ -136,7 +161,15 @@ fn main() {
                         }
                     });
                 });
-                egui_state.handle_platform_output(&window, &egui_ctx, full_output.platform_output);
+
+                unsafe {
+                    gl.clear_color(0.1, 0.1, 0.1, 1.0);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+                egui_glow.paint(windowed_context.window());
+                windowed_context
+                    .swap_buffers()
+                    .expect("failed to swap buffers");
             }
             _ => {}
         }
