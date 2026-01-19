@@ -12,8 +12,6 @@ use winit::{
     window::WindowBuilder,
 };
 
-mod panels;
-
 fn main() {
     let preview_extent = [512, 512];
     let mut render_engine = RenderEngine::new(&RenderEngineInfo {
@@ -68,8 +66,6 @@ fn main() {
     let mut last_frame_time = Instant::now();
     let mut preview_texture: Option<egui::TextureHandle> = None;
     let mut preview_ready = false;
-    let project_provider = panels::projects::DummyProjectProvider;
-
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -142,12 +138,108 @@ fn main() {
                 }
 
                 egui_glow.run(windowed_context.window(), |ctx| {
-                    egui::SidePanel::left("projects_panel").show(ctx, |ui| {
-                        panels::projects::render_projects_panel(ui, &project_provider);
+                    let mut show_scene_hierarchy = true;
+                    let mut show_inspector = true;
+                    let mut show_assets = true;
+                    let mut show_console = true;
+                    let mut position = [0.0_f32, 1.0, 2.0];
+                    let mut visible = true;
+
+                    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+                        egui::menu::bar(ui, |ui| {
+                            ui.menu_button("File", |ui| {
+                                ui.button("New Scene");
+                                ui.button("Open...");
+                                ui.button("Save");
+                                ui.separator();
+                                ui.button("Preferences");
+                                ui.separator();
+                                ui.button("Quit");
+                            });
+                            ui.menu_button("Edit", |ui| {
+                                ui.button("Undo");
+                                ui.button("Redo");
+                                ui.separator();
+                                ui.button("Cut");
+                                ui.button("Copy");
+                                ui.button("Paste");
+                            });
+                            ui.menu_button("View", |ui| {
+                                ui.checkbox(&mut show_scene_hierarchy, "Scene Hierarchy");
+                                ui.checkbox(&mut show_inspector, "Inspector");
+                                ui.checkbox(&mut show_assets, "Assets");
+                                ui.checkbox(&mut show_console, "Console");
+                            });
+                            ui.menu_button("Build", |ui| {
+                                ui.button("Build Project");
+                                ui.button("Run");
+                            });
+                            ui.menu_button("Help", |ui| {
+                                ui.button("Documentation");
+                                ui.button("Report Issue");
+                                ui.separator();
+                                ui.button("About Meshi");
+                            });
+                        });
                     });
 
+                    egui::SidePanel::left("scene_hierarchy")
+                        .resizable(true)
+                        .show(ctx, |ui| {
+                            ui.heading("Scene Hierarchy");
+                            ui.separator();
+                            ui.label("Root");
+                            ui.indent("scene_nodes", |ui| {
+                                ui.label("Camera");
+                                ui.label("Directional Light");
+                                ui.label("Player");
+                                ui.label("Environment");
+                            });
+                        });
+
+                    egui::SidePanel::right("inspector_panel")
+                        .resizable(true)
+                        .show(ctx, |ui| {
+                            ui.heading("Inspector");
+                            ui.separator();
+                            ui.label("Selected: Player");
+                            ui.add_space(8.0);
+                            ui.group(|ui| {
+                                ui.label("Transform");
+                                ui.add(egui::DragValue::new(&mut position[0]).prefix("X "));
+                                ui.add(egui::DragValue::new(&mut position[1]).prefix("Y "));
+                                ui.add(egui::DragValue::new(&mut position[2]).prefix("Z "));
+                            });
+                            ui.add_space(8.0);
+                            ui.group(|ui| {
+                                ui.label("Mesh Renderer");
+                                ui.checkbox(&mut visible, "Visible");
+                                ui.label("Material: Starter");
+                            });
+                        });
+
+                    egui::TopBottomPanel::bottom("assets_console_panel")
+                        .resizable(true)
+                        .show(ctx, |ui| {
+                            ui.columns(2, |columns| {
+                                columns[0].heading("Assets");
+                                columns[0].separator();
+                                columns[0].label("Meshes/");
+                                columns[0].label("Materials/");
+                                columns[0].label("Textures/");
+                                columns[0].label("Scripts/");
+
+                                columns[1].heading("Console");
+                                columns[1].separator();
+                                columns[1].label("[Info] Editor ready.");
+                                columns[1].label("[Warn] Lighting bake pending.");
+                                columns[1].label("[Error] Missing texture: brick_albedo.png");
+                            });
+                        });
+
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.heading("Game Preview");
+                        ui.heading("Viewport");
+                        ui.separator();
                         if preview_ready {
                             if let Some(texture) = preview_texture.as_ref() {
                                 let preview_size = egui::Vec2::new(
