@@ -1,4 +1,4 @@
-use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
+use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
@@ -523,6 +523,10 @@ impl ForwardRenderer {
 
             // Forward SPLIT pass. Renders the following framebuffers:
             // 1) Color
+            self.environment.update(EnvironmentFrameSettings {
+                delta_time,
+                ..Default::default()
+            });
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.viewport,
@@ -535,11 +539,7 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    cmd.combine(self.environment.render(
-                        &self.viewport,
-                        camera_handle,
-                        delta_time,
-                    ))
+                    cmd.combine(self.environment.render(&self.viewport, camera_handle))
                 },
             );
 

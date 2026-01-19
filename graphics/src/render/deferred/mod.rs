@@ -3,7 +3,7 @@ use std::{
     ptr::NonNull,
 };
 
-use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
+use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::environment::clouds::CloudRenderer;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
@@ -1418,6 +1418,10 @@ impl DeferredRenderer {
             transparent_attachments[0] = Some(final_combine.view);
             let transparent_clear: [Option<ClearValue>; 8] = [None; 8];
 
+            self.subrender.environment.update(EnvironmentFrameSettings {
+                delta_time,
+                ..Default::default()
+            });
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.data.viewport,
@@ -1427,11 +1431,11 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    cmd = cmd.combine(self.subrender.environment.render(
-                        &self.data.viewport,
-                        camera_handle,
-                        delta_time,
-                    ));
+                    cmd = cmd.combine(
+                        self.subrender
+                            .environment
+                            .render(&self.data.viewport, camera_handle),
+                    );
 //                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {

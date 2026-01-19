@@ -21,9 +21,28 @@ pub struct EnvironmentRendererInfo {
     pub terrain: terrain::TerrainInfo,
 }
 
+pub struct EnvironmentFrameSettings {
+    pub delta_time: f32,
+    pub time_scale: f32,
+    pub ocean: Option<ocean::OceanFrameSettings>,
+    pub skybox: Option<sky::SkyboxFrameSettings>,
+}
+
+impl Default for EnvironmentFrameSettings {
+    fn default() -> Self {
+        Self {
+            delta_time: 0.0,
+            time_scale: 1.0,
+            ocean: None,
+            skybox: None,
+        }
+    }
+}
+
 pub struct EnvironmentRenderer {
     dynamic: DynamicAllocator,
     time: f32,
+    last_delta_time: f32,
     sky: SkyRenderer,
     ocean: OceanRenderer,
     terrain: TerrainRenderer,
@@ -49,6 +68,7 @@ impl EnvironmentRenderer {
             color_format: info.color_format,
             sample_count: info.sample_count.clone(),
             time: 0.0,
+            last_delta_time: 0.0,
             sky,
             ocean,
             terrain,
@@ -60,8 +80,26 @@ impl EnvironmentRenderer {
         self.dynamic.reset();
     }
 
+    pub fn update(&mut self, settings: EnvironmentFrameSettings) {
+        let scaled_delta = settings.delta_time * settings.time_scale;
+        self.time += scaled_delta;
+        self.last_delta_time = scaled_delta;
+
+        if let Some(ocean) = settings.ocean {
+            self.ocean.update(ocean);
+        }
+
+        if let Some(skybox) = settings.skybox {
+            self.sky.update_skybox(skybox);
+        }
+    }
+
     pub fn update_ocean(&mut self, settings: ocean::OceanFrameSettings) {
         self.ocean.update(settings);
+    }
+
+    pub fn update_skybox(&mut self, settings: sky::SkyboxFrameSettings) {
+        self.sky.update_skybox(settings);
     }
 
     pub fn update_terrain(&mut self, settings: terrain::TerrainFrameSettings) {
@@ -72,17 +110,14 @@ impl EnvironmentRenderer {
         &mut self,
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
-        delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
-        self.time += delta_time;
-
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
                 viewport,
                 &mut self.dynamic,
                 camera,
                 self.time,
-                delta_time,
+                self.last_delta_time,
             ))
             .combine(self.ocean.record_draws(
                 viewport,

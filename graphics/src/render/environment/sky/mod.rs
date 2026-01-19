@@ -24,7 +24,22 @@ pub struct SkyboxInfo {
     pub intensity: f32,
 }
 
+#[derive(Clone)]
+pub struct SkyboxFrameSettings {
+    pub intensity: f32,
+    pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+}
+
 impl Default for SkyboxInfo {
+    fn default() -> Self {
+        Self {
+            cubemap: None,
+            intensity: 1.0,
+        }
+    }
+}
+
+impl Default for SkyboxFrameSettings {
     fn default() -> Self {
         Self {
             cubemap: None,
@@ -288,6 +303,20 @@ impl SkyRenderer {
             skybox_intensity: info.skybox.intensity,
             clouds,
             cfg,
+        }
+    }
+
+    pub fn update_skybox(&mut self, settings: SkyboxFrameSettings) {
+        self.skybox_intensity = settings.intensity;
+
+        if let Some(cubemap) = settings.cubemap {
+            self.skybox_pipeline.update_table(
+                "skybox_texture",
+                dashi::IndexedResource {
+                    resource: ShaderResource::Image(cubemap.view),
+                    slot: 0,
+                },
+            );
         }
     }
 
