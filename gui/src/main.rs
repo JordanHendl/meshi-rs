@@ -1,7 +1,12 @@
+mod panels;
+
 use egui::ColorImage;
-use egui_glow::EguiGlow;
 use egui_glow::glow::{self, HasContext as _};
+use egui_glow::EguiGlow;
 use glam::Mat4;
+use panels::assets::{
+    render_assets_panel, AssetBrowserState, AssetEntry, AssetFilter, AssetMetadata, ImportJob,
+};
 use meshi_graphics::*;
 use meshi_graphics::{DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect, WindowInfo};
 use std::rc::Rc;
@@ -81,6 +86,71 @@ fn main() {
     let mut rigidbody_mass = 75.0_f32;
     let mut script_enabled = true;
     let mut gizmo_mode = GizmoMode::Translate;
+    let mut asset_browser_state = AssetBrowserState {
+        search: String::new(),
+        filter: AssetFilter::All,
+    };
+    let asset_entries = vec![
+        AssetEntry {
+            name: "Player".to_string(),
+            asset_type: "Models".to_string(),
+            path: "Assets/Models/player.fbx".to_string(),
+            status: "Imported".to_string(),
+            thumbnail_label: "FBX".to_string(),
+        },
+        AssetEntry {
+            name: "Hero Texture".to_string(),
+            asset_type: "Textures".to_string(),
+            path: "Assets/Textures/hero_albedo.png".to_string(),
+            status: "Ready".to_string(),
+            thumbnail_label: "PNG".to_string(),
+        },
+        AssetEntry {
+            name: "Starter Material".to_string(),
+            asset_type: "Materials".to_string(),
+            path: "Assets/Materials/starter.mat".to_string(),
+            status: "Linked".to_string(),
+            thumbnail_label: "MAT".to_string(),
+        },
+        AssetEntry {
+            name: "Wind Loop".to_string(),
+            asset_type: "Audio".to_string(),
+            path: "Assets/Audio/wind_loop.ogg".to_string(),
+            status: "Streaming".to_string(),
+            thumbnail_label: "OGG".to_string(),
+        },
+        AssetEntry {
+            name: "Player Controller".to_string(),
+            asset_type: "Scripts".to_string(),
+            path: "Assets/Scripts/player_controller.rs".to_string(),
+            status: "Compiled".to_string(),
+            thumbnail_label: "RS".to_string(),
+        },
+    ];
+    let import_jobs = vec![
+        ImportJob {
+            source_file: "~/Downloads/robot.glb".to_string(),
+            asset_name: "Robot".to_string(),
+            asset_type: "Models".to_string(),
+            status: "Waiting".to_string(),
+            last_imported: "Never".to_string(),
+        },
+        ImportJob {
+            source_file: "~/Downloads/terrain_albedo.tif".to_string(),
+            asset_name: "Terrain Albedo".to_string(),
+            asset_type: "Textures".to_string(),
+            status: "Queued".to_string(),
+            last_imported: "2 days ago".to_string(),
+        },
+    ];
+    let asset_metadata = AssetMetadata {
+        asset_name: "Player".to_string(),
+        source_file: "Assets/Models/player.fbx".to_string(),
+        import_preset: "Character: High".to_string(),
+        vertex_count: "24,320".to_string(),
+        material_count: "3".to_string(),
+        tags: vec!["character".to_string(), "biped".to_string(), "hero".to_string()],
+    };
     let scene_tree = SceneNode::new(
         "Root",
         vec![
@@ -330,18 +400,31 @@ fn main() {
                         .resizable(true)
                         .show(ctx, |ui| {
                             ui.columns(2, |columns| {
-                                columns[0].heading("Assets");
-                                columns[0].separator();
-                                columns[0].label("Meshes/");
-                                columns[0].label("Materials/");
-                                columns[0].label("Textures/");
-                                columns[0].label("Scripts/");
+                                if show_assets {
+                                    render_assets_panel(
+                                        &mut columns[0],
+                                        &mut asset_browser_state,
+                                        &asset_entries,
+                                        &import_jobs,
+                                        &asset_metadata,
+                                    );
+                                } else {
+                                    columns[0].heading("Assets");
+                                    columns[0].separator();
+                                    columns[0].label("Assets panel hidden.");
+                                }
 
-                                columns[1].heading("Console");
-                                columns[1].separator();
-                                columns[1].label("[Info] Editor ready.");
-                                columns[1].label("[Warn] Lighting bake pending.");
-                                columns[1].label("[Error] Missing texture: brick_albedo.png");
+                                if show_console {
+                                    columns[1].heading("Console");
+                                    columns[1].separator();
+                                    columns[1].label("[Info] Editor ready.");
+                                    columns[1].label("[Warn] Lighting bake pending.");
+                                    columns[1].label("[Error] Missing texture: brick_albedo.png");
+                                } else {
+                                    columns[1].heading("Console");
+                                    columns[1].separator();
+                                    columns[1].label("Console hidden.");
+                                }
                             });
                         });
 
