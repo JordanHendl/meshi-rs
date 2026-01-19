@@ -23,7 +23,7 @@ use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
-pub use render::clouds::CloudRenderer;
+pub use render::environment::clouds::CloudRenderer;
 use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;

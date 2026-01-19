@@ -1,7 +1,8 @@
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::UsageBits;
 use dashi::*;
-use dashi::cmd::PendingGraphics;
+use dashi::cmd::*; 
+use dashi::cmd::PendingGraphics; 
 use dashi::driver::command::Draw;
 use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, DepthInfo, Format, GraphicsPipelineDetails,
@@ -10,8 +11,8 @@ use dashi::{
 };
 use tare::utils::StagedBuffer;
 
-use super::CloudDebugView;
-use super::cloud_assets::CloudAssets;
+use crate::CloudDebugView;
+use crate::render::environment::clouds::cloud_assets::CloudAssets;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -196,7 +197,7 @@ impl CloudCompositePass {
             .set_attachment_format(0, Format::BGRA8)
             .add_depth_target(AttachmentDesc {
                 format: Format::D24S8,
-                samples: SampleCount::S1,
+                samples: sample_count,
             })
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![dashi::ColorBlendState {
@@ -209,6 +210,7 @@ impl CloudCompositePass {
                     alpha_blend_op: dashi::BlendOp::Add,
                     write_mask: Default::default(),
                 }],
+                sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: false,
                     should_write: false,

@@ -2,7 +2,6 @@ pub mod deferred;
 pub mod environment;
 pub mod forward;
 pub mod text;
-pub mod clouds;
 mod gpu_draw_builder;
 mod particle_system;
 mod skinning;

@@ -9,7 +9,7 @@ use cloud_pass_composite::CloudCompositePass;
 use cloud_pass_raymarch::{CloudRaymarchPass, CloudSamplingSettings};
 use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
-use crate::structs::{CloudDebugView, CloudResolutionScale, CloudSettings};
+use crate::structs::{CloudResolutionScale, CloudSettings};
 use dashi::{Context, Handle, Viewport};
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::BindlessState;
@@ -311,7 +311,7 @@ fn calc_low_res(viewport: &Viewport, scale: CloudResolutionScale) -> [u32; 2] {
         CloudResolutionScale::Quarter => 4,
     };
     [
-        (viewport.area.w as u32).max(1) / divisor,
-        (viewport.area.h as u32).max(1) / divisor,
+        ((viewport.area.w as u32).max(1) / divisor).max(1),
+        ((viewport.area.h as u32).max(1) / divisor).max(1),
     ]
 }

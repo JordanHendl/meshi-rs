@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
-use super::clouds::CloudRenderer;
+use super::environment::clouds::CloudRenderer;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
@@ -95,7 +95,7 @@ struct DataProcessors {
 
 struct Renderers {
     environment: EnvironmentRenderer,
-    clouds: super::clouds::CloudRenderer,
+    clouds: super::environment::clouds::CloudRenderer,
 }
 
 struct DeferredPSO {

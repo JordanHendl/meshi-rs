@@ -1,6 +1,7 @@
 pub mod ocean;
 pub mod sky;
 pub mod terrain;
+pub mod clouds;
 
 use dashi::cmd::PendingGraphics;
 use dashi::{CommandStream, Context, DynamicAllocator, Format, SampleCount, Viewport};
