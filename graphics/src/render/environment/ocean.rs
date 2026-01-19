@@ -12,6 +12,7 @@ use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use furikake::types::Camera;
 use glam::Vec2;
+use tracing::warn;
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -123,7 +124,7 @@ impl OceanRenderer {
             })
             .expect("Failed to create ocean wave buffer");
 
-        let compute_pipeline = CSOBuilder::new()
+        let compute_pipeline = match CSOBuilder::new()
             .shader(Some(
                 include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
             ))
@@ -132,11 +133,19 @@ impl OceanRenderer {
                 ShaderResource::StorageBuffer(wave_buffer.into()),
             )
             .add_variable(
-                "ocean_params",
+                "params",
                 ShaderResource::DynamicStorage(dynamic.state()),
             )
             .build(ctx)
-            .ok();
+        {
+            Ok(pipeline) => Some(pipeline),
+            Err(err) => {
+                warn!(
+                    "Ocean compute pipeline creation failed: {err}. Falling back to static waves."
+                );
+                None
+            }
+        };
 
         let shaders = compile_ocean_shaders();
         let mut pso_builder = PSOBuilder::new()

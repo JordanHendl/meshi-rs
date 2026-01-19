@@ -23,7 +23,9 @@ pub struct EnvironmentRendererInfo {
 
 pub struct EnvironmentFrameSettings {
     pub delta_time: f32,
+    pub time_seconds: Option<f32>,
     pub time_scale: f32,
+    pub paused: bool,
     pub ocean: Option<ocean::OceanFrameSettings>,
     pub skybox: Option<sky::SkyboxFrameSettings>,
 }
@@ -32,7 +34,9 @@ impl Default for EnvironmentFrameSettings {
     fn default() -> Self {
         Self {
             delta_time: 0.0,
+            time_seconds: None,
             time_scale: 1.0,
+            paused: false,
             ocean: None,
             skybox: None,
         }
@@ -42,6 +46,8 @@ impl Default for EnvironmentFrameSettings {
 pub struct EnvironmentRenderer {
     dynamic: DynamicAllocator,
     time: f32,
+    time_scale: f32,
+    paused: bool,
     last_delta_time: f32,
     sky: SkyRenderer,
     ocean: OceanRenderer,
@@ -68,6 +74,8 @@ impl EnvironmentRenderer {
             color_format: info.color_format,
             sample_count: info.sample_count.clone(),
             time: 0.0,
+            time_scale: 1.0,
+            paused: false,
             last_delta_time: 0.0,
             sky,
             ocean,
@@ -81,9 +89,20 @@ impl EnvironmentRenderer {
     }
 
     pub fn update(&mut self, settings: EnvironmentFrameSettings) {
-        let scaled_delta = settings.delta_time * settings.time_scale;
-        self.time += scaled_delta;
-        self.last_delta_time = scaled_delta;
+        let previous_time = self.time;
+        self.time_scale = settings.time_scale;
+        self.paused = settings.paused;
+
+        if let Some(time_seconds) = settings.time_seconds {
+            self.time = time_seconds;
+            self.last_delta_time = self.time - previous_time;
+        } else if self.paused {
+            self.last_delta_time = 0.0;
+        } else {
+            let scaled_delta = settings.delta_time * self.time_scale;
+            self.time += scaled_delta;
+            self.last_delta_time = scaled_delta;
+        }
 
         if let Some(ocean) = settings.ocean {
             self.ocean.update(ocean);
@@ -104,6 +123,34 @@ impl EnvironmentRenderer {
 
     pub fn update_terrain(&mut self, settings: terrain::TerrainFrameSettings) {
         self.terrain.update(settings);
+    }
+
+    pub fn set_time(&mut self, time_seconds: f32) {
+        self.time = time_seconds;
+    }
+
+    pub fn set_time_scale(&mut self, time_scale: f32) {
+        self.time_scale = time_scale;
+    }
+
+    pub fn pause(&mut self) {
+        self.paused = true;
+    }
+
+    pub fn resume(&mut self) {
+        self.paused = false;
+    }
+
+    pub fn time_seconds(&self) -> f32 {
+        self.time
+    }
+
+    pub fn time_scale(&self) -> f32 {
+        self.time_scale
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     pub fn render(
