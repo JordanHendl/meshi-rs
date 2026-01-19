@@ -23,6 +23,7 @@ use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
+pub use render::clouds::CloudRenderer;
 use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
@@ -194,6 +195,18 @@ impl RenderEngine {
         material: Option<Handle<Material>>,
     ) {
         self.renderer.set_billboard_material(handle, material);
+    }
+
+    pub fn cloud_settings(&self) -> CloudSettings {
+        self.renderer.cloud_settings()
+    }
+
+    pub fn set_cloud_settings(&mut self, settings: CloudSettings) {
+        self.renderer.set_cloud_settings(settings);
+    }
+
+    pub fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
+        self.renderer.set_cloud_weather_map(view);
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {

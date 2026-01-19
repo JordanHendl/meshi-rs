@@ -170,6 +170,119 @@ impl Default for PlanePrimitiveInfo {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudResolutionScale {
+    Half,
+    Quarter,
+}
+
+impl Default for CloudResolutionScale {
+    fn default() -> Self {
+        Self::Quarter
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudDebugView {
+    None = 0,
+    WeatherMap = 1,
+    ShadowMap = 2,
+    Transmittance = 3,
+    StepHeatmap = 4,
+    TemporalWeight = 5,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloudShadowSettings {
+    pub enabled: bool,
+    pub resolution: u32,
+    pub extent: f32,
+    pub strength: f32,
+}
+
+impl Default for CloudShadowSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            resolution: 256,
+            extent: 50000.0,
+            strength: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloudTemporalSettings {
+    pub blend_factor: f32,
+    pub clamp_strength: f32,
+    pub depth_sigma: f32,
+    pub history_weight_scale: f32,
+}
+
+impl Default for CloudTemporalSettings {
+    fn default() -> Self {
+        Self {
+            blend_factor: 0.9,
+            clamp_strength: 0.7,
+            depth_sigma: 15.0,
+            history_weight_scale: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloudSettings {
+    pub enabled: bool,
+    pub base_altitude: f32,
+    pub top_altitude: f32,
+    pub density_scale: f32,
+    pub step_count: u32,
+    pub light_step_count: u32,
+    pub phase_g: f32,
+    pub wind: Vec2,
+    pub wind_speed: f32,
+    pub low_res_scale: CloudResolutionScale,
+    pub coverage_power: f32,
+    pub detail_strength: f32,
+    pub curl_strength: f32,
+    pub jitter_strength: f32,
+    pub epsilon: f32,
+    pub sun_radiance: Vec3,
+    pub sun_direction: Vec3,
+    pub shadow: CloudShadowSettings,
+    pub temporal: CloudTemporalSettings,
+    pub debug_view: CloudDebugView,
+    pub performance_budget_ms: f32,
+}
+
+impl Default for CloudSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            base_altitude: 1500.0,
+            top_altitude: 4000.0,
+            density_scale: 0.5,
+            step_count: 96,
+            light_step_count: 6,
+            phase_g: 0.6,
+            wind: Vec2::new(1.0, 0.0),
+            wind_speed: 20.0,
+            low_res_scale: CloudResolutionScale::Quarter,
+            coverage_power: 1.2,
+            detail_strength: 0.6,
+            curl_strength: 0.0,
+            jitter_strength: 1.0,
+            epsilon: 0.01,
+            sun_radiance: Vec3::new(1.0, 1.0, 1.0),
+            sun_direction: Vec3::new(0.0, -1.0, 0.0),
+            shadow: CloudShadowSettings::default(),
+            temporal: CloudTemporalSettings::default(),
+            debug_view: CloudDebugView::None,
+            performance_budget_ms: 4.0,
+        }
+    }
+}
+
 
 #[inline]
 pub fn pack_gpu_light(s: LightInfo) -> Light {

@@ -2,12 +2,13 @@ pub mod deferred;
 pub mod environment;
 pub mod forward;
 pub mod text;
+pub mod clouds;
 mod gpu_draw_builder;
 mod particle_system;
 mod skinning;
 mod scene;
 
-use crate::{AnimationState, RenderObject, RenderObjectInfo, TextInfo, TextObject};
+use crate::{AnimationState, CloudSettings, RenderObject, RenderObjectInfo, TextInfo, TextObject};
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
@@ -105,5 +106,8 @@ pub trait Renderer {
         views: &[Handle<Camera>],
         delta_time: f32,
     ) -> Vec<ViewOutput>;
+    fn cloud_settings(&self) -> CloudSettings;
+    fn set_cloud_settings(&mut self, settings: CloudSettings);
+    fn set_cloud_weather_map(&mut self, view: Option<ImageView>);
     fn shut_down(self: Box<Self>);
 }

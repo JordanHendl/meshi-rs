@@ -3,7 +3,7 @@ use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{AnimationState, BillboardInfo, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
+use crate::{AnimationState, BillboardInfo, CloudSettings, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
@@ -54,6 +54,7 @@ pub struct ForwardRenderer {
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
     text: TextRenderer,
+    cloud_settings: CloudSettings,
 }
 
 struct RenderObjectData {
@@ -635,6 +636,17 @@ impl Renderer for ForwardRenderer {
         delta_time: f32,
     ) -> Vec<ViewOutput> {
         ForwardRenderer::update(self, sems, views, delta_time)
+    }
+
+    fn cloud_settings(&self) -> CloudSettings {
+        self.cloud_settings
+    }
+
+    fn set_cloud_settings(&mut self, settings: CloudSettings) {
+        self.cloud_settings = settings;
+    }
+
+    fn set_cloud_weather_map(&mut self, _view: Option<ImageView>) {
     }
 
     fn shut_down(self: Box<Self>) {

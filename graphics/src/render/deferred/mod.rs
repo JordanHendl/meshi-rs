@@ -4,19 +4,18 @@ use std::{
 };
 
 use super::environment::{EnvironmentRenderer, EnvironmentRendererInfo};
+use super::clouds::CloudRenderer;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::AnimationState;
+use crate::{AnimationState, TextInfo, TextRenderMode};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{
-    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextInfo, TextObject,
-    render::scene::*,
+    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
-use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{Draw, DrawIndexedIndirect};
@@ -31,12 +30,8 @@ use furikake::{
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
-use noren::rdb::Skeleton;
-use noren::rdb::primitives::Vertex;
-use noren::{
-    DB,
-    meta::{DeviceModel, HostMaterial},
-};
+use noren::DB;
+use noren::meta::DeviceModel;
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
@@ -100,6 +95,7 @@ struct DataProcessors {
 
 struct Renderers {
     environment: EnvironmentRenderer,
+    clouds: super::clouds::CloudRenderer,
 }
 
 struct DeferredPSO {
@@ -126,6 +122,8 @@ pub struct DeferredRenderer {
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
     text: TextRenderer,
+    depth: ImageView,
+    cloud_overlay: Handle<TextObject>,
 }
 
 struct RenderObjectData {
@@ -242,6 +240,30 @@ impl DeferredRenderer {
             },
         );
 
+        let depth_image = ctx
+            .make_image(&ImageInfo {
+                debug_name: "[MESHI DEFERRED] Persistent Depth",
+                dim: [
+                    info.initial_viewport.area.w as u32,
+                    info.initial_viewport.area.h as u32,
+                    1,
+                ],
+                layers: 1,
+                format: Format::D24S8,
+                mip_levels: 1,
+                samples: info.sample_count,
+                initial_data: None,
+                ..Default::default()
+            })
+            .expect("create persistent depth image");
+
+        let depth = ImageView {
+            img: depth_image,
+            aspect: AspectMask::Depth,
+            view_type: ImageViewType::Type2D,
+            range: SubresourceRange::new(0, 1, 0, 1),
+        };
+
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
         let cull_queue = ctx
@@ -323,7 +345,17 @@ impl DeferredRenderer {
             ),
         };
 
-        let subrender = Renderers { environment };
+        let clouds = CloudRenderer::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            &info.initial_viewport,
+            depth,
+            info.sample_count,
+        );
+        let subrender = Renderers {
+            environment,
+            clouds,
+        };
 
         let psos = DeferredPSO {
             pipelines: Default::default(),
@@ -346,6 +378,13 @@ impl DeferredRenderer {
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
         text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
+        let cloud_overlay = text.register_text(&TextInfo {
+            text: String::new(),
+            position: Vec2::new(12.0, 12.0),
+            color: Vec4::ONE,
+            scale: 1.0,
+            render_mode: TextRenderMode::Plain,
+        });
         Self {
             ctx,
             state,
@@ -359,6 +398,8 @@ impl DeferredRenderer {
             subrender,
             psos,
             text,
+            depth,
+            cloud_overlay,
         }
     }
 
@@ -1126,13 +1167,7 @@ impl DeferredRenderer {
 
         let semaphores = self.graph.make_semaphores(1);
         let mut outputs = Vec::with_capacity(views.len());
-        let mut depth = self.graph.make_image(&ImageInfo {
-            debug_name: &format!("[MESHI DEFERRED] Depth buffer"),
-            format: Format::D24S8,
-            ..default_framebuffer_info
-        });
-
-        depth.view.aspect = AspectMask::Depth;
+        let depth = self.depth;
 
         for (view_idx, camera) in views.iter().enumerate() {
             let position = self.graph.make_image(&ImageInfo {
@@ -1208,7 +1243,7 @@ impl DeferredRenderer {
                     &SubpassInfo {
                         viewport: self.data.viewport,
                         color_attachments: deferred_pass_attachments,
-                        depth_attachment: Some(depth.view),
+                        depth_attachment: Some(depth),
                         clear_values,
                         depth_clear,
                     },
@@ -1309,6 +1344,16 @@ impl DeferredRenderer {
                 },
             );
 
+//            self.subrender.clouds.update(
+//                self.ctx.as_mut(),
+//                self.state.as_mut(),
+//                &self.data.viewport,
+//                camera_handle,
+//                delta_time,
+//            );
+            let overlay_text = self.subrender.clouds.timing_overlay_text();
+            self.text.set_text(self.cloud_overlay, &overlay_text);
+
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
             // Transparent forward pass.                                      //
@@ -1377,7 +1422,7 @@ impl DeferredRenderer {
                 &SubpassInfo {
                     viewport: self.data.viewport,
                     color_attachments: transparent_attachments,
-                    depth_attachment: Some(depth.view),
+                    depth_attachment: Some(depth),
                     clear_values: transparent_clear,
                     depth_clear: None,
                 },
@@ -1387,6 +1432,7 @@ impl DeferredRenderer {
                         camera_handle,
                         delta_time,
                     ));
+//                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
@@ -1522,6 +1568,18 @@ impl Renderer for DeferredRenderer {
         delta_time: f32,
     ) -> Vec<ViewOutput> {
         DeferredRenderer::update(self, sems, views, delta_time)
+    }
+
+    fn cloud_settings(&self) -> crate::CloudSettings {
+        self.subrender.clouds.settings()
+    }
+
+    fn set_cloud_settings(&mut self, settings: crate::CloudSettings) {
+        self.subrender.clouds.set_settings(settings);
+    }
+
+    fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
+        self.subrender.clouds.set_authored_weather_map(view);
     }
 
     fn shut_down(self: Box<Self>) {
