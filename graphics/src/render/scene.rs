@@ -2,6 +2,8 @@ use std::ptr::NonNull;
 
 use bento::builder::CSOBuilder;
 use dashi::*;
+use dashi::cmd::SyncPoint;
+use dashi::driver::command::Scope;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
     ShaderResource, UsageBits,
@@ -197,7 +199,7 @@ impl GPUScene {
 
     fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
-        let state: &BindlessState = unsafe { self.state.as_ref() };
+        let state: &mut BindlessState = unsafe { self.state.as_mut() };
 
         let Ok(binding) = state.binding("meshi_bindless_cameras") else {
             return Err(bento::BentoError::InvalidInput("lmao".to_string()));
@@ -212,17 +214,20 @@ impl GPUScene {
             .shader(Some(
                 include_str!("shaders/scene_transform.comp.glsl").as_bytes(),
             ))
+            .set_debug_name("[MESHI] Scene Transform")
             .add_variable(
                 "in_list",
                 ShaderResource::StorageBuffer(self.data.objects_to_process.get_gpu_handle().into()),
             )
             .add_variable("transformations", self.data.transformations.clone())
-            .build(&mut ctx);
+            .build(&mut ctx)
+            .unwrap();
 
         let cull_state = CSOBuilder::new()
             .shader(Some(
                 include_str!("shaders/scene_cull.comp.glsl").as_bytes(),
             ))
+            .set_debug_name("[MESHI] Scene Cull")
             .add_variable("cameras", resources[0].resource.clone())
             .add_variable(
                 "objects",
@@ -250,9 +255,12 @@ impl GPUScene {
             )
             .build(&mut ctx).unwrap();
 
+        state.register_cso_tables(&cull_state);
+        state.register_cso_tables(&transform_state);
+
         Ok(SceneComputePipelines {
             cull_state: Some(cull_state),
-            transform_state: transform_state.ok(),
+            transform_state: Some(transform_state),
         })
     }
 
@@ -265,6 +273,8 @@ impl GPUScene {
         let max_views = info.limits.max_num_views as usize;
         let total_cull_slots = max_scene_objects * info.draw_bins.len() * max_views;
         let bin_counter_size = std::mem::size_of::<u32>() * info.draw_bins.len() * max_views;
+        
+        assert_eq!(scene_object_size, 224);
 
         if BindlessState::reserved_names()
             .iter()
@@ -583,10 +593,10 @@ impl GPUScene {
         }
 
         let workgroup_size = 64u32;
-        let num_objects = self.data.objects_to_process.len() as u32;
+        let num_objects = 2048;
 
         let dispatch_x = ((num_objects.max(1) + workgroup_size - 1) / workgroup_size).max(1);
-
+        
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
             error!("No transform state to dispatch!");
             return stream.end();
@@ -599,7 +609,6 @@ impl GPUScene {
         assert!(transform_state.tables()[0].is_some());
         assert!(cull_state.tables()[0].is_some());
         assert!(cull_state.tables()[1].is_some());
-
         stream
             .combine(self.data.objects_to_process.sync_up().unwrap())
             .combine(self.data.dispatch.sync_up())
@@ -618,6 +627,7 @@ impl GPUScene {
                 self.data.transformations_buffer.handle,
                 UsageBits::COMPUTE_SHADER,
             )
+            .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads)
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
@@ -626,7 +636,6 @@ impl GPUScene {
                 bind_tables: transform_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline()
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
@@ -635,7 +644,7 @@ impl GPUScene {
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-            .unbind_pipeline()
+             .unbind_pipeline()
             .end()
     }
 

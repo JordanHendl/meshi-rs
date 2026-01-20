@@ -3,10 +3,9 @@ use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
-use dashi::execution::CommandRing;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, DynamicAllocator,
-    Format, Handle, MemoryVisibility, ShaderResource, UsageBits, Viewport,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
+    MemoryVisibility, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
@@ -69,7 +68,6 @@ pub struct OceanRenderer {
     vertex_resolution: u32,
     wind_dir: Vec2,
     wind_speed: f32,
-    queue: CommandRing,
     use_depth: bool,
 }
 
@@ -128,6 +126,7 @@ impl OceanRenderer {
             .shader(Some(
                 include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
             ))
+            .set_debug_name("[MESHI] Ocean Compute")
             .add_reserved_table_variables(state)
             .unwrap()
             .add_variable(
@@ -148,6 +147,7 @@ impl OceanRenderer {
 
         let shaders = compile_ocean_shaders();
         let mut pso_builder = PSOBuilder::new()
+            .set_debug_name("[MESHI] Ocean")
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .set_attachment_format(0, info.color_format)
@@ -168,6 +168,7 @@ impl OceanRenderer {
             );
 
         pso_builder = pso_builder
+            .add_reserved_table_variables(state).unwrap()
             .add_reserved_table_variable(state, "meshi_bindless_cameras")
             .unwrap();
 
@@ -196,15 +197,8 @@ impl OceanRenderer {
             })
             .build(ctx)
             .expect("Failed to build ocean PSO");
-
-        let queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[OCEAN SIM]",
-                parent: None,
-                queue_type: dashi::QueueType::Compute,
-            })
-            .expect("create ocean compute ring");
-
+        
+        state.register_pso_tables(&pipeline);
         Self {
             pipeline,
             compute_pipeline,
@@ -214,7 +208,6 @@ impl OceanRenderer {
             vertex_resolution: ocean_info.vertex_resolution,
             wind_dir: Vec2::new(1.0, 0.0),
             wind_speed: 12.0,
-            queue,
             use_depth: info.use_depth,
         }
     }
@@ -224,13 +217,12 @@ impl OceanRenderer {
         self.wind_speed = settings.wind_speed;
     }
 
-    pub fn record_draws(
+    pub fn record_compute(
         &mut self,
-        viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
-        camera: Handle<Camera>,
         time: f32,
-    ) -> CommandStream<PendingGraphics> {
+    ) -> CommandStream<Executable> {
+        let stream = CommandStream::new().begin();
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
                 .bump()
@@ -244,32 +236,30 @@ impl OceanRenderer {
                 _padding: 0.0,
             };
 
-            self.queue
-                .record(|c| {
-                    CommandStream::new()
-                        .begin()
-                        .prepare_buffer(self.wave_buffer, UsageBits::COMPUTE_SHADER)
-                        .dispatch(&Dispatch {
-                            x: (self.fft_size + 7) / 8,
-                            y: (self.fft_size + 7) / 8,
-                            z: 1,
-                            pipeline: pipeline.handle,
-                            bind_tables: pipeline.tables(),
-                            dynamic_buffers: [None, Some(alloc), None, None],
-                        })
-                        .unbind_pipeline()
-                        .end()
-                        .append(c)
-                        .expect("Failed to record ocean compute");
+            return stream
+                .prepare_buffer(self.wave_buffer, UsageBits::COMPUTE_SHADER)
+                .dispatch(&Dispatch {
+                    x: (self.fft_size + 7) / 8,
+                    y: (self.fft_size + 7) / 8,
+                    z: 1,
+                    pipeline: pipeline.handle,
+                    bind_tables: pipeline.tables(),
+                    dynamic_buffers: [None, Some(alloc), None, None],
                 })
-                .expect("record ocean compute");
-
-            self.queue
-                .submit(&Default::default())
-                .expect("submit ocean compute");
-            self.queue.wait_all().expect("wait ocean compute");
+                .unbind_pipeline()
+                .end();
         }
 
+        stream.end()
+    }
+
+    pub fn record_draws(
+        &mut self,
+        viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
+        camera: Handle<Camera>,
+        time: f32,
+    ) -> CommandStream<PendingGraphics> {
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean draw params");

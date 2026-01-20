@@ -328,8 +328,6 @@ impl SkyRenderer {
         time: f32,
         delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
-        self.clouds.update(time, delta_time);
-
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate sky dynamic buffer");
@@ -350,5 +348,9 @@ impl SkyRenderer {
                 ..Default::default()
             })
             .unbind_graphics_pipeline()
+    }
+
+    pub fn record_compute(&mut self, time: f32, delta_time: f32) -> CommandStream<Executable> {
+        self.clouds.record_compute(time, delta_time)
     }
 }

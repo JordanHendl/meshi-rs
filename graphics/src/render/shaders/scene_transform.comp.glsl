@@ -39,7 +39,7 @@ void main() {
     mat4 world = obj.local_transform;
     uint parent_slot = obj.parent_slot;
 
-    while (parent_slot != 0xffffffffu) {
+    while (parent_slot < in_list.objects.length()) {
         SceneObject parent = in_list.objects[parent_slot];
         world = parent.local_transform * world;
         parent_slot = parent.parent_slot;

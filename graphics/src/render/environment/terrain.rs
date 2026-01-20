@@ -3,10 +3,9 @@ use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
-use dashi::execution::CommandRing;
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, DynamicAllocator,
-    Format, Handle, MemoryVisibility, ShaderResource, UsageBits, Viewport,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
+    MemoryVisibility, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
@@ -78,7 +77,6 @@ pub struct TerrainRenderer {
     lod_levels: u32,
     max_tiles: u32,
     camera_position: Vec3,
-    queue: CommandRing,
     use_depth: bool,
 }
 
@@ -281,14 +279,6 @@ impl TerrainRenderer {
 
         state.register_pso_tables(&pipeline);
 
-        let queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[TERRAIN LOD]",
-                parent: None,
-                queue_type: dashi::QueueType::Compute,
-            })
-            .expect("create terrain compute ring");
-
         Self {
             pipeline,
             compute_pipeline,
@@ -301,7 +291,6 @@ impl TerrainRenderer {
             lod_levels: terrain_info.lod_levels,
             max_tiles: terrain_info.max_tiles,
             camera_position: Vec3::ZERO,
-            queue,
             use_depth: info.use_depth,
         }
     }
@@ -310,11 +299,11 @@ impl TerrainRenderer {
         self.camera_position = settings.camera_position;
     }
 
-    pub fn record_draws(
+    pub fn record_compute(
         &mut self,
-        viewport: &Viewport,
         dynamic: &mut DynamicAllocator,
-    ) -> CommandStream<PendingGraphics> {
+    ) -> CommandStream<Executable> {
+        let stream = CommandStream::new().begin();
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
                 .bump()
@@ -329,36 +318,32 @@ impl TerrainRenderer {
                 _padding: 0.0,
             };
 
-            self.queue
-                .record(|c| {
-                    CommandStream::new()
-                        .begin()
-                        .prepare_buffer(self.clipmap_buffer, UsageBits::COMPUTE_SHADER)
-                        .prepare_buffer(self.draw_args_buffer, UsageBits::COMPUTE_SHADER)
-                        .prepare_buffer(self.instance_buffer, UsageBits::COMPUTE_SHADER)
-                        .prepare_buffer(self.heightmap_buffer, UsageBits::COMPUTE_SHADER)
-                        .prepare_buffer(self.meshlet_buffer, UsageBits::COMPUTE_SHADER)
-                        .dispatch(&Dispatch {
-                            x: (self.max_tiles + 63) / 64,
-                            y: 1,
-                            z: 1,
-                            pipeline: pipeline.handle,
-                            bind_tables: pipeline.tables(),
-                            dynamic_buffers: [None, Some(alloc), None, None],
-                        })
-                        .unbind_pipeline()
-                        .end()
-                        .append(c)
-                        .expect("Failed to record terrain compute");
+            return stream
+                .prepare_buffer(self.clipmap_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(self.draw_args_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(self.instance_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(self.heightmap_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(self.meshlet_buffer, UsageBits::COMPUTE_SHADER)
+                .dispatch(&Dispatch {
+                    x: (self.max_tiles + 63) / 64,
+                    y: 1,
+                    z: 1,
+                    pipeline: pipeline.handle,
+                    bind_tables: pipeline.tables(),
+                    dynamic_buffers: [None, Some(alloc), None, None],
                 })
-                .expect("record terrain compute");
-
-            self.queue
-                .submit(&Default::default())
-                .expect("submit terrain compute");
-            self.queue.wait_all().expect("wait terrain compute");
+                .unbind_pipeline()
+                .end();
         }
 
+        stream.end()
+    }
+
+    pub fn record_draws(
+        &mut self,
+        viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
+    ) -> CommandStream<PendingGraphics> {
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate terrain draw params");

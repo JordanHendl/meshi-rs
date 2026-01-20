@@ -3,7 +3,7 @@ pub mod sky;
 pub mod terrain;
 pub mod clouds;
 
-use dashi::cmd::PendingGraphics;
+use dashi::cmd::{Executable, PendingGraphics};
 use dashi::{CommandStream, Context, DynamicAllocator, Format, SampleCount, Viewport};
 use furikake::{BindlessState, types::Camera};
 
@@ -173,6 +173,15 @@ impl EnvironmentRenderer {
                 self.time,
             ))
            // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
+    }
+
+    pub fn record_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.sky.record_compute(self.time, self.last_delta_time))
+            .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
+//            .combine(self.terrain.record_compute(&mut self.dynamic))
+            .end()
     }
 
     pub fn color_format(&self) -> Format {

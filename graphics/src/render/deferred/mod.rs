@@ -1,21 +1,19 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ptr::NonNull,
-};
+use std::{collections::HashMap, ptr::NonNull};
 
-use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::environment::clouds::CloudRenderer;
+use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{AnimationState, TextInfo, TextRenderMode};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
+use crate::{AnimationState, TextInfo, TextRenderMode};
 use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{Draw, DrawIndexedIndirect};
@@ -284,6 +282,7 @@ impl DeferredRenderer {
 
         let shaders = miso::stddeferred_combine(&[]);
         let mut psostate = PSOBuilder::new()
+            .set_debug_name("[MESHI] Deferred Combine")
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .set_attachment_format(0, Format::BGRA8)
@@ -423,6 +422,7 @@ impl DeferredRenderer {
         let shaders = miso::gpudeferred(&[]);
 
         let s = PSOBuilder::new()
+            .set_debug_name("[MESHI] STDDeferred")
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .add_table_variable_with_resources(
@@ -475,6 +475,7 @@ impl DeferredRenderer {
         let shaders = miso::stdbillboard(&[]);
 
         let mut pso_builder = PSOBuilder::new()
+            .set_debug_name("[MESHI] Deferred Billboard")
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .set_attachment_format(0, Format::BGRA8)
@@ -1104,29 +1105,29 @@ impl DeferredRenderer {
         self.text.set_text_info(handle, info);
     }
 
-    fn pull_scene(&mut self) -> Handle<Semaphore> {
-        let wait = self.graph.make_semaphore();
-        self.exec
-            .cull_queue
-            .record(|c| {
-                let state_update = self
-                    .state
-                    .update()
-                    .expect("Failed to update furikake state");
+    fn record_frame_compute(&mut self, delta_time: f32) {
+        self.subrender.environment.update(EnvironmentFrameSettings {
+            delta_time,
+            ..Default::default()
+        });
 
-                let cull_cmds = state_update.combine(self.proc.scene.cull_and_sync());
-                cull_cmds.append(c).unwrap();
-            })
-            .expect("Failed to make commands");
+        self.graph.add_compute_pass(|mut cmd| {
+            let c = CommandStream::new()
+                .begin()
+                .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads);
 
-        self.exec
-            .cull_queue
-            .submit(&SubmitInfo {
-                signal_sems: &[wait],
-                ..Default::default()
-            })
-            .expect("Failed to submit!");
-        wait
+            let state_update = self
+                .state
+                .update()
+                .expect("Failed to update furikake state")
+                .combine(c)
+                .combine(self.proc.scene.cull());
+
+            cmd.combine(state_update)
+                .combine(self.subrender.environment.record_compute())
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
+                .end()
+        });
     }
 
     pub fn update(
@@ -1138,22 +1139,11 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        if self.exec.cull_queue.current_index() == 0 {
-            self.data.dynamic.reset();
-            self.subrender.environment.reset();
-            self.proc.draw_builder.reset();
-        }
-
         let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
         self.proc.scene.set_active_cameras(views);
-        // Pull scene GPU --> CPU to read.
-        let scene_processing = self.pull_scene();
-        self.exec
-            .cull_queue
-            .wait_all()
-            .expect("Failed to wait for cull queue");
+        self.record_frame_compute(delta_time);
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
@@ -1225,6 +1215,7 @@ impl DeferredRenderer {
                         .draw_builder
                         .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                 )
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
                 .end()
             });
 
@@ -1340,13 +1331,13 @@ impl DeferredRenderer {
                 },
             );
 
-//            self.subrender.clouds.update(
-//                self.ctx.as_mut(),
-//                self.state.as_mut(),
-//                &self.data.viewport,
-//                camera_handle,
-//                delta_time,
-//            );
+            //            self.subrender.clouds.update(
+            //                self.ctx.as_mut(),
+            //                self.state.as_mut(),
+            //                &self.data.viewport,
+            //                camera_handle,
+            //                delta_time,
+            //            );
             let overlay_text = self.subrender.clouds.timing_overlay_text();
             self.text.set_text(self.cloud_overlay, &overlay_text);
 
@@ -1355,26 +1346,6 @@ impl DeferredRenderer {
             // Transparent forward pass.                                      //
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
-
-            let mut visible_billboard_ids = HashSet::new();
-            let num_bins = self.proc.scene.num_bins() as u32;
-            let max_objects = self.proc.scene.max_objects_per_bin();
-            let billboard_bin_offset = view_idx as u32 * num_bins + BIN_TRANSPARENT;
-            if let Some(bin_count) = self
-                .proc
-                .scene
-                .bin_counts()
-                .get(billboard_bin_offset as usize)
-                .copied()
-            {
-                let capped_count = bin_count.min(max_objects);
-                for i in 0..capped_count {
-                    let cull_index = billboard_bin_offset * max_objects + i;
-                    if let Some(culled) = self.proc.scene.culled_object(cull_index) {
-                        visible_billboard_ids.insert(culled.object_id);
-                    }
-                }
-            }
 
             struct BillboardDraw {
                 vertex_buffer: Handle<Buffer>,
@@ -1394,10 +1365,6 @@ impl DeferredRenderer {
                     (obj.scene_handle, billboard.clone())
                 };
 
-                if !visible_billboard_ids.contains(&(scene_handle.slot as u32)) {
-                    continue;
-                }
-
                 if let Some(material) = billboard.info.material {
                     let transform = self.proc.scene.get_object_transform(scene_handle);
                     self.update_billboard_vertices(&billboard, transform, camera_handle);
@@ -1414,10 +1381,6 @@ impl DeferredRenderer {
             transparent_attachments[0] = Some(final_combine.view);
             let transparent_clear: [Option<ClearValue>; 8] = [None; 8];
 
-            self.subrender.environment.update(EnvironmentFrameSettings {
-                delta_time,
-                ..Default::default()
-            });
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.data.viewport,
@@ -1432,7 +1395,7 @@ impl DeferredRenderer {
                             .environment
                             .render(&self.data.viewport, camera_handle),
                     );
-//                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
+                    //                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
@@ -1485,8 +1448,6 @@ impl DeferredRenderer {
         if let Some(semaphore) = skinning_complete {
             wait_sems.push(semaphore);
         }
-
-        wait_sems.push(scene_processing);
 
         self.graph.execute_with(&SubmitInfo {
             wait_sems: &wait_sems,
