@@ -146,5 +146,6 @@ void main() {
     mat4 view = camera_view();
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
+    gl_Position.y = -gl_Position.y;
     v_uv = uv;
 }
