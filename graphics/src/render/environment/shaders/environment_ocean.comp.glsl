@@ -25,7 +25,8 @@ void main() {
     }
 
     uint idx = y * params.fft_size + x;
-    vec2 uv = vec2(float(x), float(y)) / max(float(params.fft_size - 1), 1.0);
+    float fft_size_f = max(float(params.fft_size), 1.0);
+    vec2 uv = vec2(float(x), float(y)) / fft_size_f;
     vec2 wind = params.wind_dir;
     float wind_len = max(length(wind), 0.001);
     vec2 wind_dir = wind / wind_len;
@@ -36,28 +37,30 @@ void main() {
     float speed = max(params.wind_speed, 0.1);
 
     float height = 0.0;
-    float amplitude = 0.35;
-    float base_freq = 0.6;
-    vec2 world = (uv - 0.5) * float(params.fft_size);
+    float two_pi = 6.28318530718;
+    float base_amplitude = 0.18;
+    float spectrum_scale = 0.9;
+    float time_phase = time * speed * 0.12;
 
-    for (int i = 0; i < 8; ++i) {
-        float octave = pow(2.0, float(i));
-        float freq = base_freq * octave;
-        float phase_a = dot(world, wind_dir) * freq + time * speed * 0.15 * octave;
-        float phase_b = dot(world, dir_b) * freq * 0.9 + time * speed * 0.12 * octave;
-        float phase_c = dot(world, dir_c) * freq * 1.1 + time * speed * 0.1 * octave;
-        float phase_d = dot(world, dir_d) * freq * 0.75 + time * speed * 0.08 * octave;
-        float wave = sin(phase_a) * 0.23
-            + sin(phase_b) * 0.2
-            + cos(phase_c) * 0.15
-            + sin(phase_d) * 0.1;
-        height += wave * amplitude;
-        amplitude *= 0.55;
+    for (int ky = -4; ky <= 4; ++ky) {
+        for (int kx = -4; kx <= 4; ++kx) {
+            if (kx == 0 && ky == 0) {
+                continue;
+            }
+
+            vec2 k = vec2(float(kx), float(ky));
+            float k2 = max(dot(k, k), 1.0);
+            float k_len = sqrt(k2);
+            vec2 k_dir = k / k_len;
+            float alignment = max(dot(k_dir, wind_dir), 0.0);
+            float amplitude = base_amplitude * exp(-k2 * 0.18) * (0.45 + 0.55 * alignment);
+            float phase = two_pi * dot(k, uv);
+            float dispersion = time_phase * (0.6 + 0.4 * alignment) * k_len;
+            height += amplitude * sin(phase + dispersion);
+        }
     }
 
-    float chop = sin(dot(world, wind_dir) * base_freq * 2.5 + time * speed * 0.9);
-    height += chop * 0.07;
-    height += sin(dot(world, dir_d) * base_freq * 6.0 + time * speed * 1.4) * 0.02;
+    height *= spectrum_scale;
 
     ocean_waves.values[idx] = vec4(height, 0.0, 0.0, 1.0);
 }

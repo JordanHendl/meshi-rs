@@ -137,20 +137,22 @@ vec2 vertex_uv(uint vertex_id) {
 
 float sample_height(vec2 uv) {
     vec2 wrapped_uv = fract(uv);
-    float fx = wrapped_uv.x * float(params.fft_size - 1);
-    float fy = wrapped_uv.y * float(params.fft_size - 1);
+    uint fft_size = max(params.fft_size, 1);
+    float fft_size_f = float(fft_size);
+    float fx = wrapped_uv.x * fft_size_f;
+    float fy = wrapped_uv.y * fft_size_f;
     uint x0 = uint(floor(fx));
     uint y0 = uint(floor(fy));
-    uint x1 = min(x0 + 1, params.fft_size - 1);
-    uint y1 = min(y0 + 1, params.fft_size - 1);
+    uint x1 = (x0 + 1) % fft_size;
+    uint y1 = (y0 + 1) % fft_size;
     float tx = fx - float(x0);
     float ty = fy - float(y0);
     uint max_index = max(ocean_waves.values.length(), 1);
 
-    uint idx00 = min(y0 * params.fft_size + x0, max_index - 1);
-    uint idx10 = min(y0 * params.fft_size + x1, max_index - 1);
-    uint idx01 = min(y1 * params.fft_size + x0, max_index - 1);
-    uint idx11 = min(y1 * params.fft_size + x1, max_index - 1);
+    uint idx00 = min(y0 * fft_size + x0, max_index - 1);
+    uint idx10 = min(y0 * fft_size + x1, max_index - 1);
+    uint idx01 = min(y1 * fft_size + x0, max_index - 1);
+    uint idx11 = min(y1 * fft_size + x1, max_index - 1);
 
     float h00 = ocean_waves.values[idx00].x;
     float h10 = ocean_waves.values[idx10].x;
@@ -171,7 +173,7 @@ void main() {
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
     float height = sample_height(uv);
-    float sample_step = 1.0 / max(float(params.fft_size - 1), 1.0);
+    float sample_step = 1.0 / max(float(params.fft_size), 1.0);
     vec2 uv_dx = uv + vec2(sample_step, 0.0);
     vec2 uv_dx_neg = uv - vec2(sample_step, 0.0);
     vec2 uv_dy = uv + vec2(0.0, sample_step);
