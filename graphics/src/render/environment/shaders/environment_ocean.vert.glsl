@@ -173,17 +173,18 @@ void main() {
     vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
-    vec4 waves = sample_waves(uv);
-    float height = waves.x;
-
     uint tile_x = gl_InstanceIndex % max(params.tile_count_x, 1);
     uint tile_y = gl_InstanceIndex / max(params.tile_count_x, 1);
     vec2 tile_grid = vec2(max(params.tile_count_x, 1), max(params.tile_count_y, 1));
     vec2 tile_center = (tile_grid - 1.0) * 0.5;
-    vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * (params.patch_size * 2.0);
-    vec2 snapped_origin = floor(camera_position() / params.patch_size) * params.patch_size;
+    float tile_size = max(params.patch_size * 2.0, 0.001);
+    vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * tile_size;
+    vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
     vec2 world = local + snapped_origin + tile_offset;
+    vec2 world_uv = world / tile_size + vec2(0.5);
+    vec4 waves = sample_waves(world_uv);
+    float height = waves.x;
     float patch_scale = max(params.patch_size, 0.001);
     vec2 gradient_world = waves.yz / (2.0 * patch_scale);
     vec2 choppy_offset = -gradient_world * (patch_scale * 0.15);
@@ -193,7 +194,7 @@ void main() {
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;
-    v_uv = fract(uv);
+    v_uv = fract(world_uv);
     v_normal = normal;
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;

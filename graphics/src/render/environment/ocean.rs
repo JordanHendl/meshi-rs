@@ -26,9 +26,9 @@ pub struct OceanInfo {
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            fft_size: 256,
-            patch_size: 400.0,
-            vertex_resolution: 512,
+            fft_size: 512,
+            patch_size: 200.0,
+            vertex_resolution: 1024,
         }
     }
 }
@@ -47,7 +47,7 @@ impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
             wind_dir: Vec2::new(0.9, 0.2),
-            wind_speed: 14.0,
+            wind_speed: 6.0,
             time_scale: 0.6,
         }
     }
