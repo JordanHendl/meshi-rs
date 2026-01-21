@@ -1,4 +1,5 @@
 mod render;
+pub mod gui;
 pub mod structs;
 pub(crate) mod utils;
 
