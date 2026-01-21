@@ -415,4 +415,5 @@ pub struct RenderEngineInfo {
     pub canvas_extent: Option<[u32; 2]>,
     pub renderer: RendererSelect,
     pub sample_count: Option<SampleCount>,
+    pub skybox_cubemap_entry: Option<String>,
 }

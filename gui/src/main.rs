@@ -9,6 +9,7 @@ use panels::assets::{render_assets_panel, AssetBrowserState, AssetFilter};
 use panels::projects::render_projects_panel;
 use panels::scripts::render_scripts_panel;
 use state::{EditorState, SceneNode};
+use meshi_graphics::defaults::DEFAULT_CUBEMAP_ENTRY;
 use meshi_graphics::*;
 use meshi_graphics::{DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect, WindowInfo};
 use std::rc::Rc;
@@ -26,6 +27,7 @@ fn main() {
         canvas_extent: Some(preview_extent),
         renderer: RendererSelect::Deferred,
         sample_count: None,
+        skybox_cubemap_entry: Some(DEFAULT_CUBEMAP_ENTRY.to_string()),
     })
     .expect("failed to create render engine");
 

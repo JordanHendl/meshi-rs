@@ -202,10 +202,10 @@ impl EnvironmentRenderer {
         // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }
 
-    pub fn record_compute(&mut self) -> CommandStream<Executable> {
+    pub fn record_compute(&mut self, ctx: &mut Context) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
-            .combine(self.sky.record_compute(self.time, self.last_delta_time))
+            .combine(self.sky.record_compute(ctx, self.time, self.last_delta_time))
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
             //            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()

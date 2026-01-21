@@ -1144,7 +1144,7 @@ impl DeferredRenderer {
                 .combine(self.proc.scene.cull());
 
             cmd.combine(state_update)
-                .combine(self.subrender.environment.record_compute())
+                .combine(self.subrender.environment.record_compute(self.ctx.as_mut()))
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
                 .end()
         });
@@ -1510,6 +1510,16 @@ impl Renderer for DeferredRenderer {
 
     fn initialize_database(&mut self, db: &mut DB) {
         DeferredRenderer::initialize_database(self, db);
+    }
+
+    fn set_skybox_cubemap(&mut self, cubemap: noren::rdb::imagery::DeviceCubemap) {
+        self.subrender
+            .environment
+            .update_skybox(super::environment::sky::SkyboxFrameSettings {
+                cubemap: Some(cubemap),
+                use_procedural_cubemap: false,
+                ..Default::default()
+            });
     }
 
     fn register_object(

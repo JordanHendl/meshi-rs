@@ -55,6 +55,7 @@ pub struct RenderEngine {
     blit_queue: CommandRing,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     db: Option<NonNull<DB>>,
+    pending_skybox_entry: Option<String>,
     frame_timer: FrameTimer,
 }
 
@@ -109,6 +110,7 @@ impl RenderEngine {
             event_cb: None,
             event_loop,
             blit_queue,
+            pending_skybox_entry: info.skybox_cubemap_entry.clone(),
             frame_timer: FrameTimer::new(60),
         })
     }
@@ -116,10 +118,25 @@ impl RenderEngine {
     pub fn initialize_database(&mut self, db: &mut DB) {
         self.db = Some(NonNull::new(db).expect("lmao"));
         self.renderer.initialize_database(db);
+        if let Some(entry) = self.pending_skybox_entry.take() {
+            self.set_skybox_cubemap_entry(&entry);
+        }
     }
 
     pub fn context(&mut self) -> &'static mut Context {
         self.renderer.context()
+    }
+
+    pub fn set_skybox_cubemap_entry(&mut self, entry: &str) {
+        let Some(mut db) = self.db else {
+            warn!("Attempted to set skybox cubemap without a database.");
+            return;
+        };
+
+        match unsafe { db.as_mut() }.imagery_mut().fetch_gpu_cubemap(entry) {
+            Ok(cubemap) => self.renderer.set_skybox_cubemap(cubemap),
+            Err(err) => warn!("Failed to load skybox cubemap '{entry}': {err:?}"),
+        }
     }
 
     pub fn shut_down(mut self) {

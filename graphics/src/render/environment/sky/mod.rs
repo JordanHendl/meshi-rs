@@ -5,7 +5,7 @@ use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use cloud::CloudSimulation;
 use dashi::cmd::{Executable, PendingGraphics};
-use dashi::driver::command::Draw;
+use dashi::driver::command::{BlitImage, Draw};
 use dashi::structs::*;
 use dashi::*;
 use dashi::{
@@ -17,7 +17,7 @@ use furikake::{
     BindlessState, reservations::bindless_camera::ReservedBindlessCamera, types::Camera,
 };
 use glam::*;
-use noren::rdb::imagery::{HostCubemap, ImageInfo as NorenImageInfo};
+use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo};
 use tare::utils::StagedBuffer;
 use tracing::warn;
 
@@ -132,6 +132,7 @@ pub struct SkyRenderer {
     skybox_pipeline: PSO,
     skybox_sampler: Handle<Sampler>,
     skybox_fallback_view: ImageView,
+    skybox_swap_info: Option<GPUImageInfo>,
     skybox_intensity: f32,
     use_procedural_cubemap: bool,
     cubemap_update_interval: u32,
@@ -142,6 +143,7 @@ pub struct SkyRenderer {
     cubemap_face_views: Option<[ImageView; 6]>,
     cubemap_camera_handles: Option<[Handle<Camera>; 6]>,
     procedural_cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pending_cubemap_swap: Option<noren::rdb::imagery::DeviceCubemap>,
     cubemap_format: Format,
     sky_settings: SkyFrameSettings,
     clouds: CloudSimulation,
@@ -249,6 +251,30 @@ fn default_skybox_view(ctx: &mut dashi::Context) -> ImageView {
     }
 }
 
+fn create_skybox_swap_view(ctx: &mut dashi::Context, info: &GPUImageInfo) -> ImageView {
+    let image_info = NorenImageInfo {
+        name: "[MESHI GFX SKY] Skybox Swap".to_string(),
+        dim: info.dim,
+        layers: info.layers,
+        format: info.format,
+        mip_levels: info.mip_levels,
+    };
+
+    let mut dashi_info = image_info.dashi_cube();
+    dashi_info.initial_data = None;
+
+    let image = ctx
+        .make_image(&dashi_info)
+        .expect("Failed to create skybox swap image");
+
+    ImageView {
+        img: image,
+        aspect: AspectMask::Color,
+        view_type: ImageViewType::Cube,
+        range: SubresourceRange::new(0, info.mip_levels, 0, info.layers),
+    }
+}
+
 impl SkyRenderer {
     pub fn new(
         ctx: &mut dashi::Context,
@@ -260,12 +286,22 @@ impl SkyRenderer {
         let shaders = compile_sky_shaders();
         let skybox_shaders = compile_skybox_shaders();
 
-        let skybox_view = info
-            .skybox
-            .cubemap
-            .as_ref()
-            .map(|cubemap| cubemap.view)
-            .unwrap_or_else(|| default_skybox_view(ctx));
+        let (skybox_view, skybox_swap_info) = if let Some(cubemap) = info.skybox.cubemap.as_ref() {
+            (
+                create_skybox_swap_view(ctx, &cubemap.info),
+                Some(cubemap.info.clone()),
+            )
+        } else {
+            (
+                default_skybox_view(ctx),
+                Some(GPUImageInfo {
+                    dim: [1, 1, 1],
+                    layers: 6,
+                    format: Format::RGBA8,
+                    mip_levels: 1,
+                }),
+            )
+        };
         let skybox_sampler = ctx
             .make_sampler(&SamplerInfo::default())
             .expect("Failed to create skybox sampler");
@@ -381,6 +417,7 @@ impl SkyRenderer {
             skybox_pipeline,
             skybox_sampler,
             skybox_fallback_view: skybox_view,
+            skybox_swap_info,
             skybox_intensity: info.skybox.intensity,
             use_procedural_cubemap: info.skybox.use_procedural_cubemap,
             cubemap_update_interval: info.skybox.update_interval_frames.max(1),
@@ -391,6 +428,7 @@ impl SkyRenderer {
             cubemap_face_views: None,
             cubemap_camera_handles: None,
             procedural_cubemap: None,
+            pending_cubemap_swap: info.skybox.cubemap.clone(),
             cubemap_format: info.color_format,
             sky_settings: SkyFrameSettings::default(),
             clouds,
@@ -405,7 +443,7 @@ impl SkyRenderer {
         self.cubemap_update_interval = settings.update_interval_frames.max(1);
 
         if let Some(cubemap) = settings.cubemap {
-            self.skybox_fallback_view = cubemap.view;
+            self.pending_cubemap_swap = Some(cubemap);
         }
 
         if procedural_changed {
@@ -521,8 +559,46 @@ impl SkyRenderer {
             .unbind_graphics_pipeline()
     }
 
-    pub fn record_compute(&mut self, time: f32, delta_time: f32) -> CommandStream<Executable> {
-        self.clouds.record_compute(time, delta_time)
+    pub fn record_compute(
+        &mut self,
+        ctx: &mut dashi::Context,
+        time: f32,
+        delta_time: f32,
+    ) -> CommandStream<Executable> {
+        let mut stream = CommandStream::new().begin();
+
+        if let Some(cubemap) = self.pending_cubemap_swap.take() {
+            let target_info = self.ensure_skybox_swap_target(ctx, &cubemap.info);
+            let src_range =
+                SubresourceRange::new(0, cubemap.info.mip_levels, 0, cubemap.info.layers);
+            let dst_range =
+                SubresourceRange::new(0, target_info.mip_levels, 0, target_info.layers);
+
+            stream = stream.blit_images(&BlitImage {
+                src: cubemap.view.img,
+                dst: self.skybox_fallback_view.img,
+                src_range,
+                dst_range,
+                filter: Filter::Linear,
+                src_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: cubemap.info.dim[0],
+                    h: cubemap.info.dim[1],
+                },
+                dst_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: target_info.dim[0],
+                    h: target_info.dim[1],
+                },
+            });
+            self.apply_skybox_binding();
+        }
+
+        stream
+            .combine(self.clouds.record_compute(time, delta_time))
+            .end()
     }
 }
 
@@ -614,6 +690,32 @@ impl SkyRenderer {
 
         self.apply_skybox_binding();
         true
+    }
+
+    fn ensure_skybox_swap_target(
+        &mut self,
+        ctx: &mut dashi::Context,
+        info: &GPUImageInfo,
+    ) -> GPUImageInfo {
+        let needs_rebuild = self
+            .skybox_swap_info
+            .as_ref()
+            .map(|current| {
+                current.dim != info.dim
+                    || current.layers != info.layers
+                    || current.format != info.format
+                    || current.mip_levels != info.mip_levels
+            })
+            .unwrap_or(true);
+
+        if needs_rebuild {
+            self.skybox_fallback_view = create_skybox_swap_view(ctx, info);
+            self.skybox_swap_info = Some(info.clone());
+        }
+
+        self.skybox_swap_info
+            .clone()
+            .unwrap_or_else(|| info.clone())
     }
 
     fn update_cubemap_cameras(

@@ -86,6 +86,7 @@ pub trait Renderer {
     fn context(&mut self) -> &'static mut Context;
     fn state(&mut self) -> &mut BindlessState;
     fn initialize_database(&mut self, db: &mut DB);
+    fn set_skybox_cubemap(&mut self, cubemap: noren::rdb::imagery::DeviceCubemap);
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,

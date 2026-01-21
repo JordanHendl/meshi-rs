@@ -1,5 +1,6 @@
 use dashi::Handle;
 use glam::{Mat4, Vec2};
+use meshi_graphics::defaults::DEFAULT_CUBEMAP_ENTRY;
 use meshi_graphics::{Camera, DB, DBInfo, Display, DisplayInfo, RenderEngine, RenderEngineInfo};
 use meshi_graphics::{RendererSelect, TextRenderMode, WindowInfo};
 
@@ -51,6 +52,7 @@ pub fn init(
         canvas_extent: Some(window_size),
         renderer,
         sample_count: None,
+        skybox_cubemap_entry: Some(DEFAULT_CUBEMAP_ENTRY.to_string()),
     })
     .unwrap();
 

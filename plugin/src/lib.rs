@@ -82,6 +82,7 @@ impl MeshiEngine {
                 } else {
                     Some(unsafe { [*info.canvas_extent, *info.canvas_extent.add(1)] })
                 },
+                skybox_cubemap_entry: Some(noren::defaults::DEFAULT_CUBEMAP_ENTRY.to_string()),
                 ..Default::default()
             })
             .expect("failed to initialize render engine"),

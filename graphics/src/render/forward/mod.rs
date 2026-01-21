@@ -655,6 +655,15 @@ impl Renderer for ForwardRenderer {
         ForwardRenderer::initialize_database(self, db);
     }
 
+    fn set_skybox_cubemap(&mut self, cubemap: noren::rdb::imagery::DeviceCubemap) {
+        self.environment
+            .update_skybox(super::environment::sky::SkyboxFrameSettings {
+                cubemap: Some(cubemap),
+                use_procedural_cubemap: false,
+                ..Default::default()
+            });
+    }
+
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,
