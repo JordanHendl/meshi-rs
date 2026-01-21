@@ -463,6 +463,8 @@ impl ForwardRenderer {
         }
         self.gui
             .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
+        self.text
+            .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
         if self.cull_queue.current_index() == 0 {
             self.dynamic.reset();
             self.environment.reset();
@@ -613,7 +615,13 @@ impl ForwardRenderer {
                     clear_values: gui_clear,
                     depth_clear: None,
                 },
-                |mut cmd| cmd.combine(self.gui.render_gui(&self.viewport)),
+                |mut cmd| {
+                    cmd = cmd.combine(
+                        self.text
+                            .render_transparent(self.ctx.as_mut(), &self.viewport),
+                    );
+                    cmd.combine(self.gui.render_gui(&self.viewport))
+                },
             );
 
             outputs.push(ViewOutput {
