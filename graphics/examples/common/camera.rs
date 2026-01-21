@@ -12,8 +12,8 @@ pub struct CameraSettings {
 impl Default for CameraSettings {
     fn default() -> Self {
         Self {
-            speed: 6.0,
-            fast_speed: 18.0,
+            speed: 18.0,
+            fast_speed: 36.0,
             sensitivity: 0.006,
             pitch_limit: 1.54,
         }
@@ -128,10 +128,10 @@ impl CameraController {
             * Quat::from_axis_angle(Vec3::X, self.pitch);
         let mut direction = Vec3::ZERO;
         if self.input.move_active && self.input.forward {
-            direction += rotation * Vec3::NEG_Z;
+            direction += rotation * Vec3::Z;
         }
         if self.input.move_active && self.input.back {
-            direction += rotation * Vec3::Z;
+            direction += rotation * Vec3::NEG_Z;
         }
         if self.input.move_active && self.input.right {
             direction += rotation * Vec3::X;

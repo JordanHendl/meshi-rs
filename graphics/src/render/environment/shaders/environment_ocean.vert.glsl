@@ -138,11 +138,26 @@ float sample_height(vec2 uv) {
     vec2 clamped_uv = clamp(uv, 0.0, 1.0);
     float fx = clamped_uv.x * float(params.fft_size - 1);
     float fy = clamped_uv.y * float(params.fft_size - 1);
-    uint x = uint(fx);
-    uint y = uint(fy);
+    uint x0 = uint(floor(fx));
+    uint y0 = uint(floor(fy));
+    uint x1 = min(x0 + 1, params.fft_size - 1);
+    uint y1 = min(y0 + 1, params.fft_size - 1);
+    float tx = fx - float(x0);
+    float ty = fy - float(y0);
     uint max_index = max(ocean_waves.values.length(), 1);
-    uint idx = min(y * params.fft_size + x, max_index - 1);
-    return ocean_waves.values[idx].x;
+
+    uint idx00 = min(y0 * params.fft_size + x0, max_index - 1);
+    uint idx10 = min(y0 * params.fft_size + x1, max_index - 1);
+    uint idx01 = min(y1 * params.fft_size + x0, max_index - 1);
+    uint idx11 = min(y1 * params.fft_size + x1, max_index - 1);
+
+    float h00 = ocean_waves.values[idx00].x;
+    float h10 = ocean_waves.values[idx10].x;
+    float h01 = ocean_waves.values[idx01].x;
+    float h11 = ocean_waves.values[idx11].x;
+    float hx0 = mix(h00, h10, tx);
+    float hx1 = mix(h01, h11, tx);
+    return mix(hx0, hx1, ty);
 }
 
 void main() {
@@ -154,27 +169,25 @@ void main() {
     vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
-    uint x = uint(uv.x * float(params.fft_size - 1));
-    uint y = uint(uv.y * float(params.fft_size - 1));
-    uint max_index = max(ocean_waves.values.length(), 1);
-    uint idx = min(y * params.fft_size + x, max_index - 1);
-
-    float height = ocean_waves.values[idx].x;
+    float height = sample_height(uv);
     float sample_step = 1.0 / max(float(params.fft_size - 1), 1.0);
     vec2 uv_dx = uv + vec2(sample_step, 0.0);
+    vec2 uv_dx_neg = uv - vec2(sample_step, 0.0);
     vec2 uv_dy = uv + vec2(0.0, sample_step);
+    vec2 uv_dy_neg = uv - vec2(0.0, sample_step);
     float height_dx = sample_height(uv_dx);
+    float height_dx_neg = sample_height(uv_dx_neg);
     float height_dy = sample_height(uv_dy);
+    float height_dy_neg = sample_height(uv_dy_neg);
 
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
-    vec2 local_dx = (uv_dx * 2.0 - 1.0) * params.patch_size;
-    vec2 local_dy = (uv_dy * 2.0 - 1.0) * params.patch_size;
     vec2 world = local + camera_position();
     vec4 position = vec4(world.x, height, world.y, 1.0);
     vec3 p = vec3(local.x, height, local.y);
-    vec3 p_dx = vec3(local_dx.x, height_dx, local_dx.y);
-    vec3 p_dy = vec3(local_dy.x, height_dy, local_dy.y);
-    vec3 normal = normalize(cross(p_dy - p, p_dx - p));
+    float world_step = 2.0 * params.patch_size * sample_step;
+    vec3 tangent_x = vec3(world_step, height_dx - height_dx_neg, 0.0);
+    vec3 tangent_y = vec3(0.0, height_dy - height_dy_neg, world_step);
+    vec3 normal = normalize(cross(tangent_y, tangent_x));
     mat4 view = camera_view();
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;

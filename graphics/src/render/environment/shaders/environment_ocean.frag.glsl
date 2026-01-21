@@ -74,5 +74,5 @@ void main() {
     float shade = 0.4 + 0.6 * v_uv.y;
     vec3 base_color = vec3(0.0, 0.3, 0.6) * shade;
     vec3 color = apply_light(base_color, v_normal, v_view_dir, v_world_pos);
-    out_color = vec4(color, 1.0);
+    out_color = vec4(color, 0.5);
 }

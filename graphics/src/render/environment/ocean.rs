@@ -24,8 +24,8 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             fft_size: 128,
-            patch_size: 100.0,
-            vertex_resolution: 2048,
+            patch_size: 128.0,
+            vertex_resolution: 1280,
         }
     }
 }
@@ -34,13 +34,15 @@ impl Default for OceanInfo {
 pub struct OceanFrameSettings {
     pub wind_dir: Vec2,
     pub wind_speed: f32,
+    pub time_scale: f32,
 }
 
 impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
-            wind_dir: Vec2::new(1.0, 0.0),
-            wind_speed: 12.0,
+            wind_dir: Vec2::new(0.25, 0.25),
+            wind_speed: 8.0,
+            time_scale: 0.35,
         }
     }
 }
@@ -50,9 +52,11 @@ impl Default for OceanFrameSettings {
 struct OceanComputeParams {
     fft_size: u32,
     time: f32,
+    time_scale: f32,
+    _padding0: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    _padding: f32,
+    _padding1: f32,
 }
 
 #[repr(C)]
@@ -78,6 +82,7 @@ pub struct OceanRenderer {
     vertex_resolution: u32,
     wind_dir: Vec2,
     wind_speed: f32,
+    time_scale: f32,
     use_depth: bool,
 }
 
@@ -220,6 +225,7 @@ impl OceanRenderer {
             vertex_resolution: ocean_info.vertex_resolution,
             wind_dir: Vec2::new(1.0, 0.0),
             wind_speed: 12.0,
+            time_scale: 0.35,
             use_depth: info.use_depth,
         }
     }
@@ -227,6 +233,7 @@ impl OceanRenderer {
     pub fn update(&mut self, settings: OceanFrameSettings) {
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
+        self.time_scale = settings.time_scale;
     }
 
     pub fn record_compute(
@@ -243,9 +250,11 @@ impl OceanRenderer {
             *params = OceanComputeParams {
                 fft_size: self.fft_size,
                 time,
+                time_scale: self.time_scale,
+                _padding0: 0.0,
                 wind_dir: self.wind_dir,
                 wind_speed: self.wind_speed,
-                _padding: 0.0,
+                _padding1: 0.0,
             };
 
             return stream

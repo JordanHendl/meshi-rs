@@ -17,7 +17,7 @@ impl Default for CameraSetup {
             transform: Mat4::IDENTITY,
             fov_y_radians: 60f32.to_radians(),
             near: 0.1,
-            far: 100.0,
+            far: 20000.0,
         }
     }
 }
