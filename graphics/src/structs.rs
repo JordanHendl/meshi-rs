@@ -24,6 +24,8 @@ pub struct RenderObject;
 
 pub struct TextObject;
 
+pub struct GuiObject;
+
 #[derive(Clone, Debug)]
 pub enum TextRenderMode {
     Plain,
@@ -53,6 +55,62 @@ impl Default for TextInfo {
             color: Vec4::ONE,
             scale: 1.0,
             render_mode: TextRenderMode::Plain,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum GuiRenderMode {
+    Solid,
+    Textured {
+        texture_id: u32,
+        uv_min: Vec2,
+        uv_max: Vec2,
+    },
+}
+
+impl Default for GuiRenderMode {
+    fn default() -> Self {
+        Self::Solid
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GuiScissorInfo {
+    pub enabled: bool,
+    pub position: Vec2,
+    pub size: Vec2,
+}
+
+impl Default for GuiScissorInfo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            position: Vec2::ZERO,
+            size: Vec2::ZERO,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GuiInfo {
+    pub position: Vec2,
+    pub size: Vec2,
+    pub color: Vec4,
+    pub layer: i32,
+    pub render_mode: GuiRenderMode,
+    pub scissor: GuiScissorInfo,
+}
+
+impl Default for GuiInfo {
+    fn default() -> Self {
+        Self {
+            position: Vec2::ZERO,
+            size: Vec2::ZERO,
+            color: Vec4::ONE,
+            layer: 0,
+            render_mode: GuiRenderMode::Solid,
+            scissor: GuiScissorInfo::default(),
         }
     }
 }

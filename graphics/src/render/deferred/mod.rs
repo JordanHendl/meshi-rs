@@ -2,13 +2,14 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
+use super::gui::GuiRenderer;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{AnimationState, TextInfo, TextRenderMode};
+use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
@@ -122,6 +123,7 @@ pub struct DeferredRenderer {
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
     text: TextRenderer,
+    gui: GuiRenderer,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
 }
@@ -383,6 +385,7 @@ impl DeferredRenderer {
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
         text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
+        let gui = GuiRenderer::new();
         let cloud_overlay = text.register_text(&TextInfo {
             text: String::new(),
             position: Vec2::new(12.0, 12.0),
@@ -403,6 +406,7 @@ impl DeferredRenderer {
             subrender,
             psos,
             text,
+            gui,
             depth,
             cloud_overlay,
         }
@@ -1093,8 +1097,16 @@ impl DeferredRenderer {
         self.text.register_text(info)
     }
 
+    pub fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
+        self.gui.register_gui(info)
+    }
+
     pub fn release_text(&mut self, handle: Handle<TextObject>) {
         self.text.release_text(handle);
+    }
+
+    pub fn release_gui(&mut self, handle: Handle<GuiObject>) {
+        self.gui.release_gui(handle);
     }
 
     pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
@@ -1103,6 +1115,10 @@ impl DeferredRenderer {
 
     pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
         self.text.set_text_info(handle, info);
+    }
+
+    pub fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
+        self.gui.set_gui_info(handle, info);
     }
 
     fn record_frame_compute(&mut self, delta_time: f32) {
@@ -1510,8 +1526,16 @@ impl Renderer for DeferredRenderer {
         DeferredRenderer::register_text(self, info)
     }
 
+    fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
+        DeferredRenderer::register_gui(self, info)
+    }
+
     fn release_text(&mut self, handle: Handle<TextObject>) {
         DeferredRenderer::release_text(self, handle);
+    }
+
+    fn release_gui(&mut self, handle: Handle<GuiObject>) {
+        DeferredRenderer::release_gui(self, handle);
     }
 
     fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
@@ -1520,6 +1544,10 @@ impl Renderer for DeferredRenderer {
 
     fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
         DeferredRenderer::set_text_info(self, handle, info);
+    }
+
+    fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
+        DeferredRenderer::set_gui_info(self, handle, info);
     }
 
     fn update(

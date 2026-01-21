@@ -1,11 +1,12 @@
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
+use super::gui::GuiRenderer;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{
-    AnimationState, BillboardInfo, CloudSettings, RenderObject, RenderObjectInfo, TextInfo,
-    TextObject, render::scene::*,
+    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
+    TextInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
@@ -57,6 +58,7 @@ pub struct ForwardRenderer {
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
     text: TextRenderer,
+    gui: GuiRenderer,
     cloud_settings: CloudSettings,
 }
 
@@ -418,8 +420,16 @@ impl ForwardRenderer {
         self.text.register_text(info)
     }
 
+    pub fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
+        self.gui.register_gui(info)
+    }
+
     pub fn release_text(&mut self, handle: Handle<TextObject>) {
         self.text.release_text(handle);
+    }
+
+    pub fn release_gui(&mut self, handle: Handle<GuiObject>) {
+        self.gui.release_gui(handle);
     }
 
     pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
@@ -428,6 +438,10 @@ impl ForwardRenderer {
 
     pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
         self.text.set_text_info(handle, info);
+    }
+
+    pub fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
+        self.gui.set_gui_info(handle, info);
     }
 
     fn pull_scene(&mut self) {
@@ -655,8 +669,16 @@ impl Renderer for ForwardRenderer {
         ForwardRenderer::register_text(self, info)
     }
 
+    fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
+        ForwardRenderer::register_gui(self, info)
+    }
+
     fn release_text(&mut self, handle: Handle<TextObject>) {
         ForwardRenderer::release_text(self, handle);
+    }
+
+    fn release_gui(&mut self, handle: Handle<GuiObject>) {
+        ForwardRenderer::release_gui(self, handle);
     }
 
     fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
@@ -665,6 +687,10 @@ impl Renderer for ForwardRenderer {
 
     fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
         ForwardRenderer::set_text_info(self, handle, info);
+    }
+
+    fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
+        ForwardRenderer::set_gui_info(self, handle, info);
     }
 
     fn update(

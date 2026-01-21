@@ -178,6 +178,10 @@ impl RenderEngine {
         self.renderer.register_text(info)
     }
 
+    pub fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
+        self.renderer.register_gui(info)
+    }
+
     pub fn set_skinned_object_animation(
         &mut self,
         handle: Handle<RenderObject>,
@@ -218,12 +222,20 @@ impl RenderEngine {
         self.renderer.release_text(handle);
     }
 
+    pub fn release_gui(&mut self, handle: Handle<GuiObject>) {
+        self.renderer.release_gui(handle);
+    }
+
     pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
         self.renderer.set_text(handle, text);
     }
 
     pub fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo) {
         self.renderer.set_text_info(handle, info);
+    }
+
+    pub fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
+        self.renderer.set_gui_info(handle, info);
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {

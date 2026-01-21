@@ -1,13 +1,17 @@
 pub mod deferred;
 pub mod environment;
 pub mod forward;
+pub mod gui;
 pub mod text;
 mod gpu_draw_builder;
 mod particle_system;
 mod skinning;
 mod scene;
 
-use crate::{AnimationState, CloudSettings, RenderObject, RenderObjectInfo, TextInfo, TextObject};
+use crate::{
+    AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo, TextInfo,
+    TextObject,
+};
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{BindlessState, types::Camera, types::Material};
 use glam::Mat4;
@@ -99,6 +103,9 @@ pub trait Renderer {
     fn release_text(&mut self, handle: Handle<TextObject>);
     fn set_text(&mut self, handle: Handle<TextObject>, text: &str);
     fn set_text_info(&mut self, handle: Handle<TextObject>, info: &TextInfo);
+    fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject>;
+    fn release_gui(&mut self, handle: Handle<GuiObject>);
+    fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo);
     fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
