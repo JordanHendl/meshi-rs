@@ -118,6 +118,15 @@ fn rect_area_light(
     }
 }
 
+fn light_marker_position(light: &LightInfo) -> Option<Vec3> {
+    match light.ty {
+        LightType::Point | LightType::Spot | LightType::RectArea => {
+            Some(Vec3::new(light.pos_x, light.pos_y, light.pos_z))
+        }
+        _ => None,
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
     let args: Vec<String> = args().collect();
@@ -144,10 +153,10 @@ fn main() {
     setup.engine.set_object_transform(model_handle, &translation);
 
     let lights = [
-        directional_light(Vec3::new(-0.2, -1.0, -0.3), Vec3::splat(1.0), 1.4),
-        point_light(Vec3::new(1.5, 0.5, -1.5), Vec3::new(1.0, 0.2, 0.2), 7.0, 6.0),
+        directional_light(Vec3::new(-0.2, -70.0, -0.3), Vec3::splat(1.0), 1.4),
+        point_light(Vec3::new(1.0, 0.3, -60.0), Vec3::new(1.0, 0.2, 0.2), 7.0, 6.0),
         spot_light(
-            Vec3::new(-1.2, 1.8, -1.0),
+            Vec3::new(-20.1, 1.1, -2.3),
             Vec3::new(0.2, -1.0, -0.2),
             Vec3::new(0.2, 0.8, 1.0),
             9.0,
@@ -156,8 +165,8 @@ fn main() {
             28.0_f32.to_radians(),
         ),
         rect_area_light(
-            Vec3::new(0.0, 1.4, -2.2),
-            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(0.2, 1.2, -30.0),
+            Vec3::new(0.0, -2.0, 0.0),
             Vec3::new(0.9, 0.8, 0.5),
             6.0,
             5.0,
@@ -168,6 +177,28 @@ fn main() {
 
     for light in &lights {
         setup.engine.register_light(light);
+    }
+
+    let marker_model = setup
+        .db
+        .fetch_gpu_model("model/sphere")
+        .or_else(|_| setup.db.fetch_gpu_model("model/icosphere"))
+        .or_else(|_| setup.db.fetch_gpu_model("model/cube"))
+        .or_else(|_| setup.db.fetch_gpu_model("model/default"))
+        .or_else(|_| setup.db.fetch_gpu_model("model/witch"))
+        .expect("Expected a sphere-like model in the database");
+    let mut light_markers = Vec::new();
+    for light in &lights {
+        if let Some(position) = light_marker_position(light) {
+            let handle = setup
+                .engine
+                .register_object(&RenderObjectInfo::Model(marker_model.clone()))
+                .unwrap();
+            let marker_transform =
+                Mat4::from_translation(position) * Mat4::from_scale(Vec3::splat(4.0));
+            setup.engine.set_object_transform(handle, &marker_transform);
+            light_markers.push(handle);
+        }
     }
 
     struct AppData {
