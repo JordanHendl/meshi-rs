@@ -3343,7 +3343,7 @@ dependencies = [
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#0c18fb1c675bf640fec6c7f1f0d0f86f18e88570"
+source = "git+https://github.com/JordanHendl/noren#cae0a47b7cf02e0e96f069f7d9b3230eed26eceb"
 dependencies = [
  "bento",
  "bincode",

@@ -15,7 +15,7 @@ use common_camera::CameraController;
 
 fn main() {
     tracing_subscriber::fmt::init();
-    let renderer = RendererSelect::Forward;
+    let renderer = RendererSelect::Deferred;
     let mut setup = common_setup::init(
         "meshi-environment",
         [1280, 720],
