@@ -342,11 +342,27 @@ impl SkyRenderer {
 
         pso_builder = pso_builder.add_reserved_table_variables(state).unwrap();
 
+        if info.use_depth {
+            pso_builder = pso_builder.add_depth_target(AttachmentDesc {
+                format: Format::D24S8,
+                samples: info.sample_count,
+            });
+        }
+
+        let sky_depth_test = if info.use_depth {
+            Some(dashi::DepthInfo {
+                should_test: true,
+                should_write: false,
+            })
+        } else {
+            None
+        };
+
         let pipeline = pso_builder
             .set_details(dashi::GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
                 sample_count: info.sample_count,
-                depth_test: None,
+                depth_test: sky_depth_test,
                 ..Default::default()
             })
             .build(ctx)
@@ -534,29 +550,54 @@ impl SkyRenderer {
         time: f32,
         delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
-        self.apply_skybox_binding();
+        if self.use_procedural_cubemap {
+            self.update_sky_config();
 
-        let mut alloc = dynamic
-            .bump()
-            .expect("Failed to allocate sky dynamic buffer");
+            let mut alloc = dynamic
+                .bump()
+                .expect("Failed to allocate sky dynamic buffer");
 
-        let params = &mut alloc.slice::<SkyboxParams>()[0];
-        params.camera_index = camera.slot as u32;
-        params.intensity = self.skybox_intensity;
-        params._padding = [0.0; 2];
+            let params = &mut alloc.slice::<SkyDrawParams>()[0];
+            params.camera_index = camera.slot as u32;
+            params._padding = [0; 3];
 
-        CommandStream::<PendingGraphics>::subdraw()
-            .combine(self.cfg.sync_up())
-            .bind_graphics_pipeline(self.skybox_pipeline.handle)
-            .update_viewport(viewport)
-            .draw(&Draw {
-                bind_tables: self.skybox_pipeline.tables(),
-                dynamic_buffers: [None, Some(alloc), None, None],
-                instance_count: 1,
-                count: 3,
-                ..Default::default()
-            })
-            .unbind_graphics_pipeline()
+            CommandStream::<PendingGraphics>::subdraw()
+                .combine(self.cfg.sync_up())
+                .bind_graphics_pipeline(self.pipeline.handle)
+                .update_viewport(viewport)
+                .draw(&Draw {
+                    bind_tables: self.pipeline.tables(),
+                    dynamic_buffers: [None, Some(alloc), None, None],
+                    instance_count: 1,
+                    count: 3,
+                    ..Default::default()
+                })
+                .unbind_graphics_pipeline()
+        } else {
+            self.apply_skybox_binding();
+
+            let mut alloc = dynamic
+                .bump()
+                .expect("Failed to allocate sky dynamic buffer");
+
+            let params = &mut alloc.slice::<SkyboxParams>()[0];
+            params.camera_index = camera.slot as u32;
+            params.intensity = self.skybox_intensity;
+            params._padding = [0.0; 2];
+
+            CommandStream::<PendingGraphics>::subdraw()
+                .combine(self.cfg.sync_up())
+                .bind_graphics_pipeline(self.skybox_pipeline.handle)
+                .update_viewport(viewport)
+                .draw(&Draw {
+                    bind_tables: self.skybox_pipeline.tables(),
+                    dynamic_buffers: [None, Some(alloc), None, None],
+                    instance_count: 1,
+                    count: 3,
+                    ..Default::default()
+                })
+                .unbind_graphics_pipeline()
+        }
     }
 
     pub fn record_compute(

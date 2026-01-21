@@ -20,5 +20,6 @@ VSOutput main(uint vertex_id : SV_VertexID)
     output.position = float4(pos, 1.0, 1.0);
     output.uv = pos * 0.5 + 0.5;
 
+    output.position.y = -output.position.y;
     return output;
 }

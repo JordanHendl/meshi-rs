@@ -35,6 +35,8 @@ layout(set = 1, binding = 2) readonly buffer SceneLights {
     Light lights[];
 } meshi_bindless_lights;
 
+const float LIGHT_TYPE_DIRECTIONAL = 0.0;
+
 vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
     if (meshi_bindless_lights.lights.length() == 0) {
         return base_color * 0.4;
@@ -50,6 +52,10 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
 
     if (light_type < 0.0) {
       continue;
+    } else if (light_type == LIGHT_TYPE_DIRECTIONAL) {
+        vec3 dir = light.direction_range.xyz;
+        float dir_len = length(dir);
+        light_dir = dir_len > 0.0 ? dir / dir_len : vec3(0.0, 1.0, 0.0);
     } else {
         vec3 to_light = light.position_type.xyz - world_pos;
         float distance = length(to_light);
