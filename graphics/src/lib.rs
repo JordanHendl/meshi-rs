@@ -1,5 +1,5 @@
-mod render;
 pub mod gui;
+mod render;
 pub mod structs;
 pub(crate) mod utils;
 
@@ -8,23 +8,24 @@ use dashi::execution::CommandRing;
 use dashi::utils::Pool;
 use dashi::{
     AspectMask, Buffer, BufferInfo, BufferUsage, BufferView, CommandQueueInfo2, CommandStream,
-    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Format,
-    Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
+    Context, Display as DashiDisplay, DisplayInfo as DashiDisplayInfo, FRect2D, Format, Handle,
+    ImageInfo, ImageView, ImageViewType, MemoryVisibility, QueueType, Rect2D, SampleCount,
     SubmitInfo, SubresourceRange, Viewport,
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
+pub use render::environment::clouds::CloudRenderer;
+pub use render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
-pub use render::environment::clouds::CloudRenderer;
 use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
@@ -57,6 +58,30 @@ pub struct RenderEngine {
     db: Option<NonNull<DB>>,
     pending_skybox_entry: Option<String>,
     frame_timer: FrameTimer,
+    environment_lighting: Option<EnvironmentLightingState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnvironmentLightingSettings {
+    pub sky: SkyFrameSettings,
+    pub sun_light_intensity: f32,
+    pub moon_light_intensity: f32,
+}
+
+impl Default for EnvironmentLightingSettings {
+    fn default() -> Self {
+        Self {
+            sky: SkyFrameSettings::default(),
+            sun_light_intensity: 1.0,
+            moon_light_intensity: 0.1,
+        }
+    }
+}
+
+struct EnvironmentLightingState {
+    sun_light: Handle<Light>,
+    moon_light: Handle<Light>,
+    settings: EnvironmentLightingSettings,
 }
 
 impl RenderEngine {
@@ -112,6 +137,7 @@ impl RenderEngine {
             blit_queue,
             pending_skybox_entry: info.skybox_cubemap_entry.clone(),
             frame_timer: FrameTimer::new(60),
+            environment_lighting: None,
         })
     }
 
@@ -133,10 +159,58 @@ impl RenderEngine {
             return;
         };
 
-        match unsafe { db.as_mut() }.imagery_mut().fetch_gpu_cubemap(entry) {
+        match unsafe { db.as_mut() }
+            .imagery_mut()
+            .fetch_gpu_cubemap(entry)
+        {
             Ok(cubemap) => self.renderer.set_skybox_cubemap(cubemap),
             Err(err) => warn!("Failed to load skybox cubemap '{entry}': {err:?}"),
         }
+    }
+
+    pub fn set_skybox_settings(&mut self, settings: SkyboxFrameSettings) {
+        self.renderer.set_skybox_settings(settings);
+    }
+
+    pub fn set_sky_settings(&mut self, settings: SkyFrameSettings) {
+        self.renderer.set_sky_settings(settings);
+    }
+
+    pub fn set_environment_lighting(&mut self, settings: EnvironmentLightingSettings) {
+        let sky_settings = settings.sky.clone();
+        let (sun_direction, moon_direction) = resolve_sun_moon_direction(&sky_settings);
+        let sun_info = directional_light_info(
+            sun_direction,
+            sky_settings.sun_color,
+            settings.sun_light_intensity,
+        );
+        let moon_info = directional_light_info(
+            moon_direction,
+            sky_settings.moon_color,
+            settings.moon_light_intensity,
+        );
+
+        let existing_lights = if let Some(state) = &mut self.environment_lighting {
+            state.settings = settings.clone();
+            Some((state.sun_light, state.moon_light))
+        } else {
+            None
+        };
+
+        if let Some((sun_light, moon_light)) = existing_lights {
+            self.set_light_info(sun_light, &sun_info);
+            self.set_light_info(moon_light, &moon_info);
+        } else {
+            let sun_light = self.register_light(&sun_info);
+            let moon_light = self.register_light(&moon_info);
+            self.environment_lighting = Some(EnvironmentLightingState {
+                sun_light,
+                moon_light,
+                settings: settings.clone(),
+            });
+        }
+
+        self.renderer.set_sky_settings(sky_settings);
     }
 
     pub fn shut_down(mut self) {
@@ -177,7 +251,18 @@ impl RenderEngine {
     }
 
     pub fn set_light_info(&mut self, handle: Handle<Light>, info: &LightInfo) {
-        todo!()
+        if !handle.valid() {
+            return;
+        }
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_lights",
+                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                    *lights.light_mut(handle) = pack_gpu_light(*info);
+                },
+            )
+            .unwrap();
     }
 
     pub fn release_light(&mut self, handle: Handle<Light>) {
@@ -673,4 +758,77 @@ impl RenderEngine {
             user_data,
         });
     }
+}
+
+fn directional_light_info(direction: Vec3, color: Vec3, intensity: f32) -> LightInfo {
+    LightInfo {
+        ty: LightType::Directional,
+        flags: LightFlags::CASTS_SHADOWS.bits(),
+        intensity,
+        range: 0.0,
+        color_r: color.x,
+        color_g: color.y,
+        color_b: color.z,
+        pos_x: 0.0,
+        pos_y: 0.0,
+        pos_z: 0.0,
+        dir_x: direction.x,
+        dir_y: direction.y,
+        dir_z: direction.z,
+        spot_inner_angle_rad: 0.0,
+        spot_outer_angle_rad: 0.0,
+        rect_half_width: 0.0,
+        rect_half_height: 0.0,
+    }
+}
+
+fn resolve_sun_moon_direction(settings: &SkyFrameSettings) -> (Vec3, Vec3) {
+    let sun_dir = resolve_celestial_direction(
+        settings.sun_direction,
+        settings.time_of_day,
+        settings.latitude_degrees,
+        settings.longitude_degrees,
+        false,
+    );
+    let moon_dir = resolve_celestial_direction(
+        settings.moon_direction,
+        settings.time_of_day,
+        settings.latitude_degrees,
+        settings.longitude_degrees,
+        true,
+    );
+    (sun_dir, moon_dir)
+}
+
+fn resolve_celestial_direction(
+    explicit: Option<Vec3>,
+    time_of_day: Option<f32>,
+    latitude_degrees: Option<f32>,
+    longitude_degrees: Option<f32>,
+    is_moon: bool,
+) -> Vec3 {
+    if let Some(direction) = explicit {
+        if direction.length_squared() > 0.0 {
+            return direction.normalize();
+        }
+    }
+
+    if let Some(time) = time_of_day {
+        let day_time = time.rem_euclid(24.0);
+        let angle = day_time / 24.0 * std::f32::consts::TAU;
+        let elevation = (angle - std::f32::consts::FRAC_PI_2).sin();
+        let base = Vec3::new(angle.cos(), elevation, angle.sin());
+        let latitude = latitude_degrees.unwrap_or(0.0).to_radians();
+        let longitude = longitude_degrees.unwrap_or(0.0).to_radians();
+        let rotation = Mat3::from_rotation_y(longitude) * Mat3::from_rotation_x(latitude);
+        let mut dir = rotation * base;
+        if is_moon {
+            dir = -dir;
+        }
+        if dir.length_squared() > 0.0 {
+            return dir.normalize();
+        }
+    }
+
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }

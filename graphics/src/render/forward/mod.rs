@@ -5,8 +5,8 @@ use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{
-    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
-    TextInfo, TextObject, render::scene::*,
+    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
+    RenderObjectInfo, TextInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
@@ -670,6 +670,14 @@ impl Renderer for ForwardRenderer {
                 use_procedural_cubemap: false,
                 ..Default::default()
             });
+    }
+
+    fn set_skybox_settings(&mut self, settings: super::environment::sky::SkyboxFrameSettings) {
+        self.environment.update_skybox(settings);
+    }
+
+    fn set_sky_settings(&mut self, settings: super::environment::sky::SkyFrameSettings) {
+        self.environment.update_sky(settings);
     }
 
     fn register_object(

@@ -2,8 +2,8 @@ use std::{collections::HashMap, ptr::NonNull};
 
 use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
-use super::gui::GuiRenderer;
 use super::gpu_draw_builder::GPUDrawBuilder;
+use super::gui::GuiRenderer;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
@@ -1506,6 +1506,14 @@ impl Renderer for DeferredRenderer {
                 use_procedural_cubemap: false,
                 ..Default::default()
             });
+    }
+
+    fn set_skybox_settings(&mut self, settings: super::environment::sky::SkyboxFrameSettings) {
+        self.subrender.environment.update_skybox(settings);
+    }
+
+    fn set_sky_settings(&mut self, settings: super::environment::sky::SkyFrameSettings) {
+        self.subrender.environment.update_sky(settings);
     }
 
     fn register_object(

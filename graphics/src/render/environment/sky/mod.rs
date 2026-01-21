@@ -37,7 +37,7 @@ pub struct SkyboxFrameSettings {
     pub update_interval_frames: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SkyFrameSettings {
     pub sun_direction: Option<Vec3>,
     pub sun_color: Vec3,
@@ -571,8 +571,7 @@ impl SkyRenderer {
             let target_info = self.ensure_skybox_swap_target(ctx, &cubemap.info);
             let src_range =
                 SubresourceRange::new(0, cubemap.info.mip_levels, 0, cubemap.info.layers);
-            let dst_range =
-                SubresourceRange::new(0, target_info.mip_levels, 0, target_info.layers);
+            let dst_range = SubresourceRange::new(0, target_info.mip_levels, 0, target_info.layers);
 
             stream = stream.blit_images(&BlitImage {
                 src: cubemap.view.img,
@@ -786,18 +785,20 @@ impl SkyRenderer {
     fn update_sky_config(&mut self) {
         let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
         let default_tint = Vec3::new(0.529, 0.808, 0.922);
-        let sun_dir = self.sky_settings.sun_direction.unwrap_or(Vec3::Y);
-        let moon_dir = self.sky_settings.moon_direction.unwrap_or(-Vec3::Y);
-        let sun_dir = if sun_dir.length_squared() > 0.0 {
-            sun_dir.normalize()
-        } else {
-            Vec3::Y
-        };
-        let moon_dir = if moon_dir.length_squared() > 0.0 {
-            moon_dir.normalize()
-        } else {
-            -Vec3::Y
-        };
+        let sun_dir = resolve_celestial_direction(
+            self.sky_settings.sun_direction,
+            self.sky_settings.time_of_day,
+            self.sky_settings.latitude_degrees,
+            self.sky_settings.longitude_degrees,
+            false,
+        );
+        let moon_dir = resolve_celestial_direction(
+            self.sky_settings.moon_direction,
+            self.sky_settings.time_of_day,
+            self.sky_settings.latitude_degrees,
+            self.sky_settings.longitude_degrees,
+            true,
+        );
 
         config.horizon_init = default_tint;
         config.zenith_tint = default_tint;
@@ -811,4 +812,37 @@ impl SkyRenderer {
         config.moon_angular_radius = self.sky_settings.moon_angular_radius;
         config.intensity_scale = 1.0;
     }
+}
+
+fn resolve_celestial_direction(
+    explicit: Option<Vec3>,
+    time_of_day: Option<f32>,
+    latitude_degrees: Option<f32>,
+    longitude_degrees: Option<f32>,
+    is_moon: bool,
+) -> Vec3 {
+    if let Some(direction) = explicit {
+        if direction.length_squared() > 0.0 {
+            return direction.normalize();
+        }
+    }
+
+    if let Some(time) = time_of_day {
+        let day_time = time.rem_euclid(24.0);
+        let angle = day_time / 24.0 * std::f32::consts::TAU;
+        let elevation = (angle - std::f32::consts::FRAC_PI_2).sin();
+        let base = Vec3::new(angle.cos(), elevation, angle.sin());
+        let latitude = latitude_degrees.unwrap_or(0.0).to_radians();
+        let longitude = longitude_degrees.unwrap_or(0.0).to_radians();
+        let rotation = Mat3::from_rotation_y(longitude) * Mat3::from_rotation_x(latitude);
+        let mut dir = rotation * base;
+        if is_moon {
+            dir = -dir;
+        }
+        if dir.length_squared() > 0.0 {
+            return dir.normalize();
+        }
+    }
+
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }

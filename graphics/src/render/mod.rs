@@ -1,12 +1,12 @@
 pub mod deferred;
 pub mod environment;
 pub mod forward;
-pub mod gui;
-pub mod text;
 mod gpu_draw_builder;
+pub mod gui;
 mod particle_system;
-mod skinning;
 mod scene;
+mod skinning;
+pub mod text;
 
 use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo, TextInfo,
@@ -87,6 +87,11 @@ pub trait Renderer {
     fn state(&mut self) -> &mut BindlessState;
     fn initialize_database(&mut self, db: &mut DB);
     fn set_skybox_cubemap(&mut self, cubemap: noren::rdb::imagery::DeviceCubemap);
+    fn set_skybox_settings(
+        &mut self,
+        settings: crate::render::environment::sky::SkyboxFrameSettings,
+    );
+    fn set_sky_settings(&mut self, settings: crate::render::environment::sky::SkyFrameSettings);
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,
