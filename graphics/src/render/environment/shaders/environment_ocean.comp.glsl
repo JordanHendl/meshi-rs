@@ -38,35 +38,73 @@ void main() {
 
     float height = 0.0;
     vec2 gradient = vec2(0.0);
+    float velocity = 0.0;
     float two_pi = 6.28318530718;
-    float base_amplitude = 0.18;
-    float spectrum_scale = 0.9;
+    float gravity = 9.81;
+    float spectrum_scale = 1.1;
+    float base_amplitude = 0.55;
+    float capillary_amplitude = 0.18;
+    float capillary_scale = 3.5;
+    float capillary_term = 0.000074;
     float time_phase = time * speed * 0.12;
 
-    for (int ky = -4; ky <= 4; ++ky) {
-        for (int kx = -4; kx <= 4; ++kx) {
+    for (int ky = -12; ky <= 12; ++ky) {
+        for (int kx = -12; kx <= 12; ++kx) {
             if (kx == 0 && ky == 0) {
                 continue;
             }
 
-            vec2 k = vec2(float(kx), float(ky));
-            float k2 = max(dot(k, k), 1.0);
-            float k_len = sqrt(k2);
-            vec2 k_dir = k / k_len;
+            vec2 k_base = vec2(float(kx), float(ky));
+            float k2_base = dot(k_base, k_base);
+            float k_len_base = max(sqrt(k2_base), 0.001);
+            vec2 k_dir = k_base / k_len_base;
             float alignment = max(dot(k_dir, wind_dir), 0.0);
-            float amplitude = base_amplitude * exp(-k2 * 0.18) * (0.45 + 0.55 * alignment);
-            float phase = two_pi * dot(k, uv);
-            float dispersion = time_phase * (0.6 + 0.4 * alignment) * k_len;
+            float alignment_spread = alignment * alignment;
+
+            float L = max(speed * speed / gravity, 0.001);
+            float damping = 0.0012;
+            float l = L * damping;
+            float k2 = max(k2_base, 0.0001);
+            float phillips = exp(-1.0 / (k2 * L * L)) / (k2 * k2);
+            phillips *= alignment_spread * exp(-k2 * l * l);
+            float amplitude = base_amplitude * sqrt(max(phillips, 0.0));
+
+            float phase_rand = fract(sin(dot(k_base, vec2(127.1, 311.7))) * 43758.5453);
+            float phase = two_pi * (dot(k_base, uv) + phase_rand);
+            float omega = sqrt(gravity * k_len_base);
+            float dispersion = time_phase * omega;
             float angle = phase + dispersion;
             float wave = sin(angle);
-            height += amplitude * wave;
             float cos_wave = cos(angle);
-            gradient += amplitude * cos_wave * two_pi * k;
+            height += amplitude * wave;
+            gradient += amplitude * cos_wave * two_pi * k_base;
+            velocity += amplitude * cos_wave * omega;
+
+            vec2 k_cap = k_base * capillary_scale;
+            float k2_cap = dot(k_cap, k_cap);
+            float k_len_cap = max(sqrt(k2_cap), 0.001);
+            vec2 k_cap_dir = k_cap / k_len_cap;
+            float cap_align = max(dot(k_cap_dir, wind_dir), 0.0);
+            float cap_spread = cap_align * cap_align;
+            float cap_phillips = exp(-1.0 / (k2_cap * L * L)) / (k2_cap * k2_cap);
+            cap_phillips *= cap_spread * exp(-k2_cap * l * l * 12.0);
+            float cap_amplitude = capillary_amplitude * sqrt(max(cap_phillips, 0.0));
+            float cap_phase_rand = fract(sin(dot(k_base, vec2(269.5, 183.3))) * 41583.123);
+            float cap_phase = two_pi * (dot(k_cap, uv) + cap_phase_rand);
+            float cap_omega = sqrt(gravity * k_len_cap + capillary_term * k_len_cap * k_len_cap * k_len_cap);
+            float cap_dispersion = time_phase * cap_omega;
+            float cap_angle = cap_phase + cap_dispersion;
+            float cap_wave = sin(cap_angle);
+            float cap_cos = cos(cap_angle);
+            height += cap_amplitude * cap_wave;
+            gradient += cap_amplitude * cap_cos * two_pi * k_cap;
+            velocity += cap_amplitude * cap_cos * cap_omega;
         }
     }
 
     height *= spectrum_scale;
     gradient *= spectrum_scale;
+    velocity *= spectrum_scale;
 
-    ocean_waves.values[idx] = vec4(height, gradient.x, gradient.y, 1.0);
+    ocean_waves.values[idx] = vec4(height, gradient.x, gradient.y, velocity);
 }

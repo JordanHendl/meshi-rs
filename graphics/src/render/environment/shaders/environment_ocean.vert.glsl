@@ -103,6 +103,7 @@ layout(location = 0) out vec2 v_uv;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec3 v_view_dir;
 layout(location = 3) out vec3 v_world_pos;
+layout(location = 4) out float v_velocity;
 
 vec2 camera_position() {
   Camera c = meshi_bindless_cameras.cameras[params.camera_index];
@@ -135,7 +136,7 @@ vec2 vertex_uv(uint vertex_id) {
     return positions[vertex_id];
 }
 
-vec3 sample_waves(vec2 uv) {
+vec4 sample_waves(vec2 uv) {
     vec2 wrapped_uv = fract(uv);
     uint fft_size = max(params.fft_size, 1);
     float fft_size_f = float(fft_size);
@@ -154,12 +155,12 @@ vec3 sample_waves(vec2 uv) {
     uint idx01 = min(y1 * fft_size + x0, max_index - 1);
     uint idx11 = min(y1 * fft_size + x1, max_index - 1);
 
-    vec3 w00 = ocean_waves.values[idx00].xyz;
-    vec3 w10 = ocean_waves.values[idx10].xyz;
-    vec3 w01 = ocean_waves.values[idx01].xyz;
-    vec3 w11 = ocean_waves.values[idx11].xyz;
-    vec3 wx0 = mix(w00, w10, tx);
-    vec3 wx1 = mix(w01, w11, tx);
+    vec4 w00 = ocean_waves.values[idx00];
+    vec4 w10 = ocean_waves.values[idx10];
+    vec4 w01 = ocean_waves.values[idx01];
+    vec4 w11 = ocean_waves.values[idx11];
+    vec4 wx0 = mix(w00, w10, tx);
+    vec4 wx1 = mix(w01, w11, tx);
     return mix(wx0, wx1, ty);
 }
 
@@ -172,7 +173,7 @@ void main() {
     vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
-    vec3 waves = sample_waves(uv);
+    vec4 waves = sample_waves(uv);
     float height = waves.x;
 
     uint tile_x = gl_InstanceIndex % max(params.tile_count_x, 1);
@@ -183,10 +184,10 @@ void main() {
     vec2 snapped_origin = floor(camera_position() / params.patch_size) * params.patch_size;
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
     vec2 world = local + snapped_origin + tile_offset;
-    vec4 position = vec4(world.x, height, world.y, 1.0);
-    vec3 p = vec3(local.x, height, local.y);
     float patch_scale = max(params.patch_size, 0.001);
     vec2 gradient_world = waves.yz / (2.0 * patch_scale);
+    vec2 choppy_offset = -gradient_world * (patch_scale * 0.15);
+    vec4 position = vec4(world.x + choppy_offset.x, height, world.y + choppy_offset.y, 1.0);
     vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
     mat4 view = camera_view();
     mat4 proj = camera_proj();
@@ -196,4 +197,5 @@ void main() {
     v_normal = normal;
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;
+    v_velocity = waves.w;
 }

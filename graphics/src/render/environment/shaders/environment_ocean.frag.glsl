@@ -5,6 +5,7 @@ layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec3 v_view_dir;
 layout(location = 3) in vec3 v_world_pos;
+layout(location = 4) in float v_velocity;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 1, binding = 0) readonly buffer OceanParams {
@@ -80,8 +81,10 @@ void main() {
     float fresnel = 0.02 + (1.0 - 0.02) * pow(1.0 - ndotv, 5.0);
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
+    float velocity = abs(v_velocity);
     float curvature = length(fwidth(n));
-    float foam_mask = smoothstep(0.25, 0.6, slope + curvature * 2.0);
+    float breaking = velocity * 0.35 + slope * 1.2;
+    float foam_mask = smoothstep(0.55, 0.95, breaking + curvature * 0.4);
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
     vec3 color = apply_light(base_color, n, v, v_world_pos);
