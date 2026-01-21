@@ -148,6 +148,39 @@ fn compile_skybox_shaders() -> [bento::CompilationResult; 2] {
     [vertex, fragment]
 }
 
+fn compile_sky_shaders() -> [bento::CompilationResult; 2] {
+    let compiler = Compiler::new().expect("Failed to create shader compiler");
+    let base_request = Request {
+        name: Some("sky".to_string()),
+        lang: ShaderLang::Slang,
+        optimization: OptimizationLevel::Performance,
+        debug_symbols: true,
+        ..Default::default()
+    };
+
+    let vertex = compiler
+        .compile(
+            include_str!("shaders/sky_vert.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Vertex,
+                ..base_request.clone()
+            },
+        )
+        .expect("Failed to compile sky vertex shader");
+
+    let fragment = compiler
+        .compile(
+            include_str!("shaders/sky_frag.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Fragment,
+                ..base_request
+            },
+        )
+        .expect("Failed to compile sky fragment shader");
+
+    [vertex, fragment]
+}
+
 fn default_skybox_view(ctx: &mut dashi::Context) -> ImageView {
     let face = vec![135, 206, 235, 255];
     let faces = [
@@ -191,7 +224,7 @@ impl SkyRenderer {
         dynamic: &DynamicAllocator,
     ) -> Self {
         let clouds = CloudSimulation::new(ctx);
-        let shaders = miso::stdsky(&[]);
+        let shaders = compile_sky_shaders();
         let skybox_shaders = compile_skybox_shaders();
 
         let skybox_view = info
@@ -233,23 +266,13 @@ impl SkyRenderer {
             .add_table_variable_with_resources(
                 "SkyParams",
                 vec![dashi::IndexedResource {
-                    resource: ShaderResource::ConstBuffer(cfg.device()),
+                    resource: ShaderResource::StorageBuffer(cfg.device()),
                     slot: 0,
                 }],
             );
 
         pso_builder = pso_builder
-            .add_reserved_table_variable(state, "meshi_bindless_cameras")
-            .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_lights")
-            .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_textures")
-            .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_samplers")
-            .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_materials")
-            .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_transformations")
+            .add_reserved_table_variables(state)
             .unwrap();
 
         if info.use_depth {
