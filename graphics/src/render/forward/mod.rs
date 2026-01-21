@@ -3,7 +3,10 @@ use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::{AnimationState, BillboardInfo, CloudSettings, RenderObject, RenderObjectInfo, TextInfo, TextObject, render::scene::*};
+use crate::{
+    AnimationState, BillboardInfo, CloudSettings, RenderObject, RenderObjectInfo, TextInfo,
+    TextObject, render::scene::*,
+};
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
@@ -476,6 +479,47 @@ impl ForwardRenderer {
 
         depth.view.aspect = AspectMask::Depth;
 
+        self.environment.update(EnvironmentFrameSettings {
+            delta_time,
+            ..Default::default()
+        });
+
+        let sky_cubemap_pass = views.first().and_then(|camera| {
+            self.environment.prepare_sky_cubemap(
+                self.ctx.as_mut(),
+                self.state.as_mut(),
+                &self.viewport,
+                *camera,
+            )
+        });
+
+        if let Some(pass) = sky_cubemap_pass {
+            for (face_index, face_view) in pass.face_views.iter().enumerate() {
+                let mut attachments: [Option<ImageView>; 8] = [None; 8];
+                attachments[0] = Some(*face_view);
+
+                let mut clear_values: [Option<ClearValue>; 8] = [None; 8];
+                clear_values[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
+
+                let cubemap_viewport = pass.viewport;
+                self.graph.add_subpass(
+                    &SubpassInfo {
+                        viewport: cubemap_viewport,
+                        color_attachments: attachments,
+                        depth_attachment: None,
+                        clear_values,
+                        depth_clear: None,
+                    },
+                    |mut cmd| {
+                        cmd.combine(
+                            self.environment
+                                .render_sky_cubemap_face(&cubemap_viewport, face_index),
+                        )
+                    },
+                );
+            }
+        }
+
         for (view_idx, camera) in views.iter().enumerate() {
             let color = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI FORWARD] Position Framebuffer View {view_idx}"),
@@ -523,10 +567,6 @@ impl ForwardRenderer {
 
             // Forward SPLIT pass. Renders the following framebuffers:
             // 1) Color
-            self.environment.update(EnvironmentFrameSettings {
-                delta_time,
-                ..Default::default()
-            });
             self.graph.add_subpass(
                 &SubpassInfo {
                     viewport: self.viewport,
@@ -538,9 +578,7 @@ impl ForwardRenderer {
                         stencil: 0,
                     }),
                 },
-                |mut cmd| {
-                    cmd.combine(self.environment.render(&self.viewport, camera_handle))
-                },
+                |mut cmd| cmd.combine(self.environment.render(&self.viewport, camera_handle)),
             );
 
             outputs.push(ViewOutput {
@@ -646,8 +684,7 @@ impl Renderer for ForwardRenderer {
         self.cloud_settings = settings;
     }
 
-    fn set_cloud_weather_map(&mut self, _view: Option<ImageView>) {
-    }
+    fn set_cloud_weather_map(&mut self, _view: Option<ImageView>) {}
 
     fn shut_down(self: Box<Self>) {
         self.ctx.destroy();

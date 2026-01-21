@@ -13,21 +13,28 @@ use dashi::{
     SamplerInfo, ShaderResource, SubresourceRange, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
-use furikake::{BindlessState, types::Camera};
+use furikake::{
+    BindlessState, reservations::bindless_camera::ReservedBindlessCamera, types::Camera,
+};
 use glam::*;
 use noren::rdb::imagery::{HostCubemap, ImageInfo as NorenImageInfo};
 use tare::utils::StagedBuffer;
+use tracing::warn;
 
 #[derive(Clone)]
 pub struct SkyboxInfo {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
     pub intensity: f32,
+    pub use_procedural_cubemap: bool,
+    pub update_interval_frames: u32,
 }
 
 #[derive(Clone)]
 pub struct SkyboxFrameSettings {
     pub intensity: f32,
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub use_procedural_cubemap: bool,
+    pub update_interval_frames: u32,
 }
 
 #[derive(Clone)]
@@ -50,6 +57,8 @@ impl Default for SkyboxInfo {
         Self {
             cubemap: None,
             intensity: 1.0,
+            use_procedural_cubemap: true,
+            update_interval_frames: 1,
         }
     }
 }
@@ -59,6 +68,8 @@ impl Default for SkyboxFrameSettings {
         Self {
             cubemap: None,
             intensity: 1.0,
+            use_procedural_cubemap: true,
+            update_interval_frames: 1,
         }
     }
 }
@@ -105,11 +116,33 @@ struct SkyboxParams {
     _padding: [f32; 2],
 }
 
+#[repr(C)]
+struct SkyDrawParams {
+    camera_index: u32,
+    _padding: [u32; 3],
+}
+
+pub struct SkyCubemapPass {
+    pub viewport: Viewport,
+    pub face_views: [ImageView; 6],
+}
+
 pub struct SkyRenderer {
     pipeline: PSO,
     skybox_pipeline: PSO,
     skybox_sampler: Handle<Sampler>,
+    skybox_fallback_view: ImageView,
     skybox_intensity: f32,
+    use_procedural_cubemap: bool,
+    cubemap_update_interval: u32,
+    cubemap_frame_index: u32,
+    cubemap_dirty: bool,
+    cubemap_size: u32,
+    cubemap_viewport: Viewport,
+    cubemap_face_views: Option<[ImageView; 6]>,
+    cubemap_camera_handles: Option<[Handle<Camera>; 6]>,
+    procedural_cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    cubemap_format: Format,
     sky_settings: SkyFrameSettings,
     clouds: CloudSimulation,
     cfg: StagedBuffer,
@@ -271,31 +304,13 @@ impl SkyRenderer {
                 }],
             );
 
-        pso_builder = pso_builder
-            .add_reserved_table_variables(state)
-            .unwrap();
-
-        if info.use_depth {
-            pso_builder = pso_builder.add_depth_target(AttachmentDesc {
-                format: Format::D24S8,
-                samples: info.sample_count,
-            });
-        }
-
-        let depth_test = if info.use_depth {
-            Some(dashi::DepthInfo {
-                should_test: false,
-                should_write: false,
-            })
-        } else {
-            None
-        };
+        pso_builder = pso_builder.add_reserved_table_variables(state).unwrap();
 
         let pipeline = pso_builder
             .set_details(dashi::GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
                 sample_count: info.sample_count,
-                depth_test,
+                depth_test: None,
                 ..Default::default()
             })
             .build(ctx)
@@ -365,7 +380,18 @@ impl SkyRenderer {
             pipeline,
             skybox_pipeline,
             skybox_sampler,
+            skybox_fallback_view: skybox_view,
             skybox_intensity: info.skybox.intensity,
+            use_procedural_cubemap: info.skybox.use_procedural_cubemap,
+            cubemap_update_interval: info.skybox.update_interval_frames.max(1),
+            cubemap_frame_index: 0,
+            cubemap_dirty: true,
+            cubemap_size: 0,
+            cubemap_viewport: Viewport::default(),
+            cubemap_face_views: None,
+            cubemap_camera_handles: None,
+            procedural_cubemap: None,
+            cubemap_format: info.color_format,
             sky_settings: SkyFrameSettings::default(),
             clouds,
             cfg,
@@ -374,20 +400,92 @@ impl SkyRenderer {
 
     pub fn update_skybox(&mut self, settings: SkyboxFrameSettings) {
         self.skybox_intensity = settings.intensity;
+        let procedural_changed = self.use_procedural_cubemap != settings.use_procedural_cubemap;
+        self.use_procedural_cubemap = settings.use_procedural_cubemap;
+        self.cubemap_update_interval = settings.update_interval_frames.max(1);
 
         if let Some(cubemap) = settings.cubemap {
-            self.skybox_pipeline.update_table(
-                "skybox_texture",
-                dashi::IndexedResource {
-                    resource: ShaderResource::Image(cubemap.view),
-                    slot: 0,
-                },
-            );
+            self.skybox_fallback_view = cubemap.view;
         }
+
+        if procedural_changed {
+            self.cubemap_dirty = true;
+        }
+
+        self.apply_skybox_binding();
     }
 
     pub fn update_sky(&mut self, settings: SkyFrameSettings) {
         self.sky_settings = settings;
+        self.cubemap_dirty = true;
+    }
+
+    pub fn prepare_cubemap_pass(
+        &mut self,
+        ctx: &mut dashi::Context,
+        state: &mut BindlessState,
+        viewport: &Viewport,
+        camera: dashi::Handle<Camera>,
+    ) -> Option<SkyCubemapPass> {
+        if !self.use_procedural_cubemap {
+            self.apply_skybox_binding();
+            return None;
+        }
+
+        let size = cubemap_size_from_viewport(viewport);
+        let recreated = self.ensure_cubemap_resources(ctx, size);
+
+        if recreated {
+            self.cubemap_dirty = true;
+        }
+
+        self.cubemap_frame_index = self.cubemap_frame_index.wrapping_add(1);
+        let interval_ready = self.cubemap_frame_index % self.cubemap_update_interval == 0;
+        let should_render = self.cubemap_dirty || interval_ready;
+
+        if !should_render {
+            return None;
+        }
+
+        self.update_cubemap_cameras(state, camera, size)?;
+        self.cubemap_dirty = false;
+
+        Some(SkyCubemapPass {
+            viewport: self.cubemap_viewport,
+            face_views: self.cubemap_face_views?,
+        })
+    }
+
+    pub fn record_cubemap_face(
+        &mut self,
+        viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
+        face_index: usize,
+    ) -> CommandStream<PendingGraphics> {
+        self.update_sky_config();
+
+        let mut alloc = dynamic.bump().expect("Failed to allocate sky draw params");
+
+        let params = &mut alloc.slice::<SkyDrawParams>()[0];
+        params.camera_index = self
+            .cubemap_camera_handles
+            .and_then(|handles| handles.get(face_index).copied())
+            .map(|handle| handle.slot as u32)
+            .unwrap_or_default();
+        params._padding = [0; 3];
+
+        CommandStream::<PendingGraphics>::subdraw()
+            .combine(self.cfg.sync_up())
+            .bind_graphics_pipeline(self.pipeline.handle)
+            .update_viewport(viewport)
+            .draw(&Draw {
+                bind_tables: self.pipeline.tables(),
+                dynamic_buffers: [None, Some(alloc), None, None],
+                instance_count: 1,
+                count: 3,
+                ..Default::default()
+            })
+            .unbind_graphics_pipeline()
     }
 
     pub fn record_draws(
@@ -398,34 +496,7 @@ impl SkyRenderer {
         time: f32,
         delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
-        let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
-        let sun_dir = self
-            .sky_settings
-            .sun_direction
-            .unwrap_or(Vec3::Y);
-        let moon_dir = self
-            .sky_settings
-            .moon_direction
-            .unwrap_or(-Vec3::Y);
-        let sun_dir = if sun_dir.length_squared() > 0.0 {
-            sun_dir.normalize()
-        } else {
-            Vec3::Y
-        };
-        let moon_dir = if moon_dir.length_squared() > 0.0 {
-            moon_dir.normalize()
-        } else {
-            -Vec3::Y
-        };
-
-        config.sun_dir = sun_dir;
-        config.sun_color = self.sky_settings.sun_color;
-        config.sun_intensity = self.sky_settings.sun_intensity;
-        config.sun_angular_radius = self.sky_settings.sun_angular_radius;
-        config.moon_dir = moon_dir;
-        config.moon_color = self.sky_settings.moon_color;
-        config.moon_intensity = self.sky_settings.moon_intensity;
-        config.moon_angular_radius = self.sky_settings.moon_angular_radius;
+        self.apply_skybox_binding();
 
         let mut alloc = dynamic
             .bump()
@@ -452,5 +523,190 @@ impl SkyRenderer {
 
     pub fn record_compute(&mut self, time: f32, delta_time: f32) -> CommandStream<Executable> {
         self.clouds.record_compute(time, delta_time)
+    }
+}
+
+fn cubemap_size_from_viewport(viewport: &Viewport) -> u32 {
+    let size = viewport.area.w.min(viewport.area.h).max(1.0);
+    size.round() as u32
+}
+
+impl SkyRenderer {
+    fn apply_skybox_binding(&mut self) {
+        let view = if self.use_procedural_cubemap {
+            self.procedural_cubemap
+                .as_ref()
+                .map(|cubemap| cubemap.view)
+                .unwrap_or(self.skybox_fallback_view)
+        } else {
+            self.skybox_fallback_view
+        };
+
+        self.skybox_pipeline.update_table(
+            "skybox_texture",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(view),
+                slot: 0,
+            },
+        );
+    }
+
+    fn ensure_cubemap_resources(&mut self, ctx: &mut dashi::Context, size: u32) -> bool {
+        if self.cubemap_size == size && self.procedural_cubemap.is_some() {
+            return false;
+        }
+
+        let info = NorenImageInfo {
+            name: "[MESHI GFX SKY] Procedural Cubemap".to_string(),
+            dim: [size, size, 1],
+            layers: 6,
+            format: self.cubemap_format,
+            mip_levels: 1,
+        };
+
+        let mut dashi_info = info.dashi_cube();
+        dashi_info.initial_data = None;
+
+        let image = ctx
+            .make_image(&dashi_info)
+            .expect("Failed to create procedural sky cubemap image");
+
+        let view = ImageView {
+            img: image,
+            aspect: AspectMask::Color,
+            view_type: ImageViewType::Cube,
+            range: SubresourceRange::new(0, info.mip_levels, 0, 6),
+        };
+
+        self.procedural_cubemap = Some(noren::rdb::imagery::DeviceCubemap {
+            view,
+            info: info.gpu(),
+        });
+
+        let mut faces = [ImageView::default(); 6];
+        for (index, face) in faces.iter_mut().enumerate() {
+            *face = ImageView {
+                img: image,
+                aspect: AspectMask::Color,
+                view_type: ImageViewType::Type2D,
+                range: SubresourceRange::new(0, info.mip_levels, index as u32, 1),
+            };
+        }
+
+        self.cubemap_face_views = Some(faces);
+        self.cubemap_size = size;
+        self.cubemap_viewport = Viewport {
+            area: FRect2D {
+                x: 0.0,
+                y: 0.0,
+                w: size as f32,
+                h: size as f32,
+            },
+            scissor: Rect2D {
+                x: 0,
+                y: 0,
+                w: size,
+                h: size,
+            },
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+
+        self.apply_skybox_binding();
+        true
+    }
+
+    fn update_cubemap_cameras(
+        &mut self,
+        state: &mut BindlessState,
+        camera: dashi::Handle<Camera>,
+        size: u32,
+    ) -> Option<()> {
+        let camera_position =
+            match state.reserved::<ReservedBindlessCamera>("meshi_bindless_cameras") {
+                Ok(cameras) => cameras.camera(camera).position(),
+                Err(_) => {
+                    warn!("SkyRenderer failed to access bindless cameras for cubemap update");
+                    Vec3::ZERO
+                }
+            };
+
+        if self.cubemap_camera_handles.is_none() {
+            let mut handles: Option<[Handle<Camera>; 6]> = None;
+            let _ = state.reserved_mut(
+                "meshi_bindless_cameras",
+                |cameras: &mut ReservedBindlessCamera| {
+                    handles = Some([
+                        cameras.add_camera(),
+                        cameras.add_camera(),
+                        cameras.add_camera(),
+                        cameras.add_camera(),
+                        cameras.add_camera(),
+                        cameras.add_camera(),
+                    ]);
+                },
+            );
+            self.cubemap_camera_handles = handles;
+        }
+
+        let handles = self.cubemap_camera_handles?;
+
+        let face_settings = [
+            (Vec3::X, -Vec3::Y),
+            (-Vec3::X, -Vec3::Y),
+            (Vec3::Y, Vec3::Z),
+            (-Vec3::Y, -Vec3::Z),
+            (Vec3::Z, -Vec3::Y),
+            (-Vec3::Z, -Vec3::Y),
+        ];
+
+        let _ = state.reserved_mut(
+            "meshi_bindless_cameras",
+            |cameras: &mut ReservedBindlessCamera| {
+                for ((direction, up), handle) in face_settings.iter().zip(handles.iter()) {
+                    let view = Mat4::look_to_rh(camera_position, *direction, *up);
+                    let cam = cameras.camera_mut(*handle);
+                    cam.set_transform(view.inverse());
+                    cam.set_perspective(
+                        std::f32::consts::FRAC_PI_2,
+                        size as f32,
+                        size as f32,
+                        0.1,
+                        1000.0,
+                    );
+                }
+            },
+        );
+
+        Some(())
+    }
+
+    fn update_sky_config(&mut self) {
+        let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
+        let default_tint = Vec3::new(0.529, 0.808, 0.922);
+        let sun_dir = self.sky_settings.sun_direction.unwrap_or(Vec3::Y);
+        let moon_dir = self.sky_settings.moon_direction.unwrap_or(-Vec3::Y);
+        let sun_dir = if sun_dir.length_squared() > 0.0 {
+            sun_dir.normalize()
+        } else {
+            Vec3::Y
+        };
+        let moon_dir = if moon_dir.length_squared() > 0.0 {
+            moon_dir.normalize()
+        } else {
+            -Vec3::Y
+        };
+
+        config.horizon_init = default_tint;
+        config.zenith_tint = default_tint;
+        config.sun_dir = sun_dir;
+        config.sun_color = self.sky_settings.sun_color;
+        config.sun_intensity = self.sky_settings.sun_intensity;
+        config.sun_angular_radius = self.sky_settings.sun_angular_radius;
+        config.moon_dir = moon_dir;
+        config.moon_color = self.sky_settings.moon_color;
+        config.moon_intensity = self.sky_settings.moon_intensity;
+        config.moon_angular_radius = self.sky_settings.moon_angular_radius;
+        config.intensity_scale = 1.0;
     }
 }

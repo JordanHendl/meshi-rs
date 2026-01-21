@@ -1,7 +1,7 @@
+pub mod clouds;
 pub mod ocean;
 pub mod sky;
 pub mod terrain;
-pub mod clouds;
 
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::{CommandStream, Context, DynamicAllocator, Format, SampleCount, Viewport};
@@ -131,6 +131,25 @@ impl EnvironmentRenderer {
         self.sky.update_sky(settings);
     }
 
+    pub fn prepare_sky_cubemap(
+        &mut self,
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        viewport: &Viewport,
+        camera: dashi::Handle<Camera>,
+    ) -> Option<sky::SkyCubemapPass> {
+        self.sky.prepare_cubemap_pass(ctx, state, viewport, camera)
+    }
+
+    pub fn render_sky_cubemap_face(
+        &mut self,
+        viewport: &Viewport,
+        face_index: usize,
+    ) -> CommandStream<PendingGraphics> {
+        self.sky
+            .record_cubemap_face(viewport, &mut self.dynamic, face_index)
+    }
+
     pub fn update_terrain(&mut self, settings: terrain::TerrainFrameSettings) {
         self.terrain.update(settings);
     }
@@ -176,13 +195,11 @@ impl EnvironmentRenderer {
                 self.time,
                 self.last_delta_time,
             ))
-            .combine(self.ocean.record_draws(
-                viewport,
-                &mut self.dynamic,
-                camera,
-                self.time,
-            ))
-           // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
+            .combine(
+                self.ocean
+                    .record_draws(viewport, &mut self.dynamic, camera, self.time),
+            )
+        // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }
 
     pub fn record_compute(&mut self) -> CommandStream<Executable> {
@@ -190,7 +207,7 @@ impl EnvironmentRenderer {
             .begin()
             .combine(self.sky.record_compute(self.time, self.last_delta_time))
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
-//            .combine(self.terrain.record_compute(&mut self.dynamic))
+            //            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
     }
 
