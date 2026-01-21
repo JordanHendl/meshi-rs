@@ -37,6 +37,7 @@ void main() {
     float speed = max(params.wind_speed, 0.1);
 
     float height = 0.0;
+    vec2 gradient = vec2(0.0);
     float two_pi = 6.28318530718;
     float base_amplitude = 0.18;
     float spectrum_scale = 0.9;
@@ -56,11 +57,16 @@ void main() {
             float amplitude = base_amplitude * exp(-k2 * 0.18) * (0.45 + 0.55 * alignment);
             float phase = two_pi * dot(k, uv);
             float dispersion = time_phase * (0.6 + 0.4 * alignment) * k_len;
-            height += amplitude * sin(phase + dispersion);
+            float angle = phase + dispersion;
+            float wave = sin(angle);
+            height += amplitude * wave;
+            float cos_wave = cos(angle);
+            gradient += amplitude * cos_wave * two_pi * k;
         }
     }
 
     height *= spectrum_scale;
+    gradient *= spectrum_scale;
 
-    ocean_waves.values[idx] = vec4(height, 0.0, 0.0, 1.0);
+    ocean_waves.values[idx] = vec4(height, gradient.x, gradient.y, 1.0);
 }

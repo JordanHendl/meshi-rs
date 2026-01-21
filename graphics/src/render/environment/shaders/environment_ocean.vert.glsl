@@ -135,7 +135,7 @@ vec2 vertex_uv(uint vertex_id) {
     return positions[vertex_id];
 }
 
-float sample_height(vec2 uv) {
+vec3 sample_waves(vec2 uv) {
     vec2 wrapped_uv = fract(uv);
     uint fft_size = max(params.fft_size, 1);
     float fft_size_f = float(fft_size);
@@ -154,13 +154,13 @@ float sample_height(vec2 uv) {
     uint idx01 = min(y1 * fft_size + x0, max_index - 1);
     uint idx11 = min(y1 * fft_size + x1, max_index - 1);
 
-    float h00 = ocean_waves.values[idx00].x;
-    float h10 = ocean_waves.values[idx10].x;
-    float h01 = ocean_waves.values[idx01].x;
-    float h11 = ocean_waves.values[idx11].x;
-    float hx0 = mix(h00, h10, tx);
-    float hx1 = mix(h01, h11, tx);
-    return mix(hx0, hx1, ty);
+    vec3 w00 = ocean_waves.values[idx00].xyz;
+    vec3 w10 = ocean_waves.values[idx10].xyz;
+    vec3 w01 = ocean_waves.values[idx01].xyz;
+    vec3 w11 = ocean_waves.values[idx11].xyz;
+    vec3 wx0 = mix(w00, w10, tx);
+    vec3 wx1 = mix(w01, w11, tx);
+    return mix(wx0, wx1, ty);
 }
 
 void main() {
@@ -172,16 +172,8 @@ void main() {
     vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
-    float height = sample_height(uv);
-    float sample_step = 1.0 / max(float(params.fft_size), 1.0);
-    vec2 uv_dx = uv + vec2(sample_step, 0.0);
-    vec2 uv_dx_neg = uv - vec2(sample_step, 0.0);
-    vec2 uv_dy = uv + vec2(0.0, sample_step);
-    vec2 uv_dy_neg = uv - vec2(0.0, sample_step);
-    float height_dx = sample_height(uv_dx);
-    float height_dx_neg = sample_height(uv_dx_neg);
-    float height_dy = sample_height(uv_dy);
-    float height_dy_neg = sample_height(uv_dy_neg);
+    vec3 waves = sample_waves(uv);
+    float height = waves.x;
 
     uint tile_x = gl_InstanceIndex % max(params.tile_count_x, 1);
     uint tile_y = gl_InstanceIndex / max(params.tile_count_x, 1);
@@ -193,10 +185,9 @@ void main() {
     vec2 world = local + snapped_origin + tile_offset;
     vec4 position = vec4(world.x, height, world.y, 1.0);
     vec3 p = vec3(local.x, height, local.y);
-    float world_step = 2.0 * params.patch_size * sample_step;
-    vec3 tangent_x = vec3(world_step, height_dx - height_dx_neg, 0.0);
-    vec3 tangent_y = vec3(0.0, height_dy - height_dy_neg, world_step);
-    vec3 normal = normalize(cross(tangent_y, tangent_x));
+    float patch_scale = max(params.patch_size, 0.001);
+    vec2 gradient_world = waves.yz / (2.0 * patch_scale);
+    vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
     mat4 view = camera_view();
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;

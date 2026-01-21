@@ -15,34 +15,40 @@ use tracing::warn;
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
+    /// FFT grid size used to generate the wave spectrum texture.
     pub fft_size: u32,
+    /// World-space half-size of a single ocean patch in meters.
     pub patch_size: f32,
+    /// Tessellation resolution for each patch; higher values add detail at higher cost.
     pub vertex_resolution: u32,
 }
 
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            fft_size: 128,
-            patch_size: 128.0,
-            vertex_resolution: 1280,
+            fft_size: 256,
+            patch_size: 400.0,
+            vertex_resolution: 512,
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct OceanFrameSettings {
+    /// Normalized wind direction used to align the wave spectrum.
     pub wind_dir: Vec2,
+    /// Wind speed in meters per second; higher values create taller, faster waves.
     pub wind_speed: f32,
+    /// Time multiplier for wave evolution; values above 1.0 speed up the animation.
     pub time_scale: f32,
 }
 
 impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
-            wind_dir: Vec2::new(0.25, 0.25),
-            wind_speed: 8.0,
-            time_scale: 0.35,
+            wind_dir: Vec2::new(0.9, 0.2),
+            wind_speed: 14.0,
+            time_scale: 0.6,
         }
     }
 }
@@ -217,6 +223,7 @@ impl OceanRenderer {
             .expect("Failed to build ocean PSO");
 
         state.register_pso_tables(&pipeline);
+        let default_frame = OceanFrameSettings::default();
         Self {
             pipeline,
             compute_pipeline,
@@ -224,9 +231,9 @@ impl OceanRenderer {
             fft_size: ocean_info.fft_size,
             patch_size: ocean_info.patch_size,
             vertex_resolution: ocean_info.vertex_resolution,
-            wind_dir: Vec2::new(1.0, 0.0),
-            wind_speed: 12.0,
-            time_scale: 0.35,
+            wind_dir: default_frame.wind_dir,
+            wind_speed: default_frame.wind_speed,
+            time_scale: default_frame.time_scale,
             use_depth: info.use_depth,
         }
     }
