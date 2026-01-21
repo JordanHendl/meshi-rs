@@ -85,12 +85,13 @@ layout(set = 0, binding = 0) readonly buffer OceanWaves {
 layout(set = 1, binding = 0) readonly buffer OceanParams {
     uint fft_size;
     uint vertex_resolution;
+    uint camera_index;
+    uint _padding0;
     float patch_size;
     float time;
     vec2 wind_dir;
     float wind_speed;
-    uint camera_index;
-    float _padding;
+    vec2 _padding1;
 } params;
 
 layout(set = 1, binding = 1) readonly buffer SceneCameras {
@@ -98,10 +99,18 @@ layout(set = 1, binding = 1) readonly buffer SceneCameras {
 } meshi_bindless_cameras;
 
 layout(location = 0) out vec2 v_uv;
+layout(location = 1) out vec3 v_normal;
+layout(location = 2) out vec3 v_view_dir;
+layout(location = 3) out vec3 v_world_pos;
 
 vec2 camera_position() {
   Camera c = meshi_bindless_cameras.cameras[params.camera_index];
     return camera_position(c).xy;
+}
+
+vec3 camera_position_world() {
+    Camera c = meshi_bindless_cameras.cameras[params.camera_index];
+    return camera_position(c);
 }
 
 mat4 camera_view() {
@@ -125,6 +134,17 @@ vec2 vertex_uv(uint vertex_id) {
     return positions[vertex_id];
 }
 
+float sample_height(vec2 uv) {
+    vec2 clamped_uv = clamp(uv, 0.0, 1.0);
+    float fx = clamped_uv.x * float(params.fft_size - 1);
+    float fy = clamped_uv.y * float(params.fft_size - 1);
+    uint x = uint(fx);
+    uint y = uint(fy);
+    uint max_index = max(ocean_waves.values.length(), 1);
+    uint idx = min(y * params.fft_size + x, max_index - 1);
+    return ocean_waves.values[idx].x;
+}
+
 void main() {
     uint grid_resolution = max(params.vertex_resolution, 2);
     uint quad_index = gl_VertexIndex / 6;
@@ -136,16 +156,31 @@ void main() {
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
     uint x = uint(uv.x * float(params.fft_size - 1));
     uint y = uint(uv.y * float(params.fft_size - 1));
-    uint idx = min(y * params.fft_size + x, ocean_waves.values.length());
+    uint max_index = max(ocean_waves.values.length(), 1);
+    uint idx = min(y * params.fft_size + x, max_index - 1);
 
     float height = ocean_waves.values[idx].x;
+    float sample_step = 1.0 / max(float(params.fft_size - 1), 1.0);
+    vec2 uv_dx = uv + vec2(sample_step, 0.0);
+    vec2 uv_dy = uv + vec2(0.0, sample_step);
+    float height_dx = sample_height(uv_dx);
+    float height_dy = sample_height(uv_dy);
 
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
+    vec2 local_dx = (uv_dx * 2.0 - 1.0) * params.patch_size;
+    vec2 local_dy = (uv_dy * 2.0 - 1.0) * params.patch_size;
     vec2 world = local + camera_position();
     vec4 position = vec4(world.x, height, world.y, 1.0);
+    vec3 p = vec3(local.x, height, local.y);
+    vec3 p_dx = vec3(local_dx.x, height_dx, local_dx.y);
+    vec3 p_dy = vec3(local_dy.x, height_dy, local_dy.y);
+    vec3 normal = normalize(cross(p_dy - p, p_dx - p));
     mat4 view = camera_view();
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;
     v_uv = uv;
+    v_normal = normal;
+    v_view_dir = camera_position_world() - position.xyz;
+    v_world_pos = position.xyz;
 }

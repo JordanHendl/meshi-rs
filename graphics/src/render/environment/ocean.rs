@@ -23,17 +23,26 @@ pub struct OceanInfo {
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            fft_size: 64,
+            fft_size: 128,
             patch_size: 100.0,
-            vertex_resolution: 128,
+            vertex_resolution: 2048,
         }
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct OceanFrameSettings {
     pub wind_dir: Vec2,
     pub wind_speed: f32,
+}
+
+impl Default for OceanFrameSettings {
+    fn default() -> Self {
+        Self {
+            wind_dir: Vec2::new(1.0, 0.0),
+            wind_speed: 12.0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -51,12 +60,13 @@ struct OceanComputeParams {
 struct OceanDrawParams {
     fft_size: u32,
     vertex_resolution: u32,
+    camera_index: u32,
+    _padding0: u32,
     patch_size: f32,
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    camera_index: u32,
-    _padding: f32,
+    _padding1: [f32; 2],
 }
 
 pub struct OceanRenderer {
@@ -170,6 +180,8 @@ impl OceanRenderer {
         pso_builder = pso_builder
             .add_reserved_table_variables(state).unwrap()
             .add_reserved_table_variable(state, "meshi_bindless_cameras")
+            .unwrap()
+            .add_reserved_table_variable(state, "meshi_bindless_lights")
             .unwrap();
 
         if info.use_depth {
@@ -197,7 +209,7 @@ impl OceanRenderer {
             })
             .build(ctx)
             .expect("Failed to build ocean PSO");
-        
+
         state.register_pso_tables(&pipeline);
         Self {
             pipeline,
@@ -268,12 +280,13 @@ impl OceanRenderer {
         *params = OceanDrawParams {
             fft_size: self.fft_size,
             vertex_resolution: self.vertex_resolution,
+            camera_index: camera.slot as u32,
+            _padding0: 0,
             patch_size: self.patch_size,
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
-            camera_index: camera.slot as u32,
-            _padding: 0.0,
+            _padding1: [0.0; 2],
         };
 
         let grid_resolution = self.vertex_resolution.max(2);

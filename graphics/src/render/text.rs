@@ -328,7 +328,6 @@ impl TextRenderer {
         };
 
         if glyph_count == 0 {
-            error!("Skipping text render due to zero glyph count.");
             return cmd;
         }
 
