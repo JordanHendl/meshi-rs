@@ -457,6 +457,8 @@ impl ForwardRenderer {
         if views.is_empty() {
             return Vec::new();
         }
+        self.gui
+            .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
         if self.cull_queue.current_index() == 0 {
             self.dynamic.reset();
             self.environment.reset();
@@ -593,6 +595,21 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| cmd.combine(self.environment.render(&self.viewport, camera_handle)),
+            );
+
+            let mut gui_attachments: [Option<ImageView>; 8] = [None; 8];
+            gui_attachments[0] = Some(color.view);
+            let gui_clear: [Option<ClearValue>; 8] = [None; 8];
+
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.viewport,
+                    color_attachments: gui_attachments,
+                    depth_attachment: Some(depth.view),
+                    clear_values: gui_clear,
+                    depth_clear: None,
+                },
+                |mut cmd| cmd.combine(self.gui.render_gui(&self.viewport)),
             );
 
             outputs.push(ViewOutput {

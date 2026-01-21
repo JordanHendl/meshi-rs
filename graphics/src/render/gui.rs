@@ -4,8 +4,9 @@ use bytemuck::{Pod, Zeroable};
 use dashi::cmd::PendingGraphics;
 use dashi::driver::command::Draw;
 use dashi::{
-    BufferInfo, BufferUsage, CommandStream, Context, DepthInfo, Format, GraphicsPipelineDetails,
-    IndexedResource, MemoryVisibility, SampleCount, ShaderResource, ShaderType, Viewport,
+    BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
+    DepthInfo, Format, GraphicsPipelineDetails, IndexedResource, MemoryVisibility, SampleCount,
+    ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
 use resource_pool::{resource_list::ResourceList, Handle};
@@ -161,7 +162,7 @@ impl GuiRenderer {
                 "gui_indices",
                 vec![IndexedResource {
                     resource: ShaderResource::StorageBuffer(index_buffer.device().into()),
-                    slot: 1,
+                    slot: 0,
                 }],
             )
             .add_reserved_table_variables(state)
@@ -172,7 +173,16 @@ impl GuiRenderer {
             })
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 1],
+                color_blend_states: vec![ColorBlendState {
+                    enable: true,
+                    src_blend: BlendFactor::SrcAlpha,
+                    dst_blend: BlendFactor::InvSrcAlpha,
+                    blend_op: BlendOp::Add,
+                    src_alpha_blend: BlendFactor::One,
+                    dst_alpha_blend: BlendFactor::InvSrcAlpha,
+                    alpha_blend_op: BlendOp::Add,
+                    write_mask: Default::default(),
+                }],
                 sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: false,

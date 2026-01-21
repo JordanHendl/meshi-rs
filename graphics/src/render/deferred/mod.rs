@@ -1155,6 +1155,8 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
+        self.gui
+            .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
         let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
@@ -1450,6 +1452,21 @@ impl DeferredRenderer {
                             .render_transparent(self.ctx.as_mut(), &self.data.viewport),
                     )
                 },
+            );
+
+            let mut gui_attachments: [Option<ImageView>; 8] = [None; 8];
+            gui_attachments[0] = Some(final_combine.view);
+            let gui_clear: [Option<ClearValue>; 8] = [None; 8];
+
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: self.data.viewport,
+                    color_attachments: gui_attachments,
+                    depth_attachment: Some(depth),
+                    clear_values: gui_clear,
+                    depth_clear: None,
+                },
+                |mut cmd| cmd.combine(self.gui.render_gui(&self.data.viewport)),
             );
 
             outputs.push(ViewOutput {
