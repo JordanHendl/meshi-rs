@@ -5,8 +5,8 @@ use dashi::cmd::PendingGraphics;
 use dashi::driver::command::Draw;
 use dashi::{
     BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
-    DepthInfo, Format, GraphicsPipelineDetails, IndexedResource, MemoryVisibility, SampleCount,
-    ShaderResource, ShaderType, Viewport,
+    DepthInfo, DynamicState, Format, GraphicsPipelineDetails, IndexedResource, MemoryVisibility,
+    SampleCount, ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
 use resource_pool::{resource_list::ResourceList, Handle};
@@ -189,6 +189,7 @@ impl GuiRenderer {
                     should_test: false,
                     should_write: false,
                 }),
+                dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
                 ..Default::default()
             })
             .build(ctx)
