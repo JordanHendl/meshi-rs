@@ -65,11 +65,12 @@ struct OceanDrawParams {
     fft_size: u32,
     vertex_resolution: u32,
     camera_index: u32,
-    _padding0: u32,
+    tile_count_x: u32,
     patch_size: f32,
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
+    tile_count_y: u32,
     _padding1: [f32; 2],
 }
 
@@ -286,15 +287,18 @@ impl OceanRenderer {
             .expect("Failed to allocate ocean draw params");
 
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
+        let tile_count_x = 3;
+        let tile_count_y = 3;
         *params = OceanDrawParams {
             fft_size: self.fft_size,
             vertex_resolution: self.vertex_resolution,
             camera_index: camera.slot as u32,
-            _padding0: 0,
+            tile_count_x,
             patch_size: self.patch_size,
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
+            tile_count_y,
             _padding1: [0.0; 2],
         };
 
@@ -308,7 +312,7 @@ impl OceanRenderer {
             .draw(&Draw {
                 bind_tables: self.pipeline.tables(),
                 dynamic_buffers: [None, Some(alloc), None, None],
-                instance_count: 1,
+                instance_count: tile_count_x * tile_count_y,
                 count: vertex_count,
                 ..Default::default()
             })

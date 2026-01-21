@@ -86,11 +86,12 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     uint fft_size;
     uint vertex_resolution;
     uint camera_index;
-    uint _padding0;
+    uint tile_count_x;
     float patch_size;
     float time;
     vec2 wind_dir;
     float wind_speed;
+    uint tile_count_y;
     vec2 _padding1;
 } params;
 
@@ -135,9 +136,9 @@ vec2 vertex_uv(uint vertex_id) {
 }
 
 float sample_height(vec2 uv) {
-    vec2 clamped_uv = clamp(uv, 0.0, 1.0);
-    float fx = clamped_uv.x * float(params.fft_size - 1);
-    float fy = clamped_uv.y * float(params.fft_size - 1);
+    vec2 wrapped_uv = fract(uv);
+    float fx = wrapped_uv.x * float(params.fft_size - 1);
+    float fy = wrapped_uv.y * float(params.fft_size - 1);
     uint x0 = uint(floor(fx));
     uint y0 = uint(floor(fy));
     uint x1 = min(x0 + 1, params.fft_size - 1);
@@ -180,8 +181,14 @@ void main() {
     float height_dy = sample_height(uv_dy);
     float height_dy_neg = sample_height(uv_dy_neg);
 
+    uint tile_x = gl_InstanceIndex % max(params.tile_count_x, 1);
+    uint tile_y = gl_InstanceIndex / max(params.tile_count_x, 1);
+    vec2 tile_grid = vec2(max(params.tile_count_x, 1), max(params.tile_count_y, 1));
+    vec2 tile_center = (tile_grid - 1.0) * 0.5;
+    vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * (params.patch_size * 2.0);
+    vec2 snapped_origin = floor(camera_position() / params.patch_size) * params.patch_size;
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
-    vec2 world = local + camera_position();
+    vec2 world = local + snapped_origin + tile_offset;
     vec4 position = vec4(world.x, height, world.y, 1.0);
     vec3 p = vec3(local.x, height, local.y);
     float world_step = 2.0 * params.patch_size * sample_step;
@@ -192,7 +199,7 @@ void main() {
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;
-    v_uv = uv;
+    v_uv = fract(uv);
     v_normal = normal;
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;
