@@ -73,6 +73,20 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
 void main() {
     float shade = 0.4 + 0.6 * v_uv.y;
     vec3 base_color = vec3(0.0, 0.3, 0.6) * shade;
-    vec3 color = apply_light(base_color, v_normal, v_view_dir, v_world_pos);
+
+    vec3 n = normalize(v_normal);
+    vec3 v = normalize(v_view_dir);
+    float ndotv = clamp(dot(n, v), 0.0, 1.0);
+    float fresnel = 0.02 + (1.0 - 0.02) * pow(1.0 - ndotv, 5.0);
+
+    float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
+    float curvature = length(fwidth(n));
+    float foam_mask = smoothstep(0.25, 0.6, slope + curvature * 2.0);
+    vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
+
+    vec3 color = apply_light(base_color, n, v, v_world_pos);
+    color = mix(color, vec3(1.0), fresnel * 0.6);
+    color += foam_color;
+
     out_color = vec4(color, 0.5);
 }
