@@ -15,20 +15,32 @@ use tracing::warn;
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
-    /// FFT grid size used to generate the wave spectrum texture.
-    pub fft_size: u32,
     /// World-space half-size of a single ocean patch in meters.
     pub patch_size: f32,
     /// Tessellation resolution for each patch; higher values add detail at higher cost.
     pub vertex_resolution: u32,
+    /// FFT grid sizes for near, mid, and far cascades.
+    pub cascade_fft_sizes: [u32; 3],
+    /// Patch size multipliers for near, mid, and far cascades.
+    pub cascade_patch_scales: [f32; 3],
+    /// Base tile radius (1 -> 3x3 grid).
+    pub base_tile_radius: u32,
+    /// Maximum tile radius for far-field coverage.
+    pub max_tile_radius: u32,
+    /// Camera-height step (meters) before expanding tiles.
+    pub tile_height_step: f32,
 }
 
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            fft_size: 512,
             patch_size: 200.0,
             vertex_resolution: 1024,
+            cascade_fft_sizes: [512, 256, 128],
+            cascade_patch_scales: [0.5, 1.0, 4.0],
+            base_tile_radius: 1,
+            max_tile_radius: 5,
+            tile_height_step: 30.0,
         }
     }
 }
@@ -68,25 +80,35 @@ struct OceanComputeParams {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct OceanDrawParams {
-    fft_size: u32,
+    cascade_fft_sizes: [u32; 4],
+    cascade_patch_sizes: [f32; 4],
+    cascade_blend_ranges: [f32; 4],
     vertex_resolution: u32,
     camera_index: u32,
-    tile_count_x: u32,
-    patch_size: f32,
+    base_tile_radius: u32,
+    max_tile_radius: u32,
+    tile_height_step: f32,
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    tile_count_y: u32,
-    _padding1: [f32; 2],
+    _padding1: f32,
+}
+
+#[derive(Debug)]
+struct OceanCascade {
+    fft_size: u32,
+    patch_size: f32,
+    wave_buffer: Handle<Buffer>,
+    compute_pipeline: Option<bento::builder::CSO>,
 }
 
 pub struct OceanRenderer {
     pipeline: PSO,
-    compute_pipeline: Option<bento::builder::CSO>,
-    wave_buffer: Handle<Buffer>,
-    fft_size: u32,
-    patch_size: f32,
+    cascades: [OceanCascade; 3],
     vertex_resolution: u32,
+    base_tile_radius: u32,
+    max_tile_radius: u32,
+    tile_height_step: f32,
     wind_dir: Vec2,
     wind_speed: f32,
     time_scale: f32,
@@ -134,40 +156,68 @@ impl OceanRenderer {
         dynamic: &DynamicAllocator,
     ) -> Self {
         let ocean_info = info.ocean;
-        let wave_buffer = ctx
-            .make_buffer(&BufferInfo {
-                debug_name: "[MESHI GFX OCEAN] Wave Buffer",
-                byte_size: ocean_info.fft_size * ocean_info.fft_size * 16,
-                visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::STORAGE,
-                initial_data: None,
-            })
-            .expect("Failed to create ocean wave buffer");
+        let mut cascades = Vec::with_capacity(3);
+        for (index, fft_size) in ocean_info.cascade_fft_sizes.iter().enumerate() {
+            let patch_scale = ocean_info
+                .cascade_patch_scales
+                .get(index)
+                .copied()
+                .unwrap_or(1.0);
+            let patch_size = ocean_info.patch_size * patch_scale;
+            let wave_buffer = ctx
+                .make_buffer(&BufferInfo {
+                    debug_name: "[MESHI GFX OCEAN] Wave Buffer",
+                    byte_size: fft_size * fft_size * 16,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                })
+                .expect("Failed to create ocean wave buffer");
 
-        let compute_pipeline = match CSOBuilder::new()
-            .shader(Some(
-                include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
-            ))
-            .set_debug_name("[MESHI] Ocean Compute")
-            .add_reserved_table_variables(state)
-            .unwrap()
-            .add_variable(
-                "ocean_waves",
-                ShaderResource::StorageBuffer(wave_buffer.into()),
-            )
-            .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
-            .build(ctx)
-        {
-            Ok(pipeline) => Some(pipeline),
-            Err(err) => {
-                warn!(
-                    "Ocean compute pipeline creation failed: {err}. Falling back to static waves."
-                );
-                None
-            }
-        };
+            let compute_pipeline = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean Compute")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "ocean_waves",
+                    ShaderResource::StorageBuffer(wave_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean compute pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            cascades.push(OceanCascade {
+                fft_size: *fft_size,
+                patch_size,
+                wave_buffer,
+                compute_pipeline,
+            });
+        }
+
+        let cascades: [OceanCascade; 3] = cascades
+            .try_into()
+            .expect("Expected three ocean cascades");
 
         let shaders = compile_ocean_shaders();
+        let wave_resources = cascades
+            .iter()
+            .enumerate()
+            .map(|(slot, cascade)| dashi::IndexedResource {
+                resource: ShaderResource::StorageBuffer(cascade.wave_buffer.into()),
+                slot: slot as u32,
+            })
+            .collect();
         let mut pso_builder = PSOBuilder::new()
             .set_debug_name("[MESHI] Ocean")
             .vertex_compiled(Some(shaders[0].clone()))
@@ -176,10 +226,7 @@ impl OceanRenderer {
             .add_reserved_table_variables(state).unwrap()
             .add_table_variable_with_resources(
                 "ocean_waves",
-                vec![dashi::IndexedResource {
-                    resource: ShaderResource::StorageBuffer(wave_buffer.into()),
-                    slot: 0,
-                }],
+                wave_resources,
             )
             .add_table_variable_with_resources(
                 "params",
@@ -224,13 +271,15 @@ impl OceanRenderer {
 
         state.register_pso_tables(&pipeline);
         let default_frame = OceanFrameSettings::default();
+        let base_tile_radius = ocean_info.base_tile_radius.max(1);
+        let max_tile_radius = ocean_info.max_tile_radius.max(base_tile_radius);
         Self {
             pipeline,
-            compute_pipeline,
-            wave_buffer,
-            fft_size: ocean_info.fft_size,
-            patch_size: ocean_info.patch_size,
+            cascades,
             vertex_resolution: ocean_info.vertex_resolution,
+            base_tile_radius,
+            max_tile_radius,
+            tile_height_step: ocean_info.tile_height_step.max(1.0),
             wind_dir: default_frame.wind_dir,
             wind_speed: default_frame.wind_speed,
             time_scale: default_frame.time_scale,
@@ -249,14 +298,17 @@ impl OceanRenderer {
         dynamic: &mut DynamicAllocator,
         time: f32,
     ) -> CommandStream<Executable> {
-        let stream = CommandStream::new().begin();
-        if let Some(pipeline) = self.compute_pipeline.as_ref() {
+        let mut stream = CommandStream::new().begin();
+        for cascade in &self.cascades {
+            let Some(pipeline) = cascade.compute_pipeline.as_ref() else {
+                continue;
+            };
             let mut alloc = dynamic
                 .bump()
                 .expect("Failed to allocate ocean compute params");
             let params = &mut alloc.slice::<OceanComputeParams>()[0];
             *params = OceanComputeParams {
-                fft_size: self.fft_size,
+                fft_size: cascade.fft_size,
                 time,
                 time_scale: self.time_scale,
                 _padding0: 0.0,
@@ -265,18 +317,17 @@ impl OceanRenderer {
                 _padding1: 0.0,
             };
 
-            return stream
-                .prepare_buffer(self.wave_buffer, UsageBits::COMPUTE_SHADER)
+            stream = stream
+                .prepare_buffer(cascade.wave_buffer, UsageBits::COMPUTE_SHADER)
                 .dispatch(&Dispatch {
-                    x: (self.fft_size + 7) / 8,
-                    y: (self.fft_size + 7) / 8,
+                    x: (cascade.fft_size + 7) / 8,
+                    y: (cascade.fft_size + 7) / 8,
                     z: 1,
                     pipeline: pipeline.handle,
                     bind_tables: pipeline.tables(),
                     dynamic_buffers: [None, Some(alloc), None, None],
                 })
-                .unbind_pipeline()
-                .end();
+                .unbind_pipeline();
         }
 
         stream.end()
@@ -294,24 +345,38 @@ impl OceanRenderer {
             .expect("Failed to allocate ocean draw params");
 
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
-        let tile_count_x = 3;
-        let tile_count_y = 3;
+        let mut cascade_fft_sizes = [0u32; 4];
+        let mut cascade_patch_sizes = [0.0f32; 4];
+        for (index, cascade) in self.cascades.iter().enumerate() {
+            cascade_fft_sizes[index] = cascade.fft_size;
+            cascade_patch_sizes[index] = cascade.patch_size;
+        }
+        let blend_ranges = [
+            cascade_patch_sizes[0] * 6.0,
+            cascade_patch_sizes[1] * 10.0,
+            cascade_patch_sizes[2] * 12.0,
+            0.0,
+        ];
         *params = OceanDrawParams {
-            fft_size: self.fft_size,
+            cascade_fft_sizes,
+            cascade_patch_sizes,
+            cascade_blend_ranges: blend_ranges,
             vertex_resolution: self.vertex_resolution,
             camera_index: camera.slot as u32,
-            tile_count_x,
-            patch_size: self.patch_size,
+            base_tile_radius: self.base_tile_radius,
+            max_tile_radius: self.max_tile_radius,
+            tile_height_step: self.tile_height_step,
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
-            tile_count_y,
-            _padding1: [0.0; 2],
+            _padding1: 0.0,
         };
 
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
         let vertex_count = quad_count * 6;
+        let max_tile_count = self.max_tile_radius.max(1) * 2 + 1;
+        let instance_count = max_tile_count * max_tile_count;
 
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.pipeline.handle)
@@ -319,7 +384,7 @@ impl OceanRenderer {
             .draw(&Draw {
                 bind_tables: self.pipeline.tables(),
                 dynamic_buffers: [None, Some(alloc), None, None],
-                instance_count: tile_count_x * tile_count_y,
+                instance_count,
                 count: vertex_count,
                 ..Default::default()
             })

@@ -80,19 +80,21 @@ vec3 camera_forward(const Camera cam) {
 
 layout(set = 0, binding = 0) readonly buffer OceanWaves {
     vec4 values[];
-} ocean_waves;
+} ocean_waves[];
 
 layout(set = 1, binding = 0) readonly buffer OceanParams {
-    uint fft_size;
+    uvec4 cascade_fft_sizes;
+    vec4 cascade_patch_sizes;
+    vec4 cascade_blend_ranges;
     uint vertex_resolution;
     uint camera_index;
-    uint tile_count_x;
-    float patch_size;
+    uint base_tile_radius;
+    uint max_tile_radius;
+    float tile_height_step;
     float time;
     vec2 wind_dir;
     float wind_speed;
-    uint tile_count_y;
-    vec2 _padding1;
+    float _padding1;
 } params;
 
 layout(set = 1, binding = 1) readonly buffer SceneCameras {
@@ -136,9 +138,8 @@ vec2 vertex_uv(uint vertex_id) {
     return positions[vertex_id];
 }
 
-vec4 sample_waves(vec2 uv) {
+vec4 sample_waves(vec2 uv, uint cascade_index, uint fft_size) {
     vec2 wrapped_uv = fract(uv);
-    uint fft_size = max(params.fft_size, 1);
     float fft_size_f = float(fft_size);
     float fx = wrapped_uv.x * fft_size_f;
     float fy = wrapped_uv.y * fft_size_f;
@@ -148,17 +149,18 @@ vec4 sample_waves(vec2 uv) {
     uint y1 = (y0 + 1) % fft_size;
     float tx = fx - float(x0);
     float ty = fy - float(y0);
-    uint max_index = max(ocean_waves.values.length(), 1);
+    uint buffer_index = nonuniformEXT(cascade_index);
+    uint max_index = max(ocean_waves[buffer_index].values.length(), 1);
 
     uint idx00 = min(y0 * fft_size + x0, max_index - 1);
     uint idx10 = min(y0 * fft_size + x1, max_index - 1);
     uint idx01 = min(y1 * fft_size + x0, max_index - 1);
     uint idx11 = min(y1 * fft_size + x1, max_index - 1);
 
-    vec4 w00 = ocean_waves.values[idx00];
-    vec4 w10 = ocean_waves.values[idx10];
-    vec4 w01 = ocean_waves.values[idx01];
-    vec4 w11 = ocean_waves.values[idx11];
+    vec4 w00 = ocean_waves[buffer_index].values[idx00];
+    vec4 w10 = ocean_waves[buffer_index].values[idx10];
+    vec4 w01 = ocean_waves[buffer_index].values[idx01];
+    vec4 w11 = ocean_waves[buffer_index].values[idx11];
     vec4 wx0 = mix(w00, w10, tx);
     vec4 wx1 = mix(w01, w11, tx);
     return mix(wx0, wx1, ty);
@@ -173,30 +175,73 @@ void main() {
     vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
     vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
-    uint tile_x = gl_InstanceIndex % max(params.tile_count_x, 1);
-    uint tile_y = gl_InstanceIndex / max(params.tile_count_x, 1);
-    vec2 tile_grid = vec2(max(params.tile_count_x, 1), max(params.tile_count_y, 1));
+    uint base_radius = max(params.base_tile_radius, 1);
+    uint max_radius = max(params.max_tile_radius, base_radius);
+    float height_step = max(params.tile_height_step, 0.001);
+    float camera_height = abs(camera_position_world().y);
+    float extra_radius_f = floor(camera_height / height_step);
+    float max_extra = float(max_radius - base_radius);
+    uint extra_radius = uint(clamp(extra_radius_f, 0.0, max_extra));
+    uint tile_radius = base_radius + extra_radius;
+    uint tile_count = tile_radius * 2 + 1;
+    if (gl_InstanceIndex >= tile_count * tile_count) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        v_uv = vec2(0.0);
+        v_normal = vec3(0.0, 1.0, 0.0);
+        v_view_dir = vec3(0.0);
+        v_world_pos = vec3(0.0);
+        v_velocity = 0.0;
+        return;
+    }
+
+    uint tile_x = gl_InstanceIndex % tile_count;
+    uint tile_y = gl_InstanceIndex / tile_count;
+    vec2 tile_grid = vec2(tile_count);
     vec2 tile_center = (tile_grid - 1.0) * 0.5;
-    float tile_size = max(params.patch_size * 2.0, 0.001);
+    float base_patch_size = max(params.cascade_patch_sizes.y, 0.001);
+    float tile_size = max(base_patch_size * 2.0, 0.001);
     vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * tile_size;
     vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
-    vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
+    vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
     vec2 world = local + snapped_origin + tile_offset;
-    vec2 world_uv = world / tile_size + vec2(0.5);
-    vec4 waves = sample_waves(world_uv);
-    float height = waves.x;
-    float patch_scale = max(params.patch_size, 0.001);
-    vec2 gradient_world = waves.yz / (2.0 * patch_scale);
-    vec2 choppy_offset = -gradient_world * (patch_scale * 0.15);
+    vec3 camera_world = camera_position_world();
+    float distance = length(world - camera_world.xz);
+    float near_range = params.cascade_blend_ranges.x;
+    float mid_range = params.cascade_blend_ranges.y;
+    float far_range = params.cascade_blend_ranges.z;
+    float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
+    float w_far = smoothstep(mid_range, far_range, distance);
+    float w_mid = clamp(1.0 - w_near - w_far, 0.0, 1.0);
+    float weight_sum = max(w_near + w_mid + w_far, 0.001);
+    w_near /= weight_sum;
+    w_mid /= weight_sum;
+    w_far /= weight_sum;
+
+    uint fft_near = max(params.cascade_fft_sizes.x, 1);
+    uint fft_mid = max(params.cascade_fft_sizes.y, 1);
+    uint fft_far = max(params.cascade_fft_sizes.z, 1);
+    float patch_near = max(params.cascade_patch_sizes.x, 0.001);
+    float patch_mid = max(params.cascade_patch_sizes.y, 0.001);
+    float patch_far = max(params.cascade_patch_sizes.z, 0.001);
+    vec4 waves_near = sample_waves(world / (patch_near * 2.0) + vec2(0.5), 0u, fft_near);
+    vec4 waves_mid = sample_waves(world / (patch_mid * 2.0) + vec2(0.5), 1u, fft_mid);
+    vec4 waves_far = sample_waves(world / (patch_far * 2.0) + vec2(0.5), 2u, fft_far);
+    float height = waves_near.x * w_near + waves_mid.x * w_mid + waves_far.x * w_far;
+    vec2 gradient_world =
+        waves_near.yz * (w_near / (2.0 * patch_near)) +
+        waves_mid.yz * (w_mid / (2.0 * patch_mid)) +
+        waves_far.yz * (w_far / (2.0 * patch_far));
+    float velocity = waves_near.w * w_near + waves_mid.w * w_mid + waves_far.w * w_far;
+    vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
     vec4 position = vec4(world.x + choppy_offset.x, height, world.y + choppy_offset.y, 1.0);
     vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
     mat4 view = camera_view();
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;
-    v_uv = fract(world_uv);
+    v_uv = fract(world / tile_size + vec2(0.5));
     v_normal = normal;
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;
-    v_velocity = waves.w;
+    v_velocity = velocity;
 }

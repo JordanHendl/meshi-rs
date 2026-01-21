@@ -9,15 +9,18 @@ layout(location = 4) in float v_velocity;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 1, binding = 0) readonly buffer OceanParams {
-    uint fft_size;
+    uvec4 cascade_fft_sizes;
+    vec4 cascade_patch_sizes;
+    vec4 cascade_blend_ranges;
     uint vertex_resolution;
     uint camera_index;
-    uint _padding0;
-    float patch_size;
+    uint base_tile_radius;
+    uint max_tile_radius;
+    float tile_height_step;
     float time;
     vec2 wind_dir;
     float wind_speed;
-    vec2 _padding1;
+    float _padding1;
 } params;
 
 struct Light {
