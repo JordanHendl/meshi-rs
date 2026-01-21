@@ -1121,6 +1121,10 @@ impl DeferredRenderer {
         self.gui.set_gui_info(handle, info);
     }
 
+    pub fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        self.gui.set_gui_visibility(handle, visible);
+    }
+
     fn record_frame_compute(&mut self, delta_time: f32) {
         self.subrender.environment.update(EnvironmentFrameSettings {
             delta_time,
@@ -1565,6 +1569,10 @@ impl Renderer for DeferredRenderer {
 
     fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
         DeferredRenderer::set_gui_info(self, handle, info);
+    }
+
+    fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        DeferredRenderer::set_gui_visibility(self, handle, visible);
     }
 
     fn update(

@@ -238,6 +238,10 @@ impl RenderEngine {
         self.renderer.set_gui_info(handle, info);
     }
 
+    pub fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        self.renderer.set_gui_visibility(handle, visible);
+    }
+
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         self.renderer.set_object_transform(handle, transform);
     }

@@ -444,6 +444,10 @@ impl ForwardRenderer {
         self.gui.set_gui_info(handle, info);
     }
 
+    pub fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        self.gui.set_gui_visibility(handle, visible);
+    }
+
     fn pull_scene(&mut self) {
         todo!()
     }
@@ -708,6 +712,10 @@ impl Renderer for ForwardRenderer {
 
     fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo) {
         ForwardRenderer::set_gui_info(self, handle, info);
+    }
+
+    fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        ForwardRenderer::set_gui_visibility(self, handle, visible);
     }
 
     fn update(

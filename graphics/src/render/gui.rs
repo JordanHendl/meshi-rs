@@ -18,6 +18,7 @@ use crate::{GuiInfo, GuiObject};
 #[derive(Clone, Debug)]
 struct GuiObjectData {
     info: GuiInfo,
+    visible: bool,
     dirty: bool,
 }
 
@@ -271,6 +272,7 @@ impl GuiRenderer {
     pub fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
         let handle = self.objects.push(GuiObjectData {
             info: info.clone(),
+            visible: true,
             dirty: true,
         });
 
@@ -302,6 +304,21 @@ impl GuiRenderer {
 
         let object = self.objects.get_ref_mut(handle);
         object.info = info.clone();
+        object.dirty = true;
+    }
+
+    pub fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
+        if !handle.valid() {
+            return;
+        }
+
+        let handle = from_handle(handle);
+        if !self.objects.entries.iter().any(|entry| entry.slot == handle.slot) {
+            return;
+        }
+
+        let object = self.objects.get_ref_mut(handle);
+        object.visible = visible;
         object.dirty = true;
     }
 }

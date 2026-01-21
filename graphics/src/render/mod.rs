@@ -106,6 +106,7 @@ pub trait Renderer {
     fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject>;
     fn release_gui(&mut self, handle: Handle<GuiObject>);
     fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo);
+    fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool);
     fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
