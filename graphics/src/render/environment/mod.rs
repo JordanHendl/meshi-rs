@@ -28,6 +28,7 @@ pub struct EnvironmentFrameSettings {
     pub paused: bool,
     pub ocean: Option<ocean::OceanFrameSettings>,
     pub skybox: Option<sky::SkyboxFrameSettings>,
+    pub sky: Option<sky::SkyFrameSettings>,
 }
 
 impl Default for EnvironmentFrameSettings {
@@ -39,6 +40,7 @@ impl Default for EnvironmentFrameSettings {
             paused: false,
             ocean: None,
             skybox: None,
+            sky: None,
         }
     }
 }
@@ -111,6 +113,10 @@ impl EnvironmentRenderer {
         if let Some(skybox) = settings.skybox {
             self.sky.update_skybox(skybox);
         }
+
+        if let Some(sky) = settings.sky {
+            self.sky.update_sky(sky);
+        }
     }
 
     pub fn update_ocean(&mut self, settings: ocean::OceanFrameSettings) {
@@ -119,6 +125,10 @@ impl EnvironmentRenderer {
 
     pub fn update_skybox(&mut self, settings: sky::SkyboxFrameSettings) {
         self.sky.update_skybox(settings);
+    }
+
+    pub fn update_sky(&mut self, settings: sky::SkyFrameSettings) {
+        self.sky.update_sky(settings);
     }
 
     pub fn update_terrain(&mut self, settings: terrain::TerrainFrameSettings) {

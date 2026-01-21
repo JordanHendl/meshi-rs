@@ -30,6 +30,21 @@ pub struct SkyboxFrameSettings {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
 }
 
+#[derive(Clone)]
+pub struct SkyFrameSettings {
+    pub sun_direction: Option<Vec3>,
+    pub sun_color: Vec3,
+    pub sun_intensity: f32,
+    pub sun_angular_radius: f32,
+    pub moon_direction: Option<Vec3>,
+    pub moon_color: Vec3,
+    pub moon_intensity: f32,
+    pub moon_angular_radius: f32,
+    pub time_of_day: Option<f32>,
+    pub latitude_degrees: Option<f32>,
+    pub longitude_degrees: Option<f32>,
+}
+
 impl Default for SkyboxInfo {
     fn default() -> Self {
         Self {
@@ -48,6 +63,24 @@ impl Default for SkyboxFrameSettings {
     }
 }
 
+impl Default for SkyFrameSettings {
+    fn default() -> Self {
+        Self {
+            sun_direction: Some(Vec3::Y),
+            sun_color: Vec3::ONE,
+            sun_intensity: 1.0,
+            sun_angular_radius: 0.00465,
+            moon_direction: Some(-Vec3::Y),
+            moon_color: Vec3::ONE,
+            moon_intensity: 0.1,
+            moon_angular_radius: 0.0026,
+            time_of_day: None,
+            latitude_degrees: None,
+            longitude_degrees: None,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Default)]
 struct SkyConfig {
@@ -55,6 +88,14 @@ struct SkyConfig {
     intensity_scale: f32,
     zenith_tint: Vec3,
     _padding: f32,
+    sun_dir: Vec3,
+    sun_intensity: f32,
+    sun_color: Vec3,
+    sun_angular_radius: f32,
+    moon_dir: Vec3,
+    moon_intensity: f32,
+    moon_color: Vec3,
+    moon_angular_radius: f32,
 }
 
 #[repr(C)]
@@ -69,6 +110,7 @@ pub struct SkyRenderer {
     skybox_pipeline: PSO,
     skybox_sampler: Handle<Sampler>,
     skybox_intensity: f32,
+    sky_settings: SkyFrameSettings,
     clouds: CloudSimulation,
     cfg: StagedBuffer,
 }
@@ -301,6 +343,7 @@ impl SkyRenderer {
             skybox_pipeline,
             skybox_sampler,
             skybox_intensity: info.skybox.intensity,
+            sky_settings: SkyFrameSettings::default(),
             clouds,
             cfg,
         }
@@ -320,6 +363,10 @@ impl SkyRenderer {
         }
     }
 
+    pub fn update_sky(&mut self, settings: SkyFrameSettings) {
+        self.sky_settings = settings;
+    }
+
     pub fn record_draws(
         &mut self,
         viewport: &Viewport,
@@ -328,6 +375,35 @@ impl SkyRenderer {
         time: f32,
         delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
+        let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
+        let sun_dir = self
+            .sky_settings
+            .sun_direction
+            .unwrap_or(Vec3::Y);
+        let moon_dir = self
+            .sky_settings
+            .moon_direction
+            .unwrap_or(-Vec3::Y);
+        let sun_dir = if sun_dir.length_squared() > 0.0 {
+            sun_dir.normalize()
+        } else {
+            Vec3::Y
+        };
+        let moon_dir = if moon_dir.length_squared() > 0.0 {
+            moon_dir.normalize()
+        } else {
+            -Vec3::Y
+        };
+
+        config.sun_dir = sun_dir;
+        config.sun_color = self.sky_settings.sun_color;
+        config.sun_intensity = self.sky_settings.sun_intensity;
+        config.sun_angular_radius = self.sky_settings.sun_angular_radius;
+        config.moon_dir = moon_dir;
+        config.moon_color = self.sky_settings.moon_color;
+        config.moon_intensity = self.sky_settings.moon_intensity;
+        config.moon_angular_radius = self.sky_settings.moon_angular_radius;
+
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate sky dynamic buffer");
@@ -338,6 +414,7 @@ impl SkyRenderer {
         params._padding = [0.0; 2];
 
         CommandStream::<PendingGraphics>::subdraw()
+            .combine(self.cfg.sync_up())
             .bind_graphics_pipeline(self.skybox_pipeline.handle)
             .update_viewport(viewport)
             .draw(&Draw {
