@@ -6,13 +6,14 @@ use dashi::driver::command::Draw;
 use dashi::{
     BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
     DepthInfo, DynamicState, Format, GraphicsPipelineDetails, IndexedResource, MemoryVisibility,
-    SampleCount, ShaderResource, ShaderType, Viewport,
+    Rect2D, SampleCount, ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
 use resource_pool::{resource_list::ResourceList, Handle};
 use tare::utils::StagedBuffer;
 use tracing::{error, warn};
 
+use crate::gui::{GuiBatchMesh, GuiClipRect, GuiFrame};
 use crate::{GuiInfo, GuiObject};
 
 #[derive(Clone, Debug)]
@@ -50,6 +51,7 @@ pub struct GuiRenderer {
     vertex_capacity: usize,
     index_capacity: usize,
     mesh_range: GuiMeshRange,
+    batch_meshes: Vec<GuiBatchMesh>,
 }
 
 fn to_handle(handle: Handle<GuiObjectData>) -> Handle<GuiObject> {
@@ -70,6 +72,7 @@ impl GuiRenderer {
             vertex_capacity: 65_536,
             index_capacity: 131_072,
             mesh_range: GuiMeshRange::default(),
+            batch_meshes: Vec::new(),
         }
     }
 
@@ -197,6 +200,11 @@ impl GuiRenderer {
     }
 
     pub fn upload_mesh(&mut self, mesh: &GuiMesh) -> GuiMeshRange {
+        self.batch_meshes.clear();
+        self.upload_mesh_inner(mesh)
+    }
+
+    fn upload_mesh_inner(&mut self, mesh: &GuiMesh) -> GuiMeshRange {
         let Some(vertex_buffer) = self.vertex_buffer.as_mut() else {
             return GuiMeshRange::default();
         };
@@ -235,39 +243,65 @@ impl GuiRenderer {
         self.mesh_range
     }
 
+    pub fn upload_frame(&mut self, frame: GuiFrame) {
+        self.batch_meshes = frame.batches;
+    }
+
     pub fn render_gui(
         &mut self,
         viewport: &Viewport,
     ) -> CommandStream<PendingGraphics> {
-        let mut cmd = CommandStream::<PendingGraphics>::subdraw();
+        
+        let s: &mut Self= unsafe{&mut *(self as *mut Self) };
+        let cmd = CommandStream::<PendingGraphics>::subdraw();
         let Some(pso) = self.gui_pso.as_ref() else {
             error!("Failed to build gui without a gui pso");
             return cmd;
         };
+        let pso_handle = pso.handle;
+        let bind_tables = pso.tables();
 
-        if self.mesh_range.index_count == 0 {
-            return cmd;
-        }
-
-        let Some(vertex_buffer) = self.vertex_buffer.as_ref() else {
-            return cmd;
-        };
-        let Some(index_buffer) = self.index_buffer.as_ref() else {
+        if self.vertex_buffer.is_none() || self.index_buffer.is_none() {
             return cmd;
         };
 
-        cmd = cmd
-            .bind_graphics_pipeline(pso.handle)
-            .update_viewport(viewport)
-            .draw(&Draw {
-                bind_tables: pso.tables(),
+        let mut graphics_cmd = cmd.bind_graphics_pipeline(pso_handle);
+
+        if self.batch_meshes.is_empty() {
+            if self.mesh_range.index_count == 0 {
+                return graphics_cmd.unbind_graphics_pipeline();
+            }
+
+            graphics_cmd = graphics_cmd.update_viewport(viewport).draw(&Draw {
+                bind_tables,
                 count: self.mesh_range.index_count as u32,
                 instance_count: 1,
                 ..Default::default()
-            })
-            .unbind_graphics_pipeline();
+            });
+        } else {
+            for batch in &self.batch_meshes {
+                let range = Self::upload_mesh_inner(s, &batch.mesh);
+                if range.index_count == 0 {
+                    continue;
+                }
 
-        cmd
+                let scissor = batch
+                    .batch
+                    .clip_rect
+                    .map(|clip| scissor_from_clip(clip, viewport))
+                    .unwrap_or(viewport.scissor);
+                let batch_viewport = Viewport { scissor, ..*viewport };
+
+                graphics_cmd = graphics_cmd.update_viewport(&batch_viewport).draw(&Draw {
+                    bind_tables,
+                    count: range.index_count as u32,
+                    instance_count: 1,
+                    ..Default::default()
+                });
+            }
+        }
+
+        graphics_cmd.unbind_graphics_pipeline()
     }
 
     pub fn register_gui(&mut self, info: &GuiInfo) -> Handle<GuiObject> {
@@ -321,5 +355,24 @@ impl GuiRenderer {
         let object = self.objects.get_ref_mut(handle);
         object.visible = visible;
         object.dirty = true;
+    }
+}
+
+fn scissor_from_clip(clip: GuiClipRect, viewport: &Viewport) -> Rect2D {
+    let min_x = clip.min[0].max(viewport.area.x);
+    let min_y = clip.min[1].max(viewport.area.y);
+    let max_x = clip.max[0].min(viewport.area.x + viewport.area.w);
+    let max_y = clip.max[1].min(viewport.area.y + viewport.area.h);
+
+    let x = min_x.floor();
+    let y = min_y.floor();
+    let w = (max_x.ceil() - x).max(0.0);
+    let h = (max_y.ceil() - y).max(0.0);
+
+    Rect2D {
+        x: x.max(0.0) as u32,
+        y: y.max(0.0) as u32,
+        w: w as u32,
+        h: h as u32,
     }
 }

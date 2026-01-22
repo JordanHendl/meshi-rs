@@ -44,30 +44,42 @@ impl GuiContext {
                 .then_with(|| a_index.cmp(b_index))
         });
 
-        let mut mesh = GuiMesh::default();
-        let mut batches: Vec<GuiBatch> = Vec::new();
+        let mut batches: Vec<GuiBatchMesh> = Vec::new();
+        let mut current_batch: Option<GuiBatch> = None;
+        let mut current_mesh = GuiMesh::default();
 
         for (_, draw) in indexed {
-            if batches
-                .last()
-                .map(|batch| batch.layer != draw.layer || batch.texture_id != draw.texture_id)
-                .unwrap_or(true)
-            {
-                batches.push(GuiBatch {
+            let needs_new_batch = current_batch.as_ref().map_or(true, |batch| {
+                batch.layer != draw.layer
+                    || batch.texture_id != draw.texture_id
+                    || batch.clip_rect != draw.clip_rect
+            });
+
+            if needs_new_batch {
+                if let Some(batch) = current_batch.take() {
+                    batches.push(GuiBatchMesh {
+                        batch,
+                        mesh: current_mesh,
+                    });
+                }
+
+                current_mesh = GuiMesh::default();
+                current_batch = Some(GuiBatch {
                     layer: draw.layer,
                     texture_id: draw.texture_id,
                     index_range: 0..0,
+                    clip_rect: draw.clip_rect,
                 });
             }
 
-            let base_vertex = mesh.vertices.len() as u32;
-            mesh.vertices
+            let base_vertex = current_mesh.vertices.len() as u32;
+            current_mesh.vertices
                 .extend(draw.quad.vertices().into_iter().map(|vertex| GuiVertex {
                     position: vertex.position,
                     uv: vertex.uv,
                     color: vertex.color,
                 }));
-            mesh.indices.extend_from_slice(&[
+            current_mesh.indices.extend_from_slice(&[
                 base_vertex,
                 base_vertex + 1,
                 base_vertex + 2,
@@ -76,8 +88,8 @@ impl GuiContext {
                 base_vertex,
             ]);
 
-            if let Some(batch) = batches.last_mut() {
-                let end = mesh.indices.len() as u32;
+            if let Some(batch) = current_batch.as_mut() {
+                let end = current_mesh.indices.len() as u32;
                 if batch.index_range.end == 0 {
                     batch.index_range = (end - 6)..end;
                 } else {
@@ -86,7 +98,14 @@ impl GuiContext {
             }
         }
 
-        GuiFrame { mesh, batches }
+        if let Some(batch) = current_batch.take() {
+            batches.push(GuiBatchMesh {
+                batch,
+                mesh: current_mesh,
+            });
+        }
+
+        GuiFrame { batches }
     }
 }
 
@@ -96,6 +115,7 @@ pub struct GuiDraw {
     pub layer: GuiLayer,
     pub texture_id: u32,
     pub quad: GuiQuad,
+    pub clip_rect: Option<GuiClipRect>,
 }
 
 impl GuiDraw {
@@ -104,6 +124,21 @@ impl GuiDraw {
             layer,
             texture_id,
             quad,
+            clip_rect: None,
+        }
+    }
+
+    pub fn with_clip_rect(
+        layer: GuiLayer,
+        texture_id: u32,
+        quad: GuiQuad,
+        clip_rect: GuiClipRect,
+    ) -> Self {
+        Self {
+            layer,
+            texture_id,
+            quad,
+            clip_rect: Some(clip_rect),
         }
     }
 }
@@ -158,17 +193,43 @@ struct GuiVertexData {
     color: [f32; 4],
 }
 
+/// Clip rectangle for GUI draw submissions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuiClipRect {
+    pub min: [f32; 2],
+    pub max: [f32; 2],
+}
+
+impl GuiClipRect {
+    pub fn from_min_max(min: [f32; 2], max: [f32; 2]) -> Self {
+        Self { min, max }
+    }
+
+    pub fn from_position_size(position: [f32; 2], size: [f32; 2]) -> Self {
+        Self {
+            min: position,
+            max: [position[0] + size[0], position[1] + size[1]],
+        }
+    }
+}
+
 /// A frame-ready GUI mesh plus batch metadata.
 #[derive(Debug, Default)]
 pub struct GuiFrame {
-    pub mesh: GuiMesh,
-    pub batches: Vec<GuiBatch>,
+    pub batches: Vec<GuiBatchMesh>,
 }
 
 /// Consecutive indices sharing the same layer and texture binding.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GuiBatch {
     pub layer: GuiLayer,
     pub texture_id: u32,
     pub index_range: Range<u32>,
+    pub clip_rect: Option<GuiClipRect>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuiBatchMesh {
+    pub batch: GuiBatch,
+    pub mesh: GuiMesh,
 }
