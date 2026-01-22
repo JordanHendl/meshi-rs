@@ -235,7 +235,7 @@ void main() {
     vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
     vec4 position = vec4(world.x + choppy_offset.x, height, world.y + choppy_offset.y, 1.0);
     vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
-    mat4 view = camera_view();
+    mat4 view = inverse(camera_view());
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;

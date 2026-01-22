@@ -120,17 +120,18 @@ impl CameraController {
         self.mouse_delta = Vec2::ZERO;
         if self.input.move_active {
             self.yaw += mouse_delta.x * self.settings.sensitivity;
-            self.pitch = (self.pitch - mouse_delta.y * self.settings.sensitivity)
+            self.pitch = (self.pitch + mouse_delta.y * self.settings.sensitivity)
                 .clamp(-self.settings.pitch_limit, self.settings.pitch_limit);
         }
 
-        let yaw_rotation = Quat::from_axis_angle(Vec3::Y, self.yaw);
-        let pitch_axis = yaw_rotation * Vec3::X;
-        let pitch_rotation = Quat::from_axis_angle(pitch_axis, self.pitch);
-        let rotation = yaw_rotation * pitch_rotation;
+        let forward = Vec3::new(
+            self.yaw.sin() * self.pitch.cos(),
+            self.pitch.sin(),
+            -self.yaw.cos() * self.pitch.cos(),
+        )
+        .normalize();
+        let right = forward.cross(Vec3::Y).normalize();
         let mut direction = Vec3::ZERO;
-        let forward = rotation * Vec3::NEG_Z;
-        let right = rotation * Vec3::X;
         if self.input.move_active && self.input.forward {
             direction += forward;
         }
@@ -158,6 +159,6 @@ impl CameraController {
             self.position += direction.normalize() * speed * dt;
         }
 
-        Mat4::from_rotation_translation(rotation, self.position)
+        Mat4::look_to_rh(self.position, forward, Vec3::Y).inverse()
     }
 }

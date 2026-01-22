@@ -63,7 +63,7 @@ impl Default for TextInfo {
 pub enum GuiRenderMode {
     Solid,
     Textured {
-        texture_id: u32,
+        texture_id: Option<u32>,
         uv_min: Vec2,
         uv_max: Vec2,
     },

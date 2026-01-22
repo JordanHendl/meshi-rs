@@ -10,6 +10,8 @@ use std::ops::Range;
 
 use crate::render::gui::{GuiMesh, GuiVertex};
 
+const GUI_NO_TEXTURE_ID: u32 = u32::MAX;
+
 /// Primary GUI state owned by the renderer/user layer.
 #[derive(Debug, Default)]
 pub struct GuiContext {
@@ -78,6 +80,8 @@ impl GuiContext {
                     position: vertex.position,
                     uv: vertex.uv,
                     color: vertex.color,
+                    texture_id: draw.texture_id.unwrap_or(GUI_NO_TEXTURE_ID),
+                    _padding: [0; 3],
                 }));
             current_mesh.indices.extend_from_slice(&[
                 base_vertex,
@@ -113,13 +117,13 @@ impl GuiContext {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GuiDraw {
     pub layer: GuiLayer,
-    pub texture_id: u32,
+    pub texture_id: Option<u32>,
     pub quad: GuiQuad,
     pub clip_rect: Option<GuiClipRect>,
 }
 
 impl GuiDraw {
-    pub fn new(layer: GuiLayer, texture_id: u32, quad: GuiQuad) -> Self {
+    pub fn new(layer: GuiLayer, texture_id: Option<u32>, quad: GuiQuad) -> Self {
         Self {
             layer,
             texture_id,
@@ -130,7 +134,7 @@ impl GuiDraw {
 
     pub fn with_clip_rect(
         layer: GuiLayer,
-        texture_id: u32,
+        texture_id: Option<u32>,
         quad: GuiQuad,
         clip_rect: GuiClipRect,
     ) -> Self {
@@ -223,7 +227,7 @@ pub struct GuiFrame {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GuiBatch {
     pub layer: GuiLayer,
-    pub texture_id: u32,
+    pub texture_id: Option<u32>,
     pub index_range: Range<u32>,
     pub clip_rect: Option<GuiClipRect>,
 }

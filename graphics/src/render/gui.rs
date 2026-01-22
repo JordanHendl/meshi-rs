@@ -29,6 +29,8 @@ pub struct GuiVertex {
     pub position: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub texture_id: u32,
+    pub _padding: [u32; 3],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -152,7 +154,7 @@ impl GuiRenderer {
             )
             .expect("Failed to compile GUI fragment shader");
 
-        PSOBuilder::new()
+        let mut pso_builder = PSOBuilder::new()
             .vertex_compiled(Some(vertex))
             .fragment_compiled(Some(fragment))
             .add_table_variable_with_resources(
@@ -169,7 +171,9 @@ impl GuiRenderer {
                     slot: 0,
                 }],
             )
-            .add_reserved_table_variables(state)
+            .add_reserved_table_variable(state, "meshi_bindless_textures")
+            .unwrap()
+            .add_reserved_table_variable(state, "meshi_bindless_samplers")
             .unwrap()
             .add_depth_target(AttachmentDesc {
                 format: Format::D24S8,
@@ -196,7 +200,9 @@ impl GuiRenderer {
                 ..Default::default()
             })
             .build(ctx)
-            .expect("Failed to build GUI pipeline")
+            .expect("Failed to build GUI pipeline");
+
+        pso_builder
     }
 
     pub fn upload_mesh(&mut self, mesh: &GuiMesh) -> GuiMeshRange {
