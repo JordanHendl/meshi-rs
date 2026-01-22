@@ -89,7 +89,7 @@ FSOutput main(FSInput input)
     float sun_disc = disc_mask(world_dir, sky.sun_dir, sky.sun_angular_radius);
     float moon_disc = disc_mask(world_dir, sky.moon_dir, sky.moon_angular_radius);
 
-    float sun_halo = pow(sun_dot, 64.0) * 0.6 + pow(sun_dot, 256.0) * 1.5;
+    float sun_halo = pow(sun_dot, 256.0) * 0.1 + pow(sun_dot, 512.0) * 0.2;
     float moon_halo = pow(moon_dot, 64.0) * 0.25 + pow(moon_dot, 256.0) * 0.8;
 
     float3 sky_color = base_color;
