@@ -344,6 +344,10 @@ impl RenderEngine {
         self.renderer.set_gui_visibility(handle, visible);
     }
 
+    pub fn upload_gui_frame(&mut self, frame: gui::GuiFrame) {
+        self.renderer.upload_gui_frame(frame);
+    }
+
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         self.renderer.set_object_transform(handle, transform);
     }

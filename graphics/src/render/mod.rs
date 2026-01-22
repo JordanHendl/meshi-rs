@@ -8,6 +8,7 @@ mod scene;
 mod skinning;
 pub mod text;
 
+use crate::gui::GuiFrame;
 use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo, TextInfo,
     TextObject,
@@ -113,6 +114,7 @@ pub trait Renderer {
     fn release_gui(&mut self, handle: Handle<GuiObject>);
     fn set_gui_info(&mut self, handle: Handle<GuiObject>, info: &GuiInfo);
     fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool);
+    fn upload_gui_frame(&mut self, frame: GuiFrame);
     fn update(
         &mut self,
         sems: &[Handle<Semaphore>],

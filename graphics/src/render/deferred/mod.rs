@@ -4,6 +4,7 @@ use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
+use crate::gui::GuiFrame;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
@@ -1125,6 +1126,10 @@ impl DeferredRenderer {
         self.gui.set_gui_visibility(handle, visible);
     }
 
+    pub fn upload_gui_frame(&mut self, frame: GuiFrame) {
+        self.gui.upload_frame(frame);
+    }
+
     fn record_frame_compute(&mut self, delta_time: f32) {
         self.subrender.environment.update(EnvironmentFrameSettings {
             delta_time,
@@ -1577,6 +1582,10 @@ impl Renderer for DeferredRenderer {
 
     fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
         DeferredRenderer::set_gui_visibility(self, handle, visible);
+    }
+
+    fn upload_gui_frame(&mut self, frame: GuiFrame) {
+        DeferredRenderer::upload_gui_frame(self, frame);
     }
 
     fn update(

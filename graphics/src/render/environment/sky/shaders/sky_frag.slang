@@ -79,7 +79,7 @@ FSOutput main(FSInput input)
     float2 ndc = input.uv * 2.0 - 1.0;
     float aspect = camera.viewport.x / camera.viewport.y;
     float tan_half = tan(camera.fov_y_radians * 0.5);
-    float3 dir = normalize(float3(ndc.x * aspect * tan_half, -ndc.y * tan_half, -1.0));
+    float3 dir = normalize(float3(ndc.x * aspect * tan_half, ndc.y * tan_half, -1.0));
     float3 world_dir = normalize(mul((float3x3)camera.world_from_camera, dir));
 
     float3 base_color = sky_gradient(world_dir);

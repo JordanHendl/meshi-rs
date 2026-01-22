@@ -37,19 +37,19 @@ layout(set = 1, binding = 2) readonly buffer SceneLights {
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 
-vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
+vec4 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
     if (meshi_bindless_lights.lights.length() == 0) {
-        return base_color * 0.4;
+        return vec4(base_color * 0.1, 0.5);
     }
     
     vec3 gain = vec3(0.0);
+    float spec = 0.0;
     for(int i = 0; i < meshi_bindless_lights.lights.length(); ++i) {
     Light light = meshi_bindless_lights.lights[i];
     float light_type = light.position_type.w;
     vec3 light_color = light.color_intensity.rgb * light.color_intensity.w;
     vec3 light_dir;
     float attenuation = 1.0;
-
     if (light_type < 0.0) {
       continue;
     } else if (light_type == LIGHT_TYPE_DIRECTIONAL) {
@@ -70,6 +70,7 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
     vec3 h = normalize(light_dir + v);
     float diffuse = max(dot(n, light_dir), 0.0);
     float specular = pow(max(dot(n, h), 0.0), 48.0);
+    spec += specular;
     vec3 diffuse_term = diffuse * light_color * base_color;
     vec3 specular_term = specular * light_color;
       vec3 ambient_term = base_color * 0.08;
@@ -77,7 +78,7 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
       gain += diffuse_term + specular_term + ambient_term * attenuation;
     }
 
-    return gain;
+    return vec4(gain, max(0.8, spec));
 }
 
 void main() {
@@ -96,9 +97,9 @@ void main() {
     float foam_mask = smoothstep(0.55, 0.95, breaking + curvature * 0.4);
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
-    vec3 color = apply_light(base_color, n, v, v_world_pos);
-    color = mix(color, vec3(1.0), fresnel * 0.6);
-    color += foam_color;
+    vec4 color = apply_light(base_color, n, v, v_world_pos);
+    color.rgb = mix(color.rgb, vec3(1.0), fresnel * 0.6);
+    color.rgb += foam_color;
 
-    out_color = vec4(color, 0.5);
+    out_color = vec4(color);
 }

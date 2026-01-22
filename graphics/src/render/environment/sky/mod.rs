@@ -825,7 +825,6 @@ impl SkyRenderer {
 
     fn update_sky_config(&mut self) {
         let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
-        let default_tint = Vec3::new(0.529, 0.808, 0.922);
         let sun_dir = resolve_celestial_direction(
             self.sky_settings.sun_direction,
             self.sky_settings.time_of_day,
@@ -840,18 +839,39 @@ impl SkyRenderer {
             self.sky_settings.longitude_degrees,
             true,
         );
+        let sun_height = sun_dir.y.clamp(-1.0, 1.0);
+        let day_factor = smoothstep(0.0, 0.25, sun_height);
+        let night_factor = 1.0 - smoothstep(-0.2, 0.05, sun_height);
+        let twilight_factor = (1.0 - day_factor - night_factor).clamp(0.0, 1.0);
 
-        config.horizon_init = default_tint;
-        config.zenith_tint = default_tint;
+        let day_horizon = Vec3::new(0.529, 0.808, 0.922);
+        let day_zenith = Vec3::new(0.247, 0.52, 0.9);
+        let twilight_horizon = Vec3::new(0.98, 0.58, 0.35);
+        let twilight_zenith = Vec3::new(0.6, 0.32, 0.52);
+        let night_horizon = Vec3::new(0.02, 0.02, 0.08);
+        let night_zenith = Vec3::new(0.01, 0.01, 0.04);
+
+        let horizon_tint = night_horizon * night_factor
+            + twilight_horizon * twilight_factor
+            + day_horizon * day_factor;
+        let zenith_tint = night_zenith * night_factor
+            + twilight_zenith * twilight_factor
+            + day_zenith * day_factor;
+        let intensity_scale = night_factor * 0.25 + twilight_factor * 0.7 + day_factor * 1.0;
+        let sun_intensity_scale = day_factor + twilight_factor * 0.6;
+        let moon_intensity_scale = night_factor + twilight_factor * 0.5;
+
+        config.horizon_init = horizon_tint;
+        config.zenith_tint = zenith_tint;
         config.sun_dir = sun_dir;
         config.sun_color = self.sky_settings.sun_color;
-        config.sun_intensity = self.sky_settings.sun_intensity;
+        config.sun_intensity = self.sky_settings.sun_intensity * sun_intensity_scale;
         config.sun_angular_radius = self.sky_settings.sun_angular_radius;
         config.moon_dir = moon_dir;
         config.moon_color = self.sky_settings.moon_color;
-        config.moon_intensity = self.sky_settings.moon_intensity;
+        config.moon_intensity = self.sky_settings.moon_intensity * moon_intensity_scale;
         config.moon_angular_radius = self.sky_settings.moon_angular_radius;
-        config.intensity_scale = 1.0;
+        config.intensity_scale = intensity_scale;
     }
 }
 
@@ -886,4 +906,12 @@ fn resolve_celestial_direction(
     }
 
     if is_moon { -Vec3::Y } else { Vec3::Y }
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }

@@ -1,5 +1,6 @@
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gui::GuiRenderer;
+use crate::gui::GuiFrame;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::TextRenderer;
@@ -448,6 +449,10 @@ impl ForwardRenderer {
         self.gui.set_gui_visibility(handle, visible);
     }
 
+    pub fn upload_gui_frame(&mut self, frame: GuiFrame) {
+        self.gui.upload_frame(frame);
+    }
+
     fn pull_scene(&mut self) {
         todo!()
     }
@@ -741,6 +746,10 @@ impl Renderer for ForwardRenderer {
 
     fn set_gui_visibility(&mut self, handle: Handle<GuiObject>, visible: bool) {
         ForwardRenderer::set_gui_visibility(self, handle, visible);
+    }
+
+    fn upload_gui_frame(&mut self, frame: GuiFrame) {
+        ForwardRenderer::upload_gui_frame(self, frame);
     }
 
     fn update(
