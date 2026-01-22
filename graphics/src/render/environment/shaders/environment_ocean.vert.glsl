@@ -201,7 +201,7 @@ void main() {
     float base_patch_size = max(params.cascade_patch_sizes.y, 0.001);
     float tile_size = max(base_patch_size * 2.0, 0.001);
     vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * tile_size;
-    vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
+    vec2 snapped_origin = camera_position();
     vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
     vec2 world = local + snapped_origin + tile_offset;
     vec3 camera_world = camera_position_world();
