@@ -474,6 +474,17 @@ impl SkyRenderer {
         self.cubemap_dirty = true;
     }
 
+    pub fn environment_cubemap_view(&self) -> ImageView {
+        if self.use_procedural_cubemap {
+            self.procedural_cubemap
+                .as_ref()
+                .map(|cubemap| cubemap.view)
+                .unwrap_or(self.skybox_fallback_view)
+        } else {
+            self.skybox_fallback_view
+        }
+    }
+
     pub fn prepare_cubemap_pass(
         &mut self,
         ctx: &mut dashi::Context,

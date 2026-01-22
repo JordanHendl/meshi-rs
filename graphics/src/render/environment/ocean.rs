@@ -5,7 +5,7 @@ use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
 use dashi::{
     Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
-    MemoryVisibility, ShaderResource, UsageBits, Viewport,
+    ImageView, MemoryVisibility, Sampler, SamplerInfo, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
@@ -113,6 +113,7 @@ pub struct OceanRenderer {
     wind_speed: f32,
     time_scale: f32,
     use_depth: bool,
+    environment_sampler: Handle<Sampler>,
 }
 
 fn compile_ocean_shaders() -> [bento::CompilationResult; 2] {
@@ -154,6 +155,7 @@ impl OceanRenderer {
         state: &mut BindlessState,
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
+        environment_map: ImageView,
     ) -> Self {
         let ocean_info = info.ocean;
         let mut cascades = Vec::with_capacity(3);
@@ -210,6 +212,9 @@ impl OceanRenderer {
             .expect("Expected three ocean cascades");
 
         let shaders = compile_ocean_shaders();
+        let environment_sampler = ctx
+            .make_sampler(&SamplerInfo::default())
+            .expect("Failed to create ocean environment sampler");
         let wave_resources = cascades
             .iter()
             .enumerate()
@@ -232,6 +237,20 @@ impl OceanRenderer {
                 "params",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_env_map",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(environment_map),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_env_sampler",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Sampler(environment_sampler),
                     slot: 0,
                 }],
             );
@@ -284,6 +303,7 @@ impl OceanRenderer {
             wind_speed: default_frame.wind_speed,
             time_scale: default_frame.time_scale,
             use_depth: info.use_depth,
+            environment_sampler,
         }
     }
 
@@ -291,6 +311,23 @@ impl OceanRenderer {
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
         self.time_scale = settings.time_scale;
+    }
+
+    pub fn set_environment_map(&mut self, view: ImageView) {
+        self.pipeline.update_table(
+            "ocean_env_map",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "ocean_env_sampler",
+            dashi::IndexedResource {
+                resource: ShaderResource::Sampler(self.environment_sampler),
+                slot: 0,
+            },
+        );
     }
 
     pub fn record_compute(

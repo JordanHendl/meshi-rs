@@ -1,6 +1,7 @@
 #version 450
 
 #extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_samplerless_texture_functions : enable
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec3 v_view_dir;
@@ -34,6 +35,9 @@ struct Light {
 layout(set = 1, binding = 2) readonly buffer SceneLights {
     Light lights[];
 } meshi_bindless_lights;
+
+layout(set = 1, binding = 3) uniform textureCube ocean_env_map;
+layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 
@@ -89,6 +93,8 @@ void main() {
     vec3 v = normalize(v_view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
     float fresnel = 0.02 + (1.0 - 0.02) * pow(1.0 - ndotv, 5.0);
+    vec3 reflection_dir = reflect(-v, n);
+    vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
     float velocity = abs(v_velocity);
@@ -98,7 +104,7 @@ void main() {
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
     vec4 color = apply_light(base_color, n, v, v_world_pos);
-    color.rgb = mix(color.rgb, vec3(1.0), fresnel * 0.6);
+    color.rgb = mix(color.rgb, env_color, clamp(fresnel * 0.85, 0.0, 1.0));
     color.rgb += foam_color;
 
     out_color = vec4(color);

@@ -69,7 +69,13 @@ impl EnvironmentRenderer {
             .expect("Failed to make environment dynamic allocator");
 
         let sky = SkyRenderer::new(ctx, state, &info, &dynamic);
-        let ocean = OceanRenderer::new(ctx, state, &info, &dynamic);
+        let ocean = OceanRenderer::new(
+            ctx,
+            state,
+            &info,
+            &dynamic,
+            sky.environment_cubemap_view(),
+        );
         let terrain = TerrainRenderer::new(ctx, state, &info, &dynamic);
 
         Self {
@@ -187,6 +193,8 @@ impl EnvironmentRenderer {
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
     ) -> CommandStream<PendingGraphics> {
+        self.ocean
+            .set_environment_map(self.sky.environment_cubemap_view());
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
                 viewport,
