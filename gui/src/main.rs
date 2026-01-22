@@ -90,6 +90,8 @@ fn main() {
     let mut rigidbody_mass = 75.0_f32;
     let mut script_enabled = true;
     let mut gizmo_mode = GizmoMode::Translate;
+    let mut ui_scale_mode = UiScaleMode::Global;
+    let mut ui_scale_multiplier = 1.0_f32;
     let mut editor_state = EditorState::new();
     let mut asset_browser_state = AssetBrowserState {
         search: String::new(),
@@ -128,6 +130,9 @@ fn main() {
                 let delta_time = (now - last_frame_time).as_secs_f32();
                 last_frame_time = now;
                 render_engine.update(delta_time);
+                let viewport_size = windowed_context.window().inner_size();
+                let viewport_scale = viewport_scale_from_size(viewport_size);
+                let ui_scale_factor = viewport_scale * ui_scale_multiplier;
 
                 preview_ready = false;
                 if display.valid() {
@@ -166,40 +171,84 @@ fn main() {
                 }
 
                 egui_glow.run(windowed_context.window(), |ctx| {
+                    let per_widget_scale = match ui_scale_mode {
+                        UiScaleMode::Global => {
+                            ctx.set_pixels_per_point(ui_scale_factor);
+                            1.0
+                        }
+                        UiScaleMode::PerWidget => {
+                            ctx.set_pixels_per_point(1.0);
+                            ui_scale_factor
+                        }
+                    };
+
                     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-                        egui::menu::bar(ui, |ui| {
-                            ui.menu_button("File", |ui| {
-                                ui.button("New Scene");
-                                ui.button("Open...");
-                                ui.button("Save");
-                                ui.separator();
-                                ui.button("Preferences");
-                                ui.separator();
-                                ui.button("Quit");
-                            });
-                            ui.menu_button("Edit", |ui| {
-                                ui.button("Undo");
-                                ui.button("Redo");
-                                ui.separator();
-                                ui.button("Cut");
-                                ui.button("Copy");
-                                ui.button("Paste");
-                            });
-                            ui.menu_button("View", |ui| {
-                                ui.checkbox(&mut show_scene_hierarchy, "Scene Hierarchy");
-                                ui.checkbox(&mut show_inspector, "Inspector");
-                                ui.checkbox(&mut show_assets, "Assets");
-                                ui.checkbox(&mut show_console, "Console");
-                            });
-                            ui.menu_button("Build", |ui| {
-                                ui.button("Build Project");
-                                ui.button("Run");
-                            });
-                            ui.menu_button("Help", |ui| {
-                                ui.button("Documentation");
-                                ui.button("Report Issue");
-                                ui.separator();
-                                ui.button("About Meshi");
+                        with_scaled_ui(ui, per_widget_scale, |ui| {
+                            egui::menu::bar(ui, |ui| {
+                                ui.menu_button("File", |ui| {
+                                    ui.button("New Scene");
+                                    ui.button("Open...");
+                                    ui.button("Save");
+                                    ui.separator();
+                                    ui.button("Preferences");
+                                    ui.separator();
+                                    ui.button("Quit");
+                                });
+                                ui.menu_button("Edit", |ui| {
+                                    ui.button("Undo");
+                                    ui.button("Redo");
+                                    ui.separator();
+                                    ui.button("Cut");
+                                    ui.button("Copy");
+                                    ui.button("Paste");
+                                });
+                                ui.menu_button("View", |ui| {
+                                    ui.checkbox(&mut show_scene_hierarchy, "Scene Hierarchy");
+                                    ui.checkbox(&mut show_inspector, "Inspector");
+                                    ui.checkbox(&mut show_assets, "Assets");
+                                    ui.checkbox(&mut show_console, "Console");
+                                });
+                                ui.menu_button("UI Scale", |ui| {
+                                    ui.label(format!("Viewport scale: {viewport_scale:.2}x"));
+                                    ui.label(format!(
+                                        "Effective scale: {ui_scale_factor:.2}x"
+                                    ));
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Mode");
+                                        ui.radio_value(
+                                            &mut ui_scale_mode,
+                                            UiScaleMode::Global,
+                                            "Global",
+                                        );
+                                        ui.radio_value(
+                                            &mut ui_scale_mode,
+                                            UiScaleMode::PerWidget,
+                                            "Per-widget",
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Multiplier");
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut ui_scale_multiplier,
+                                                0.5..=2.0,
+                                            )
+                                            .logarithmic(true)
+                                            .clamp_to_range(true),
+                                        );
+                                    });
+                                });
+                                ui.menu_button("Build", |ui| {
+                                    ui.button("Build Project");
+                                    ui.button("Run");
+                                });
+                                ui.menu_button("Help", |ui| {
+                                    ui.button("Documentation");
+                                    ui.button("Report Issue");
+                                    ui.separator();
+                                    ui.button("About Meshi");
+                                });
                             });
                         });
                     });
@@ -207,184 +256,207 @@ fn main() {
                     egui::SidePanel::left("scene_hierarchy")
                         .resizable(true)
                         .show(ctx, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                render_projects_panel(ui, &editor_state);
-                                ui.add_space(12.0);
-                                ui.heading("Scene Hierarchy");
-                                ui.separator();
-                                ui.label("Filter");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut hierarchy_filter)
-                                        .hint_text("Search...")
-                                        .desired_width(f32::INFINITY),
-                                );
-                                ui.add_space(6.0);
-                                draw_scene_tree(
-                                    ui,
-                                    &editor_state.scene_tree,
-                                    &mut selected_entity,
-                                );
+                            with_scaled_ui(ui, per_widget_scale, |ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    render_projects_panel(ui, &editor_state);
+                                    ui.add_space(12.0);
+                                    ui.heading("Scene Hierarchy");
+                                    ui.separator();
+                                    ui.label("Filter");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut hierarchy_filter)
+                                            .hint_text("Search...")
+                                            .desired_width(f32::INFINITY),
+                                    );
+                                    ui.add_space(6.0);
+                                    draw_scene_tree(
+                                        ui,
+                                        &editor_state.scene_tree,
+                                        &mut selected_entity,
+                                    );
+                                });
                             });
                         });
 
                     egui::SidePanel::right("inspector_panel")
                         .resizable(true)
                         .show(ctx, |ui| {
-                            ui.heading("Inspector");
-                            ui.separator();
-                            ui.label(format!("Selected: {selected_entity}"));
-                            ui.add_space(8.0);
-                            egui::CollapsingHeader::new("Transform")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label("Position");
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_position[0])
-                                                .prefix("X "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_position[1])
-                                                .prefix("Y "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_position[2])
-                                                .prefix("Z "),
-                                        );
+                            with_scaled_ui(ui, per_widget_scale, |ui| {
+                                ui.heading("Inspector");
+                                ui.separator();
+                                ui.label(format!("Selected: {selected_entity}"));
+                                ui.add_space(8.0);
+                                egui::CollapsingHeader::new("Transform")
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label("Position");
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_position[0])
+                                                    .prefix("X "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_position[1])
+                                                    .prefix("Y "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_position[2])
+                                                    .prefix("Z "),
+                                            );
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Rotation");
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_rotation[0])
+                                                    .prefix("X "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_rotation[1])
+                                                    .prefix("Y "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_rotation[2])
+                                                    .prefix("Z "),
+                                            );
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Scale");
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_scale[0])
+                                                    .prefix("X "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_scale[1])
+                                                    .prefix("Y "),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut transform_scale[2])
+                                                    .prefix("Z "),
+                                            );
+                                        });
                                     });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Rotation");
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_rotation[0])
-                                                .prefix("X "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_rotation[1])
-                                                .prefix("Y "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_rotation[2])
-                                                .prefix("Z "),
-                                        );
+                                ui.add_space(8.0);
+                                egui::CollapsingHeader::new("Render")
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        ui.checkbox(&mut renderer_visible, "Visible");
+                                        ui.horizontal(|ui| {
+                                            ui.label("Mesh");
+                                            ui.label("player_mesh.fbx");
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Material");
+                                            ui.label("Starter");
+                                        });
                                     });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Scale");
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_scale[0])
-                                                .prefix("X "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_scale[1])
-                                                .prefix("Y "),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut transform_scale[2])
-                                                .prefix("Z "),
-                                        );
+                                ui.add_space(8.0);
+                                egui::CollapsingHeader::new("Physics")
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        ui.checkbox(&mut physics_enabled, "Rigid Body");
+                                        ui.checkbox(&mut collider_enabled, "Collider");
+                                        ui.horizontal(|ui| {
+                                            ui.label("Mass");
+                                            ui.add(
+                                                egui::DragValue::new(&mut rigidbody_mass)
+                                                    .suffix(" kg"),
+                                            );
+                                        });
                                     });
-                                });
-                            ui.add_space(8.0);
-                            egui::CollapsingHeader::new("Render")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.checkbox(&mut renderer_visible, "Visible");
-                                    ui.horizontal(|ui| {
-                                        ui.label("Mesh");
-                                        ui.label("player_mesh.fbx");
+                                ui.add_space(8.0);
+                                egui::CollapsingHeader::new("Script")
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        ui.checkbox(&mut script_enabled, "Enabled");
+                                        ui.horizontal(|ui| {
+                                            ui.label("Script");
+                                            ui.label("player_controller.rs");
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Update");
+                                            ui.label("OnTick");
+                                        });
                                     });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Material");
-                                        ui.label("Starter");
-                                    });
-                                });
-                            ui.add_space(8.0);
-                            egui::CollapsingHeader::new("Physics")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.checkbox(&mut physics_enabled, "Rigid Body");
-                                    ui.checkbox(&mut collider_enabled, "Collider");
-                                    ui.horizontal(|ui| {
-                                        ui.label("Mass");
-                                        ui.add(
-                                            egui::DragValue::new(&mut rigidbody_mass).suffix(" kg"),
-                                        );
-                                    });
-                                });
-                            ui.add_space(8.0);
-                            egui::CollapsingHeader::new("Script")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.checkbox(&mut script_enabled, "Enabled");
-                                    ui.horizontal(|ui| {
-                                        ui.label("Script");
-                                        ui.label("player_controller.rs");
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Update");
-                                        ui.label("OnTick");
-                                    });
-                                });
+                            });
                         });
 
                     egui::TopBottomPanel::bottom("assets_console_panel")
                         .resizable(true)
                         .show(ctx, |ui| {
-                            ui.columns(2, |columns| {
-                                if show_assets {
-                                    render_assets_panel(
-                                        &mut columns[0],
-                                        &mut asset_browser_state,
-                                        &editor_state.asset_entries,
-                                        &editor_state.import_jobs,
-                                        &editor_state.asset_metadata,
-                                    );
-                                } else {
-                                    columns[0].heading("Assets");
-                                    columns[0].separator();
-                                    columns[0].label("Assets panel hidden.");
-                                }
+                            with_scaled_ui(ui, per_widget_scale, |ui| {
+                                ui.columns(2, |columns| {
+                                    if show_assets {
+                                        render_assets_panel(
+                                            &mut columns[0],
+                                            &mut asset_browser_state,
+                                            &editor_state.asset_entries,
+                                            &editor_state.import_jobs,
+                                            &editor_state.asset_metadata,
+                                        );
+                                    } else {
+                                        columns[0].heading("Assets");
+                                        columns[0].separator();
+                                        columns[0].label("Assets panel hidden.");
+                                    }
 
-                                if show_console {
-                                    columns[1].heading("Console");
-                                    columns[1].separator();
-                                    columns[1].label("[Info] Editor ready.");
-                                    columns[1].label("[Warn] Lighting bake pending.");
-                                    columns[1].label("[Error] Missing texture: brick_albedo.png");
-                                    columns[1].add_space(12.0);
-                                } else {
-                                    columns[1].heading("Console");
-                                    columns[1].separator();
-                                    columns[1].label("Console hidden.");
-                                    columns[1].add_space(12.0);
-                                }
+                                    if show_console {
+                                        columns[1].heading("Console");
+                                        columns[1].separator();
+                                        columns[1].label("[Info] Editor ready.");
+                                        columns[1].label("[Warn] Lighting bake pending.");
+                                        columns[1].label(
+                                            "[Error] Missing texture: brick_albedo.png",
+                                        );
+                                        columns[1].add_space(12.0);
+                                    } else {
+                                        columns[1].heading("Console");
+                                        columns[1].separator();
+                                        columns[1].label("Console hidden.");
+                                        columns[1].add_space(12.0);
+                                    }
 
-                                render_scripts_panel(&mut columns[1], &editor_state);
+                                    render_scripts_panel(&mut columns[1], &editor_state);
+                                });
                             });
                         });
 
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.heading("Viewport");
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label("Gizmo");
-                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Translate, "Translate");
-                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Rotate, "Rotate");
-                            ui.selectable_value(&mut gizmo_mode, GizmoMode::Scale, "Scale");
+                        with_scaled_ui(ui, per_widget_scale, |ui| {
+                            ui.heading("Viewport");
                             ui.separator();
-                            ui.label(format!("Mode: {}", gizmo_mode.label()));
-                        });
-                        ui.add_space(8.0);
-                        if preview_ready {
-                            if let Some(texture) = preview_texture.as_ref() {
-                                let preview_size = egui::Vec2::new(
-                                    preview_extent[0] as f32,
-                                    preview_extent[1] as f32,
+                            ui.horizontal(|ui| {
+                                ui.label("Gizmo");
+                                ui.selectable_value(
+                                    &mut gizmo_mode,
+                                    GizmoMode::Translate,
+                                    "Translate",
                                 );
-                                ui.image(texture.id(), preview_size);
+                                ui.selectable_value(
+                                    &mut gizmo_mode,
+                                    GizmoMode::Rotate,
+                                    "Rotate",
+                                );
+                                ui.selectable_value(
+                                    &mut gizmo_mode,
+                                    GizmoMode::Scale,
+                                    "Scale",
+                                );
+                                ui.separator();
+                                ui.label(format!("Mode: {}", gizmo_mode.label()));
+                            });
+                            ui.add_space(8.0);
+                            if preview_ready {
+                                if let Some(texture) = preview_texture.as_ref() {
+                                    let preview_size = egui::Vec2::new(
+                                        preview_extent[0] as f32,
+                                        preview_extent[1] as f32,
+                                    );
+                                    ui.image(texture.id(), preview_size);
+                                }
+                            } else {
+                                ui.label("Renderer not ready.");
                             }
-                        } else {
-                            ui.label("Renderer not ready.");
-                        }
+                        });
                     });
                 });
 
@@ -421,6 +493,54 @@ fn draw_scene_tree(ui: &mut egui::Ui, node: &SceneNode, selected: &mut String) {
     }
 }
 
+fn viewport_scale_from_size(size: winit::dpi::PhysicalSize<u32>) -> f32 {
+    const BASELINE_VIEWPORT: f32 = 900.0;
+    let min_dimension = size.width.min(size.height) as f32;
+    (min_dimension / BASELINE_VIEWPORT).clamp(0.75, 2.5)
+}
+
+fn with_scaled_ui<R>(
+    ui: &mut egui::Ui,
+    scale: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    if (scale - 1.0).abs() <= f32::EPSILON {
+        return add_contents(ui);
+    }
+    let style = scaled_style(ui.style(), scale);
+    ui.scope(|ui| {
+        ui.set_style(style);
+        add_contents(ui)
+    })
+    .inner
+}
+
+fn scaled_style(style: &egui::Style, scale: f32) -> egui::Style {
+    let mut style = style.clone();
+    for font in style.text_styles.values_mut() {
+        font.size *= scale;
+    }
+    style.spacing.item_spacing = egui::vec2(
+        style.spacing.item_spacing.x * scale,
+        style.spacing.item_spacing.y * scale,
+    );
+    style.spacing.button_padding = egui::vec2(
+        style.spacing.button_padding.x * scale,
+        style.spacing.button_padding.y * scale,
+    );
+    style.spacing.interact_size = egui::vec2(
+        style.spacing.interact_size.x * scale,
+        style.spacing.interact_size.y * scale,
+    );
+    style.spacing.indent *= scale;
+    style.spacing.slider_width *= scale;
+    style.spacing.text_edit_width *= scale;
+    style.spacing.icon_width *= scale;
+    style.spacing.icon_width_inner *= scale;
+    style.spacing.icon_spacing *= scale;
+    style
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GizmoMode {
     Translate,
@@ -436,4 +556,10 @@ impl GizmoMode {
             GizmoMode::Scale => "Scale",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiScaleMode {
+    Global,
+    PerWidget,
 }
