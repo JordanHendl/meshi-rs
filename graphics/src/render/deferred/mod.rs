@@ -1536,6 +1536,10 @@ impl Renderer for DeferredRenderer {
         self.subrender.environment.update_sky(settings);
     }
 
+    fn set_ocean_settings(&mut self, settings: super::environment::ocean::OceanFrameSettings) {
+        self.subrender.environment.update_ocean(settings);
+    }
+
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,

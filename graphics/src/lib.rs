@@ -20,6 +20,7 @@ use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
 pub use render::environment::clouds::CloudRenderer;
+pub use render::environment::ocean::OceanFrameSettings;
 pub use render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
@@ -174,6 +175,10 @@ impl RenderEngine {
 
     pub fn set_sky_settings(&mut self, settings: SkyFrameSettings) {
         self.renderer.set_sky_settings(settings);
+    }
+
+    pub fn set_ocean_settings(&mut self, settings: OceanFrameSettings) {
+        self.renderer.set_ocean_settings(settings);
     }
 
     pub fn set_environment_lighting(&mut self, settings: EnvironmentLightingSettings) {

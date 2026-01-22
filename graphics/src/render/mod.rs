@@ -93,6 +93,10 @@ pub trait Renderer {
         settings: crate::render::environment::sky::SkyboxFrameSettings,
     );
     fn set_sky_settings(&mut self, settings: crate::render::environment::sky::SkyFrameSettings);
+    fn set_ocean_settings(
+        &mut self,
+        settings: crate::render::environment::ocean::OceanFrameSettings,
+    );
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,

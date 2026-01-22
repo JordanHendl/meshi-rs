@@ -47,6 +47,7 @@ impl Default for OceanInfo {
 
 #[derive(Clone, Copy)]
 pub struct OceanFrameSettings {
+    pub enabled: bool,
     /// Normalized wind direction used to align the wave spectrum.
     pub wind_dir: Vec2,
     /// Wind speed in meters per second; higher values create taller, faster waves.
@@ -58,6 +59,7 @@ pub struct OceanFrameSettings {
 impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
+            enabled: true,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
             time_scale: 0.6,
@@ -114,6 +116,7 @@ pub struct OceanRenderer {
     time_scale: f32,
     use_depth: bool,
     environment_sampler: Handle<Sampler>,
+    enabled: bool,
 }
 
 fn compile_ocean_shaders() -> [bento::CompilationResult; 2] {
@@ -304,10 +307,12 @@ impl OceanRenderer {
             time_scale: default_frame.time_scale,
             use_depth: info.use_depth,
             environment_sampler,
+            enabled: default_frame.enabled,
         }
     }
 
     pub fn update(&mut self, settings: OceanFrameSettings) {
+        self.enabled = settings.enabled;
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
         self.time_scale = settings.time_scale;
@@ -335,6 +340,10 @@ impl OceanRenderer {
         dynamic: &mut DynamicAllocator,
         time: f32,
     ) -> CommandStream<Executable> {
+        if !self.enabled {
+            return CommandStream::new().begin().end();
+        }
+
         let mut stream = CommandStream::new().begin();
         for cascade in &self.cascades {
             let Some(pipeline) = cascade.compute_pipeline.as_ref() else {
@@ -377,6 +386,10 @@ impl OceanRenderer {
         camera: Handle<Camera>,
         time: f32,
     ) -> CommandStream<PendingGraphics> {
+        if !self.enabled {
+            return CommandStream::subdraw();
+        }
+
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean draw params");

@@ -39,6 +39,7 @@ pub struct SkyboxFrameSettings {
 
 #[derive(Clone, Debug)]
 pub struct SkyFrameSettings {
+    pub enabled: bool,
     pub sun_direction: Option<Vec3>,
     pub sun_color: Vec3,
     pub sun_intensity: f32,
@@ -77,6 +78,7 @@ impl Default for SkyboxFrameSettings {
 impl Default for SkyFrameSettings {
     fn default() -> Self {
         Self {
+            enabled: true,
             sun_direction: Some(Vec3::Y),
             sun_color: Vec3::ONE,
             sun_intensity: 1.0,
@@ -148,6 +150,7 @@ pub struct SkyRenderer {
     sky_settings: SkyFrameSettings,
     clouds: CloudSimulation,
     cfg: StagedBuffer,
+    enabled: bool,
 }
 
 fn compile_skybox_shaders() -> [bento::CompilationResult; 2] {
@@ -449,6 +452,7 @@ impl SkyRenderer {
             sky_settings: SkyFrameSettings::default(),
             clouds,
             cfg,
+            enabled: true,
         }
     }
 
@@ -470,6 +474,7 @@ impl SkyRenderer {
     }
 
     pub fn update_sky(&mut self, settings: SkyFrameSettings) {
+        self.enabled = settings.enabled;
         self.sky_settings = settings;
         self.cubemap_dirty = true;
     }
@@ -492,6 +497,10 @@ impl SkyRenderer {
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
     ) -> Option<SkyCubemapPass> {
+        if !self.enabled {
+            return None;
+        }
+
         if !self.use_procedural_cubemap {
             self.apply_skybox_binding();
             return None;
@@ -561,6 +570,10 @@ impl SkyRenderer {
         time: f32,
         delta_time: f32,
     ) -> CommandStream<PendingGraphics> {
+        if !self.enabled {
+            return CommandStream::subdraw();
+        }
+
         if self.use_procedural_cubemap {
             self.update_sky_config();
 
@@ -647,9 +660,11 @@ impl SkyRenderer {
             self.apply_skybox_binding();
         }
 
-        stream
-            .combine(self.clouds.record_compute(time, delta_time))
-            .end()
+        if self.enabled {
+            stream = stream.combine(self.clouds.record_compute(time, delta_time));
+        }
+
+        stream.end()
     }
 }
 

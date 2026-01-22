@@ -98,6 +98,7 @@ fn main() {
             .engine
             .set_environment_lighting(EnvironmentLightingSettings {
                 sky: SkyFrameSettings {
+                    enabled: true,
                     sun_direction: None,
                     sun_color: Vec3::new(1.0, 0.95, 0.85),
                     sun_intensity: 8.0,

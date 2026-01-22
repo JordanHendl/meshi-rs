@@ -86,6 +86,10 @@ fn main() {
     let mut total_time = 0.0f32;
     let angular_velocity = 2.0f32;
     
+    setup.engine.set_ocean_settings(OceanFrameSettings {
+        enabled: false,
+        ..Default::default()
+    });
     while data.running {
         if let Some(avg_ms) = setup.engine.average_frame_time_ms() {
             let avg_fps = 1000.0 / avg_ms;

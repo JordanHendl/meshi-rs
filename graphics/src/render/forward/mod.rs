@@ -700,6 +700,10 @@ impl Renderer for ForwardRenderer {
         self.environment.update_sky(settings);
     }
 
+    fn set_ocean_settings(&mut self, settings: super::environment::ocean::OceanFrameSettings) {
+        self.environment.update_ocean(settings);
+    }
+
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,
