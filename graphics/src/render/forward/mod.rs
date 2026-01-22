@@ -3,7 +3,7 @@ use super::gui::GuiRenderer;
 use crate::gui::GuiFrame;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
-use super::text::TextRenderer;
+use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::{
     AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
@@ -450,7 +450,22 @@ impl ForwardRenderer {
     }
 
     pub fn upload_gui_frame(&mut self, frame: GuiFrame) {
-        self.gui.upload_frame(frame);
+        let GuiFrame { batches, text_draws } = frame;
+        self.gui.upload_frame(GuiFrame {
+            batches,
+            text_draws: Vec::new(),
+        });
+        let frame_draws = text_draws
+            .into_iter()
+            .map(|draw| TextDraw {
+                text: draw.text,
+                position: Vec2::new(draw.position[0], draw.position[1]),
+                color: Vec4::from_array(draw.color),
+                scale: draw.scale,
+                mode: TextDrawMode::Plain,
+            })
+            .collect();
+        self.text.set_frame_draws(frame_draws);
     }
 
     fn pull_scene(&mut self) {

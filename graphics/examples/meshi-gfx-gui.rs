@@ -3,7 +3,10 @@ use std::ffi::c_void;
 
 use glam::{vec2, Vec2, Vec4};
 use meshi_ffi_structs::event::*;
-use meshi_graphics::gui::{GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad};
+use meshi_graphics::gui::{
+    GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarRenderOptions,
+    MenuBarState, MenuItem,
+};
 use meshi_graphics::{RendererSelect, TextInfo};
 use meshi_utils::timer::Timer;
 
@@ -129,6 +132,61 @@ fn main() {
     let mut last_time = timer.elapsed_seconds_f32();
     let viewport = setup.window_size;
     let mut last_status = String::new();
+    let menu_bar = MenuBar {
+        menus: vec![
+            Menu {
+                label: "File".to_string(),
+                items: vec![
+                    MenuItem {
+                        label: "New".to_string(),
+                        enabled: true,
+                        shortcut: Some("Ctrl+N".to_string()),
+                        checked: false,
+                        action_id: Some(1),
+                        is_separator: false,
+                    },
+                    MenuItem {
+                        label: "Open".to_string(),
+                        enabled: true,
+                        shortcut: Some("Ctrl+O".to_string()),
+                        checked: false,
+                        action_id: Some(2),
+                        is_separator: false,
+                    },
+                    MenuItem::separator(),
+                    MenuItem {
+                        label: "Quit".to_string(),
+                        enabled: true,
+                        shortcut: Some("Ctrl+Q".to_string()),
+                        checked: false,
+                        action_id: Some(3),
+                        is_separator: false,
+                    },
+                ],
+            },
+            Menu {
+                label: "View".to_string(),
+                items: vec![
+                    MenuItem {
+                        label: "Show Grid".to_string(),
+                        enabled: true,
+                        shortcut: None,
+                        checked: true,
+                        action_id: Some(10),
+                        is_separator: false,
+                    },
+                    MenuItem {
+                        label: "Show Guides".to_string(),
+                        enabled: false,
+                        shortcut: None,
+                        checked: false,
+                        action_id: Some(11),
+                        is_separator: false,
+                    },
+                ],
+            },
+        ],
+    };
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
@@ -170,12 +228,22 @@ fn main() {
         );
 
         let mut gui = GuiContext::new();
+        let menu_options = MenuBarRenderOptions {
+            viewport: [viewport.x, viewport.y],
+            position: [0.0, 0.0],
+            layer: GuiLayer::Overlay,
+            metrics: Default::default(),
+            colors: Default::default(),
+            state: MenuBarState { open_menu: Some(0) },
+        };
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Background,
             None,
             quad_from_pixels(vec2(0.0, 0.0), viewport, Vec4::new(0.05, 0.05, 0.07, 1.0), viewport),
         ));
+
+        gui.submit_menu_bar(&menu_bar, &menu_options);
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::World,

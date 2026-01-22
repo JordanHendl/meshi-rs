@@ -56,6 +56,8 @@ struct TextGlyph {
 pub struct TextRenderer {
     objects: ResourceList<TextObjectData>,
     draws: Vec<TextDraw>,
+    frame_draws: Vec<TextDraw>,
+    frame_dirty: bool,
     sdf_fonts: HashMap<String, DeviceSDFFont>,
     db: Option<NonNull<DB>>,
     text_pso: Option<bento::builder::PSO>,
@@ -76,6 +78,8 @@ impl TextRenderer {
         Self {
             objects: ResourceList::default(),
             draws: Vec::new(),
+            frame_draws: Vec::new(),
+            frame_dirty: false,
             sdf_fonts: HashMap::new(),
             db: None,
             text_pso: None,
@@ -397,6 +401,11 @@ impl TextRenderer {
         obj.dirty = true;
     }
 
+    pub fn set_frame_draws(&mut self, draws: Vec<TextDraw>) {
+        self.frame_draws = draws;
+        self.frame_dirty = true;
+    }
+
     pub fn build_draws(&mut self) {
         self.draws.clear();
 
@@ -423,6 +432,9 @@ impl TextRenderer {
                 mode,
             });
         }
+
+        self.draws.extend(self.frame_draws.clone());
+        self.frame_dirty = false;
     }
 
     pub fn emit_draws(&mut self) -> &[TextDraw] {
@@ -430,7 +442,8 @@ impl TextRenderer {
             .objects
             .entries
             .iter()
-            .any(|h| self.objects.get_ref(*h).dirty);
+            .any(|h| self.objects.get_ref(*h).dirty)
+            || self.frame_dirty;
 
         if needs_rebuild {
             self.build_draws();
