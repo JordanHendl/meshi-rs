@@ -41,9 +41,9 @@ layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 
-vec4 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
+vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
     if (meshi_bindless_lights.lights.length() == 0) {
-        return vec4(base_color * 0.1, 0.5);
+        return base_color * 0.1;
     }
     
     vec3 gain = vec3(0.0);
@@ -82,7 +82,7 @@ vec4 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
       gain += diffuse_term + specular_term + ambient_term * attenuation;
     }
 
-    return vec4(gain, max(0.8, spec));
+    return gain;
 }
 
 void main() {
@@ -103,9 +103,11 @@ void main() {
     float foam_mask = smoothstep(0.55, 0.95, breaking + curvature * 0.4);
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
-    vec4 color = apply_light(base_color, n, v, v_world_pos);
-    color.rgb = mix(color.rgb, env_color, clamp(fresnel * 0.85, 0.0, 1.0));
-    color.rgb += foam_color;
+    vec3 color = apply_light(base_color, n, v, v_world_pos);
+    color = mix(color, env_color, clamp(fresnel * 0.85, 0.0, 1.0));
+    color += foam_color;
+    float transparency = mix(0.25, 0.85, fresnel) + foam_mask * 0.15;
+    float alpha = clamp(transparency, 0.1, 0.98);
 
-    out_color = vec4(color);
+    out_color = vec4(color, alpha);
 }
