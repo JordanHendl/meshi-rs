@@ -11,10 +11,10 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     uint fft_size;
     float time;
     float time_scale;
-    float _padding0;
+    float wave_amplitude;
     vec2 wind_dir;
     float wind_speed;
-    float _padding1;
+    float capillary_strength;
 } params;
 
 void main() {
@@ -42,8 +42,9 @@ void main() {
     float two_pi = 6.28318530718;
     float gravity = 9.81;
     float spectrum_scale = 1.1;
-    float base_amplitude = 0.55;
-    float capillary_amplitude = 0.18;
+    float amplitude_scale = max(params.wave_amplitude, 0.0);
+    float base_amplitude = 0.55 * amplitude_scale;
+    float capillary_amplitude = 0.18 * max(params.capillary_strength, 0.0);
     float capillary_scale = 3.5;
     float capillary_term = 0.000074;
     float time_phase = time * speed * 0.12;

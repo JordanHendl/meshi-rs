@@ -52,6 +52,10 @@ pub struct OceanFrameSettings {
     pub wind_dir: Vec2,
     /// Wind speed in meters per second; higher values create taller, faster waves.
     pub wind_speed: f32,
+    /// Scales overall wave height, slope, and velocity (1.0 = default).
+    pub wave_amplitude: f32,
+    /// Scales high-frequency capillary detail (1.0 = default).
+    pub capillary_strength: f32,
     /// Time multiplier for wave evolution; values above 1.0 speed up the animation.
     pub time_scale: f32,
 }
@@ -62,7 +66,9 @@ impl Default for OceanFrameSettings {
             enabled: true,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
-            time_scale: 0.6,
+            wave_amplitude: 2.0,
+            capillary_strength: 1.0,
+            time_scale: 1.0,
         }
     }
 }
@@ -73,10 +79,10 @@ struct OceanComputeParams {
     fft_size: u32,
     time: f32,
     time_scale: f32,
-    _padding0: f32,
+    wave_amplitude: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    _padding1: f32,
+    capillary_strength: f32,
 }
 
 #[repr(C)]
@@ -113,6 +119,8 @@ pub struct OceanRenderer {
     tile_height_step: f32,
     wind_dir: Vec2,
     wind_speed: f32,
+    wave_amplitude: f32,
+    capillary_strength: f32,
     time_scale: f32,
     use_depth: bool,
     environment_sampler: Handle<Sampler>,
@@ -304,6 +312,8 @@ impl OceanRenderer {
             tile_height_step: ocean_info.tile_height_step.max(1.0),
             wind_dir: default_frame.wind_dir,
             wind_speed: default_frame.wind_speed,
+            wave_amplitude: default_frame.wave_amplitude,
+            capillary_strength: default_frame.capillary_strength,
             time_scale: default_frame.time_scale,
             use_depth: info.use_depth,
             environment_sampler,
@@ -315,6 +325,8 @@ impl OceanRenderer {
         self.enabled = settings.enabled;
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
+        self.wave_amplitude = settings.wave_amplitude;
+        self.capillary_strength = settings.capillary_strength;
         self.time_scale = settings.time_scale;
     }
 
@@ -357,10 +369,10 @@ impl OceanRenderer {
                 fft_size: cascade.fft_size,
                 time,
                 time_scale: self.time_scale,
-                _padding0: 0.0,
+                wave_amplitude: self.wave_amplitude,
                 wind_dir: self.wind_dir,
                 wind_speed: self.wind_speed,
-                _padding1: 0.0,
+                capillary_strength: self.capillary_strength,
             };
 
             stream = stream
