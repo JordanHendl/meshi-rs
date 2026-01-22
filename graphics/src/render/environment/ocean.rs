@@ -35,12 +35,12 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             patch_size: 200.0,
-            vertex_resolution: 512,
+            vertex_resolution: 128,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.5, 1.0, 4.0],
             base_tile_radius: 1,
             max_tile_radius: 3,
-            tile_height_step: 30.0,
+            tile_height_step: 1.0,
         }
     }
 }
@@ -59,7 +59,7 @@ impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
             wind_dir: Vec2::new(0.9, 0.2),
-            wind_speed: 6.0,
+            wind_speed: 2.0,
             time_scale: 0.6,
         }
     }
