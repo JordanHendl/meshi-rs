@@ -81,7 +81,7 @@ impl CameraController {
         let rotation = Self::rotation(self.yaw, self.pitch);
         let forward = rotation * Vec3::NEG_Z;
         let right = rotation * Vec3::X;
-        let up = rotation * Vec3::Y;
+        let up = Vec3::Y;
 
         let mut direction = Vec3::ZERO;
         if self.input.forward {
@@ -115,6 +115,9 @@ impl CameraController {
     }
 
     fn rotation(yaw: f32, pitch: f32) -> Quat {
-        Quat::from_axis_angle(Vec3::Y, yaw) * Quat::from_axis_angle(Vec3::X, pitch)
+        let yaw_rotation = Quat::from_axis_angle(Vec3::Y, yaw);
+        let pitch_axis = yaw_rotation * Vec3::X;
+        let pitch_rotation = Quat::from_axis_angle(pitch_axis, pitch);
+        yaw_rotation * pitch_rotation
     }
 }

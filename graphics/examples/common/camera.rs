@@ -120,7 +120,7 @@ impl CameraController {
         self.mouse_delta = Vec2::ZERO;
         if self.input.move_active {
             self.yaw += mouse_delta.x * self.settings.sensitivity;
-            self.pitch = (self.pitch + mouse_delta.y * self.settings.sensitivity)
+            self.pitch = (self.pitch - mouse_delta.y * self.settings.sensitivity)
                 .clamp(-self.settings.pitch_limit, self.settings.pitch_limit);
         }
 
