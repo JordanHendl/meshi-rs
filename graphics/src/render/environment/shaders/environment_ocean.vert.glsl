@@ -239,7 +239,7 @@ void main() {
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
     gl_Position.y = -gl_Position.y;
-    v_uv = fract(world / tile_size + vec2(0.5));
+    v_uv = world / tile_size + vec2(0.5);
     v_normal = normal;
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;
