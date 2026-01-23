@@ -1,16 +1,16 @@
 use bento::builder::CSOBuilder;
-use dashi::cmd::Executable;
+use bytemuck::cast_slice;
 use dashi::UsageBits;
-use dashi::{
-    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
-    ShaderResource,
-};
-use furikake::PSOBuilderFurikakeExt;
+use dashi::cmd::Executable;
 use dashi::driver::command::Dispatch;
+use dashi::{
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler,
+    SamplerInfo, ShaderResource,
+};
 use furikake::BindlessState;
+use furikake::PSOBuilderFurikakeExt;
 use glam::{UVec3, Vec2, Vec3};
 use tare::utils::StagedBuffer;
-use bytemuck::cast_slice;
 
 use super::cloud_assets::CloudAssets;
 use super::cloud_pass_shadow::CloudShadowPass;
@@ -164,17 +164,28 @@ impl CloudRaymarchPass {
         let pipeline = Some(
             CSOBuilder::new()
                 .set_debug_name("[MESHI] Cloud Raymarch")
-                .shader(Some(include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes()))
+                .shader(Some(
+                    include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes(),
+                ))
                 .add_reserved_table_variable(state, "meshi_bindless_cameras")
                 .unwrap()
                 .add_reserved_table_variable(state, "meshi_bindless_lights")
                 .unwrap()
-                .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
-                .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
+                .add_variable(
+                    "params",
+                    ShaderResource::ConstBuffer(params.device().into()),
+                )
+                .add_variable(
+                    "cloud_weather_map",
+                    ShaderResource::Image(assets.weather_map_view()),
+                )
                 .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
                 .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
                 .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
-                .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
+                .add_variable(
+                    "cloud_detail_noise",
+                    ShaderResource::Image(assets.detail_noise),
+                )
                 .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
                 .add_variable("cloud_blue_noise", ShaderResource::Image(assets.blue_noise))
                 .add_variable("cloud_blue_sampler", ShaderResource::Sampler(sampler))
@@ -182,13 +193,22 @@ impl CloudRaymarchPass {
                     "cloud_shadow_buffer",
                     ShaderResource::StorageBuffer(shadow_pass.shadow_buffer.into()),
                 )
-                .add_variable("cloud_color_buffer", ShaderResource::StorageBuffer(color_buffer.into()))
+                .add_variable(
+                    "cloud_color_buffer",
+                    ShaderResource::StorageBuffer(color_buffer.into()),
+                )
                 .add_variable(
                     "cloud_transmittance_buffer",
                     ShaderResource::StorageBuffer(transmittance_buffer.into()),
                 )
-                .add_variable("cloud_depth_buffer", ShaderResource::StorageBuffer(depth_buffer.into()))
-                .add_variable("cloud_steps_buffer", ShaderResource::StorageBuffer(steps_buffer.into()))
+                .add_variable(
+                    "cloud_depth_buffer",
+                    ShaderResource::StorageBuffer(depth_buffer.into()),
+                )
+                .add_variable(
+                    "cloud_steps_buffer",
+                    ShaderResource::StorageBuffer(steps_buffer.into()),
+                )
                 .build(ctx)
                 .unwrap(),
         );
@@ -267,7 +287,7 @@ impl CloudRaymarchPass {
             .prepare_buffer(self.transmittance_buffer, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.depth_buffer, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.steps_buffer, UsageBits::COMPUTE_SHADER)
-//                    .gpu_timer_begin(timer_index)
+            .gpu_timer_begin(self.timer_index)
             .dispatch(&Dispatch {
                 x: (output_resolution[0] + RAYMARCH_WORKGROUP_SIZE - 1) / RAYMARCH_WORKGROUP_SIZE,
                 y: (output_resolution[1] + RAYMARCH_WORKGROUP_SIZE - 1) / RAYMARCH_WORKGROUP_SIZE,
@@ -276,7 +296,7 @@ impl CloudRaymarchPass {
                 bind_tables: pipeline.tables(),
                 dynamic_buffers: Default::default(),
             })
-  //                  .gpu_timer_end(timer_index)
+            .gpu_timer_end(self.timer_index)
             .unbind_pipeline()
             .end()
     }

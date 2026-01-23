@@ -1,9 +1,9 @@
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use dashi::UsageBits;
-use dashi::*;
-use dashi::cmd::*; 
-use dashi::cmd::PendingGraphics; 
+use dashi::cmd::PendingGraphics;
+use dashi::cmd::*;
 use dashi::driver::command::Draw;
+use dashi::*;
 use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, DepthInfo, Format, GraphicsPipelineDetails,
     Handle, IndexedResource, MemoryVisibility, Sampler, SamplerInfo, ShaderResource, ShaderType,
@@ -260,7 +260,7 @@ impl CloudCompositePass {
     ) -> CommandStream<PendingGraphics> {
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.params.sync_up())
-            // .gpu_timer_begin(timer_index)
+            .gpu_timer_begin(timer_index)
             .bind_graphics_pipeline(self.pipeline.handle)
             .update_viewport(viewport)
             .draw(&Draw {
@@ -270,7 +270,7 @@ impl CloudCompositePass {
                 ..Default::default()
             })
             .unbind_graphics_pipeline()
-            // .gpu_timer_end(timer_index)
+            .gpu_timer_end(timer_index)
     }
 
     pub fn pipeline(&self) -> &PSO {

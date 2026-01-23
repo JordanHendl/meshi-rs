@@ -1,15 +1,15 @@
+use super::cloud_pass_raymarch::CloudSamplingSettings;
 use bento::builder::CSOBuilder;
-use dashi::cmd::Executable;
+use bytemuck::cast_slice;
 use dashi::UsageBits;
+use dashi::cmd::Executable;
 use dashi::driver::command::Dispatch;
 use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, ShaderResource,
 };
 use furikake::BindlessState;
-use tare::utils::StagedBuffer;
-use bytemuck::cast_slice;
 use furikake::PSOBuilderFurikakeExt;
-use super::cloud_pass_raymarch::CloudSamplingSettings;
+use tare::utils::StagedBuffer;
 
 const TEMPORAL_WORKGROUP_SIZE: u32 = 8;
 
@@ -170,8 +170,11 @@ impl CloudTemporalPass {
                 UsageBits::COMPUTE_SHADER,
             )
             .prepare_buffer(self.history_depth[history_write], UsageBits::COMPUTE_SHADER)
-            .prepare_buffer(self.history_weight[history_write], UsageBits::COMPUTE_SHADER)
-//                    .gpu_timer_begin(timer_index)
+            .prepare_buffer(
+                self.history_weight[history_write],
+                UsageBits::COMPUTE_SHADER,
+            )
+            .gpu_timer_begin(self.timer_index)
             .dispatch(&Dispatch {
                 x: (output_resolution[0] + TEMPORAL_WORKGROUP_SIZE - 1) / TEMPORAL_WORKGROUP_SIZE,
                 y: (output_resolution[1] + TEMPORAL_WORKGROUP_SIZE - 1) / TEMPORAL_WORKGROUP_SIZE,
@@ -180,7 +183,7 @@ impl CloudTemporalPass {
                 bind_tables: pipeline.tables(),
                 dynamic_buffers: Default::default(),
             })
-//                    .gpu_timer_end(timer_index)
+            .gpu_timer_end(self.timer_index)
             .unbind_pipeline()
             .end();
 
@@ -236,8 +239,16 @@ fn create_history_buffers(ctx: &mut Context, output_resolution: [u32; 2]) -> Tem
 
     TemporalBuffers {
         history_color: [
-            buffer("[CLOUD] History Color 0", 16, Some(cast_slice(&history_color_init))),
-            buffer("[CLOUD] History Color 1", 16, Some(cast_slice(&history_color_init))),
+            buffer(
+                "[CLOUD] History Color 0",
+                16,
+                Some(cast_slice(&history_color_init)),
+            ),
+            buffer(
+                "[CLOUD] History Color 1",
+                16,
+                Some(cast_slice(&history_color_init)),
+            ),
         ],
         history_transmittance: [
             buffer(
@@ -294,61 +305,63 @@ fn build_pipeline(
     output_depth: Handle<dashi::Buffer>,
     output_weight: Handle<dashi::Buffer>,
 ) -> Option<bento::builder::CSO> {
-    Some(CSOBuilder::new()
-        .set_debug_name("[MESHI] Cloud Temporal")
-        .shader(Some(
-            include_str!("shaders/cloud_temporal.comp.glsl").as_bytes(),
-        ))
-        .add_reserved_table_variable(state, "meshi_bindless_cameras")
-        .unwrap()
-        .add_variable(
-            "params",
-            ShaderResource::ConstBuffer(params.device().into()),
-        )
-        .add_variable(
-            "cloud_current_color",
-            ShaderResource::StorageBuffer(current_color.into()),
-        )
-        .add_variable(
-            "cloud_current_trans",
-            ShaderResource::StorageBuffer(current_transmittance.into()),
-        )
-        .add_variable(
-            "cloud_current_depth",
-            ShaderResource::StorageBuffer(current_depth.into()),
-        )
-        .add_variable(
-            "cloud_history_color",
-            ShaderResource::StorageBuffer(history_color.into()),
-        )
-        .add_variable(
-            "cloud_history_trans",
-            ShaderResource::StorageBuffer(history_transmittance.into()),
-        )
-        .add_variable(
-            "cloud_history_depth",
-            ShaderResource::StorageBuffer(history_depth.into()),
-        )
-        .add_variable(
-            "cloud_history_weight",
-            ShaderResource::StorageBuffer(history_weight.into()),
-        )
-        .add_variable(
-            "cloud_output_color",
-            ShaderResource::StorageBuffer(output_color.into()),
-        )
-        .add_variable(
-            "cloud_output_trans",
-            ShaderResource::StorageBuffer(output_transmittance.into()),
-        )
-        .add_variable(
-            "cloud_output_depth",
-            ShaderResource::StorageBuffer(output_depth.into()),
-        )
-        .add_variable(
-            "cloud_output_weight",
-            ShaderResource::StorageBuffer(output_weight.into()),
-        )
-        .build(ctx)
-        .unwrap())
+    Some(
+        CSOBuilder::new()
+            .set_debug_name("[MESHI] Cloud Temporal")
+            .shader(Some(
+                include_str!("shaders/cloud_temporal.comp.glsl").as_bytes(),
+            ))
+            .add_reserved_table_variable(state, "meshi_bindless_cameras")
+            .unwrap()
+            .add_variable(
+                "params",
+                ShaderResource::ConstBuffer(params.device().into()),
+            )
+            .add_variable(
+                "cloud_current_color",
+                ShaderResource::StorageBuffer(current_color.into()),
+            )
+            .add_variable(
+                "cloud_current_trans",
+                ShaderResource::StorageBuffer(current_transmittance.into()),
+            )
+            .add_variable(
+                "cloud_current_depth",
+                ShaderResource::StorageBuffer(current_depth.into()),
+            )
+            .add_variable(
+                "cloud_history_color",
+                ShaderResource::StorageBuffer(history_color.into()),
+            )
+            .add_variable(
+                "cloud_history_trans",
+                ShaderResource::StorageBuffer(history_transmittance.into()),
+            )
+            .add_variable(
+                "cloud_history_depth",
+                ShaderResource::StorageBuffer(history_depth.into()),
+            )
+            .add_variable(
+                "cloud_history_weight",
+                ShaderResource::StorageBuffer(history_weight.into()),
+            )
+            .add_variable(
+                "cloud_output_color",
+                ShaderResource::StorageBuffer(output_color.into()),
+            )
+            .add_variable(
+                "cloud_output_trans",
+                ShaderResource::StorageBuffer(output_transmittance.into()),
+            )
+            .add_variable(
+                "cloud_output_depth",
+                ShaderResource::StorageBuffer(output_depth.into()),
+            )
+            .add_variable(
+                "cloud_output_weight",
+                ShaderResource::StorageBuffer(output_weight.into()),
+            )
+            .build(ctx)
+            .unwrap(),
+    )
 }

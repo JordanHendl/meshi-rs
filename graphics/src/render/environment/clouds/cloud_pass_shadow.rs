@@ -1,13 +1,13 @@
 use bento::builder::CSOBuilder;
-use dashi::cmd::Executable;
 use dashi::UsageBits;
-use furikake::PSOBuilderFurikakeExt;
-use dashi::{
-    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
-    ShaderResource,
-};
+use dashi::cmd::Executable;
 use dashi::driver::command::Dispatch;
+use dashi::{
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler,
+    SamplerInfo, ShaderResource,
+};
 use furikake::BindlessState;
+use furikake::PSOBuilderFurikakeExt;
 use glam::Vec3;
 use tare::utils::StagedBuffer;
 
@@ -80,15 +80,26 @@ impl CloudShadowPass {
 
         let pipeline = Some(
             CSOBuilder::new()
-                .shader(Some(include_str!("shaders/cloud_shadow.comp.glsl").as_bytes()))
+                .shader(Some(
+                    include_str!("shaders/cloud_shadow.comp.glsl").as_bytes(),
+                ))
                 .add_reserved_table_variable(state, "meshi_bindless_cameras")
                 .unwrap()
-                .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
-                .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
+                .add_variable(
+                    "params",
+                    ShaderResource::ConstBuffer(params.device().into()),
+                )
+                .add_variable(
+                    "cloud_weather_map",
+                    ShaderResource::Image(assets.weather_map_view()),
+                )
                 .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
                 .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
                 .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
-                .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
+                .add_variable(
+                    "cloud_detail_noise",
+                    ShaderResource::Image(assets.detail_noise),
+                )
                 .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
                 .add_variable(
                     "cloud_shadow_buffer",
@@ -149,7 +160,7 @@ impl CloudShadowPass {
             .begin()
             .combine(self.params.sync_up())
             .prepare_buffer(self.shadow_buffer, UsageBits::COMPUTE_SHADER)
-//                    .gpu_timer_begin(timer_index)
+            .gpu_timer_begin(self.timer_index)
             .dispatch(&Dispatch {
                 x: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
                 y: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
@@ -158,7 +169,7 @@ impl CloudShadowPass {
                 bind_tables: pipeline.tables(),
                 dynamic_buffers: Default::default(),
             })
-  //                  .gpu_timer_end(timer_index)
+            .gpu_timer_end(self.timer_index)
             .unbind_pipeline()
             .end()
     }
