@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ptr::NonNull,
-};
+use std::collections::HashMap;
 
 use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
@@ -18,7 +15,6 @@ use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
-use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
@@ -27,19 +23,13 @@ use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
-use furikake::reservations::bindless_indices::ReservedBindlessIndices;
-use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
+use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::types::AnimationState as FurikakeAnimationState;
-use furikake::{
-    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
-    types::VertexBufferSlot, types::*,
-};
+use furikake::{BindlessState, types::Material, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::DB;
-use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
-use noren::rdb::primitives::Vertex;
-use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
+use noren::meta::DeviceModel;
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
@@ -77,6 +67,29 @@ pub struct PerDrawData {
     index_count: u32,
 }
 
+impl PerDrawData {
+    pub fn terrain_draw(
+        scene_id: Handle<SceneObject>,
+        transform_id: Handle<Transformation>,
+        material_id: Handle<Material>,
+        vertex_id: u32,
+        vertex_count: u32,
+        index_id: u32,
+        index_count: u32,
+    ) -> Self {
+        Self {
+            scene_id,
+            transform_id,
+            material_id,
+            vertex_id,
+            vertex_count,
+            index_id,
+            index_count,
+            ..Default::default()
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 struct PerObjectInfo {
@@ -93,7 +106,6 @@ struct RendererData {
     viewport: Viewport,
     objects: ResourceList<RenderObjectData>,
     lookup: HashMap<u16, Handle<RenderObjectData>>,
-    terrain_objects: HashMap<String, TerrainObjectEntry>,
     renderables: GPUPool<PerDrawData>,
     dynamic: DynamicAllocator,
 }
@@ -102,7 +114,6 @@ struct DataProcessors {
     scene: GPUScene,
     skinning: SkinningDispatcher,
     draw_builder: GPUDrawBuilder,
-    terrain_draw_builder: GPUDrawBuilder,
 }
 
 struct Renderers {
@@ -113,7 +124,6 @@ struct Renderers {
 struct DeferredPSO {
     pipelines: HashMap<Handle<Material>, PSO>,
     standard: PSO,
-    terrain: PSO,
     billboard: PSO,
     combine_pso: PSO,
 }
@@ -131,7 +141,6 @@ pub struct DeferredRenderer {
     sample_count: SampleCount,
     exec: DeferredExecution,
     state: Box<BindlessState>,
-    db: Option<NonNull<DB>>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
     text: TextRenderer,
@@ -144,15 +153,6 @@ struct RenderObjectData {
     kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
     draws: Vec<Handle<PerDrawData>>,
-}
-
-#[derive(Clone)]
-struct TerrainObjectEntry {
-    scene_handle: Handle<SceneObject>,
-    draws: Vec<Handle<PerDrawData>>,
-    content_hash: u64,
-    geometry_entry: String,
-    material_handle: Handle<Material>,
 }
 
 enum RenderObjectKind {
@@ -341,7 +341,6 @@ impl DeferredRenderer {
             viewport: info.initial_viewport,
             objects: ResourceList::default(),
             lookup: Default::default(),
-            terrain_objects: Default::default(),
             renderables: GPUPool::new(
                 ctx.as_mut(),
                 &BufferInfo {
@@ -373,17 +372,6 @@ impl DeferredRenderer {
                 },
                 state.as_mut(),
             ),
-            terrain_draw_builder: GPUDrawBuilder::new(
-                &GPUDrawBuilderInfo {
-                    name: "[MESHI] Deferred Terrain Draw Builder",
-                    ctx: ctx.as_mut(),
-                    cull_results,
-                    bin_counts,
-                    num_bins,
-                    ..Default::default()
-                },
-                state.as_mut(),
-            ),
         };
 
         let clouds = CloudRenderer::new(
@@ -393,22 +381,25 @@ impl DeferredRenderer {
             depth,
             info.sample_count,
         );
-        let subrender = Renderers {
+        let mut subrender = Renderers {
             environment,
             clouds,
         };
+
+        subrender.environment.initialize_terrain_deferred(
+            ctx.as_mut(),
+            state.as_mut(),
+            info.sample_count,
+            cull_results,
+            bin_counts,
+            num_bins,
+            &data.dynamic,
+        );
 
         let psos = DeferredPSO {
             pipelines: Default::default(),
             combine_pso: pso,
             standard: Self::build_pipeline(
-                ctx.as_mut(),
-                &mut state,
-                info.sample_count,
-                &proc,
-                &data,
-            ),
-            terrain: Self::build_terrain_pipeline(
                 ctx.as_mut(),
                 &mut state,
                 info.sample_count,
@@ -439,7 +430,6 @@ impl DeferredRenderer {
             state,
             graph,
             exec,
-            db: None,
             sample_count: info.sample_count,
             alloc,
             data,
@@ -506,57 +496,6 @@ impl DeferredRenderer {
 
         assert!(s.bind_table[0].is_some());
         assert!(s.bind_table[1].is_some());
-
-        state.register_pso_tables(&s);
-        s
-    }
-
-    fn build_terrain_pipeline(
-        ctx: &mut Context,
-        state: &mut BindlessState,
-        sample_count: SampleCount,
-        proc: &DataProcessors,
-        data: &RendererData,
-    ) -> PSO {
-        let shaders = miso::gpudeferred(&[]);
-
-        let s = PSOBuilder::new()
-            .set_debug_name("[MESHI] Deferred Terrain")
-            .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
-            .add_table_variable_with_resources(
-                "per_draw_ssbo",
-                vec![IndexedResource {
-                    resource: ShaderResource::StorageBuffer(
-                        proc.terrain_draw_builder.per_draw_data().into(),
-                    ),
-                    slot: 0,
-                }],
-            )
-            .add_table_variable_with_resources(
-                "per_scene_ssbo",
-                vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(data.dynamic.state()),
-                    slot: 0,
-                }],
-            )
-            .add_reserved_table_variables(state)
-            .unwrap()
-            .add_depth_target(AttachmentDesc {
-                format: Format::D24S8,
-                samples: sample_count,
-            })
-            .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 4],
-                sample_count,
-                depth_test: Some(DepthInfo {
-                    should_test: true,
-                    should_write: true,
-                }),
-                ..Default::default()
-            })
-            .build(ctx)
-            .expect("Failed to build terrain pipeline!");
 
         state.register_pso_tables(&s);
         s
@@ -885,7 +824,7 @@ impl DeferredRenderer {
         db.import_dashi_context(self.ctx.as_mut());
         db.import_furikake_state(self.state.as_mut());
         self.alloc.set_bindless_registry(self.state.as_mut());
-        self.db = Some(NonNull::new(db).expect("lmao"));
+        self.subrender.environment.initialize_database(db);
         self.text.initialize_database(db);
     }
 
@@ -1416,9 +1355,9 @@ impl DeferredRenderer {
                             .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                     )
                     .combine(
-                        self.proc
-                            .terrain_draw_builder
-                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                        self.subrender
+                            .environment
+                            .build_terrain_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                     )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
@@ -1486,17 +1425,12 @@ impl DeferredRenderer {
                             ..Default::default()
                         })
                         .unbind_graphics_pipeline()
-                        .bind_graphics_pipeline(self.psos.terrain.handle)
-                        .update_viewport(&self.data.viewport)
-                        .draw_indexed_indirect(&DrawIndexedIndirect {
-                            indices: indices_handle,
-                            indirect: self.proc.terrain_draw_builder.draw_list(),
-                            bind_tables: self.psos.terrain.tables(),
-                            dynamic_buffers: [None, None, Some(alloc), None],
-                            draw_count: self.proc.terrain_draw_builder.draw_count(),
-                            ..Default::default()
-                        })
-                        .unbind_graphics_pipeline();
+                        .combine(self.subrender.environment.record_terrain_draws(
+                            &self.data.viewport,
+                            &mut self.data.dynamic,
+                            camera_handle,
+                            indices_handle,
+                        ));
 
                     cmd
                 },
@@ -1680,294 +1614,11 @@ impl DeferredRenderer {
         &mut self,
         objects: &[super::environment::terrain::TerrainRenderObject],
     ) {
-        let mut next_keys = HashSet::with_capacity(objects.len());
-        for object in objects {
-            next_keys.insert(object.key.clone());
-        }
-
-        let mut removals = Vec::new();
-        for (key, entry) in &self.data.terrain_objects {
-            if !next_keys.contains(key) {
-                removals.push((key.clone(), entry.clone()));
-            }
-        }
-
-        for (key, entry) in removals {
-            self.release_terrain_entry(&entry);
-            self.data.terrain_objects.remove(&key);
-        }
-
-        for object in objects {
-            if let Some(entry) = self.data.terrain_objects.get(&object.key).cloned() {
-                if entry.content_hash == object.artifact.content_hash {
-                    self.proc
-                        .scene
-                        .set_object_transform(entry.scene_handle, &object.transform);
-                    continue;
-                }
-
-                self.release_terrain_entry(&entry);
-                self.data.terrain_objects.remove(&object.key);
-            }
-
-            let Some((model, geometry_entry, material_handle)) =
-                self.build_terrain_model(&object.key, &object.artifact)
-            else {
-                warn!("Failed to build terrain render object '{}'.", object.key);
-                continue;
-            };
-
-            let (scene_handle, transform_handle) =
-                self.proc.scene.register_object(&SceneObjectInfo {
-                    local: Default::default(),
-                    global: Default::default(),
-                    scene_mask: PassMask::OPAQUE_GEOMETRY as u32,
-                    scene_type: SceneNodeType::Renderable,
-                });
-
-            self.proc
-                .scene
-                .set_object_transform(scene_handle, &object.transform);
-
-            let draws = self.register_terrain_draws(&model, scene_handle, transform_handle);
-
-            self.data.terrain_objects.insert(
-                object.key.clone(),
-                TerrainObjectEntry {
-                    scene_handle,
-                    draws,
-                    content_hash: object.artifact.content_hash,
-                    geometry_entry,
-                    material_handle,
-                },
-            );
-        }
-    }
-
-    fn release_terrain_entry(&mut self, entry: &TerrainObjectEntry) {
-        self.proc.scene.release_object(entry.scene_handle);
-        for draw in &entry.draws {
-            self.proc.terrain_draw_builder.release_draw(*draw);
-        }
-
-        if entry.material_handle.valid() {
-            self.state
-                .reserved_mut::<ReservedBindlessMaterials, _>(
-                    "meshi_bindless_materials",
-                    |materials| materials.remove_material(entry.material_handle),
-                )
-                .expect("Failed to release terrain material");
-        }
-
-        let Some(mut db) = self.db else {
-            return;
-        };
-        if let Err(err) = unsafe { db.as_mut() }
-            .geometry_mut()
-            .unref_entry(&entry.geometry_entry)
-        {
-            warn!(
-                "Failed to release terrain geometry '{}': {err:?}",
-                entry.geometry_entry
-            );
-        }
-    }
-
-    fn register_terrain_draws(
-        &mut self,
-        model: &DeviceModel,
-        scene_handle: Handle<SceneObject>,
-        transform_handle: Handle<Transformation>,
-    ) -> Vec<Handle<PerDrawData>> {
-        model
-            .meshes
-            .iter()
-            .map(|mesh| {
-                self.proc.terrain_draw_builder.register_draw(&PerDrawData {
-                    scene_id: scene_handle,
-                    transform_id: transform_handle,
-                    material_id: mesh
-                        .material
-                        .as_ref()
-                        .and_then(|material| material.furikake_material_handle)
-                        .unwrap_or_default(),
-                    vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
-                    vertex_count: mesh.geometry.base.vertex_count,
-                    index_id: mesh.geometry.base.furikake_index_id.unwrap(),
-                    index_count: mesh.geometry.base.index_count.unwrap(),
-                    ..Default::default()
-                })
-            })
-            .collect()
-    }
-
-    fn build_terrain_model(
-        &mut self,
-        key: &str,
-        artifact: &noren::rdb::terrain::TerrainChunkArtifact,
-    ) -> Option<(DeviceModel, String, Handle<Material>)> {
-        if artifact.vertices.is_empty() || artifact.indices.is_empty() {
-            warn!("Terrain artifact '{key}' has no geometry data.");
-            return None;
-        }
-
-        let geometry_entry = format!(
-            "terrain/runtime/{key}/lod{}-{:016x}",
-            artifact.lod, artifact.content_hash
+        self.subrender.environment.set_terrain_render_objects(
+            objects,
+            &mut self.proc.scene,
+            self.state.as_mut(),
         );
-        let host_geometry = HostGeometry {
-            vertices: artifact.vertices.clone(),
-            indices: Some(artifact.indices.clone()),
-            ..Default::default()
-        }
-        .with_counts();
-
-        let Some(mut db) = self.db else {
-            warn!("No database available for terrain upload.");
-            return None;
-        };
-        let db = unsafe { db.as_mut() };
-        let mut geometry = match db
-            .geometry_mut()
-            .enter_gpu_geometry(&geometry_entry, host_geometry.clone())
-        {
-            Ok(geometry) => geometry,
-            Err(err) => {
-                warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
-                return None;
-            }
-        };
-
-        if !self.register_furikake_geometry(&mut geometry, &host_geometry) {
-            warn!("Failed to register furikake geometry for terrain '{geometry_entry}'.");
-            return None;
-        }
-
-        let (material_handle, material) = self.allocate_terrain_material();
-        let device_material = DeviceMaterial::new(Vec::new(), material, Some(material_handle));
-        let mesh = DeviceMesh::new(geometry, Vec::new(), Some(device_material));
-        let model = DeviceModel {
-            name: format!("terrain/{key}"),
-            meshes: vec![mesh],
-            rig: None,
-        };
-
-        Some((model, geometry_entry, material_handle))
-    }
-
-    fn allocate_terrain_material(&mut self) -> (Handle<Material>, Material) {
-        let mut material_handle = Handle::default();
-        let mut material = Material::default();
-        material.base_color_texture_id = u32::MAX;
-        material.normal_texture_id = u32::MAX;
-        material.metallic_roughness_texture_id = u32::MAX;
-        material.occlusion_texture_id = u32::MAX;
-        material.emissive_texture_id = u32::MAX;
-        self.state
-            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
-                material_handle = materials.add_material();
-                *materials.material_mut(material_handle) = material;
-            })
-            .expect("Failed to allocate terrain material");
-
-        (material_handle, material)
-    }
-
-    fn register_furikake_geometry(
-        &mut self,
-        geometry: &mut DeviceGeometry,
-        host: &HostGeometry,
-    ) -> bool {
-        if !self.register_furikake_geometry_layer(
-            &mut geometry.base,
-            &host.vertices,
-            host.indices.as_deref(),
-        ) {
-            return false;
-        }
-
-        if geometry.lods.len() != host.lods.len() {
-            warn!("Terrain geometry lod count mismatch.");
-            return false;
-        }
-
-        for (layer, source) in geometry.lods.iter_mut().zip(&host.lods) {
-            if !self.register_furikake_geometry_layer(
-                layer,
-                &source.vertices,
-                source.indices.as_deref(),
-            ) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn register_furikake_geometry_layer(
-        &mut self,
-        layer: &mut DeviceGeometryLayer,
-        vertices: &[Vertex],
-        indices: Option<&[u32]>,
-    ) -> bool {
-        let vertex_bytes = cast_slice(vertices);
-        if vertex_bytes.is_empty() {
-            layer.furikake_vertex_id = None;
-        } else {
-            let mut inserted_offset = None;
-            let slot = Self::vertex_buffer_slot(vertices);
-            if let Err(err) = self.state.reserved_mut::<ReservedBindlessVertices, _>(
-                "meshi_bindless_vertices",
-                |buffer| {
-                    inserted_offset = buffer.push_vertex_bytes(slot, vertex_bytes);
-                },
-            ) {
-                warn!("Failed to reserve terrain vertices: {err:?}");
-                return false;
-            }
-
-            let Some(offset) = inserted_offset else {
-                warn!("Failed to allocate bindless terrain vertices.");
-                return false;
-            };
-            layer.furikake_vertex_id = Some(offset);
-        }
-
-        if let Some(indices) = indices.filter(|indices| !indices.is_empty()) {
-            let mut inserted_offset = None;
-            if let Err(err) = self.state.reserved_mut::<ReservedBindlessIndices, _>(
-                "meshi_bindless_indices",
-                |buffer| {
-                    inserted_offset = buffer.push_indices(indices);
-                },
-            ) {
-                warn!("Failed to reserve terrain indices: {err:?}");
-                return false;
-            }
-
-            let Some(offset) = inserted_offset else {
-                warn!("Failed to allocate bindless terrain indices.");
-                return false;
-            };
-            layer.furikake_index_id = Some(offset);
-        } else {
-            layer.furikake_index_id = None;
-        }
-
-        true
-    }
-
-    fn vertex_buffer_slot(vertices: &[Vertex]) -> VertexBufferSlot {
-        let uses_skinning = vertices.iter().any(|vertex| {
-            vertex.joint_weights.iter().any(|weight| *weight != 0.0)
-                || vertex.joint_indices.iter().any(|index| *index != 0)
-        });
-
-        if uses_skinning {
-            VertexBufferSlot::Skeleton
-        } else {
-            VertexBufferSlot::Skeleton
-        }
     }
 }
 

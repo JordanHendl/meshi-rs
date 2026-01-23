@@ -4,8 +4,11 @@ pub mod sky;
 pub mod terrain;
 
 use dashi::cmd::{Executable, PendingGraphics};
-use dashi::{CommandStream, Context, DynamicAllocator, Format, SampleCount, Viewport};
+use dashi::{
+    Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, SampleCount, Viewport,
+};
 use furikake::{BindlessState, types::Camera};
+use noren::DB;
 
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
@@ -69,13 +72,7 @@ impl EnvironmentRenderer {
             .expect("Failed to make environment dynamic allocator");
 
         let sky = SkyRenderer::new(ctx, state, &info, &dynamic);
-        let ocean = OceanRenderer::new(
-            ctx,
-            state,
-            &info,
-            &dynamic,
-            sky.environment_cubemap_view(),
-        );
+        let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, sky.environment_cubemap_view());
         let terrain = TerrainRenderer::new(ctx, state, &info, &dynamic);
 
         Self {
@@ -160,6 +157,55 @@ impl EnvironmentRenderer {
         self.terrain.update(settings);
     }
 
+    pub fn initialize_terrain_deferred(
+        &mut self,
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        sample_count: SampleCount,
+        cull_results: Handle<Buffer>,
+        bin_counts: Handle<Buffer>,
+        num_bins: u32,
+        dynamic: &DynamicAllocator,
+    ) {
+        self.terrain.initialize_deferred(
+            ctx,
+            state,
+            sample_count,
+            cull_results,
+            bin_counts,
+            num_bins,
+            dynamic,
+        );
+    }
+
+    pub fn initialize_database(&mut self, db: &mut DB) {
+        self.terrain.initialize_database(db);
+    }
+
+    pub fn set_terrain_render_objects(
+        &mut self,
+        objects: &[terrain::TerrainRenderObject],
+        scene: &mut super::scene::GPUScene,
+        state: &mut BindlessState,
+    ) {
+        self.terrain.set_render_objects(objects, scene, state);
+    }
+
+    pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
+        self.terrain.build_deferred_draws(bin, view)
+    }
+
+    pub fn record_terrain_draws(
+        &mut self,
+        viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
+        camera: Handle<Camera>,
+        indices_handle: Handle<Buffer>,
+    ) -> CommandStream<PendingGraphics> {
+        self.terrain
+            .record_deferred_draws(viewport, dynamic, camera, indices_handle)
+    }
+
     pub fn set_time(&mut self, time_seconds: f32) {
         self.time = time_seconds;
     }
@@ -213,7 +259,10 @@ impl EnvironmentRenderer {
     pub fn record_compute(&mut self, ctx: &mut Context) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
-            .combine(self.sky.record_compute(ctx, self.time, self.last_delta_time))
+            .combine(
+                self.sky
+                    .record_compute(ctx, self.time, self.last_delta_time),
+            )
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
             //            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
