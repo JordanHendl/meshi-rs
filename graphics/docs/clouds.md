@@ -95,8 +95,8 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 * **Resolution**: `low_res_scale` (1/2 or 1/4).
 * **Shadow**: `shadow.enabled`, `shadow.resolution`, `shadow.extent`, `shadow.strength`.
 * **Temporal**: `temporal.blend_factor`, `temporal.clamp_strength`, `temporal.depth_sigma`.
-* **Debug**: `debug_view` for weather map, shadow map, transmittance, step heatmap, temporal weight.
-* **Budget**: `performance_budget_ms` (recorded in overlay, not enforced).
+* **Debug**: `debug_view` for weather map, shadow map, transmittance, step heatmap, temporal weight, and stats.
+* **Budget**: `performance_budget_ms` (recorded in stats overlay, not enforced).
 
 ## Debug Views
 
@@ -107,6 +107,7 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 3. **Transmittance** – low-res cloud transmittance.
 4. **StepHeatmap** – normalized step usage.
 5. **TemporalWeight** – history weight/disocclusion visualization.
+6. **Stats** – enable the cloud performance timing overlay.
 
 ## Determinism
 

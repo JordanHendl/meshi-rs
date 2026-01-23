@@ -10,7 +10,7 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
+use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
@@ -1492,7 +1492,13 @@ impl DeferredRenderer {
                 },
             );
 
-            let overlay_text = self.subrender.clouds.timing_overlay_text();
+            let overlay_text = if self.subrender.clouds.settings().debug_view
+                == CloudDebugView::Stats
+            {
+                self.subrender.clouds.timing_overlay_text()
+            } else {
+                String::new()
+            };
             self.text.set_text(self.cloud_overlay, &overlay_text);
 
             ///////////////////////////////////////////////////////////////////

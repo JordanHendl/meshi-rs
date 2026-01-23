@@ -248,6 +248,7 @@ pub enum CloudDebugView {
     Transmittance = 3,
     StepHeatmap = 4,
     TemporalWeight = 5,
+    Stats = 6,
 }
 
 #[derive(Clone, Copy, Debug)]

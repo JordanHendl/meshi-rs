@@ -187,12 +187,21 @@ impl DebugGui {
         let debug_mode = unsafe { bindings.debug_mode.as_ref().copied().unwrap_or(false) };
         if !debug_mode {
             self.mouse_pressed = false;
+            let mut cloud_dirty = false;
+            unsafe {
+                if let Some(clouds) = bindings.cloud_settings.as_mut() {
+                    if clouds.debug_view == CloudDebugView::Stats {
+                        clouds.debug_view = CloudDebugView::None;
+                        cloud_dirty = true;
+                    }
+                }
+            }
             return DebugGuiOutput {
                 frame: None,
                 skybox_dirty: false,
                 sky_dirty: false,
                 ocean_dirty: false,
-                cloud_dirty: false,
+                cloud_dirty,
             };
         }
 
@@ -780,7 +789,7 @@ impl DebugGui {
                         309,
                         "Debug View",
                         0.0,
-                        5.0,
+                        6.0,
                         self.slider_values.cloud_debug_view,
                     ),
                 ],
@@ -809,12 +818,13 @@ impl DebugGui {
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
-    match value.round().clamp(0.0, 5.0) as u32 {
+    match value.round().clamp(0.0, 6.0) as u32 {
         1 => CloudDebugView::WeatherMap,
         2 => CloudDebugView::ShadowMap,
         3 => CloudDebugView::Transmittance,
         4 => CloudDebugView::StepHeatmap,
         5 => CloudDebugView::TemporalWeight,
+        6 => CloudDebugView::Stats,
         _ => CloudDebugView::None,
     }
 }
