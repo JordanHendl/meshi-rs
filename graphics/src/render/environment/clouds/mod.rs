@@ -10,7 +10,8 @@ use cloud_pass_raymarch::{CloudRaymarchPass, CloudSamplingSettings};
 use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use crate::structs::{CloudResolutionScale, CloudSettings};
-use dashi::{Context, Handle, Viewport};
+use dashi::cmd::Executable;
+use dashi::{CommandStream, Context, Handle, Viewport};
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::BindlessState;
 use glam::Mat4;
@@ -135,10 +136,10 @@ impl CloudRenderer {
         viewport: &Viewport,
         camera: Handle<furikake::types::Camera>,
         delta_time: f32,
-    ) {
+    ) -> CommandStream<Executable> {
         if !self.settings.enabled {
             self.timings = CloudTimingResult::default();
-            return;
+            return CommandStream::new().begin().end();
         }
 
         let low_resolution = calc_low_res(viewport, self.settings.low_res_scale);
@@ -191,7 +192,7 @@ impl CloudRenderer {
             Ok(cameras) => cameras.camera(camera),
             Err(_) => {
                 warn!("CloudRenderer failed to access bindless cameras");
-                return;
+                return CommandStream::new().begin().end();
             }
         };
 
@@ -234,13 +235,14 @@ impl CloudRenderer {
             camera_far: camera_data.far,
         };
 
+        let mut cmd = CommandStream::new().begin();
         if self.settings.shadow.enabled {
             self.shadow_pass.update_settings(sampling, sampling.sun_direction, sampling.time);
-            self.shadow_pass.dispatch(sampling);
+            cmd = cmd.combine(self.shadow_pass.record());
         }
 
         self.raymarch_pass.update_settings(sampling);
-        self.raymarch_pass.dispatch();
+        cmd = cmd.combine(self.raymarch_pass.record());
 
         let temporal_settings = TemporalSettings {
             blend_factor: self.settings.temporal.blend_factor,
@@ -250,7 +252,7 @@ impl CloudRenderer {
 
         self.temporal_pass
             .update_params(sampling, temporal_settings, self.prev_view_proj.to_cols_array_2d());
-        self.temporal_pass.dispatch();
+        cmd = cmd.combine(self.temporal_pass.record());
 
         self.prev_view_proj = view_proj;
         self.frame_index = self.frame_index.wrapping_add(1);
@@ -279,6 +281,8 @@ impl CloudRenderer {
 //        self.timings.composite_ms = ctx
 //            .get_elapsed_gpu_time_ms(TIMER_COMPOSITE as usize)
 //            .unwrap_or(0.0);
+
+        cmd.end()
     }
 
     pub fn record_composite(

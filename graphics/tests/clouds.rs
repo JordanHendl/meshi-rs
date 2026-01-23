@@ -2,9 +2,12 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use dashi::{
-    AspectMask, BufferView, Context, ContextInfo, Format, FRect2D, ImageInfo, ImageView,
-    ImageViewType, Rect2D, SampleCount, SubresourceRange, Viewport,
+    AspectMask, BufferView, CommandQueueInfo2, Context, ContextInfo, Format, FRect2D, ImageInfo,
+    ImageView, ImageViewType, Rect2D, SampleCount, SubresourceRange, Viewport,
 };
+use dashi::cmd::Executable;
+use dashi::execution::CommandRing;
+use dashi::QueueType;
 use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
 use graphics::CloudRenderer;
 
@@ -20,10 +23,29 @@ fn hash_transmittance(ctx: &mut Context, buffer: dashi::Handle<dashi::Buffer>) -
     hasher.finish()
 }
 
+fn submit_compute(queue: &mut CommandRing, stream: dashi::CommandStream<Executable>) {
+    queue
+        .record(move |c| {
+            stream.append(c).expect("record cloud compute");
+        })
+        .expect("record cloud compute ring");
+    queue
+        .submit(&Default::default())
+        .expect("submit cloud compute");
+    queue.wait_all().expect("wait cloud compute");
+}
+
 #[test]
 fn cloud_transmittance_deterministic_and_jittered() {
     let mut ctx = Context::headless(&ContextInfo::default()).expect("create context");
     let mut state = BindlessState::new(&mut ctx);
+    let mut queue = ctx
+        .make_command_ring(&CommandQueueInfo2 {
+            debug_name: "[TEST CLOUD COMPUTE]",
+            parent: None,
+            queue_type: QueueType::Compute,
+        })
+        .expect("create cloud compute ring");
 
     let viewport = Viewport {
         area: FRect2D {
@@ -65,17 +87,22 @@ fn cloud_transmittance_deterministic_and_jittered() {
         })
         .expect("create camera");
 
-    let mut clouds_a = CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
-    clouds_a.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    let mut clouds_a =
+        CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
+    let clouds_a_cmd = clouds_a.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    submit_compute(&mut queue, clouds_a_cmd);
     let hash_a = hash_transmittance(&mut ctx, clouds_a.transmittance_buffer());
 
-    let mut clouds_b = CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
-    clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    let mut clouds_b =
+        CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
+    let clouds_b_cmd = clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    submit_compute(&mut queue, clouds_b_cmd);
     let hash_b = hash_transmittance(&mut ctx, clouds_b.transmittance_buffer());
 
     assert_eq!(hash_a, hash_b, "Cloud transmittance must be deterministic for identical inputs.");
 
-    clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    let clouds_b_cmd = clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
+    submit_compute(&mut queue, clouds_b_cmd);
     let hash_c = hash_transmittance(&mut ctx, clouds_b.transmittance_buffer());
     assert_ne!(hash_b, hash_c, "Cloud transmittance should change with frame index jitter.");
 }

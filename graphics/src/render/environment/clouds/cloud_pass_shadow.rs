@@ -1,11 +1,11 @@
 use bento::builder::CSOBuilder;
+use dashi::cmd::Executable;
 use dashi::UsageBits;
 use dashi::{
-    BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, Handle, MemoryVisibility,
-    QueueType, Sampler, SamplerInfo, ShaderResource,
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
+    ShaderResource,
 };
 use dashi::driver::command::Dispatch;
-use dashi::execution::CommandRing;
 use glam::Vec3;
 use tare::utils::StagedBuffer;
 
@@ -41,7 +41,6 @@ pub struct CloudShadowPass {
     params: StagedBuffer,
     pipeline: Option<bento::builder::CSO>,
     sampler: Handle<Sampler>,
-    queue: CommandRing,
     timer_index: u32,
 }
 
@@ -90,21 +89,12 @@ impl CloudShadowPass {
             .build(ctx)
             .ok();
 
-        let queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[CLOUD SHADOW]",
-                parent: None,
-                queue_type: QueueType::Compute,
-            })
-            .expect("create cloud shadow command ring");
-
         Self {
             shadow_buffer,
             shadow_resolution,
             params,
             pipeline,
             sampler,
-            queue,
             timer_index,
         }
     }
@@ -144,41 +134,28 @@ impl CloudShadowPass {
         params.shadow_extent = settings.shadow_extent;
     }
 
-    pub fn dispatch(&mut self, settings: CloudSamplingSettings) {
+    pub fn record(&mut self) -> CommandStream<Executable> {
         let Some(pipeline) = self.pipeline.as_ref() else {
-            return;
+            return CommandStream::new().begin().end();
         };
 
-        let shadow_resolution = settings.shadow_resolution;
-        let timer_index = self.timer_index;
-
-        self.queue
-            .record(|c| {
-                CommandStream::new_with_queue(QueueType::Compute)
-                    .begin()
-                    .combine(self.params.sync_up())
-                    .prepare_buffer(self.shadow_buffer, UsageBits::COMPUTE_SHADER)
+        let shadow_resolution = self.shadow_resolution;
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .prepare_buffer(self.shadow_buffer, UsageBits::COMPUTE_SHADER)
 //                    .gpu_timer_begin(timer_index)
-                    .dispatch(&Dispatch {
-                        x: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
-                        y: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
-                        z: 1,
-                        pipeline: pipeline.handle,
-                        bind_tables: pipeline.tables(),
-                        dynamic_buffers: Default::default(),
-                    })
-  //                  .gpu_timer_end(timer_index)
-                    .unbind_pipeline()
-                    .end()
-                    .append(c)
-                    .expect("record cloud shadow pass");
+            .dispatch(&Dispatch {
+                x: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
+                y: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
+                z: 1,
+                pipeline: pipeline.handle,
+                bind_tables: pipeline.tables(),
+                dynamic_buffers: Default::default(),
             })
-            .expect("record cloud shadow ring");
-
-        self.queue
-            .submit(&Default::default())
-            .expect("submit cloud shadow");
-        self.queue.wait_all().expect("wait cloud shadow");
+  //                  .gpu_timer_end(timer_index)
+            .unbind_pipeline()
+            .end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

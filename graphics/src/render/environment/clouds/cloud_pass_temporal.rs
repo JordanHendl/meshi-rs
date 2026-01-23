@@ -1,10 +1,9 @@
 use bento::builder::CSOBuilder;
+use dashi::cmd::Executable;
 use dashi::UsageBits;
 use dashi::driver::command::Dispatch;
-use dashi::execution::CommandRing;
 use dashi::{
-    BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, Handle, MemoryVisibility,
-    QueueType, ShaderResource,
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, ShaderResource,
 };
 use tare::utils::StagedBuffer;
 
@@ -43,7 +42,6 @@ pub struct CloudTemporalPass {
     current_depth: Handle<dashi::Buffer>,
     params: StagedBuffer,
     pipelines: [Option<bento::builder::CSO>; 2],
-    queue: CommandRing,
     timer_index: u32,
     output_resolution: [u32; 2],
     history_index: usize,
@@ -104,14 +102,6 @@ impl CloudTemporalPass {
             ),
         ];
 
-        let queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[CLOUD TEMPORAL]",
-                parent: None,
-                queue_type: QueueType::Compute,
-            })
-            .expect("create cloud temporal command ring");
-
         Self {
             history_color: buffers.history_color,
             history_transmittance: buffers.history_transmittance,
@@ -122,7 +112,6 @@ impl CloudTemporalPass {
             current_depth,
             params,
             pipelines,
-            queue,
             timer_index,
             output_resolution,
             history_index: 0,
@@ -154,66 +143,50 @@ impl CloudTemporalPass {
         };
     }
 
-    pub fn dispatch(&mut self) {
+    pub fn record(&mut self) -> CommandStream<Executable> {
         let Some(pipeline) = self.pipelines[self.history_index].as_ref() else {
-            return;
+            return CommandStream::new().begin().end();
         };
 
         let output_resolution = self.output_resolution;
-        let timer_index = self.timer_index;
         let history_read = self.history_index;
         let history_write = 1 - self.history_index;
 
-        self.queue
-            .record(|c| {
-                let mut cmd = CommandStream::new_with_queue(QueueType::Compute)
-                    .begin()
-                    .combine(self.params.sync_up())
-                    .prepare_buffer(self.current_color, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.current_transmittance, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.current_depth, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.history_color[history_read], UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(
-                        self.history_transmittance[history_read],
-                        UsageBits::COMPUTE_SHADER,
-                    )
-                    .prepare_buffer(self.history_depth[history_read], UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.history_weight[history_read], UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.history_color[history_write], UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(
-                        self.history_transmittance[history_write],
-                        UsageBits::COMPUTE_SHADER,
-                    )
-                    .prepare_buffer(self.history_depth[history_write], UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(
-                        self.history_weight[history_write],
-                        UsageBits::COMPUTE_SHADER,
-                    )
+        let cmd = CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .prepare_buffer(self.current_color, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.current_transmittance, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.current_depth, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.history_color[history_read], UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(
+                self.history_transmittance[history_read],
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.history_depth[history_read], UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.history_weight[history_read], UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.history_color[history_write], UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(
+                self.history_transmittance[history_write],
+                UsageBits::COMPUTE_SHADER,
+            )
+            .prepare_buffer(self.history_depth[history_write], UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.history_weight[history_write], UsageBits::COMPUTE_SHADER)
 //                    .gpu_timer_begin(timer_index)
-                    .dispatch(&Dispatch {
-                        x: (output_resolution[0] + TEMPORAL_WORKGROUP_SIZE - 1)
-                            / TEMPORAL_WORKGROUP_SIZE,
-                        y: (output_resolution[1] + TEMPORAL_WORKGROUP_SIZE - 1)
-                            / TEMPORAL_WORKGROUP_SIZE,
-                        z: 1,
-                        pipeline: pipeline.handle,
-                        bind_tables: pipeline.tables(),
-                        dynamic_buffers: Default::default(),
-                    })
-//                    .gpu_timer_end(timer_index)
-                    .unbind_pipeline()
-                    .end();
-
-                cmd.append(c).expect("record cloud temporal");
+            .dispatch(&Dispatch {
+                x: (output_resolution[0] + TEMPORAL_WORKGROUP_SIZE - 1) / TEMPORAL_WORKGROUP_SIZE,
+                y: (output_resolution[1] + TEMPORAL_WORKGROUP_SIZE - 1) / TEMPORAL_WORKGROUP_SIZE,
+                z: 1,
+                pipeline: pipeline.handle,
+                bind_tables: pipeline.tables(),
+                dynamic_buffers: Default::default(),
             })
-            .expect("record cloud temporal ring");
-
-        self.queue
-            .submit(&Default::default())
-            .expect("submit cloud temporal");
-        self.queue.wait_all().expect("wait cloud temporal");
+//                    .gpu_timer_end(timer_index)
+            .unbind_pipeline()
+            .end();
 
         self.history_index = history_write;
+        cmd
     }
 
     pub fn history_index(&self) -> usize {

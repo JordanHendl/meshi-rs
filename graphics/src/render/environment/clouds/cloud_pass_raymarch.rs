@@ -1,11 +1,11 @@
 use bento::builder::CSOBuilder;
+use dashi::cmd::Executable;
 use dashi::UsageBits;
 use dashi::{
-    BufferInfo, BufferUsage, CommandQueueInfo2, CommandStream, Context, Handle, MemoryVisibility,
-    QueueType, Sampler, SamplerInfo, ShaderResource,
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
+    ShaderResource,
 };
 use dashi::driver::command::Dispatch;
-use dashi::execution::CommandRing;
 use glam::{UVec3, Vec2, Vec3};
 use tare::utils::StagedBuffer;
 
@@ -94,7 +94,6 @@ pub struct CloudRaymarchPass {
     params: StagedBuffer,
     pipeline: Option<bento::builder::CSO>,
     sampler: Handle<Sampler>,
-    queue: CommandRing,
     timer_index: u32,
     output_resolution: [u32; 2],
 }
@@ -185,14 +184,6 @@ impl CloudRaymarchPass {
             .build(ctx)
             .ok();
 
-        let queue = ctx
-            .make_command_ring(&CommandQueueInfo2 {
-                debug_name: "[CLOUD RAYMARCH]",
-                parent: None,
-                queue_type: QueueType::Compute,
-            })
-            .expect("create cloud raymarch command ring");
-
         Self {
             color_buffer,
             transmittance_buffer,
@@ -201,7 +192,6 @@ impl CloudRaymarchPass {
             params,
             pipeline,
             sampler,
-            queue,
             timer_index,
             output_resolution,
         }
@@ -268,45 +258,31 @@ impl CloudRaymarchPass {
         };
     }
 
-    pub fn dispatch(&mut self) {
+    pub fn record(&mut self) -> CommandStream<Executable> {
         let Some(pipeline) = self.pipeline.as_ref() else {
-            return;
+            return CommandStream::new().begin().end();
         };
-        let timer_index = self.timer_index;
         let output_resolution = self.output_resolution;
 
-        self.queue
-            .record(|c| {
-                CommandStream::new_with_queue(QueueType::Compute)
-                    .begin()
-                    .combine(self.params.sync_up())
-                    .prepare_buffer(self.color_buffer, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.transmittance_buffer, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.depth_buffer, UsageBits::COMPUTE_SHADER)
-                    .prepare_buffer(self.steps_buffer, UsageBits::COMPUTE_SHADER)
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .prepare_buffer(self.color_buffer, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.transmittance_buffer, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.depth_buffer, UsageBits::COMPUTE_SHADER)
+            .prepare_buffer(self.steps_buffer, UsageBits::COMPUTE_SHADER)
 //                    .gpu_timer_begin(timer_index)
-                    .dispatch(&Dispatch {
-                        x: (output_resolution[0] + RAYMARCH_WORKGROUP_SIZE - 1)
-                            / RAYMARCH_WORKGROUP_SIZE,
-                        y: (output_resolution[1] + RAYMARCH_WORKGROUP_SIZE - 1)
-                            / RAYMARCH_WORKGROUP_SIZE,
-                        z: 1,
-                        pipeline: pipeline.handle,
-                        bind_tables: pipeline.tables(),
-                        dynamic_buffers: Default::default(),
-                    })
-  //                  .gpu_timer_end(timer_index)
-                    .unbind_pipeline()
-                    .end()
-                    .append(c)
-                    .expect("record cloud raymarch");
+            .dispatch(&Dispatch {
+                x: (output_resolution[0] + RAYMARCH_WORKGROUP_SIZE - 1) / RAYMARCH_WORKGROUP_SIZE,
+                y: (output_resolution[1] + RAYMARCH_WORKGROUP_SIZE - 1) / RAYMARCH_WORKGROUP_SIZE,
+                z: 1,
+                pipeline: pipeline.handle,
+                bind_tables: pipeline.tables(),
+                dynamic_buffers: Default::default(),
             })
-            .expect("record cloud raymarch ring");
-
-        self.queue
-            .submit(&Default::default())
-            .expect("submit cloud raymarch");
-        self.queue.wait_all().expect("wait cloud raymarch");
+  //                  .gpu_timer_end(timer_index)
+            .unbind_pipeline()
+            .end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

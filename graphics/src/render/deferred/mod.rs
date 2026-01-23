@@ -1251,23 +1251,24 @@ impl DeferredRenderer {
             deferred_combine_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
 
             let camera_handle = *camera;
-//            self.subrender.clouds.update(
-//                self.ctx.as_mut(),
-//                self.state.as_mut(),
-//                &self.data.viewport,
-//                camera_handle,
-//                delta_time,
-//            );
+            let mut cloud_cmd = Some(self.subrender.clouds.update(
+                self.ctx.as_mut(),
+                self.state.as_mut(),
+                &self.data.viewport,
+                camera_handle,
+                delta_time,
+            ));
 
-            self.graph.add_compute_pass(|mut cmd| {
-                cmd.combine(
-                    self.proc
-                        .draw_builder
-                        .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
-                )
-                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
+            let mut gbuffer_cmd =
+                Some(self.proc.draw_builder.build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32));
 
-                .end()
+            self.graph.add_compute_pass(move |cmd| {
+                let cmd = cmd
+                    .combine(cloud_cmd.take().unwrap_or_else(|| CommandStream::new().begin().end()))
+                    .combine(gbuffer_cmd.take().unwrap_or_else(|| CommandStream::new().begin().end()))
+                    .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
+
+                cmd.end()
             });
 
             // Deferred SPLIT pass. Renders the following framebuffers:
