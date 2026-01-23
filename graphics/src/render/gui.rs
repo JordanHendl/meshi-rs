@@ -1,7 +1,7 @@
 use bento::builder::{AttachmentDesc, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use bytemuck::{Pod, Zeroable};
-use dashi::cmd::PendingGraphics;
+use dashi::cmd::{PendingGraphics, Recording};
 use dashi::driver::command::Draw;
 use dashi::{
     BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
@@ -257,8 +257,6 @@ impl GuiRenderer {
         &mut self,
         viewport: &Viewport,
     ) -> CommandStream<PendingGraphics> {
-        
-        let s: &mut Self= unsafe{&mut *(self as *mut Self) };
         let cmd = CommandStream::<PendingGraphics>::subdraw();
         let Some(pso) = self.gui_pso.as_ref() else {
             error!("Failed to build gui without a gui pso");
@@ -278,15 +276,19 @@ impl GuiRenderer {
                 return graphics_cmd.unbind_graphics_pipeline();
             }
 
-            graphics_cmd = graphics_cmd.update_viewport(viewport).draw(&Draw {
-                bind_tables,
-                count: self.mesh_range.index_count as u32,
-                instance_count: 1,
-                ..Default::default()
-            });
+            graphics_cmd = graphics_cmd
+                .combine(self.sync_mesh_range(self.mesh_range))
+                .update_viewport(viewport)
+                .draw(&Draw {
+                    bind_tables,
+                    count: self.mesh_range.index_count as u32,
+                    instance_count: 1,
+                    ..Default::default()
+                });
         } else {
-            for batch in &self.batch_meshes {
-                let range = Self::upload_mesh_inner(s, &batch.mesh);
+            let batches = std::mem::take(&mut self.batch_meshes);
+            for batch in &batches {
+                let range = self.upload_mesh_inner(&batch.mesh);
                 if range.index_count == 0 {
                     continue;
                 }
@@ -298,13 +300,17 @@ impl GuiRenderer {
                     .unwrap_or(viewport.scissor);
                 let batch_viewport = Viewport { scissor, ..*viewport };
 
-                graphics_cmd = graphics_cmd.update_viewport(&batch_viewport).draw(&Draw {
-                    bind_tables,
-                    count: range.index_count as u32,
-                    instance_count: 1,
-                    ..Default::default()
-                });
+                graphics_cmd = graphics_cmd
+                    .combine(self.sync_mesh_range(range))
+                    .update_viewport(&batch_viewport)
+                    .draw(&Draw {
+                        bind_tables,
+                        count: range.index_count as u32,
+                        instance_count: 1,
+                        ..Default::default()
+                    });
             }
+            self.batch_meshes = batches;
         }
 
         graphics_cmd.unbind_graphics_pipeline()
@@ -361,6 +367,28 @@ impl GuiRenderer {
         let object = self.objects.get_ref_mut(handle);
         object.visible = visible;
         object.dirty = true;
+    }
+
+    fn sync_mesh_range(&self, range: GuiMeshRange) -> CommandStream<Recording> {
+        let Some(vertex_buffer) = self.vertex_buffer.as_ref() else {
+            return CommandStream::new().begin();
+        };
+        let Some(index_buffer) = self.index_buffer.as_ref() else {
+            return CommandStream::new().begin();
+        };
+
+        let mut stream = CommandStream::new().begin();
+        let vertex_bytes = (range.vertex_count * std::mem::size_of::<GuiVertex>()) as u32;
+        if vertex_bytes > 0 {
+            stream = stream.combine(vertex_buffer.sync_up_range(0, vertex_bytes));
+        }
+
+        let index_bytes = (range.index_count * std::mem::size_of::<u32>()) as u32;
+        if index_bytes > 0 {
+            stream = stream.combine(index_buffer.sync_up_range(0, index_bytes));
+        }
+
+        stream
     }
 }
 

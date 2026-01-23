@@ -23,7 +23,9 @@ VSOutput main(uint vertex_id : SV_VertexID) {
     VSOutput output;
     const uint index = gui_indices[vertex_id];
     const GuiVertex vertex = gui_vertices[index];
-    output.position = float4(vertex.position, 0.0, 1.0);
+    float2 position = vertex.position;
+    position.y = -position.y;
+    output.position = float4(position, 0.0, 1.0);
     output.tex_coords = vertex.uv;
     output.color = vertex.color;
     output.texture_id = vertex.texture_id;

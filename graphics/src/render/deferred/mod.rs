@@ -13,33 +13,33 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{
-    render::scene::*, BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject,
-};
 use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
-use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
+use crate::{
+    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
+};
+use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
+use furikake::PSOBuilderFurikakeExt;
+use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
-use furikake::reservations::ReservedBinding;
 use furikake::types::AnimationState as FurikakeAnimationState;
-use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
-    types::VertexBufferSlot, types::*, BindlessState,
+    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
+    types::VertexBufferSlot, types::*,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
+use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
-use noren::DB;
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
@@ -1551,11 +1551,11 @@ impl DeferredRenderer {
                         cmd = c.unbind_graphics_pipeline();
                     }
 
-                    cmd = cmd.combine(
+                    cmd = cmd.combine(self.gui.render_gui(&self.data.viewport));
+                    cmd.combine(
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.data.viewport),
-                    );
-                    cmd.combine(self.gui.render_gui(&self.data.viewport))
+                    )
                 },
             );
 

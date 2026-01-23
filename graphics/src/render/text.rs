@@ -59,6 +59,7 @@ pub struct TextRenderer {
     frame_draws: Vec<TextDraw>,
     frame_dirty: bool,
     sdf_fonts: HashMap<String, DeviceSDFFont>,
+    default_sdf_font: Option<String>,
     db: Option<NonNull<DB>>,
     text_pso: Option<bento::builder::PSO>,
     glyph_buffer: Option<DashiHandle<Buffer>>,
@@ -81,6 +82,7 @@ impl TextRenderer {
             frame_draws: Vec::new(),
             frame_dirty: false,
             sdf_fonts: HashMap::new(),
+            default_sdf_font: None,
             db: None,
             text_pso: None,
             glyph_buffer: None,
@@ -90,6 +92,8 @@ impl TextRenderer {
 
     pub fn initialize_database(&mut self, db: &mut DB) {
         self.db = Some(NonNull::new(db).expect("lmao"));
+        let fonts = db.enumerate_sdf_fonts();
+        self.default_sdf_font = fonts.into_iter().next();
     }
 
     pub fn initialize_renderer(
@@ -209,14 +213,28 @@ impl TextRenderer {
         }
     }
 
-    fn build_text_glyphs(&self, draws: &[TextDraw], viewport: &Viewport) -> Vec<TextGlyph> {
+    fn build_text_glyphs(&mut self, draws: &[TextDraw], viewport: &Viewport) -> Vec<TextGlyph> {
         let mut glyphs = Vec::new();
         let screen_w = viewport.area.w.max(1.0);
         let screen_h = viewport.area.h.max(1.0);
 
         for draw in draws {
-            let TextDrawMode::Sdf { font, .. } = &draw.mode else {
-                continue;
+            let default_font = self.default_sdf_font.clone();
+            let font = match &draw.mode {
+                TextDrawMode::Sdf { font_entry, font } => font.clone().or_else(|| {
+                    if font_entry.is_empty() {
+                        None
+                    } else {
+                        self.fetch_sdf_font(font_entry)
+                    }
+                }),
+                TextDrawMode::Plain => default_font.as_ref().and_then(|entry| {
+                    if entry.is_empty() {
+                        None
+                    } else {
+                        self.fetch_sdf_font(entry)
+                    }
+                }),
             };
             let Some(font) = font else {
                 continue;
