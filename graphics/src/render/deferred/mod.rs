@@ -102,6 +102,7 @@ struct DataProcessors {
     scene: GPUScene,
     skinning: SkinningDispatcher,
     draw_builder: GPUDrawBuilder,
+    terrain_draw_builder: GPUDrawBuilder,
 }
 
 struct Renderers {
@@ -112,6 +113,7 @@ struct Renderers {
 struct DeferredPSO {
     pipelines: HashMap<Handle<Material>, PSO>,
     standard: PSO,
+    terrain: PSO,
     billboard: PSO,
     combine_pso: PSO,
 }
@@ -146,7 +148,8 @@ struct RenderObjectData {
 
 #[derive(Clone)]
 struct TerrainObjectEntry {
-    handle: Handle<RenderObject>,
+    scene_handle: Handle<SceneObject>,
+    draws: Vec<Handle<PerDrawData>>,
     content_hash: u64,
     geometry_entry: String,
     material_handle: Handle<Material>,
@@ -370,6 +373,17 @@ impl DeferredRenderer {
                 },
                 state.as_mut(),
             ),
+            terrain_draw_builder: GPUDrawBuilder::new(
+                &GPUDrawBuilderInfo {
+                    name: "[MESHI] Deferred Terrain Draw Builder",
+                    ctx: ctx.as_mut(),
+                    cull_results,
+                    bin_counts,
+                    num_bins,
+                    ..Default::default()
+                },
+                state.as_mut(),
+            ),
         };
 
         let clouds = CloudRenderer::new(
@@ -388,6 +402,13 @@ impl DeferredRenderer {
             pipelines: Default::default(),
             combine_pso: pso,
             standard: Self::build_pipeline(
+                ctx.as_mut(),
+                &mut state,
+                info.sample_count,
+                &proc,
+                &data,
+            ),
+            terrain: Self::build_terrain_pipeline(
                 ctx.as_mut(),
                 &mut state,
                 info.sample_count,
@@ -485,6 +506,57 @@ impl DeferredRenderer {
 
         assert!(s.bind_table[0].is_some());
         assert!(s.bind_table[1].is_some());
+
+        state.register_pso_tables(&s);
+        s
+    }
+
+    fn build_terrain_pipeline(
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        sample_count: SampleCount,
+        proc: &DataProcessors,
+        data: &RendererData,
+    ) -> PSO {
+        let shaders = miso::gpudeferred(&[]);
+
+        let s = PSOBuilder::new()
+            .set_debug_name("[MESHI] Deferred Terrain")
+            .vertex_compiled(Some(shaders[0].clone()))
+            .fragment_compiled(Some(shaders[1].clone()))
+            .add_table_variable_with_resources(
+                "per_draw_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::StorageBuffer(
+                        proc.terrain_draw_builder.per_draw_data().into(),
+                    ),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "per_scene_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(data.dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_reserved_table_variables(state)
+            .unwrap()
+            .add_depth_target(AttachmentDesc {
+                format: Format::D24S8,
+                samples: sample_count,
+            })
+            .set_details(GraphicsPipelineDetails {
+                color_blend_states: vec![Default::default(); 4],
+                sample_count,
+                depth_test: Some(DepthInfo {
+                    should_test: true,
+                    should_write: true,
+                }),
+                ..Default::default()
+            })
+            .build(ctx)
+            .expect("Failed to build terrain pipeline!");
 
         state.register_pso_tables(&s);
         s
@@ -1343,6 +1415,11 @@ impl DeferredRenderer {
                             .draw_builder
                             .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                     )
+                    .combine(
+                        self.proc
+                            .terrain_draw_builder
+                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                    )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
                 cmd.end()
@@ -1382,31 +1459,46 @@ impl DeferredRenderer {
                         .unwrap()
                         .binding();
 
-                    match indices {
+                    let indices_handle = match indices {
                         ReservedBinding::TableBinding {
                             binding: _,
                             resources,
                         } => match resources[0].resource {
-                            ShaderResource::StorageBuffer(view) => {
-                                return cmd
-                                    .bind_graphics_pipeline(self.psos.standard.handle)
-                                    .update_viewport(&self.data.viewport)
-                                    .draw_indexed_indirect(&DrawIndexedIndirect {
-                                        indices: view.handle,
-                                        indirect: self.proc.draw_builder.draw_list(),
-                                        bind_tables: self.psos.standard.tables(),
-                                        dynamic_buffers: [None, None, Some(alloc), None],
-                                        draw_count: self.proc.draw_builder.draw_count(),
-                                        ..Default::default()
-                                    })
-                                    .unbind_graphics_pipeline();
-                            }
-                            _ => (),
+                            ShaderResource::StorageBuffer(view) => Some(view.handle),
+                            _ => None,
                         },
-                        _ => (),
-                    }
+                        _ => None,
+                    };
 
-                    return cmd;
+                    let Some(indices_handle) = indices_handle else {
+                        return cmd;
+                    };
+
+                    cmd = cmd
+                        .bind_graphics_pipeline(self.psos.standard.handle)
+                        .update_viewport(&self.data.viewport)
+                        .draw_indexed_indirect(&DrawIndexedIndirect {
+                            indices: indices_handle,
+                            indirect: self.proc.draw_builder.draw_list(),
+                            bind_tables: self.psos.standard.tables(),
+                            dynamic_buffers: [None, None, Some(alloc), None],
+                            draw_count: self.proc.draw_builder.draw_count(),
+                            ..Default::default()
+                        })
+                        .unbind_graphics_pipeline()
+                        .bind_graphics_pipeline(self.psos.terrain.handle)
+                        .update_viewport(&self.data.viewport)
+                        .draw_indexed_indirect(&DrawIndexedIndirect {
+                            indices: indices_handle,
+                            indirect: self.proc.terrain_draw_builder.draw_list(),
+                            bind_tables: self.psos.terrain.tables(),
+                            dynamic_buffers: [None, None, Some(alloc), None],
+                            draw_count: self.proc.terrain_draw_builder.draw_count(),
+                            ..Default::default()
+                        })
+                        .unbind_graphics_pipeline();
+
+                    cmd
                 },
             );
 
@@ -1608,7 +1700,9 @@ impl DeferredRenderer {
         for object in objects {
             if let Some(entry) = self.data.terrain_objects.get(&object.key).cloned() {
                 if entry.content_hash == object.artifact.content_hash {
-                    self.set_object_transform(entry.handle, &object.transform);
+                    self.proc
+                        .scene
+                        .set_object_transform(entry.scene_handle, &object.transform);
                     continue;
                 }
 
@@ -1623,31 +1717,38 @@ impl DeferredRenderer {
                 continue;
             };
 
-            match self.register_object(&RenderObjectInfo::Model(model)) {
-                Ok(handle) => {
-                    self.set_object_transform(handle, &object.transform);
-                    self.data.terrain_objects.insert(
-                        object.key.clone(),
-                        TerrainObjectEntry {
-                            handle,
-                            content_hash: object.artifact.content_hash,
-                            geometry_entry,
-                            material_handle,
-                        },
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to register terrain render object '{}': {err:?}",
-                        object.key
-                    );
-                }
-            }
+            let (scene_handle, transform_handle) =
+                self.proc.scene.register_object(&SceneObjectInfo {
+                    local: Default::default(),
+                    global: Default::default(),
+                    scene_mask: PassMask::OPAQUE_GEOMETRY as u32,
+                    scene_type: SceneNodeType::Renderable,
+                });
+
+            self.proc
+                .scene
+                .set_object_transform(scene_handle, &object.transform);
+
+            let draws = self.register_terrain_draws(&model, scene_handle, transform_handle);
+
+            self.data.terrain_objects.insert(
+                object.key.clone(),
+                TerrainObjectEntry {
+                    scene_handle,
+                    draws,
+                    content_hash: object.artifact.content_hash,
+                    geometry_entry,
+                    material_handle,
+                },
+            );
         }
     }
 
     fn release_terrain_entry(&mut self, entry: &TerrainObjectEntry) {
-        self.release_object(entry.handle);
+        self.proc.scene.release_object(entry.scene_handle);
+        for draw in &entry.draws {
+            self.proc.terrain_draw_builder.release_draw(*draw);
+        }
 
         if entry.material_handle.valid() {
             self.state
@@ -1670,6 +1771,34 @@ impl DeferredRenderer {
                 entry.geometry_entry
             );
         }
+    }
+
+    fn register_terrain_draws(
+        &mut self,
+        model: &DeviceModel,
+        scene_handle: Handle<SceneObject>,
+        transform_handle: Handle<Transformation>,
+    ) -> Vec<Handle<PerDrawData>> {
+        model
+            .meshes
+            .iter()
+            .map(|mesh| {
+                self.proc.terrain_draw_builder.register_draw(&PerDrawData {
+                    scene_id: scene_handle,
+                    transform_id: transform_handle,
+                    material_id: mesh
+                        .material
+                        .as_ref()
+                        .and_then(|material| material.furikake_material_handle)
+                        .unwrap_or_default(),
+                    vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                    vertex_count: mesh.geometry.base.vertex_count,
+                    index_id: mesh.geometry.base.furikake_index_id.unwrap(),
+                    index_count: mesh.geometry.base.index_count.unwrap(),
+                    ..Default::default()
+                })
+            })
+            .collect()
     }
 
     fn build_terrain_model(
