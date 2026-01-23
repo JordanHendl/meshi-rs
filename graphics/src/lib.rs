@@ -69,6 +69,7 @@ pub struct RenderEngine {
     pending_gui_frame: Option<gui::GuiFrame>,
     sky_settings: SkyFrameSettings,
     skybox_settings: SkyboxFrameSettings,
+    ocean_settings: OceanFrameSettings,
     cloud_settings: CloudSettings,
 }
 
@@ -158,6 +159,7 @@ impl RenderEngine {
             pending_gui_frame: None,
             sky_settings: SkyFrameSettings::default(),
             skybox_settings: SkyboxFrameSettings::default(),
+            ocean_settings: OceanFrameSettings::default(),
             cloud_settings,
         })
     }
@@ -214,6 +216,7 @@ impl RenderEngine {
     }
 
     pub fn set_ocean_settings(&mut self, settings: OceanFrameSettings) {
+        self.ocean_settings = settings;
         self.renderer.set_ocean_settings(settings);
     }
 
@@ -465,6 +468,8 @@ impl RenderEngine {
             debug_mode: &mut self.debug_mode as *mut bool,
             skybox_settings: &mut self.skybox_settings as *mut SkyboxFrameSettings,
             sky_settings: &mut self.sky_settings as *mut SkyFrameSettings,
+            ocean_settings: &mut self.ocean_settings as *mut OceanFrameSettings,
+            cloud_settings: &mut self.cloud_settings as *mut CloudSettings,
         };
         let debug_output = self
             .debug_gui
@@ -476,6 +481,14 @@ impl RenderEngine {
         }
         if debug_output.sky_dirty {
             self.renderer.set_sky_settings(self.sky_settings.clone());
+        }
+        if debug_output.ocean_dirty {
+            self.renderer
+                .set_ocean_settings(self.ocean_settings.clone());
+        }
+        if debug_output.cloud_dirty {
+            self.renderer
+                .set_cloud_settings(self.cloud_settings.clone());
         }
 
         let mut gui_frame = self.pending_gui_frame.take().unwrap_or_default();
