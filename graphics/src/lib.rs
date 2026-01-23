@@ -3,6 +3,7 @@ mod render;
 pub mod structs;
 pub(crate) mod utils;
 
+use crate::gui::debug::{DebugGui, DebugGuiBindings};
 use dashi::driver::command::*;
 use dashi::execution::CommandRing;
 use dashi::utils::Pool;
@@ -14,14 +15,15 @@ use dashi::{
 };
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use meshi_ffi_structs::*;
 use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
 pub use render::environment::clouds::CloudRenderer;
 pub use render::environment::ocean::OceanFrameSettings;
-pub use render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
+pub use render::environment::sky::SkyFrameSettings;
+pub use render::environment::sky::SkyboxFrameSettings;
 pub use render::environment::terrain::TerrainRenderObject;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
@@ -62,6 +64,12 @@ pub struct RenderEngine {
     frame_timer: FrameTimer,
     environment_lighting: Option<EnvironmentLightingState>,
     debug_mode: bool,
+    renderer_select: RendererSelect,
+    debug_gui: DebugGui,
+    pending_gui_frame: Option<gui::GuiFrame>,
+    sky_settings: SkyFrameSettings,
+    skybox_settings: SkyboxFrameSettings,
+    cloud_settings: CloudSettings,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +120,8 @@ impl RenderEngine {
             sample_count,
         };
 
-        let mut renderer: Box<dyn Renderer> = match info.renderer {
+        let renderer_select = info.renderer;
+        let mut renderer: Box<dyn Renderer> = match renderer_select {
             RendererSelect::Deferred => Box::new(DeferredRenderer::new(&renderer_info)),
             RendererSelect::Forward => Box::new(ForwardRenderer::new(&renderer_info)),
         };
@@ -131,6 +140,8 @@ impl RenderEngine {
             })
             .expect("Failed to make render queue");
 
+        let cloud_settings = renderer.cloud_settings();
+
         Ok(Self {
             displays: Pool::new(8),
             renderer,
@@ -142,6 +153,12 @@ impl RenderEngine {
             frame_timer: FrameTimer::new(60),
             environment_lighting: None,
             debug_mode: info.debug_mode,
+            renderer_select,
+            debug_gui: DebugGui::new(),
+            pending_gui_frame: None,
+            sky_settings: SkyFrameSettings::default(),
+            skybox_settings: SkyboxFrameSettings::default(),
+            cloud_settings,
         })
     }
 
@@ -175,16 +192,24 @@ impl RenderEngine {
             .imagery_mut()
             .fetch_gpu_cubemap(entry)
         {
-            Ok(cubemap) => self.renderer.set_skybox_cubemap(cubemap),
+            Ok(cubemap) => {
+                let mut settings = self.skybox_settings.clone();
+                settings.cubemap = Some(cubemap);
+                settings.use_procedural_cubemap = false;
+                self.skybox_settings = settings.clone();
+                self.renderer.set_skybox_settings(settings);
+            }
             Err(err) => warn!("Failed to load skybox cubemap '{entry}': {err:?}"),
         }
     }
 
     pub fn set_skybox_settings(&mut self, settings: SkyboxFrameSettings) {
+        self.skybox_settings = settings.clone();
         self.renderer.set_skybox_settings(settings);
     }
 
     pub fn set_sky_settings(&mut self, settings: SkyFrameSettings) {
+        self.sky_settings = settings.clone();
         self.renderer.set_sky_settings(settings);
     }
 
@@ -193,6 +218,7 @@ impl RenderEngine {
     }
 
     pub fn set_environment_lighting(&mut self, settings: EnvironmentLightingSettings) {
+        self.sky_settings = settings.sky.clone();
         let sky_settings = settings.sky.clone();
         let (sun_direction, moon_direction) = resolve_sun_moon_direction(&sky_settings);
         let sun_info = directional_light_info(
@@ -321,11 +347,12 @@ impl RenderEngine {
     }
 
     pub fn cloud_settings(&self) -> CloudSettings {
-        self.renderer.cloud_settings()
+        self.cloud_settings
     }
 
     pub fn set_cloud_settings(&mut self, settings: CloudSettings) {
-        self.renderer.set_cloud_settings(settings);
+        self.cloud_settings = settings;
+        self.renderer.set_cloud_settings(self.cloud_settings);
     }
 
     pub fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
@@ -368,7 +395,7 @@ impl RenderEngine {
     }
 
     pub fn upload_gui_frame(&mut self, frame: gui::GuiFrame) {
-        self.renderer.upload_gui_frame(frame);
+        self.pending_gui_frame = Some(frame);
     }
 
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
@@ -384,6 +411,7 @@ impl RenderEngine {
         use winit::platform::run_return::EventLoopExtRunReturn;
 
         let mut triggered = false;
+        let debug_gui_ptr = &mut self.debug_gui as *mut DebugGui;
 
         if let Some(cb) = self.event_cb.as_mut() {
             self.displays.for_each_occupied_mut(|dis| {
@@ -393,6 +421,9 @@ impl RenderEngine {
                         *control_flow = ControlFlow::Exit;
                         if let Some(mut e) = event::from_winit_event(&event) {
                             triggered = true;
+                            unsafe {
+                                (*debug_gui_ptr).handle_event(&e);
+                            }
                             let c = cb.event_cb;
                             c(&mut e, cb.user_data);
                         }
@@ -411,7 +442,11 @@ impl RenderEngine {
                     let event_loop = display.winit_event_loop();
                     event_loop.run_return(|event, _target, control_flow| {
                         *control_flow = ControlFlow::Exit;
-                        if let Some(mut _e) = event::from_winit_event(&event) {}
+                        if let Some(e) = event::from_winit_event(&event) {
+                            unsafe {
+                                (*debug_gui_ptr).handle_event(&e);
+                            }
+                        }
                     });
                 }
             });
@@ -420,6 +455,36 @@ impl RenderEngine {
 
     pub fn update(&mut self, delta_time: f32) {
         self.publish_events();
+        let viewport = self.renderer.viewport();
+        let viewport_size = Vec2::new(viewport.area.w, viewport.area.h);
+        let renderer_label = match self.renderer_select {
+            RendererSelect::Deferred => "Deferred",
+            RendererSelect::Forward => "Forward",
+        };
+        let bindings = DebugGuiBindings {
+            debug_mode: &mut self.debug_mode as *mut bool,
+            skybox_settings: &mut self.skybox_settings as *mut SkyboxFrameSettings,
+            sky_settings: &mut self.sky_settings as *mut SkyFrameSettings,
+        };
+        let debug_output = self
+            .debug_gui
+            .build_frame(viewport_size, renderer_label, bindings);
+
+        if debug_output.skybox_dirty {
+            self.renderer
+                .set_skybox_settings(self.skybox_settings.clone());
+        }
+        if debug_output.sky_dirty {
+            self.renderer.set_sky_settings(self.sky_settings.clone());
+        }
+
+        let mut gui_frame = self.pending_gui_frame.take().unwrap_or_default();
+        if let Some(mut debug_frame) = debug_output.frame {
+            gui_frame.batches.append(&mut debug_frame.batches);
+            gui_frame.text_draws.append(&mut debug_frame.text_draws);
+        }
+        self.renderer.upload_gui_frame(gui_frame);
+
         let mut views = Vec::new();
         let mut seen = HashSet::new();
 
@@ -857,5 +922,9 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon { -Vec3::Y } else { Vec3::Y }
+    if is_moon {
+        -Vec3::Y
+    } else {
+        Vec3::Y
+    }
 }

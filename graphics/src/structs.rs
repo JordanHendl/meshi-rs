@@ -401,7 +401,7 @@ pub fn pack_gpu_light(s: LightInfo) -> Light {
 
     out
 }
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum RendererSelect {
     #[default]
     Deferred,

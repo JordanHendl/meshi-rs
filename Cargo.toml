@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["plugin", "graphics", "physics", "audio", "utils", "ffi_structs", "editor"]
+members = [
+    "plugin",
+    "graphics",
+    "physics",
+    "audio",
+    "utils",
+    "ffi_structs",
+    "editor",
+    "tools/terrain_editor",
+]
 
 #[package]
 #name = "meshi"

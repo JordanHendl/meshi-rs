@@ -6,24 +6,24 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::{
-    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
-    RenderObjectInfo, TextInfo, TextObject, render::scene::*,
+    render::scene::*, AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject,
+    RenderObject, RenderObjectInfo, TextInfo, TextObject,
 };
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
 use driver::command::{DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
-    types::*,
+    reservations::bindless_materials::ReservedBindlessMaterials, types::Material, types::*,
+    BindlessState,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
-    DB,
     meta::{DeviceModel, HostMaterial},
+    DB,
 };
 use resource_pool::resource_list::ResourceList;
 use std::{collections::HashMap, ptr::NonNull};
@@ -674,6 +674,10 @@ impl ForwardRenderer {
 }
 
 impl Renderer for ForwardRenderer {
+    fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
     fn context(&mut self) -> &'static mut Context {
         unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
     }

@@ -4424,6 +4424,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "terrain-editor"
+version = "0.1.0"
+dependencies = [
+ "dashi",
+ "glam 0.29.3",
+ "meshi-ffi-structs",
+ "meshi-graphics",
+ "meshi-utils",
+ "noren",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

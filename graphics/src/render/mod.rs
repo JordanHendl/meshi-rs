@@ -14,7 +14,7 @@ use crate::{
     TextObject,
 };
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{BindlessState, types::Camera, types::Material};
+use furikake::{types::Camera, types::Material, BindlessState};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::DB;
@@ -84,6 +84,7 @@ impl FrameTimer {
 }
 
 pub trait Renderer {
+    fn viewport(&self) -> Viewport;
     fn context(&mut self) -> &'static mut Context;
     fn state(&mut self) -> &mut BindlessState;
     fn initialize_database(&mut self, db: &mut DB);

@@ -1,7 +1,7 @@
 use std::env::args;
 use std::ffi::c_void;
 
-use glam::{Vec2, Vec4, vec2};
+use glam::{vec2, Vec2, Vec4};
 use meshi_ffi_structs::event::*;
 use meshi_graphics::gui::{
     GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarLayout,
@@ -75,10 +75,6 @@ fn main() {
     tracing_subscriber::fmt::init();
     let args: Vec<String> = args().collect();
     let renderer = common_setup::renderer_from_args(&args, RendererSelect::Deferred);
-    let renderer_label = match renderer {
-        RendererSelect::Deferred => "Deferred",
-        RendererSelect::Forward => "Forward",
-    };
     let mut setup = common_setup::init(
         "meshi-gfx-gui",
         [960, 600],
@@ -121,17 +117,9 @@ fn main() {
     });
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum DebugTab {
-        Graphics,
-        Physics,
-        Audio,
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum DragTarget {
         MainPanel,
         SliderPanel,
-        DebugPanel,
     }
 
     struct AppData {
@@ -139,25 +127,17 @@ fn main() {
         cursor: Vec2,
         mouse_pressed: bool,
         mouse_down: bool,
-        control_down: bool,
-        debug_toggle_requested: bool,
         menu_state: MenuBarState,
         menu_layout: MenuBarLayout,
         menu_feedback: Option<String>,
         menu_feedback_until: f32,
         panel_position: Vec2,
         slider_panel_position: Vec2,
-        debug_panel_position: Vec2,
         drag_target: Option<DragTarget>,
         drag_offset: Vec2,
         slider_state: SliderState,
         slider_layout: SliderLayout,
         slider_values: SliderValues,
-        debug_mode: bool,
-        debug_tab: DebugTab,
-        debug_slider_state: SliderState,
-        debug_slider_layout: SliderLayout,
-        debug_values: DebugValues,
     }
 
     #[derive(Clone, Copy)]
@@ -167,19 +147,11 @@ fn main() {
         hover_boost: f32,
     }
 
-    #[derive(Clone, Copy)]
-    struct DebugValues {
-        background_brightness: f32,
-        title_bar_alpha: f32,
-    }
-
     let mut data = AppData {
         running: true,
         cursor: Vec2::ZERO,
         mouse_pressed: false,
         mouse_down: false,
-        control_down: false,
-        debug_toggle_requested: false,
         menu_state: MenuBarState {
             open_menu: None,
             hovered_menu: None,
@@ -190,7 +162,6 @@ fn main() {
         menu_feedback_until: 0.0,
         panel_position: vec2(32.0, 64.0),
         slider_panel_position: vec2(360.0, 100.0),
-        debug_panel_position: vec2(560.0, 60.0),
         drag_target: None,
         drag_offset: Vec2::ZERO,
         slider_state: SliderState::default(),
@@ -199,14 +170,6 @@ fn main() {
             panel_opacity: 0.92,
             image_scale: 1.0,
             hover_boost: 1.06,
-        },
-        debug_mode: false,
-        debug_tab: DebugTab::Graphics,
-        debug_slider_state: SliderState::default(),
-        debug_slider_layout: SliderLayout::default(),
-        debug_values: DebugValues {
-            background_brightness: 1.0,
-            title_bar_alpha: 0.9,
         },
     };
 
@@ -232,18 +195,7 @@ fn main() {
             if e.source() == EventSource::Key {
                 if e.event_type() == EventType::Pressed {
                     match e.key() {
-                        KeyCode::Control => r.control_down = true,
-                        KeyCode::GraveAccent => {
-                            if r.control_down {
-                                r.debug_toggle_requested = true;
-                            }
-                        }
                         _ => {}
-                    }
-                }
-                if e.event_type() == EventType::Released {
-                    if e.key() == KeyCode::Control {
-                        r.control_down = false;
                     }
                 }
             }
@@ -323,12 +275,6 @@ fn main() {
         let dt = (now - last_time).min(1.0 / 30.0);
         last_time = now;
 
-        if data.debug_toggle_requested {
-            data.debug_toggle_requested = false;
-            data.debug_mode = !data.debug_mode;
-            setup.engine.set_debug_mode(data.debug_mode);
-        }
-
         let panel_position = data.panel_position;
         let panel_size = vec2(300.0, 220.0);
         let title_bar_height = 32.0;
@@ -354,7 +300,7 @@ fn main() {
             0.18,
             (0.92 * pulse) * data.slider_values.panel_opacity,
         );
-        let title_bar_alpha = data.debug_values.title_bar_alpha.clamp(0.6, 1.0);
+        let title_bar_alpha = 0.9;
         let title_bar_color = if data.mouse_down && title_bar_hovered {
             Vec4::new(0.28, 0.32, 0.4, 0.95 * title_bar_alpha)
         } else if title_bar_hovered {
@@ -425,28 +371,14 @@ fn main() {
         });
         data.slider_state.hovered = hovered_slider.map(|item| item.id);
 
-        let hovered_debug_slider = if data.debug_mode && data.debug_tab == DebugTab::Graphics {
-            data.debug_slider_layout.items.iter().find(|item| {
-                item.enabled
-                    && (point_in_menu_rect(data.cursor, item.track_rect)
-                        || point_in_menu_rect(data.cursor, item.knob_rect))
-            })
-        } else {
-            None
-        };
-        data.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
-
         if data.mouse_pressed {
-            if let Some(item) = hovered_debug_slider {
-                data.debug_slider_state.active = Some(item.id);
-            } else if let Some(item) = hovered_slider {
+            if let Some(item) = hovered_slider {
                 data.slider_state.active = Some(item.id);
             }
         }
 
         if !data.mouse_down {
             data.slider_state.active = None;
-            data.debug_slider_state.active = None;
         }
 
         if let Some(active_id) = data.slider_state.active {
@@ -462,23 +394,6 @@ fn main() {
                     PANEL_OPACITY_SLIDER => data.slider_values.panel_opacity = value,
                     IMAGE_SCALE_SLIDER => data.slider_values.image_scale = value,
                     HOVER_BOOST_SLIDER => data.slider_values.hover_boost = value,
-                    _ => {}
-                }
-            }
-        }
-
-        if let Some(active_id) = data.debug_slider_state.active {
-            if let Some(item) = data
-                .debug_slider_layout
-                .items
-                .iter()
-                .find(|item| item.id == active_id && item.enabled)
-            {
-                let value =
-                    slider_value_from_cursor(data.cursor, item.track_rect, item.min, item.max);
-                match active_id {
-                    101 => data.debug_values.background_brightness = value,
-                    102 => data.debug_values.title_bar_alpha = value,
                     _ => {}
                 }
             }
@@ -516,28 +431,6 @@ fn main() {
         let slider_title_hovered =
             point_in_rect(data.cursor, slider_title_bar_pos, slider_title_bar_size);
 
-        let debug_panel_size = vec2(340.0, 260.0);
-        let debug_title_bar_height = 28.0;
-        let debug_panel_position = data.debug_panel_position;
-        let debug_title_bar_pos = debug_panel_position;
-        let debug_title_bar_size = vec2(debug_panel_size.x, debug_title_bar_height);
-        let debug_title_hovered =
-            point_in_rect(data.cursor, debug_title_bar_pos, debug_title_bar_size);
-        if data.debug_mode && data.mouse_pressed {
-            let tab_height = 26.0;
-            let tab_width = (debug_panel_size.x - 24.0) / 3.0;
-            let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0;
-            let tab_x = debug_panel_position.x + 12.0;
-            let tabs = [DebugTab::Graphics, DebugTab::Physics, DebugTab::Audio];
-            for (index, tab) in tabs.iter().enumerate() {
-                let tab_pos = vec2(tab_x + tab_width * index as f32, tab_y);
-                let tab_size = vec2(tab_width - 6.0, tab_height);
-                if point_in_rect(data.cursor, tab_pos, tab_size) {
-                    data.debug_tab = *tab;
-                }
-            }
-        }
-
         if data.mouse_pressed {
             if title_bar_hovered {
                 data.drag_target = Some(DragTarget::MainPanel);
@@ -545,9 +438,6 @@ fn main() {
             } else if slider_title_hovered {
                 data.drag_target = Some(DragTarget::SliderPanel);
                 data.drag_offset = data.cursor - slider_panel_position;
-            } else if data.debug_mode && debug_title_hovered {
-                data.drag_target = Some(DragTarget::DebugPanel);
-                data.drag_offset = data.cursor - debug_panel_position;
             }
         }
 
@@ -561,7 +451,6 @@ fn main() {
                 match target {
                     DragTarget::MainPanel => data.panel_position = new_pos,
                     DragTarget::SliderPanel => data.slider_panel_position = new_pos,
-                    DragTarget::DebugPanel => data.debug_panel_position = new_pos,
                 }
             }
         }
@@ -615,8 +504,7 @@ fn main() {
             ),
         ];
 
-        let background_color = Vec4::new(0.05, 0.05, 0.07, 1.0)
-            * data.debug_values.background_brightness.clamp(0.5, 1.4);
+        let background_color = Vec4::new(0.05, 0.05, 0.07, 1.0);
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Background,
             None,
@@ -701,118 +589,6 @@ fn main() {
 
         let slider_layout = gui.submit_sliders(&sliders, &slider_options);
 
-        let mut debug_slider_layout = SliderLayout::default();
-        if data.debug_mode {
-            gui.submit_draw(GuiDraw::new(
-                GuiLayer::Overlay,
-                None,
-                quad_from_pixels(
-                    debug_panel_position,
-                    debug_panel_size,
-                    Vec4::new(0.08, 0.1, 0.14, 0.88),
-                    viewport,
-                ),
-            ));
-            gui.submit_draw(GuiDraw::new(
-                GuiLayer::Overlay,
-                None,
-                quad_from_pixels(
-                    debug_title_bar_pos,
-                    debug_title_bar_size,
-                    Vec4::new(0.18, 0.22, 0.3, 0.95 * title_bar_alpha),
-                    viewport,
-                ),
-            ));
-            gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-                text: "Debug".to_string(),
-                position: [debug_title_bar_pos.x + 12.0, debug_title_bar_pos.y + 6.0],
-                color: Vec4::new(0.92, 0.95, 1.0, 1.0).to_array(),
-                scale: 0.95,
-            });
-
-            let tab_height = 26.0;
-            let tab_width = (debug_panel_size.x - 24.0) / 3.0;
-            let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0;
-            let tab_x = debug_panel_position.x + 12.0;
-            let tabs = [
-                (DebugTab::Graphics, "Graphics"),
-                (DebugTab::Physics, "Physics"),
-                (DebugTab::Audio, "Audio"),
-            ];
-            for (index, (tab, label)) in tabs.iter().enumerate() {
-                let tab_pos = vec2(tab_x + tab_width * index as f32, tab_y);
-                let tab_size = vec2(tab_width - 6.0, tab_height);
-                let selected = data.debug_tab == *tab;
-                let tab_color = if selected {
-                    Vec4::new(0.22, 0.28, 0.38, 0.96)
-                } else {
-                    Vec4::new(0.12, 0.16, 0.22, 0.9)
-                };
-                gui.submit_draw(GuiDraw::new(
-                    GuiLayer::Overlay,
-                    None,
-                    quad_from_pixels(tab_pos, tab_size, tab_color, viewport),
-                ));
-                gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-                    text: (*label).to_string(),
-                    position: [tab_pos.x + 10.0, tab_pos.y + 6.0],
-                    color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
-                    scale: 0.85,
-                });
-            }
-
-            if data.debug_tab == DebugTab::Graphics {
-                let text_start = vec2(debug_panel_position.x + 16.0, tab_y + tab_height + 12.0);
-                gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-                    text: format!("Renderer: {renderer_label}"),
-                    position: [text_start.x, text_start.y],
-                    color: Vec4::new(0.85, 0.9, 0.98, 1.0).to_array(),
-                    scale: 0.9,
-                });
-                gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-                    text: format!("Debug mode: {}", data.debug_mode),
-                    position: [text_start.x, text_start.y + 18.0],
-                    color: Vec4::new(0.75, 0.8, 0.9, 1.0).to_array(),
-                    scale: 0.85,
-                });
-
-                let debug_slider_options = SliderRenderOptions {
-                    viewport: [viewport.x, viewport.y],
-                    position: [debug_panel_position.x, text_start.y + 40.0],
-                    size: [
-                        debug_panel_size.x,
-                        debug_panel_size.y - (text_start.y - debug_panel_position.y) - 52.0,
-                    ],
-                    layer: GuiLayer::Overlay,
-                    metrics: SliderMetrics {
-                        item_height: 26.0,
-                        item_gap: 8.0,
-                        ..SliderMetrics::default()
-                    },
-                    colors: SliderColors::default(),
-                    state: data.debug_slider_state,
-                };
-
-                let debug_sliders = [
-                    Slider::new(
-                        101,
-                        "Background",
-                        0.6,
-                        1.4,
-                        data.debug_values.background_brightness,
-                    ),
-                    Slider::new(
-                        102,
-                        "Title Alpha",
-                        0.6,
-                        1.0,
-                        data.debug_values.title_bar_alpha,
-                    ),
-                ];
-                debug_slider_layout = gui.submit_sliders(&debug_sliders, &debug_slider_options);
-            }
-        }
-
         let frame = gui.build_frame();
         setup.engine.upload_gui_frame(frame);
 
@@ -869,7 +645,6 @@ fn main() {
 
         data.menu_layout = menu_layout;
         data.slider_layout = slider_layout;
-        data.debug_slider_layout = debug_slider_layout;
         data.mouse_pressed = false;
         setup.engine.update(dt);
     }

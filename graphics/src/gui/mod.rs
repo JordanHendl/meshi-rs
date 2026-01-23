@@ -6,6 +6,8 @@
 //! - **Draw submission**: submit [`GuiDraw`] records each frame for rendering.
 //! - **Frame build**: generate a sorted, batched mesh for GPU upload.
 
+pub mod debug;
+
 use std::ops::Range;
 
 use crate::render::gui::{GuiMesh, GuiVertex};

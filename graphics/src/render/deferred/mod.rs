@@ -15,6 +15,7 @@ use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
@@ -23,13 +24,18 @@ use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
+use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
+use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::AnimationState as FurikakeAnimationState;
-use furikake::{BindlessState, types::Material, types::*};
+use furikake::types::*;
+use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::DB;
-use noren::meta::DeviceModel;
+use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
+use noren::rdb::primitives::Vertex;
+use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
@@ -1623,6 +1629,10 @@ impl DeferredRenderer {
 }
 
 impl Renderer for DeferredRenderer {
+    fn viewport(&self) -> Viewport {
+        self.data.viewport
+    }
+
     fn context(&mut self) -> &'static mut Context {
         unsafe { &mut (*(self.ctx.as_mut() as *mut Context)) }
     }

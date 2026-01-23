@@ -6,6 +6,7 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo};
+use meshi_physics::SimulationInfo;
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
 use meshi_utils::timer::Timer;
