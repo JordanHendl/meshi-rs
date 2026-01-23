@@ -70,6 +70,22 @@ layout(set = 0, binding = 13) buffer CloudStepsBuffer {
 layout(set = 1, binding = 1) readonly buffer SceneCameras {
     Camera cameras[];
 } meshi_bindless_cameras;
+struct Light {
+    vec4 position_type;
+    vec4 direction_range;
+    vec4 color_intensity;
+    vec4 spot_area;
+    vec4 extra;
+};
+
+layout(set = 1, binding = 2) readonly buffer SceneLights {
+    Light lights[];
+} meshi_bindless_lights;
+
+const float LIGHT_TYPE_DIRECTIONAL = 0.0;
+const float LIGHT_TYPE_POINT = 1.0;
+const float LIGHT_TYPE_SPOT = 2.0;
+const float LIGHT_TYPE_RECT = 3.0;
 
 float sample_noise(texture2D tex, sampler samp, vec3 p, uvec3 dims) {
     vec3 fp = fract(p);
@@ -132,6 +148,36 @@ float light_march(vec3 origin, vec3 dir, float max_dist, uint steps, float sigma
         }
     }
     return trans;
+}
+
+vec3 light_direction(Light light, vec3 sample_pos, out float attenuation, out float max_dist, out float spot_factor) {
+    float light_type = light.position_type.w;
+    spot_factor = 1.0;
+    if (light_type == LIGHT_TYPE_DIRECTIONAL) {
+        vec3 dir = light.direction_range.xyz;
+        float dir_len = length(dir);
+        attenuation = 1.0;
+        max_dist = 5000.0;
+        return dir_len > 0.0 ? normalize(dir) : vec3(0.0, -1.0, 0.0);
+    }
+
+    vec3 to_light = light.position_type.xyz - sample_pos;
+    float distance = length(to_light);
+    vec3 light_dir = distance > 0.0 ? to_light / distance : vec3(0.0, 1.0, 0.0);
+    float range = max(light.direction_range.w, 0.001);
+    float falloff = clamp(1.0 - (distance / range), 0.0, 1.0);
+    attenuation = falloff * falloff;
+    max_dist = distance;
+
+    if (light_type == LIGHT_TYPE_SPOT) {
+        vec3 spot_dir = normalize(light.direction_range.xyz);
+        float inner = light.spot_area.x;
+        float outer = light.spot_area.y;
+        float spot_cos = dot(normalize(-light_dir), spot_dir);
+        spot_factor = smoothstep(outer, inner, spot_cos);
+    }
+
+    return light_dir;
 }
 
 void main() {
@@ -211,14 +257,35 @@ void main() {
         if (density > 0.001) {
             float sigma_t = density * params.density_scale;
             float step_trans = exp(-sigma_t * step_size);
-            float light_trans = 1.0;
-            if (params.use_shadow_map == 1u) {
-                light_trans = sample_shadow(sample_pos, params.shadow_extent, params.shadow_resolution) * params.shadow_strength;
+            vec3 scatter = vec3(0.0);
+            int light_count = meshi_bindless_lights.lights.length();
+            if (light_count == 0) {
+                float phase = phase_hg(dot(ray_dir, normalize(params.sun_direction)), params.phase_g);
+                float light_trans = light_march(sample_pos, params.sun_direction, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
+                scatter = params.sun_radiance * phase * light_trans;
             } else {
-                light_trans = light_march(sample_pos, params.sun_direction, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
+                for (int light_index = 0; light_index < light_count; ++light_index) {
+                    Light light = meshi_bindless_lights.lights[light_index];
+                    float light_type = light.position_type.w;
+                    if (light_type < 0.0) {
+                        continue;
+                    }
+                    float attenuation;
+                    float max_dist;
+                    float spot_factor;
+                    vec3 light_dir = light_direction(light, sample_pos, attenuation, max_dist, spot_factor);
+                    float light_trans = 1.0;
+                    vec3 sun_dir = normalize(params.sun_direction);
+                    if (params.use_shadow_map == 1u && light_type == LIGHT_TYPE_DIRECTIONAL && dot(light_dir, sun_dir) > 0.95) {
+                        light_trans = sample_shadow(sample_pos, params.shadow_extent, params.shadow_resolution) * params.shadow_strength;
+                    } else {
+                        light_trans = light_march(sample_pos, light_dir, max_dist, params.light_step_count, sigma_t, params.shadow_strength);
+                    }
+                    float phase = phase_hg(dot(ray_dir, light_dir), params.phase_g);
+                    vec3 light_color = light.color_intensity.rgb * light.color_intensity.w;
+                    scatter += light_color * phase * light_trans * attenuation * spot_factor;
+                }
             }
-            float phase = phase_hg(dot(ray_dir, params.sun_direction), params.phase_g);
-            vec3 scatter = params.sun_radiance * phase * light_trans;
             color += transmittance * scatter * (1.0 - step_trans);
             transmittance *= step_trans;
             float forward_dot = max(dot(ray_dir, camera_forward), 0.0);

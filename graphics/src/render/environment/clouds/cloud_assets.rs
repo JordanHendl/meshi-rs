@@ -165,9 +165,9 @@ fn create_weather_map(
             let idx = ((y * size + x) * 4) as usize;
             let nx = x as f32 / size as f32;
             let ny = y as f32 / size as f32;
-            let coverage = (0.6 + 0.4 * (nx * 12.3).sin() * (ny * 9.7).cos()).clamp(0.0, 1.0);
-            let cloud_type = (0.5 + 0.5 * (nx * 4.1 + ny * 3.3).sin()).clamp(0.0, 1.0);
-            let thickness = (0.7 + 0.3 * (nx * 7.9 + ny * 6.2).cos()).clamp(0.0, 1.0);
+            let coverage = fbm_2d(nx, ny, 2.0, 4, 0x1bad_cafe).powf(1.15);
+            let cloud_type = fbm_2d(nx, ny, 1.3, 3, 0x55aa_22ff);
+            let thickness = fbm_2d(nx, ny, 3.1, 4, 0x0ddc_4411).powf(0.9);
             let channels = [
                 (coverage * 255.0) as u8,
                 (cloud_type * 255.0) as u8,
@@ -230,4 +230,52 @@ fn hash_noise(x: u32, y: u32, z: u32, seed: u32) -> u32 {
         ^ seed.wrapping_mul(3266489917);
     v = (v ^ (v >> 13)).wrapping_mul(1274126177);
     v ^ (v >> 16)
+}
+
+fn hash_to_unit(v: u32) -> f32 {
+    v as f32 / u32::MAX as f32
+}
+
+fn smoothstep(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn value_noise_2d(x: f32, y: f32, freq: f32, seed: u32) -> f32 {
+    let xf = x * freq;
+    let yf = y * freq;
+    let x0 = xf.floor() as u32;
+    let y0 = yf.floor() as u32;
+    let x1 = x0.wrapping_add(1);
+    let y1 = y0.wrapping_add(1);
+    let fx = xf - x0 as f32;
+    let fy = yf - y0 as f32;
+    let u = smoothstep(fx);
+    let v = smoothstep(fy);
+
+    let h00 = hash_to_unit(hash_noise(x0, y0, 0, seed));
+    let h10 = hash_to_unit(hash_noise(x1, y0, 0, seed));
+    let h01 = hash_to_unit(hash_noise(x0, y1, 0, seed));
+    let h11 = hash_to_unit(hash_noise(x1, y1, 0, seed));
+
+    let hx0 = h00 + (h10 - h00) * u;
+    let hx1 = h01 + (h11 - h01) * u;
+    hx0 + (hx1 - hx0) * v
+}
+
+fn fbm_2d(x: f32, y: f32, base_freq: f32, octaves: u32, seed: u32) -> f32 {
+    let mut total = 0.0;
+    let mut amplitude = 1.0;
+    let mut max = 0.0;
+    let mut freq = base_freq;
+    for octave in 0..octaves {
+        total += value_noise_2d(x, y, freq, seed.wrapping_add(octave)) * amplitude;
+        max += amplitude;
+        amplitude *= 0.5;
+        freq *= 2.0;
+    }
+    if max > 0.0 {
+        total / max
+    } else {
+        0.0
+    }
 }

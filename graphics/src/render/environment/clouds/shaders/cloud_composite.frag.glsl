@@ -201,5 +201,5 @@ void main() {
     }
 
     float alpha = 1.0 - trans;
-    frag_color = vec4(color.rgb, alpha);
+    frag_color = vec4(color.rgb * alpha, alpha);
 }

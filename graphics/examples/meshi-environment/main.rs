@@ -1,8 +1,6 @@
 use std::ffi::c_void;
 
-use dashi::{
-    AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange,
-};
+use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
@@ -45,10 +43,8 @@ fn main() {
         _cloud_weather_map: ImageView,
     }
 
-    let cloud_weather_map = create_cloud_test_map(setup.engine.context(), 256);
-    setup
-        .engine
-        .set_cloud_weather_map(Some(cloud_weather_map));
+    let cloud_weather_map = create_cloud_test_map(setup.engine.context(), 128);
+    setup.engine.set_cloud_weather_map(Some(cloud_weather_map));
 
     let mut data = AppData {
         running: true,
@@ -177,9 +173,14 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
             let idx = ((y * size + x) * 4) as usize;
             let nx = x as f32 / size as f32;
             let ny = y as f32 / size as f32;
-            let coverage = (0.5 + 0.5 * (nx * 6.0).sin() * (ny * 5.0).cos()).clamp(0.0, 1.0);
-            let cloud_type = (0.5 + 0.5 * (nx * 3.0 + ny * 2.0).cos()).clamp(0.0, 1.0);
-            let thickness = (0.6 + 0.4 * (nx * 8.0 + ny * 4.0).sin()).clamp(0.0, 1.0);
+            let base_variation = (0.5 + 0.5 * (nx * 6.5).sin() * (ny * 4.5).cos()).clamp(0.0, 1.0);
+            let overcast = (0.82 + 0.18 * base_variation).clamp(0.0, 1.0);
+            let split_width = 0.08;
+            let split_edge = ((nx - 0.5).abs() / split_width).clamp(0.0, 1.0);
+            let split_mask = split_edge * split_edge * (3.0 - 2.0 * split_edge);
+            let coverage = (overcast * (0.25 + 0.75 * split_mask)).clamp(0.0, 1.0);
+            let cloud_type = (0.6 + 0.4 * (nx * 2.5 + ny * 1.7).cos()).clamp(0.0, 1.0);
+            let thickness = (0.78 + 0.22 * (nx * 7.0 + ny * 3.5).sin()).clamp(0.0, 1.0);
             data[idx] = (coverage * 255.0) as u8;
             data[idx + 1] = (cloud_type * 255.0) as u8;
             data[idx + 2] = (thickness * 255.0) as u8;

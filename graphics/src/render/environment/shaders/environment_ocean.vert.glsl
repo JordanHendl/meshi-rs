@@ -183,9 +183,9 @@ void main() {
     uint local_vertex = gl_VertexIndex % 6;
     uint quad_x = quad_index % (grid_resolution - 1);
     uint quad_y = quad_index / (grid_resolution - 1);
-    vec2 quad_origin = vec2(quad_x, quad_y) / float(grid_resolution - 1);
-    vec2 quad_size = vec2(1.0 / float(grid_resolution - 1));
-    vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
+    float grid_scale = 1.0 / float(grid_resolution - 1);
+    vec2 base_quad_origin = vec2(quad_x, quad_y) * grid_scale;
+    vec2 base_quad_size = vec2(grid_scale);
     uint base_radius = max(params.base_tile_radius, 1);
     uint max_radius = max(params.max_tile_radius, base_radius);
     float height_step = max(params.tile_height_step, 0.001);
@@ -213,13 +213,40 @@ void main() {
     float tile_size = max(base_patch_size * 2.0, 0.001);
     vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * tile_size;
     vec2 snapped_origin = camera_position();
-    vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
-    vec2 world = local + snapped_origin + tile_offset;
+    vec2 quad_center_uv = base_quad_origin + base_quad_size * 0.5;
+    vec2 quad_center_local = (quad_center_uv * 2.0 - 1.0) * base_patch_size;
+    vec2 quad_center_world = quad_center_local + snapped_origin + tile_offset;
     vec3 camera_world = camera_position_world();
-    float distance = length(world - camera_world.xz);
+    float distance = length(quad_center_world - camera_world.xz);
     float near_range = params.cascade_blend_ranges.x;
     float mid_range = params.cascade_blend_ranges.y;
     float far_range = params.cascade_blend_ranges.z;
+    uint lod_step = 1;
+    if (distance > mid_range) {
+        lod_step = 4;
+    } else if (distance > near_range) {
+        lod_step = 2;
+    }
+    lod_step = min(lod_step, grid_resolution - 1);
+    if (lod_step > 1) {
+        if ((quad_x % lod_step) != 0 || (quad_y % lod_step) != 0) {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            v_uv = vec2(0.0);
+            v_normal = vec3(0.0, 1.0, 0.0);
+            v_view_dir = vec3(0.0);
+            v_world_pos = vec3(0.0);
+            v_velocity = 0.0;
+            return;
+        }
+    }
+    uint quad_limit = grid_resolution - 1;
+    uint quad_end_x = min(quad_x + lod_step, quad_limit);
+    uint quad_end_y = min(quad_y + lod_step, quad_limit);
+    vec2 quad_origin = vec2(quad_x, quad_y) * grid_scale;
+    vec2 quad_size = vec2(float(quad_end_x - quad_x), float(quad_end_y - quad_y)) * grid_scale;
+    vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
+    vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
+    vec2 world = local + snapped_origin + tile_offset;
     float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
     float w_far = smoothstep(mid_range, far_range, distance);
     float w_mid = clamp(1.0 - w_near - w_far, 0.0, 1.0);

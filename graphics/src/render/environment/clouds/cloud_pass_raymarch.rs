@@ -167,6 +167,8 @@ impl CloudRaymarchPass {
                 .shader(Some(include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes()))
                 .add_reserved_table_variable(state, "meshi_bindless_cameras")
                 .unwrap()
+                .add_reserved_table_variable(state, "meshi_bindless_lights")
+                .unwrap()
                 .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
                 .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
                 .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
