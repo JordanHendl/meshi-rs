@@ -1,11 +1,12 @@
 use std::env::args;
 use std::ffi::c_void;
 
-use glam::{vec2, Vec2, Vec4};
+use glam::{Vec2, Vec4, vec2};
 use meshi_ffi_structs::event::*;
 use meshi_graphics::gui::{
     GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarLayout,
-    MenuBarRenderOptions, MenuBarState, MenuItem, MenuRect, Slider, SliderColors, SliderLayout,
+    MenuBarRenderOptions, MenuBarState, MenuItem, MenuRect, Panel, PanelColors, PanelInteraction,
+    PanelMetrics, PanelRenderOptions, PanelState, Slider, SliderColors, SliderLayout,
     SliderMetrics, SliderRenderOptions, SliderState,
 };
 use meshi_graphics::{RendererSelect, TextInfo};
@@ -116,12 +117,6 @@ fn main() {
         render_mode: text_render_mode.clone(),
     });
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum DragTarget {
-        MainPanel,
-        SliderPanel,
-    }
-
     struct AppData {
         running: bool,
         cursor: Vec2,
@@ -131,10 +126,8 @@ fn main() {
         menu_layout: MenuBarLayout,
         menu_feedback: Option<String>,
         menu_feedback_until: f32,
-        panel_position: Vec2,
-        slider_panel_position: Vec2,
-        drag_target: Option<DragTarget>,
-        drag_offset: Vec2,
+        main_panel: PanelState,
+        slider_panel: PanelState,
         slider_state: SliderState,
         slider_layout: SliderLayout,
         slider_values: SliderValues,
@@ -160,10 +153,8 @@ fn main() {
         menu_layout: MenuBarLayout::default(),
         menu_feedback: None,
         menu_feedback_until: 0.0,
-        panel_position: vec2(32.0, 64.0),
-        slider_panel_position: vec2(360.0, 100.0),
-        drag_target: None,
-        drag_offset: Vec2::ZERO,
+        main_panel: PanelState::new([32.0, 64.0], [300.0, 220.0]),
+        slider_panel: PanelState::new([360.0, 100.0], [260.0, 240.0]),
         slider_state: SliderState::default(),
         slider_layout: SliderLayout::default(),
         slider_values: SliderValues {
@@ -275,61 +266,6 @@ fn main() {
         let dt = (now - last_time).min(1.0 / 30.0);
         last_time = now;
 
-        let panel_position = data.panel_position;
-        let panel_size = vec2(300.0, 220.0);
-        let title_bar_height = 32.0;
-        let title_bar_pos = panel_position;
-        let title_bar_size = vec2(panel_size.x, title_bar_height);
-        let title_bar_hovered = point_in_rect(data.cursor, title_bar_pos, title_bar_size);
-        let base_button_size = vec2(140.0, 44.0);
-        let button_a_pos = panel_position + vec2(24.0, 72.0);
-        let button_b_pos = panel_position + vec2(24.0, 132.0);
-
-        let hover_a = point_in_rect(data.cursor, button_a_pos, base_button_size);
-        let hover_b = point_in_rect(data.cursor, button_b_pos, base_button_size);
-        let hover_scale = if hover_a || hover_b {
-            data.slider_values.hover_boost
-        } else {
-            1.0
-        };
-
-        let pulse = (now * 2.0).sin() * 0.1 + 0.9;
-        let panel_color = Vec4::new(
-            0.12,
-            0.14,
-            0.18,
-            (0.92 * pulse) * data.slider_values.panel_opacity,
-        );
-        let title_bar_alpha = 0.9;
-        let title_bar_color = if data.mouse_down && title_bar_hovered {
-            Vec4::new(0.28, 0.32, 0.4, 0.95 * title_bar_alpha)
-        } else if title_bar_hovered {
-            Vec4::new(0.22, 0.26, 0.34, 0.92 * title_bar_alpha)
-        } else {
-            Vec4::new(0.18, 0.2, 0.26, 0.9 * title_bar_alpha)
-        };
-
-        let button_color = |hovered: bool| {
-            if hovered {
-                Vec4::new(0.3, 0.7, 1.0, 0.95)
-            } else {
-                Vec4::new(0.2, 0.25, 0.3, 0.9)
-            }
-        };
-
-        let button_size = base_button_size * hover_scale;
-        let button_a_draw_pos = button_a_pos - (button_size - base_button_size) * 0.5;
-        let button_b_draw_pos = button_b_pos - (button_size - base_button_size) * 0.5;
-
-        let image_base_pos = vec2(380.0, 140.0);
-        let image_motion = vec2((now * 1.4).sin() * 12.0, (now * 0.9).cos() * 6.0);
-        let image_pos = image_base_pos + image_motion;
-        let image_size = vec2(220.0, 160.0) * data.slider_values.image_scale;
-        let clip_rect = GuiClipRect::from_position_size(
-            [image_base_pos.x + 16.0, image_base_pos.y + 16.0],
-            [188.0, 120.0],
-        );
-
         let hovered_tab = data
             .menu_layout
             .menu_tabs
@@ -364,40 +300,6 @@ fn main() {
         }
 
         let clicked_open_menu = data.menu_layout.open_menu.map(|open_menu| open_menu.rect);
-        let hovered_slider = data.slider_layout.items.iter().find(|item| {
-            item.enabled
-                && (point_in_menu_rect(data.cursor, item.track_rect)
-                    || point_in_menu_rect(data.cursor, item.knob_rect))
-        });
-        data.slider_state.hovered = hovered_slider.map(|item| item.id);
-
-        if data.mouse_pressed {
-            if let Some(item) = hovered_slider {
-                data.slider_state.active = Some(item.id);
-            }
-        }
-
-        if !data.mouse_down {
-            data.slider_state.active = None;
-        }
-
-        if let Some(active_id) = data.slider_state.active {
-            if let Some(item) = data
-                .slider_layout
-                .items
-                .iter()
-                .find(|item| item.id == active_id && item.enabled)
-            {
-                let value =
-                    slider_value_from_cursor(data.cursor, item.track_rect, item.min, item.max);
-                match active_id {
-                    PANEL_OPACITY_SLIDER => data.slider_values.panel_opacity = value,
-                    IMAGE_SCALE_SLIDER => data.slider_values.image_scale = value,
-                    HOVER_BOOST_SLIDER => data.slider_values.hover_boost = value,
-                    _ => {}
-                }
-            }
-        }
 
         if data.mouse_pressed {
             if let Some(menu_index) = hovered_tab {
@@ -423,38 +325,6 @@ fn main() {
             }
         }
 
-        let slider_panel_position = data.slider_panel_position;
-        let slider_panel_size = vec2(260.0, 240.0);
-        let slider_title_bar_height = 28.0;
-        let slider_title_bar_pos = slider_panel_position;
-        let slider_title_bar_size = vec2(slider_panel_size.x, slider_title_bar_height);
-        let slider_title_hovered =
-            point_in_rect(data.cursor, slider_title_bar_pos, slider_title_bar_size);
-
-        if data.mouse_pressed {
-            if title_bar_hovered {
-                data.drag_target = Some(DragTarget::MainPanel);
-                data.drag_offset = data.cursor - panel_position;
-            } else if slider_title_hovered {
-                data.drag_target = Some(DragTarget::SliderPanel);
-                data.drag_offset = data.cursor - slider_panel_position;
-            }
-        }
-
-        if !data.mouse_down {
-            data.drag_target = None;
-        }
-
-        if let Some(target) = data.drag_target {
-            if data.mouse_down {
-                let new_pos = data.cursor - data.drag_offset;
-                match target {
-                    DragTarget::MainPanel => data.panel_position = new_pos,
-                    DragTarget::SliderPanel => data.slider_panel_position = new_pos,
-                }
-            }
-        }
-
         let mut gui = GuiContext::new();
         let menu_options = MenuBarRenderOptions {
             viewport: [viewport.x, viewport.y],
@@ -465,21 +335,6 @@ fn main() {
             state: data.menu_state,
         };
 
-        let slider_options = SliderRenderOptions {
-            viewport: [viewport.x, viewport.y],
-            position: [
-                slider_panel_position.x,
-                slider_panel_position.y + slider_title_bar_height,
-            ],
-            size: [
-                slider_panel_size.x,
-                slider_panel_size.y - slider_title_bar_height,
-            ],
-            layer: GuiLayer::Overlay,
-            metrics: SliderMetrics::default(),
-            colors: SliderColors::default(),
-            state: data.slider_state,
-        };
         let sliders = [
             Slider::new(
                 PANEL_OPACITY_SLIDER,
@@ -513,81 +368,188 @@ fn main() {
 
         let menu_layout = gui.submit_menu_bar(&menu_bar, &menu_options);
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::World,
-            None,
-            quad_from_pixels(panel_position, panel_size, panel_color, viewport),
-        ));
+        let panel_interaction = PanelInteraction {
+            cursor: [data.cursor.x, data.cursor.y],
+            mouse_pressed: data.mouse_pressed,
+            mouse_down: data.mouse_down,
+        };
+        let main_panel = Panel::new("Controls");
+        let slider_panel = Panel::new("Sliders");
+        let main_panel_metrics = PanelMetrics::default();
+        let mut main_panel_colors = PanelColors::default();
+        let pulse = (now * 2.0).sin() * 0.1 + 0.9;
+        main_panel_colors.background[3] = (0.92 * pulse) * data.slider_values.panel_opacity;
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::World,
-            None,
-            quad_from_pixels(title_bar_pos, title_bar_size, title_bar_color, viewport),
-        ));
-        gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-            text: "Controls".to_string(),
-            position: [title_bar_pos.x + 12.0, title_bar_pos.y + 8.0],
-            color: Vec4::new(0.95, 0.97, 1.0, 1.0).to_array(),
-            scale: 1.0,
-        });
+        let main_panel_layout = gui.submit_panel(
+            &main_panel,
+            &mut data.main_panel,
+            &PanelRenderOptions {
+                viewport: [viewport.x, viewport.y],
+                layer: GuiLayer::World,
+                interaction: panel_interaction,
+                metrics: main_panel_metrics,
+                colors: main_panel_colors,
+                allow_close: true,
+                allow_minimize: true,
+                show_shadow: true,
+                show_outline: true,
+            },
+        );
+        let slider_panel_layout = gui.submit_panel(
+            &slider_panel,
+            &mut data.slider_panel,
+            &PanelRenderOptions {
+                viewport: [viewport.x, viewport.y],
+                layer: GuiLayer::Overlay,
+                interaction: panel_interaction,
+                metrics: PanelMetrics {
+                    title_bar_height: 28.0,
+                    title_text_offset: [34.0, 6.0],
+                    grip_size: [20.0, 28.0],
+                    button_text_scale: 0.85,
+                    ..PanelMetrics::default()
+                },
+                colors: PanelColors {
+                    background: [0.1, 0.15, 0.2, 0.2],
+                    title_bar: [0.16, 0.2, 0.28, 0.9],
+                    title_bar_hover: [0.2, 0.25, 0.33, 0.92],
+                    title_bar_active: [0.24, 0.3, 0.38, 0.95],
+                    grip: [0.12, 0.16, 0.22, 0.7],
+                    grip_dots: [0.32, 0.38, 0.52, 0.9],
+                    ..PanelColors::default()
+                },
+                allow_close: true,
+                allow_minimize: true,
+                show_shadow: true,
+                show_outline: true,
+            },
+        );
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::World,
-            None,
-            quad_from_pixels(
-                button_a_draw_pos,
-                button_size,
-                button_color(hover_a),
-                viewport,
-            ),
-        ));
+        let show_panel_content = main_panel_layout.show_content();
+        let content_origin = Vec2::new(
+            main_panel_layout.content_rect.min[0],
+            main_panel_layout.content_rect.min[1],
+        );
+        let base_button_size = vec2(140.0, 44.0);
+        let button_a_pos = content_origin + vec2(24.0, 40.0);
+        let button_b_pos = content_origin + vec2(24.0, 100.0);
+        let hover_a =
+            show_panel_content && point_in_rect(data.cursor, button_a_pos, base_button_size);
+        let hover_b =
+            show_panel_content && point_in_rect(data.cursor, button_b_pos, base_button_size);
+        let hover_scale = if hover_a || hover_b {
+            data.slider_values.hover_boost
+        } else {
+            1.0
+        };
+        let button_color = |hovered: bool| {
+            if hovered {
+                Vec4::new(0.3, 0.7, 1.0, 0.95)
+            } else {
+                Vec4::new(0.2, 0.25, 0.3, 0.9)
+            }
+        };
+        let button_size = base_button_size * hover_scale;
+        let button_a_draw_pos = button_a_pos - (button_size - base_button_size) * 0.5;
+        let button_b_draw_pos = button_b_pos - (button_size - base_button_size) * 0.5;
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::World,
-            None,
-            quad_from_pixels(
-                button_b_draw_pos,
-                button_size,
-                button_color(hover_b),
-                viewport,
-            ),
-        ));
+        let image_base_pos = content_origin + vec2(348.0, 44.0);
+        let image_motion = vec2((now * 1.4).sin() * 12.0, (now * 0.9).cos() * 6.0);
+        let image_pos = image_base_pos + image_motion;
+        let image_size = vec2(220.0, 160.0) * data.slider_values.image_scale;
+        let clip_rect = GuiClipRect::from_position_size(
+            [image_base_pos.x + 16.0, image_base_pos.y + 16.0],
+            [188.0, 120.0],
+        );
 
-        gui.submit_draw(GuiDraw::with_clip_rect(
-            GuiLayer::World,
-            Some(0),
-            quad_from_pixels(image_pos, image_size, Vec4::ONE, viewport),
-            clip_rect,
-        ));
+        if show_panel_content {
+            gui.submit_draw(GuiDraw::new(
+                GuiLayer::World,
+                None,
+                quad_from_pixels(
+                    button_a_draw_pos,
+                    button_size,
+                    button_color(hover_a),
+                    viewport,
+                ),
+            ));
+            gui.submit_draw(GuiDraw::new(
+                GuiLayer::World,
+                None,
+                quad_from_pixels(
+                    button_b_draw_pos,
+                    button_size,
+                    button_color(hover_b),
+                    viewport,
+                ),
+            ));
+            gui.submit_draw(GuiDraw::with_clip_rect(
+                GuiLayer::World,
+                Some(0),
+                quad_from_pixels(image_pos, image_size, Vec4::ONE, viewport),
+                clip_rect,
+            ));
+        }
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::Overlay,
-            None,
-            quad_from_pixels(
-                slider_panel_position,
-                slider_panel_size,
-                Vec4::new(0.1, 0.15, 0.2, 0.2),
-                viewport,
-            ),
-        ));
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::Overlay,
-            None,
-            quad_from_pixels(
-                slider_title_bar_pos,
-                slider_title_bar_size,
-                Vec4::new(0.16, 0.2, 0.28, 0.9 * title_bar_alpha),
-                viewport,
-            ),
-        ));
-        gui.submit_text(meshi_graphics::gui::GuiTextDraw {
-            text: "Sliders".to_string(),
-            position: [slider_title_bar_pos.x + 12.0, slider_title_bar_pos.y + 6.0],
-            color: Vec4::new(0.9, 0.93, 1.0, 1.0).to_array(),
-            scale: 0.95,
-        });
+        let slider_content_rect = slider_panel_layout.content_rect;
+        let slider_content_size = [
+            slider_content_rect.max[0] - slider_content_rect.min[0],
+            slider_content_rect.max[1] - slider_content_rect.min[1],
+        ];
+        let slider_options = SliderRenderOptions {
+            viewport: [viewport.x, viewport.y],
+            position: [slider_content_rect.min[0], slider_content_rect.min[1]],
+            size: slider_content_size,
+            layer: GuiLayer::Overlay,
+            metrics: SliderMetrics::default(),
+            colors: SliderColors::default(),
+            state: data.slider_state,
+        };
 
-        let slider_layout = gui.submit_sliders(&sliders, &slider_options);
+        let hovered_slider = if slider_panel_layout.show_content() {
+            data.slider_layout.items.iter().find(|item| {
+                item.enabled
+                    && (point_in_menu_rect(data.cursor, item.track_rect)
+                        || point_in_menu_rect(data.cursor, item.knob_rect))
+            })
+        } else {
+            None
+        };
+        data.slider_state.hovered = hovered_slider.map(|item| item.id);
+
+        if data.mouse_pressed {
+            if let Some(item) = hovered_slider {
+                data.slider_state.active = Some(item.id);
+            }
+        }
+
+        if !data.mouse_down {
+            data.slider_state.active = None;
+        }
+
+        if let Some(active_id) = data.slider_state.active {
+            if let Some(item) = data
+                .slider_layout
+                .items
+                .iter()
+                .find(|item| item.id == active_id && item.enabled)
+            {
+                let value =
+                    slider_value_from_cursor(data.cursor, item.track_rect, item.min, item.max);
+                match active_id {
+                    PANEL_OPACITY_SLIDER => data.slider_values.panel_opacity = value,
+                    IMAGE_SCALE_SLIDER => data.slider_values.image_scale = value,
+                    HOVER_BOOST_SLIDER => data.slider_values.hover_boost = value,
+                    _ => {}
+                }
+            }
+        }
+
+        let slider_layout = if slider_panel_layout.show_content() {
+            gui.submit_sliders(&sliders, &slider_options)
+        } else {
+            data.slider_layout.clone()
+        };
 
         let frame = gui.build_frame();
         setup.engine.upload_gui_frame(frame);
@@ -598,25 +560,46 @@ fn main() {
             Vec4::new(0.85, 0.9, 1.0, 1.0)
         };
 
-        update_text(
-            &mut setup.engine,
-            button_a_text,
-            "Button A",
-            button_a_draw_pos + vec2(18.0, 12.0),
-            button_text_color,
-            1.2,
-            text_render_mode.clone(),
-        );
+        if show_panel_content {
+            update_text(
+                &mut setup.engine,
+                button_a_text,
+                "Button A",
+                button_a_draw_pos + vec2(18.0, 12.0),
+                button_text_color,
+                1.2,
+                text_render_mode.clone(),
+            );
 
-        update_text(
-            &mut setup.engine,
-            button_b_text,
-            "Button B",
-            button_b_draw_pos + vec2(18.0, 12.0),
-            button_text_color,
-            1.2,
-            text_render_mode.clone(),
-        );
+            update_text(
+                &mut setup.engine,
+                button_b_text,
+                "Button B",
+                button_b_draw_pos + vec2(18.0, 12.0),
+                button_text_color,
+                1.2,
+                text_render_mode.clone(),
+            );
+        } else {
+            update_text(
+                &mut setup.engine,
+                button_a_text,
+                "",
+                vec2(-1000.0, -1000.0),
+                Vec4::ZERO,
+                1.0,
+                text_render_mode.clone(),
+            );
+            update_text(
+                &mut setup.engine,
+                button_b_text,
+                "",
+                vec2(-1000.0, -1000.0),
+                Vec4::ZERO,
+                1.0,
+                text_render_mode.clone(),
+            );
+        }
 
         let status = if data.menu_feedback_until > now {
             data.menu_feedback.as_deref().unwrap_or("Menu action")

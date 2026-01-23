@@ -310,6 +310,259 @@ impl GuiContext {
 
         layout
     }
+
+    pub fn submit_panel(
+        &mut self,
+        panel: &Panel,
+        state: &mut PanelState,
+        options: &PanelRenderOptions,
+    ) -> PanelLayout {
+        let viewport = options.viewport;
+        let metrics = &options.metrics;
+        let colors = &options.colors;
+        let interaction = options.interaction;
+
+        let initial_display_size = panel_display_size(
+            state.size,
+            metrics.title_bar_height,
+            metrics.minimized_extra_height,
+            state.minimized,
+        );
+        let initial_title_bar_rect = MenuRect::from_position_size(
+            state.position,
+            [initial_display_size[0], metrics.title_bar_height],
+        );
+
+        let button_size = metrics.button_size;
+        let button_gap = metrics.button_gap;
+        let button_y = state.position[1] + (metrics.title_bar_height - button_size[1]) * 0.5;
+        let buttons_right = state.position[0] + initial_display_size[0] - metrics.button_padding;
+        let close_button_pos = [buttons_right - button_size[0], button_y];
+        let minimize_button_pos = [buttons_right - button_size[0] * 2.0 - button_gap, button_y];
+        let initial_close_rect = MenuRect::from_position_size(close_button_pos, button_size);
+        let initial_minimize_rect = MenuRect::from_position_size(minimize_button_pos, button_size);
+
+        let resize_edge = if state.closed || state.minimized {
+            None
+        } else {
+            resize_edge_for_cursor(
+                interaction.cursor,
+                state.position,
+                initial_display_size,
+                metrics.resize_margin,
+            )
+        };
+
+        if interaction.mouse_pressed && !state.closed {
+            if options.allow_close && point_in_rect(interaction.cursor, initial_close_rect) {
+                state.closed = true;
+            } else if options.allow_minimize
+                && point_in_rect(interaction.cursor, initial_minimize_rect)
+            {
+                state.minimized = !state.minimized;
+            } else if let Some(edge) = resize_edge {
+                state.resize_active = Some(edge);
+                state.resize_anchor = interaction.cursor;
+                state.resize_start_pos = state.position;
+                state.resize_start_size = state.size;
+            } else if point_in_rect(interaction.cursor, initial_title_bar_rect) {
+                state.drag_active = true;
+                state.drag_offset = sub2(interaction.cursor, state.position);
+            }
+        }
+
+        if !interaction.mouse_down {
+            state.drag_active = false;
+            state.resize_active = None;
+        }
+
+        if state.drag_active && interaction.mouse_down {
+            state.position = sub2(interaction.cursor, state.drag_offset);
+        }
+
+        if let Some(edge) = state.resize_active {
+            if interaction.mouse_down {
+                let delta = sub2(interaction.cursor, state.resize_anchor);
+                let (position, size) = apply_resize(
+                    edge,
+                    state.resize_start_pos,
+                    state.resize_start_size,
+                    delta,
+                    metrics.min_size,
+                );
+                state.position = position;
+                state.size = size;
+            }
+        }
+
+        if state.closed {
+            return PanelLayout::closed(state.position, state.size);
+        }
+
+        let display_size = panel_display_size(
+            state.size,
+            metrics.title_bar_height,
+            metrics.minimized_extra_height,
+            state.minimized,
+        );
+        let title_bar_rect = MenuRect::from_position_size(
+            state.position,
+            [display_size[0], metrics.title_bar_height],
+        );
+        let title_bar_hovered = !state.closed && point_in_rect(interaction.cursor, title_bar_rect);
+        let button_y = state.position[1] + (metrics.title_bar_height - button_size[1]) * 0.5;
+        let buttons_right = state.position[0] + display_size[0] - metrics.button_padding;
+        let close_button_pos = [buttons_right - button_size[0], button_y];
+        let minimize_button_pos = [buttons_right - button_size[0] * 2.0 - button_gap, button_y];
+        let close_rect = MenuRect::from_position_size(close_button_pos, button_size);
+        let minimize_rect = MenuRect::from_position_size(minimize_button_pos, button_size);
+
+        let display_rect = MenuRect::from_position_size(state.position, display_size);
+        let content_rect = if state.minimized {
+            MenuRect::from_position_size(state.position, [display_size[0], 0.0])
+        } else {
+            MenuRect::from_position_size(
+                [
+                    state.position[0],
+                    state.position[1] + metrics.title_bar_height,
+                ],
+                [
+                    display_size[0],
+                    (display_size[1] - metrics.title_bar_height).max(0.0),
+                ],
+            )
+        };
+
+        if options.show_shadow {
+            let shadow_pos = add2(state.position, metrics.shadow_offset);
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(shadow_pos, display_size, colors.shadow, viewport),
+            ));
+        }
+
+        if options.show_outline {
+            let outline_pos = sub2(
+                state.position,
+                [metrics.outline_thickness, metrics.outline_thickness],
+            );
+            let outline_size = add2(
+                display_size,
+                [
+                    metrics.outline_thickness * 2.0,
+                    metrics.outline_thickness * 2.0,
+                ],
+            );
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(outline_pos, outline_size, colors.outline, viewport),
+            ));
+        }
+
+        let title_bar_color = if interaction.mouse_down && title_bar_hovered {
+            colors.title_bar_active
+        } else if title_bar_hovered {
+            colors.title_bar_hover
+        } else {
+            colors.title_bar
+        };
+
+        self.submit_draw(GuiDraw::new(
+            options.layer,
+            None,
+            quad_from_pixels(state.position, display_size, colors.background, viewport),
+        ));
+
+        self.submit_draw(GuiDraw::new(
+            options.layer,
+            None,
+            quad_from_pixels(
+                [title_bar_rect.min[0], title_bar_rect.min[1]],
+                [display_size[0], metrics.title_bar_height],
+                title_bar_color,
+                viewport,
+            ),
+        ));
+
+        if metrics.grip_size[0] > 0.0 {
+            let grip_pos = [state.position[0] + metrics.grip_padding, state.position[1]];
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(grip_pos, metrics.grip_size, colors.grip, viewport),
+            ));
+
+            for index in 0..3 {
+                let dot_pos = [
+                    grip_pos[0] + 6.0 + index as f32 * 6.0,
+                    grip_pos[1] + (metrics.title_bar_height - 6.0) * 0.5,
+                ];
+                self.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(dot_pos, [2.0, 6.0], colors.grip_dots, viewport),
+                ));
+            }
+        }
+
+        if options.allow_minimize {
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(minimize_button_pos, button_size, colors.button, viewport),
+            ));
+            self.submit_text(GuiTextDraw {
+                text: "–".to_string(),
+                position: [minimize_button_pos[0] + 6.0, minimize_button_pos[1] + 2.0],
+                color: colors.button_text,
+                scale: metrics.button_text_scale,
+            });
+        }
+
+        if options.allow_close {
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(close_button_pos, button_size, colors.button_close, viewport),
+            ));
+            self.submit_text(GuiTextDraw {
+                text: "×".to_string(),
+                position: [close_button_pos[0] + 5.0, close_button_pos[1] + 1.0],
+                color: colors.button_text,
+                scale: metrics.button_text_scale,
+            });
+        }
+
+        self.submit_text(GuiTextDraw {
+            text: panel.title.clone(),
+            position: [
+                state.position[0] + metrics.title_text_offset[0],
+                state.position[1] + metrics.title_text_offset[1],
+            ],
+            color: colors.title_text,
+            scale: metrics.title_text_scale,
+        });
+
+        PanelLayout {
+            title_bar_rect,
+            content_rect,
+            display_rect,
+            close_rect: if options.allow_close {
+                Some(close_rect)
+            } else {
+                None
+            },
+            minimize_rect: if options.allow_minimize {
+                Some(minimize_rect)
+            } else {
+                None
+            },
+            minimized: state.minimized,
+            closed: state.closed,
+        }
+    }
 }
 
 /// Minimal draw submission payload for GUI rendering.
@@ -814,6 +1067,186 @@ pub struct SliderItemLayout {
 }
 
 #[derive(Debug, Clone)]
+pub struct Panel {
+    pub title: String,
+}
+
+impl Panel {
+    pub fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanelRenderOptions {
+    pub viewport: [f32; 2],
+    pub layer: GuiLayer,
+    pub interaction: PanelInteraction,
+    pub metrics: PanelMetrics,
+    pub colors: PanelColors,
+    pub allow_close: bool,
+    pub allow_minimize: bool,
+    pub show_shadow: bool,
+    pub show_outline: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanelInteraction {
+    pub cursor: [f32; 2],
+    pub mouse_pressed: bool,
+    pub mouse_down: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanelMetrics {
+    pub title_bar_height: f32,
+    pub min_size: [f32; 2],
+    pub button_size: [f32; 2],
+    pub button_gap: f32,
+    pub button_padding: f32,
+    pub title_text_offset: [f32; 2],
+    pub title_text_scale: f32,
+    pub button_text_scale: f32,
+    pub grip_size: [f32; 2],
+    pub grip_padding: f32,
+    pub resize_margin: f32,
+    pub shadow_offset: [f32; 2],
+    pub outline_thickness: f32,
+    pub minimized_extra_height: f32,
+}
+
+impl Default for PanelMetrics {
+    fn default() -> Self {
+        Self {
+            title_bar_height: 32.0,
+            min_size: [240.0, 180.0],
+            button_size: [18.0, 18.0],
+            button_gap: 6.0,
+            button_padding: 12.0,
+            title_text_offset: [36.0, 8.0],
+            title_text_scale: 1.0,
+            button_text_scale: 0.9,
+            grip_size: [22.0, 32.0],
+            grip_padding: 8.0,
+            resize_margin: 8.0,
+            shadow_offset: [6.0, 6.0],
+            outline_thickness: 1.0,
+            minimized_extra_height: 6.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanelColors {
+    pub background: [f32; 4],
+    pub title_bar: [f32; 4],
+    pub title_bar_hover: [f32; 4],
+    pub title_bar_active: [f32; 4],
+    pub title_text: [f32; 4],
+    pub outline: [f32; 4],
+    pub shadow: [f32; 4],
+    pub button: [f32; 4],
+    pub button_close: [f32; 4],
+    pub button_text: [f32; 4],
+    pub grip: [f32; 4],
+    pub grip_dots: [f32; 4],
+}
+
+impl Default for PanelColors {
+    fn default() -> Self {
+        Self {
+            background: [0.12, 0.14, 0.18, 0.92],
+            title_bar: [0.18, 0.2, 0.26, 0.9],
+            title_bar_hover: [0.22, 0.26, 0.34, 0.92],
+            title_bar_active: [0.28, 0.32, 0.4, 0.95],
+            title_text: [0.95, 0.97, 1.0, 1.0],
+            outline: [0.02, 0.05, 0.08, 0.9],
+            shadow: [0.0, 0.0, 0.0, 0.35],
+            button: [0.2, 0.24, 0.32, 0.9],
+            button_close: [0.28, 0.2, 0.22, 0.9],
+            button_text: [0.9, 0.93, 1.0, 1.0],
+            grip: [0.12, 0.14, 0.18, 0.6],
+            grip_dots: [0.3, 0.36, 0.5, 0.8],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PanelState {
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub minimized: bool,
+    pub closed: bool,
+    drag_offset: [f32; 2],
+    drag_active: bool,
+    resize_active: Option<PanelResizeEdge>,
+    resize_anchor: [f32; 2],
+    resize_start_pos: [f32; 2],
+    resize_start_size: [f32; 2],
+}
+
+impl PanelState {
+    pub fn new(position: [f32; 2], size: [f32; 2]) -> Self {
+        Self {
+            position,
+            size,
+            minimized: false,
+            closed: false,
+            drag_offset: [0.0, 0.0],
+            drag_active: false,
+            resize_active: None,
+            resize_anchor: [0.0, 0.0],
+            resize_start_pos: [0.0, 0.0],
+            resize_start_size: [0.0, 0.0],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanelLayout {
+    pub title_bar_rect: MenuRect,
+    pub content_rect: MenuRect,
+    pub display_rect: MenuRect,
+    pub close_rect: Option<MenuRect>,
+    pub minimize_rect: Option<MenuRect>,
+    pub minimized: bool,
+    pub closed: bool,
+}
+
+impl PanelLayout {
+    fn closed(position: [f32; 2], size: [f32; 2]) -> Self {
+        let rect = MenuRect::from_position_size(position, size);
+        Self {
+            title_bar_rect: rect,
+            content_rect: rect,
+            display_rect: rect,
+            close_rect: None,
+            minimize_rect: None,
+            minimized: false,
+            closed: true,
+        }
+    }
+
+    pub fn show_content(&self) -> bool {
+        !self.closed && !self.minimized
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MenuBarRenderOptions {
     pub viewport: [f32; 2],
     pub position: [f32; 2],
@@ -982,6 +1415,123 @@ fn menu_dropdown_height(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
         }
     }
     height
+}
+
+fn add2(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+fn sub2(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+fn panel_display_size(
+    size: [f32; 2],
+    title_bar_height: f32,
+    minimized_extra_height: f32,
+    minimized: bool,
+) -> [f32; 2] {
+    if minimized {
+        [size[0], title_bar_height + minimized_extra_height]
+    } else {
+        size
+    }
+}
+
+fn point_in_rect(point: [f32; 2], rect: MenuRect) -> bool {
+    point[0] >= rect.min[0]
+        && point[0] <= rect.max[0]
+        && point[1] >= rect.min[1]
+        && point[1] <= rect.max[1]
+}
+
+fn resize_edge_for_cursor(
+    cursor: [f32; 2],
+    position: [f32; 2],
+    size: [f32; 2],
+    margin: f32,
+) -> Option<PanelResizeEdge> {
+    let min = position;
+    let max = add2(position, size);
+    let within_x = cursor[0] >= min[0] - margin && cursor[0] <= max[0] + margin;
+    let within_y = cursor[1] >= min[1] - margin && cursor[1] <= max[1] + margin;
+    if !within_x || !within_y {
+        return None;
+    }
+
+    let left = (cursor[0] - min[0]).abs() <= margin;
+    let right = (cursor[0] - max[0]).abs() <= margin;
+    let top = (cursor[1] - min[1]).abs() <= margin;
+    let bottom = (cursor[1] - max[1]).abs() <= margin;
+
+    match (left, right, top, bottom) {
+        (true, _, true, _) => Some(PanelResizeEdge::TopLeft),
+        (_, true, true, _) => Some(PanelResizeEdge::TopRight),
+        (true, _, _, true) => Some(PanelResizeEdge::BottomLeft),
+        (_, true, _, true) => Some(PanelResizeEdge::BottomRight),
+        (true, _, _, _) => Some(PanelResizeEdge::Left),
+        (_, true, _, _) => Some(PanelResizeEdge::Right),
+        (_, _, true, _) => Some(PanelResizeEdge::Top),
+        (_, _, _, true) => Some(PanelResizeEdge::Bottom),
+        _ => None,
+    }
+}
+
+fn apply_resize(
+    edge: PanelResizeEdge,
+    start_pos: [f32; 2],
+    start_size: [f32; 2],
+    cursor_delta: [f32; 2],
+    min_size: [f32; 2],
+) -> ([f32; 2], [f32; 2]) {
+    let mut position = start_pos;
+    let mut size = start_size;
+
+    match edge {
+        PanelResizeEdge::Left | PanelResizeEdge::TopLeft | PanelResizeEdge::BottomLeft => {
+            position[0] += cursor_delta[0];
+            size[0] -= cursor_delta[0];
+        }
+        PanelResizeEdge::Right | PanelResizeEdge::TopRight | PanelResizeEdge::BottomRight => {
+            size[0] += cursor_delta[0];
+        }
+        _ => {}
+    }
+
+    match edge {
+        PanelResizeEdge::Top | PanelResizeEdge::TopLeft | PanelResizeEdge::TopRight => {
+            position[1] += cursor_delta[1];
+            size[1] -= cursor_delta[1];
+        }
+        PanelResizeEdge::Bottom | PanelResizeEdge::BottomLeft | PanelResizeEdge::BottomRight => {
+            size[1] += cursor_delta[1];
+        }
+        _ => {}
+    }
+
+    if size[0] < min_size[0] {
+        let delta = min_size[0] - size[0];
+        size[0] = min_size[0];
+        if matches!(
+            edge,
+            PanelResizeEdge::Left | PanelResizeEdge::TopLeft | PanelResizeEdge::BottomLeft
+        ) {
+            position[0] -= delta;
+        }
+    }
+
+    if size[1] < min_size[1] {
+        let delta = min_size[1] - size[1];
+        size[1] = min_size[1];
+        if matches!(
+            edge,
+            PanelResizeEdge::Top | PanelResizeEdge::TopLeft | PanelResizeEdge::TopRight
+        ) {
+            position[1] -= delta;
+        }
+    }
+
+    (position, size)
 }
 
 fn quad_from_pixels(
