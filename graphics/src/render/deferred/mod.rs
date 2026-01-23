@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ptr::NonNull};
+use std::{
+    collections::{HashMap, HashSet},
+    ptr::NonNull,
+};
 
 use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
@@ -10,28 +13,33 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
-    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
+    render::scene::*, BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject,
 };
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
+use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
+use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
-use furikake::PSOBuilderFurikakeExt;
-use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
+use furikake::reservations::bindless_indices::ReservedBindlessIndices;
+use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
+use furikake::reservations::ReservedBinding;
 use furikake::types::AnimationState as FurikakeAnimationState;
+use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
-    types::*,
+    reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
+    types::VertexBufferSlot, types::*, BindlessState,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
+use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
+use noren::rdb::primitives::Vertex;
+use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use noren::DB;
-use noren::meta::DeviceModel;
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
@@ -85,6 +93,7 @@ struct RendererData {
     viewport: Viewport,
     objects: ResourceList<RenderObjectData>,
     lookup: HashMap<u16, Handle<RenderObjectData>>,
+    terrain_objects: HashMap<String, TerrainObjectEntry>,
     renderables: GPUPool<PerDrawData>,
     dynamic: DynamicAllocator,
 }
@@ -133,6 +142,14 @@ struct RenderObjectData {
     kind: RenderObjectKind,
     scene_handle: Handle<SceneObject>,
     draws: Vec<Handle<PerDrawData>>,
+}
+
+#[derive(Clone)]
+struct TerrainObjectEntry {
+    handle: Handle<RenderObject>,
+    content_hash: u64,
+    geometry_entry: String,
+    material_handle: Handle<Material>,
 }
 
 enum RenderObjectKind {
@@ -321,6 +338,7 @@ impl DeferredRenderer {
             viewport: info.initial_viewport,
             objects: ResourceList::default(),
             lookup: Default::default(),
+            terrain_objects: Default::default(),
             renderables: GPUPool::new(
                 ctx.as_mut(),
                 &BufferInfo {
@@ -1051,6 +1069,62 @@ impl DeferredRenderer {
         if !handle.valid() {
             return;
         }
+
+        if !self
+            .data
+            .objects
+            .entries
+            .iter()
+            .any(|h| h.slot == handle.slot)
+        {
+            return;
+        }
+
+        let mut billboard_release = None;
+        let mut skinning_handle = None;
+        let (scene_handle, draws) = {
+            let obj = self.data.objects.get_ref(from_handle(handle));
+            match &obj.kind {
+                RenderObjectKind::SkinnedModel(skinned) => {
+                    skinning_handle = Some(skinned.skinning_handle);
+                }
+                RenderObjectKind::Billboard(billboard) => {
+                    billboard_release = Some((
+                        billboard.vertex_buffer,
+                        billboard.info.material,
+                        billboard.owns_material,
+                    ));
+                }
+                RenderObjectKind::Model(_) => {}
+            }
+
+            (obj.scene_handle, obj.draws.clone())
+        };
+
+        if let Some(handle) = skinning_handle {
+            self.proc.skinning.unregister(handle, self.state.as_mut());
+        }
+
+        if let Some((vertex_buffer, material, owns_material)) = billboard_release {
+            self.ctx.destroy_buffer(vertex_buffer);
+            if owns_material {
+                if let Some(material) = material {
+                    self.state
+                        .reserved_mut::<ReservedBindlessMaterials, _>(
+                            "meshi_bindless_materials",
+                            |materials| materials.remove_material(material),
+                        )
+                        .expect("Failed to release billboard material");
+                }
+            }
+        }
+
+        for draw in draws {
+            self.proc.draw_builder.release_draw(draw);
+        }
+
+        self.proc.scene.release_object(scene_handle);
+        self.data.objects.release(from_handle(handle));
     }
 
     pub fn object_transform(&self, handle: Handle<RenderObject>) -> glam::Mat4 {
@@ -1509,6 +1583,263 @@ impl DeferredRenderer {
     pub fn shut_down(self) {
         self.ctx.destroy();
     }
+
+    pub fn set_terrain_render_objects(
+        &mut self,
+        objects: &[super::environment::terrain::TerrainRenderObject],
+    ) {
+        let mut next_keys = HashSet::with_capacity(objects.len());
+        for object in objects {
+            next_keys.insert(object.key.clone());
+        }
+
+        let mut removals = Vec::new();
+        for (key, entry) in &self.data.terrain_objects {
+            if !next_keys.contains(key) {
+                removals.push((key.clone(), entry.clone()));
+            }
+        }
+
+        for (key, entry) in removals {
+            self.release_terrain_entry(&entry);
+            self.data.terrain_objects.remove(&key);
+        }
+
+        for object in objects {
+            if let Some(entry) = self.data.terrain_objects.get(&object.key).cloned() {
+                if entry.content_hash == object.artifact.content_hash {
+                    self.set_object_transform(entry.handle, &object.transform);
+                    continue;
+                }
+
+                self.release_terrain_entry(&entry);
+                self.data.terrain_objects.remove(&object.key);
+            }
+
+            let Some((model, geometry_entry, material_handle)) =
+                self.build_terrain_model(&object.key, &object.artifact)
+            else {
+                warn!("Failed to build terrain render object '{}'.", object.key);
+                continue;
+            };
+
+            match self.register_object(&RenderObjectInfo::Model(model)) {
+                Ok(handle) => {
+                    self.set_object_transform(handle, &object.transform);
+                    self.data.terrain_objects.insert(
+                        object.key.clone(),
+                        TerrainObjectEntry {
+                            handle,
+                            content_hash: object.artifact.content_hash,
+                            geometry_entry,
+                            material_handle,
+                        },
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to register terrain render object '{}': {err:?}",
+                        object.key
+                    );
+                }
+            }
+        }
+    }
+
+    fn release_terrain_entry(&mut self, entry: &TerrainObjectEntry) {
+        self.release_object(entry.handle);
+
+        if entry.material_handle.valid() {
+            self.state
+                .reserved_mut::<ReservedBindlessMaterials, _>(
+                    "meshi_bindless_materials",
+                    |materials| materials.remove_material(entry.material_handle),
+                )
+                .expect("Failed to release terrain material");
+        }
+
+        let Some(mut db) = self.db else {
+            return;
+        };
+        if let Err(err) = unsafe { db.as_mut() }
+            .geometry_mut()
+            .unref_entry(&entry.geometry_entry)
+        {
+            warn!(
+                "Failed to release terrain geometry '{}': {err:?}",
+                entry.geometry_entry
+            );
+        }
+    }
+
+    fn build_terrain_model(
+        &mut self,
+        key: &str,
+        artifact: &noren::rdb::terrain::TerrainChunkArtifact,
+    ) -> Option<(DeviceModel, String, Handle<Material>)> {
+        if artifact.vertices.is_empty() || artifact.indices.is_empty() {
+            warn!("Terrain artifact '{key}' has no geometry data.");
+            return None;
+        }
+
+        let geometry_entry = format!(
+            "terrain/runtime/{key}/lod{}-{:016x}",
+            artifact.lod, artifact.content_hash
+        );
+        let host_geometry = HostGeometry {
+            vertices: artifact.vertices.clone(),
+            indices: Some(artifact.indices.clone()),
+            ..Default::default()
+        }
+        .with_counts();
+
+        let Some(mut db) = self.db else {
+            warn!("No database available for terrain upload.");
+            return None;
+        };
+        let db = unsafe { db.as_mut() };
+        let mut geometry = match db
+            .geometry_mut()
+            .enter_gpu_geometry(&geometry_entry, host_geometry.clone())
+        {
+            Ok(geometry) => geometry,
+            Err(err) => {
+                warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
+                return None;
+            }
+        };
+
+        if !self.register_furikake_geometry(&mut geometry, &host_geometry) {
+            warn!("Failed to register furikake geometry for terrain '{geometry_entry}'.");
+            return None;
+        }
+
+        let (material_handle, material) = self.allocate_terrain_material();
+        let device_material = DeviceMaterial::new(Vec::new(), material, Some(material_handle));
+        let mesh = DeviceMesh::new(geometry, Vec::new(), Some(device_material));
+        let model = DeviceModel {
+            name: format!("terrain/{key}"),
+            meshes: vec![mesh],
+            rig: None,
+        };
+
+        Some((model, geometry_entry, material_handle))
+    }
+
+    fn allocate_terrain_material(&mut self) -> (Handle<Material>, Material) {
+        let mut material_handle = Handle::default();
+        let mut material = Material::default();
+        material.base_color_texture_id = u32::MAX;
+        material.normal_texture_id = u32::MAX;
+        material.metallic_roughness_texture_id = u32::MAX;
+        material.occlusion_texture_id = u32::MAX;
+        material.emissive_texture_id = u32::MAX;
+        self.state
+            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
+                material_handle = materials.add_material();
+                *materials.material_mut(material_handle) = material;
+            })
+            .expect("Failed to allocate terrain material");
+
+        (material_handle, material)
+    }
+
+    fn register_furikake_geometry(
+        &mut self,
+        geometry: &mut DeviceGeometry,
+        host: &HostGeometry,
+    ) -> bool {
+        if !self.register_furikake_geometry_layer(
+            &mut geometry.base,
+            &host.vertices,
+            host.indices.as_deref(),
+        ) {
+            return false;
+        }
+
+        if geometry.lods.len() != host.lods.len() {
+            warn!("Terrain geometry lod count mismatch.");
+            return false;
+        }
+
+        for (layer, source) in geometry.lods.iter_mut().zip(&host.lods) {
+            if !self.register_furikake_geometry_layer(
+                layer,
+                &source.vertices,
+                source.indices.as_deref(),
+            ) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn register_furikake_geometry_layer(
+        &mut self,
+        layer: &mut DeviceGeometryLayer,
+        vertices: &[Vertex],
+        indices: Option<&[u32]>,
+    ) -> bool {
+        let vertex_bytes = cast_slice(vertices);
+        if vertex_bytes.is_empty() {
+            layer.furikake_vertex_id = None;
+        } else {
+            let mut inserted_offset = None;
+            let slot = Self::vertex_buffer_slot(vertices);
+            if let Err(err) = self.state.reserved_mut::<ReservedBindlessVertices, _>(
+                "meshi_bindless_vertices",
+                |buffer| {
+                    inserted_offset = buffer.push_vertex_bytes(slot, vertex_bytes);
+                },
+            ) {
+                warn!("Failed to reserve terrain vertices: {err:?}");
+                return false;
+            }
+
+            let Some(offset) = inserted_offset else {
+                warn!("Failed to allocate bindless terrain vertices.");
+                return false;
+            };
+            layer.furikake_vertex_id = Some(offset);
+        }
+
+        if let Some(indices) = indices.filter(|indices| !indices.is_empty()) {
+            let mut inserted_offset = None;
+            if let Err(err) = self.state.reserved_mut::<ReservedBindlessIndices, _>(
+                "meshi_bindless_indices",
+                |buffer| {
+                    inserted_offset = buffer.push_indices(indices);
+                },
+            ) {
+                warn!("Failed to reserve terrain indices: {err:?}");
+                return false;
+            }
+
+            let Some(offset) = inserted_offset else {
+                warn!("Failed to allocate bindless terrain indices.");
+                return false;
+            };
+            layer.furikake_index_id = Some(offset);
+        } else {
+            layer.furikake_index_id = None;
+        }
+
+        true
+    }
+
+    fn vertex_buffer_slot(vertices: &[Vertex]) -> VertexBufferSlot {
+        let uses_skinning = vertices.iter().any(|vertex| {
+            vertex.joint_weights.iter().any(|weight| *weight != 0.0)
+                || vertex.joint_indices.iter().any(|index| *index != 0)
+        });
+
+        if uses_skinning {
+            VertexBufferSlot::Skeleton
+        } else {
+            VertexBufferSlot::Skeleton
+        }
+    }
 }
 
 impl Renderer for DeferredRenderer {
@@ -1632,6 +1963,13 @@ impl Renderer for DeferredRenderer {
 
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
         self.subrender.clouds.set_authored_weather_map(view);
+    }
+
+    fn set_terrain_render_objects(
+        &mut self,
+        objects: &[super::environment::terrain::TerrainRenderObject],
+    ) {
+        DeferredRenderer::set_terrain_render_objects(self, objects);
     }
 
     fn shut_down(self: Box<Self>) {

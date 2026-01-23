@@ -1,10 +1,10 @@
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gui::GuiRenderer;
-use crate::gui::GuiFrame;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
+use crate::gui::GuiFrame;
 use crate::{
     AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
     RenderObjectInfo, TextInfo, TextObject, render::scene::*,
@@ -450,7 +450,10 @@ impl ForwardRenderer {
     }
 
     pub fn upload_gui_frame(&mut self, frame: GuiFrame) {
-        let GuiFrame { batches, text_draws } = frame;
+        let GuiFrame {
+            batches,
+            text_draws,
+        } = frame;
         self.gui.upload_frame(GuiFrame {
             batches,
             text_draws: Vec::new(),
@@ -789,6 +792,12 @@ impl Renderer for ForwardRenderer {
     }
 
     fn set_cloud_weather_map(&mut self, _view: Option<ImageView>) {}
+
+    fn set_terrain_render_objects(
+        &mut self,
+        _objects: &[super::environment::terrain::TerrainRenderObject],
+    ) {
+    }
 
     fn shut_down(self: Box<Self>) {
         self.ctx.destroy();

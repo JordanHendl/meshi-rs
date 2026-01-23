@@ -128,5 +128,6 @@ pub trait Renderer {
     fn cloud_settings(&self) -> CloudSettings;
     fn set_cloud_settings(&mut self, settings: CloudSettings);
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>);
+    fn set_terrain_render_objects(&mut self, objects: &[environment::terrain::TerrainRenderObject]);
     fn shut_down(self: Box<Self>);
 }

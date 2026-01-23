@@ -3,6 +3,14 @@ use std::ffi::c_void;
 use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::*;
 use meshi_ffi_structs::event::*;
+use meshi_graphics::rdb::terrain::{
+    TerrainChunkArtifact, TerrainGeneratorDefinition, TerrainMutationLayer, TerrainProjectSettings,
+    generator_entry, mutation_layer_entry, project_settings_entry,
+};
+use meshi_graphics::terrain::{
+    TerrainChunkBuildRequest, TerrainChunkBuildStatus, build_terrain_chunk_with_context,
+    prepare_terrain_build_context,
+};
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
 
@@ -89,6 +97,22 @@ fn main() {
     });
     let mut cloud_settings = setup.engine.cloud_settings();
     cloud_settings.enabled = true;
+
+    let terrain_objects = build_default_terrain_chunk().map(|artifact| {
+        let bounds_min = Vec3::from(artifact.bounds_min);
+        let bounds_max = Vec3::from(artifact.bounds_max);
+        let center = (bounds_min + bounds_max) * 0.5;
+        let offset = Vec3::new(-center.x, -bounds_min.y, -center.z);
+        vec![TerrainRenderObject {
+            key: "default-terrain".to_string(),
+            artifact,
+            transform: Mat4::from_translation(offset),
+        }]
+    });
+
+    if let Some(objects) = &terrain_objects {
+        setup.engine.set_terrain_render_objects(objects);
+    }
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
@@ -205,5 +229,49 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
         aspect: AspectMask::Color,
         view_type: ImageViewType::Type2D,
         range: SubresourceRange::new(0, 1, 0, 1),
+    }
+}
+fn build_default_terrain_chunk() -> Option<TerrainChunkArtifact> {
+    let project_key = "default";
+    let mut rdb = RDBFile::new();
+    let settings = TerrainProjectSettings::default();
+    let generator = TerrainGeneratorDefinition::default();
+    let mutation_layer = TerrainMutationLayer::default();
+
+    rdb.add(&project_settings_entry(project_key), &settings)
+        .ok()?;
+    rdb.add(
+        &generator_entry(project_key, settings.active_generator_version),
+        &generator,
+    )
+    .ok()?;
+    rdb.add(
+        &mutation_layer_entry(
+            project_key,
+            &mutation_layer.layer_id,
+            settings.active_mutation_version,
+        ),
+        &mutation_layer,
+    )
+    .ok()?;
+
+    let context = prepare_terrain_build_context(&mut rdb, project_key).ok()?;
+    let request = TerrainChunkBuildRequest {
+        chunk_coords: [0, 0],
+        lod: 0,
+    };
+    let outcome = build_terrain_chunk_with_context(
+        &mut rdb,
+        project_key,
+        &context,
+        request,
+        |_| {},
+        || false,
+    )
+    .ok()?;
+
+    match outcome.status {
+        TerrainChunkBuildStatus::Built => outcome.artifact,
+        _ => None,
     }
 }

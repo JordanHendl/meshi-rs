@@ -22,6 +22,7 @@ use render::deferred::DeferredRenderer;
 pub use render::environment::clouds::CloudRenderer;
 pub use render::environment::ocean::OceanFrameSettings;
 pub use render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
+pub use render::environment::terrain::TerrainRenderObject;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
@@ -319,6 +320,13 @@ impl RenderEngine {
 
     pub fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
         self.renderer.set_cloud_weather_map(view);
+    }
+
+    pub fn set_terrain_render_objects(
+        &mut self,
+        objects: &[render::environment::terrain::TerrainRenderObject],
+    ) {
+        self.renderer.set_terrain_render_objects(objects);
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -839,5 +847,9 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon { -Vec3::Y } else { Vec3::Y }
+    if is_moon {
+        -Vec3::Y
+    } else {
+        Vec3::Y
+    }
 }

@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
@@ -9,7 +9,8 @@ use dashi::{
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
-use glam::Vec3;
+use glam::{Mat4, Vec3};
+use noren::rdb::terrain::TerrainChunkArtifact;
 
 #[derive(Clone, Copy)]
 pub struct TerrainInfo {
@@ -33,6 +34,13 @@ impl Default for TerrainInfo {
 #[derive(Clone, Copy, Default)]
 pub struct TerrainFrameSettings {
     pub camera_position: Vec3,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerrainRenderObject {
+    pub key: String,
+    pub artifact: TerrainChunkArtifact,
+    pub transform: Mat4,
 }
 
 #[repr(C)]
@@ -196,10 +204,7 @@ impl TerrainRenderer {
                 "instance_data",
                 ShaderResource::StorageBuffer(instance_buffer.into()),
             )
-            .add_variable(
-                "params",
-                ShaderResource::DynamicStorage(dynamic.state()),
-            )
+            .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
             .add_variable(
                 "heightmap",
                 ShaderResource::StorageBuffer(heightmap_buffer.into()),
@@ -299,10 +304,7 @@ impl TerrainRenderer {
         self.camera_position = settings.camera_position;
     }
 
-    pub fn record_compute(
-        &mut self,
-        dynamic: &mut DynamicAllocator,
-    ) -> CommandStream<Executable> {
+    pub fn record_compute(&mut self, dynamic: &mut DynamicAllocator) -> CommandStream<Executable> {
         let stream = CommandStream::new().begin();
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
