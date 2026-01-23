@@ -46,14 +46,42 @@ layout(set = 1, binding = 3) uniform textureCube ocean_env_map;
 layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
+const float PI = 3.14159265359;
 
-vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
+vec3 fresnel_schlick(float cos_theta, vec3 f0) {
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
+float distribution_ggx(vec3 n, vec3 h, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float ndoth = max(dot(n, h), 0.0);
+    float ndoth2 = ndoth * ndoth;
+    float denom = ndoth2 * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * denom * denom, 1e-5);
+}
+
+float geometry_schlick_ggx(float ndotv, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    float denom = ndotv * (1.0 - k) + k;
+    return ndotv / max(denom, 1e-5);
+}
+
+float geometry_smith(vec3 n, vec3 v, vec3 l, float roughness) {
+    float ndotv = max(dot(n, v), 0.0);
+    float ndotl = max(dot(n, l), 0.0);
+    float ggx_v = geometry_schlick_ggx(ndotv, roughness);
+    float ggx_l = geometry_schlick_ggx(ndotl, roughness);
+    return ggx_v * ggx_l;
+}
+
+vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float roughness, vec3 f0) {
     if (meshi_bindless_lights.lights.length() == 0) {
         return base_color * 0.1;
     }
-    
+
     vec3 gain = vec3(0.0);
-    float spec = 0.0;
     for(int i = 0; i < meshi_bindless_lights.lights.length(); ++i) {
     Light light = meshi_bindless_lights.lights[i];
     float light_type = light.position_type.w;
@@ -77,15 +105,22 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos) {
 
     vec3 n = normalize(normal);
     vec3 v = normalize(view_dir);
-    vec3 h = normalize(light_dir + v);
-    float diffuse = max(dot(n, light_dir), 0.0);
-    float specular = pow(max(dot(n, h), 0.0), 48.0);
-    spec += specular;
-    vec3 diffuse_term = diffuse * light_color * base_color;
-    vec3 specular_term = specular * light_color;
-      vec3 ambient_term = base_color * 0.08;
+    vec3 l = normalize(light_dir);
+    vec3 h = normalize(v + l);
+    float ndotl = max(dot(n, l), 0.0);
+    float ndotv = max(dot(n, v), 0.0);
+    vec3 f = fresnel_schlick(max(dot(h, v), 0.0), f0);
+    float d = distribution_ggx(n, h, roughness);
+    float g = geometry_smith(n, v, l, roughness);
+    vec3 numerator = d * g * f;
+    float denom = max(4.0 * ndotv * ndotl, 1e-4);
+    vec3 specular = numerator / denom;
+    vec3 k_s = f;
+    vec3 k_d = (vec3(1.0) - k_s);
+    vec3 diffuse = k_d * base_color / PI;
 
-      gain += diffuse_term + specular_term + ambient_term * attenuation;
+    vec3 radiance = light_color * attenuation;
+    gain += (diffuse + specular) * radiance * ndotl;
     }
 
     return gain;
@@ -99,10 +134,7 @@ void main() {
     vec3 v = normalize(v_view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
     float fresnel_bias = clamp(params.fresnel_bias, 0.0, 1.0);
-    float fresnel = fresnel_bias + (1.0 - fresnel_bias) * pow(1.0 - ndotv, 5.0);
     float fresnel_strength = max(params.fresnel_strength, 0.0);
-    vec3 reflection_dir = reflect(-v, n);
-    vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
     float velocity = abs(v_velocity);
@@ -115,10 +147,19 @@ void main() {
     foam_mask *= foam_strength;
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
-    vec3 color = apply_light(base_color, n, v, v_world_pos);
-    color = mix(color, env_color, clamp(fresnel * fresnel_strength, 0.0, 1.0));
+    float roughness = clamp(0.02 + slope * 0.35 + foam_mask * 0.2, 0.02, 0.8);
+    vec3 f0 = vec3(fresnel_bias);
+    vec3 fresnel = fresnel_schlick(ndotv, f0);
+
+    vec3 reflection_dir = normalize(reflect(-v, n));
+    vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
+    vec3 specular_ibl = env_color * mix(fresnel, vec3(1.0), roughness * 0.2);
+    vec3 diffuse_ibl = base_color * (1.0 - fresnel) * 0.08;
+
+    vec3 color = apply_light(base_color, n, v, v_world_pos, roughness, f0);
+    color += (diffuse_ibl + specular_ibl) * fresnel_strength;
     color += foam_color;
-    float transparency = mix(0.25, 0.85, fresnel) + foam_mask * 0.15;
+    float transparency = mix(0.25, 0.85, fresnel_strength * ndotv) + foam_mask * 0.15;
     float alpha = clamp(transparency, 0.1, 0.98);
 
     out_color = vec4(color, alpha);

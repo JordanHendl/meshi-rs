@@ -1,11 +1,11 @@
 use std::env::args;
 use std::ffi::c_void;
 
-use glam::{vec2, Vec2, Vec4};
+use glam::{Vec2, Vec4, vec2};
 use meshi_ffi_structs::event::*;
 use meshi_graphics::gui::{
-    GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarRenderOptions,
-    MenuBarState, MenuItem,
+    GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarLayout,
+    MenuBarRenderOptions, MenuBarState, MenuItem, MenuRect,
 };
 use meshi_graphics::{RendererSelect, TextInfo};
 use meshi_utils::timer::Timer;
@@ -31,6 +31,13 @@ fn point_in_rect(point: Vec2, position: Vec2, size: Vec2) -> bool {
         && point.x <= position.x + size.x
         && point.y >= position.y
         && point.y <= position.y + size.y
+}
+
+fn point_in_menu_rect(point: Vec2, rect: MenuRect) -> bool {
+    point.x >= rect.min[0]
+        && point.x <= rect.max[0]
+        && point.y >= rect.min[1]
+        && point.y <= rect.max[1]
 }
 
 fn update_text(
@@ -103,11 +110,27 @@ fn main() {
     struct AppData {
         running: bool,
         cursor: Vec2,
+        mouse_pressed: bool,
+        mouse_down: bool,
+        menu_state: MenuBarState,
+        menu_layout: MenuBarLayout,
+        menu_feedback: Option<String>,
+        menu_feedback_until: f32,
     }
 
     let mut data = AppData {
         running: true,
         cursor: Vec2::ZERO,
+        mouse_pressed: false,
+        mouse_down: false,
+        menu_state: MenuBarState {
+            open_menu: None,
+            hovered_menu: None,
+            hovered_item: None,
+        },
+        menu_layout: MenuBarLayout::default(),
+        menu_feedback: None,
+        menu_feedback_until: 0.0,
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -119,6 +142,15 @@ fn main() {
             }
             if e.source() == EventSource::Mouse && e.event_type() == EventType::CursorMoved {
                 r.cursor = e.motion2d();
+            }
+            if e.source() == EventSource::MouseButton {
+                if e.event_type() == EventType::Pressed {
+                    r.mouse_pressed = true;
+                    r.mouse_down = true;
+                }
+                if e.event_type() == EventType::Released {
+                    r.mouse_down = false;
+                }
             }
         }
     }
@@ -195,9 +227,13 @@ fn main() {
 
         let panel_position = vec2(32.0, 64.0);
         let panel_size = vec2(300.0, 220.0);
+        let title_bar_height = 32.0;
+        let title_bar_pos = panel_position;
+        let title_bar_size = vec2(panel_size.x, title_bar_height);
+        let title_bar_hovered = point_in_rect(data.cursor, title_bar_pos, title_bar_size);
         let base_button_size = vec2(140.0, 44.0);
-        let button_a_pos = panel_position + vec2(24.0, 64.0);
-        let button_b_pos = panel_position + vec2(24.0, 124.0);
+        let button_a_pos = panel_position + vec2(24.0, 72.0);
+        let button_b_pos = panel_position + vec2(24.0, 132.0);
 
         let hover_a = point_in_rect(data.cursor, button_a_pos, base_button_size);
         let hover_b = point_in_rect(data.cursor, button_b_pos, base_button_size);
@@ -205,6 +241,13 @@ fn main() {
 
         let pulse = (now * 2.0).sin() * 0.1 + 0.9;
         let panel_color = Vec4::new(0.12, 0.14, 0.18, 0.92 * pulse);
+        let title_bar_color = if data.mouse_down && title_bar_hovered {
+            Vec4::new(0.28, 0.32, 0.4, 0.95)
+        } else if title_bar_hovered {
+            Vec4::new(0.22, 0.26, 0.34, 0.92)
+        } else {
+            Vec4::new(0.18, 0.2, 0.26, 0.9)
+        };
 
         let button_color = |hovered: bool| {
             if hovered {
@@ -227,6 +270,70 @@ fn main() {
             [188.0, 120.0],
         );
 
+        let hovered_tab = data
+            .menu_layout
+            .menu_tabs
+            .iter()
+            .find(|tab| point_in_menu_rect(data.cursor, tab.rect))
+            .map(|tab| tab.menu_index);
+        let hovered_item = data
+            .menu_layout
+            .item_rects
+            .iter()
+            .find(|item| point_in_menu_rect(data.cursor, item.rect))
+            .map(|item| {
+                (
+                    item.menu_index,
+                    item.item_index,
+                    item.action_id,
+                    item.enabled,
+                )
+            });
+
+        data.menu_state.hovered_menu = hovered_tab;
+        data.menu_state.hovered_item = hovered_item
+            .filter(|(_, _, _, enabled)| *enabled)
+            .map(|(menu_index, item_index, _, _)| (menu_index, item_index));
+
+        if data.menu_state.open_menu.is_some()
+            && hovered_tab.is_some()
+            && !data.mouse_pressed
+            && !data.mouse_down
+        {
+            data.menu_state.open_menu = hovered_tab;
+        }
+
+        let clicked_open_menu = data.menu_layout.open_menu.map(|open_menu| open_menu.rect);
+
+        if data.mouse_pressed {
+            if let Some(menu_index) = hovered_tab {
+                if data.menu_state.open_menu == Some(menu_index) {
+                    data.menu_state.open_menu = None;
+                } else {
+                    data.menu_state.open_menu = Some(menu_index);
+                }
+            } else if let Some((_, _, action_id, enabled)) = hovered_item {
+                if enabled {
+                    if let Some(action_id) = action_id {
+                        data.menu_feedback = Some(format!("Selected menu action {}", action_id));
+                        data.menu_feedback_until = now + 2.0;
+                    }
+                    data.menu_state.open_menu = None;
+                }
+            } else if let Some(open_rect) = clicked_open_menu {
+                if !point_in_menu_rect(data.cursor, open_rect) {
+                    data.menu_state.open_menu = None;
+                }
+            } else {
+                data.menu_state.open_menu = None;
+            }
+        }
+
+        if data.mouse_pressed && title_bar_hovered {
+            data.menu_feedback = Some("Clicked title bar".to_string());
+            data.menu_feedback_until = now + 1.5;
+        }
+
         let mut gui = GuiContext::new();
         let menu_options = MenuBarRenderOptions {
             viewport: [viewport.x, viewport.y],
@@ -234,16 +341,21 @@ fn main() {
             layer: GuiLayer::Overlay,
             metrics: Default::default(),
             colors: Default::default(),
-            state: MenuBarState { open_menu: Some(0) },
+            state: data.menu_state,
         };
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Background,
             None,
-            quad_from_pixels(vec2(0.0, 0.0), viewport, Vec4::new(0.05, 0.05, 0.07, 1.0), viewport),
+            quad_from_pixels(
+                vec2(0.0, 0.0),
+                viewport,
+                Vec4::new(0.05, 0.05, 0.07, 1.0),
+                viewport,
+            ),
         ));
 
-        gui.submit_menu_bar(&menu_bar, &menu_options);
+        let menu_layout = gui.submit_menu_bar(&menu_bar, &menu_options);
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::World,
@@ -254,13 +366,29 @@ fn main() {
         gui.submit_draw(GuiDraw::new(
             GuiLayer::World,
             None,
-            quad_from_pixels(button_a_draw_pos, button_size, button_color(hover_a), viewport),
+            quad_from_pixels(title_bar_pos, title_bar_size, title_bar_color, viewport),
         ));
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::World,
             None,
-            quad_from_pixels(button_b_draw_pos, button_size, button_color(hover_b), viewport),
+            quad_from_pixels(
+                button_a_draw_pos,
+                button_size,
+                button_color(hover_a),
+                viewport,
+            ),
+        ));
+
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::World,
+            None,
+            quad_from_pixels(
+                button_b_draw_pos,
+                button_size,
+                button_color(hover_b),
+                viewport,
+            ),
         ));
 
         gui.submit_draw(GuiDraw::with_clip_rect(
@@ -310,7 +438,9 @@ fn main() {
             text_render_mode.clone(),
         );
 
-        let status = if hover_a {
+        let status = if data.menu_feedback_until > now {
+            data.menu_feedback.as_deref().unwrap_or("Menu action")
+        } else if hover_a {
             "Hovering: Button A"
         } else if hover_b {
             "Hovering: Button B"
@@ -323,6 +453,22 @@ fn main() {
             last_status = status.to_string();
         }
 
+        update_text(
+            &mut setup.engine,
+            title_text,
+            "Meshi GUI overlay",
+            title_bar_pos + vec2(16.0, 8.0),
+            if title_bar_hovered {
+                Vec4::new(0.95, 0.97, 1.0, 1.0)
+            } else {
+                Vec4::ONE
+            },
+            1.3,
+            text_render_mode.clone(),
+        );
+
+        data.menu_layout = menu_layout;
+        data.mouse_pressed = false;
         setup.engine.update(dt);
     }
 

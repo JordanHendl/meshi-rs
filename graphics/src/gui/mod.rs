@@ -93,7 +93,8 @@ impl GuiContext {
             }
 
             let base_vertex = current_mesh.vertices.len() as u32;
-            current_mesh.vertices
+            current_mesh
+                .vertices
                 .extend(draw.quad.vertices().into_iter().map(|vertex| GuiVertex {
                     position: vertex.position,
                     uv: vertex.uv,
@@ -311,10 +312,32 @@ impl MenuBar {
         for (menu_index, menu) in self.menus.iter().enumerate() {
             let label_width = text_width(&menu.label, metrics.char_width);
             let tab_width = label_width + metrics.menu_padding[0] * 2.0;
-            let tab_rect = MenuRect::from_position_size(
-                [cursor_x, menu_y],
-                [tab_width, metrics.bar_height],
-            );
+            let tab_rect =
+                MenuRect::from_position_size([cursor_x, menu_y], [tab_width, metrics.bar_height]);
+
+            if options.state.open_menu == Some(menu_index) {
+                ctx.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(
+                        [tab_rect.min[0], tab_rect.min[1]],
+                        [tab_width, metrics.bar_height],
+                        colors.tab_active,
+                        viewport,
+                    ),
+                ));
+            } else if options.state.hovered_menu == Some(menu_index) {
+                ctx.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(
+                        [tab_rect.min[0], tab_rect.min[1]],
+                        [tab_width, metrics.bar_height],
+                        colors.tab_hover,
+                        viewport,
+                    ),
+                ));
+            }
 
             layout.menu_tabs.push(MenuTabLayout {
                 menu_index,
@@ -338,10 +361,8 @@ impl MenuBar {
                 let dropdown_width = menu_dropdown_width(menu, metrics);
                 let dropdown_height = menu_dropdown_height(menu, metrics);
                 let dropdown_pos = [tab_rect.min[0], menu_y + metrics.bar_height];
-                let dropdown_rect = MenuRect::from_position_size(
-                    dropdown_pos,
-                    [dropdown_width, dropdown_height],
-                );
+                let dropdown_rect =
+                    MenuRect::from_position_size(dropdown_pos, [dropdown_width, dropdown_height]);
 
                 layout.open_menu = Some(OpenMenuLayout {
                     menu_index,
@@ -368,10 +389,7 @@ impl MenuBar {
                             options.layer,
                             None,
                             quad_from_pixels(
-                                [
-                                    dropdown_pos[0] + metrics.dropdown_padding[0],
-                                    line_y,
-                                ],
+                                [dropdown_pos[0] + metrics.dropdown_padding[0], line_y],
                                 [
                                     dropdown_width - metrics.dropdown_padding[0] * 2.0,
                                     metrics.separator_thickness,
@@ -394,6 +412,20 @@ impl MenuBar {
                         colors.disabled_text
                     };
 
+                    if item.enabled && options.state.hovered_item == Some((menu_index, item_index))
+                    {
+                        ctx.submit_draw(GuiDraw::new(
+                            options.layer,
+                            None,
+                            quad_from_pixels(
+                                [item_rect.min[0], item_rect.min[1]],
+                                [dropdown_width, metrics.item_height],
+                                colors.item_hover,
+                                viewport,
+                            ),
+                        ));
+                    }
+
                     if item.checked {
                         let check_pos = [
                             item_rect.min[0] + metrics.item_padding[0],
@@ -407,9 +439,8 @@ impl MenuBar {
                         });
                     }
 
-                    let label_x = item_rect.min[0]
-                        + metrics.item_padding[0]
-                        + metrics.checkmark_width;
+                    let label_x =
+                        item_rect.min[0] + metrics.item_padding[0] + metrics.checkmark_width;
                     let label_pos = [label_x, item_rect.min[1] + metrics.text_offset[1]];
                     ctx.submit_text(GuiTextDraw {
                         text: item.label.clone(),
@@ -421,9 +452,7 @@ impl MenuBar {
                     if let Some(shortcut) = &item.shortcut {
                         let shortcut_width = text_width(shortcut, metrics.char_width);
                         let shortcut_pos = [
-                            item_rect.max[0]
-                                - metrics.item_padding[0]
-                                - shortcut_width,
+                            item_rect.max[0] - metrics.item_padding[0] - shortcut_width,
                             item_rect.min[1] + metrics.text_offset[1],
                         ];
                         ctx.submit_text(GuiTextDraw {
@@ -504,6 +533,8 @@ pub struct MenuBarRenderOptions {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MenuBarState {
     pub open_menu: Option<usize>,
+    pub hovered_menu: Option<usize>,
+    pub hovered_item: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -548,7 +579,10 @@ impl Default for MenuLayoutMetrics {
 #[derive(Debug, Clone, Copy)]
 pub struct MenuColors {
     pub bar_background: [f32; 4],
+    pub tab_hover: [f32; 4],
+    pub tab_active: [f32; 4],
     pub dropdown_background: [f32; 4],
+    pub item_hover: [f32; 4],
     pub separator: [f32; 4],
     pub text: [f32; 4],
     pub disabled_text: [f32; 4],
@@ -559,7 +593,10 @@ impl Default for MenuColors {
     fn default() -> Self {
         Self {
             bar_background: [0.08, 0.09, 0.11, 0.98],
+            tab_hover: [0.18, 0.2, 0.26, 0.98],
+            tab_active: [0.22, 0.24, 0.3, 0.98],
             dropdown_background: [0.12, 0.13, 0.16, 0.96],
+            item_hover: [0.2, 0.24, 0.32, 0.92],
             separator: [0.24, 0.26, 0.3, 0.8],
             text: [0.9, 0.92, 0.96, 1.0],
             disabled_text: [0.55, 0.58, 0.62, 1.0],
