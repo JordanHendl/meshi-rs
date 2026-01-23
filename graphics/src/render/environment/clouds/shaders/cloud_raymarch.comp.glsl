@@ -1,23 +1,21 @@
 #version 450
 #extension GL_EXT_samplerless_texture_functions : enable
+#extension GL_EXT_scalar_block_layout : enable
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform CloudRaymarchParams {
+layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uvec2 output_resolution;
     uvec3 base_noise_size;
     uvec3 detail_noise_size;
     uint weather_map_size;
     uint frame_index;
     uint shadow_resolution;
-    uint _padding_shadow;
     mat4 view_proj;
     mat4 inv_view_proj;
     vec3 camera_position;
-    float _padding_camera;
     float camera_near;
     float camera_far;
-    vec2 _padding_camera_1;
     float cloud_base;
     float cloud_top;
     float density_scale;
@@ -35,9 +33,7 @@ layout(set = 0, binding = 0) uniform CloudRaymarchParams {
     float epsilon;
     vec3 sun_direction;
     uint use_shadow_map;
-    uint _padding;
     float shadow_extent;
-    vec3 _padding_2;
 } params;
 
 layout(set = 0, binding = 1) uniform texture2D cloud_weather_map;

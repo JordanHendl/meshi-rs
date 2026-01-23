@@ -19,57 +19,41 @@ const RAYMARCH_WORKGROUP_SIZE: u32 = 8;
 #[derive(Clone, Copy, Default)]
 pub struct CloudRaymarchParams {
     pub output_resolution: [u32; 2],
-    pub _pad0: [u32; 2],                // <-- pad to 16
-
     pub base_noise_size: [u32; 3],
-    pub _pad1: u32,                     // <-- uvec3 rounds to 16
-
     pub detail_noise_size: [u32; 3],
-    pub _pad2: u32,                     // <-- uvec3 rounds to 16
-
     pub weather_map_size: u32,
     pub frame_index: u32,
     pub shadow_resolution: u32,
-    pub _padding_shadow: u32,           // 16-byte block complete
 
-    pub view_proj: [[f32; 4]; 4],       // 64
-    pub inv_view_proj: [[f32; 4]; 4],   // 64
+    pub view_proj: [[f32; 4]; 4],
+    pub inv_view_proj: [[f32; 4]; 4],
 
     pub camera_position: [f32; 3],
-    pub _padding_camera: f32,           // vec3 + float = 16
-
     pub camera_near: f32,
     pub camera_far: f32,
-    pub _padding_camera_1: [f32; 2],    // 16
 
     pub cloud_base: f32,
     pub cloud_top: f32,
     pub density_scale: f32,
-    pub step_count: u32,                // 16
+    pub step_count: u32,
 
     pub light_step_count: u32,
     pub phase_g: f32,
     pub sun_radiance: [f32; 3],
-    pub shadow_strength: f32,           // vec3 + float = 16
+    pub shadow_strength: f32,
 
     pub wind: [f32; 2],
     pub time: f32,
-    pub coverage_power: f32,            // 16
+    pub coverage_power: f32,
 
     pub detail_strength: f32,
     pub curl_strength: f32,
     pub jitter_strength: f32,
-    pub epsilon: f32,                   // 16
+    pub epsilon: f32,
 
     pub sun_direction: [f32; 3],
-    pub use_shadow_map: u32,            // vec3 + uint = 16
-
-    pub _padding: u32,
+    pub use_shadow_map: u32,
     pub shadow_extent: f32,
-    pub _pad3: [f32; 2],                // <-- pad so next vec3 starts on 16
-
-    pub _padding_2: [f32; 3],
-    pub _pad4: f32,                     // <-- vec3 rounds to 16
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -240,7 +224,6 @@ impl CloudRaymarchPass {
             weather_map_size: settings.weather_map_size,
             frame_index: settings.frame_index,
             shadow_resolution: settings.shadow_resolution,
-            _padding_shadow: 0,
             view_proj: settings.view_proj,
             inv_view_proj: settings.inv_view_proj,
             camera_position: [
@@ -248,10 +231,8 @@ impl CloudRaymarchPass {
                 settings.camera_position.y,
                 settings.camera_position.z,
             ],
-            _padding_camera: 0.0,
             camera_near: settings.camera_near,
             camera_far: settings.camera_far,
-            _padding_camera_1: [0.0; 2],
             cloud_base: settings.cloud_base,
             cloud_top: settings.cloud_top,
             density_scale: settings.density_scale,
@@ -277,9 +258,7 @@ impl CloudRaymarchPass {
                 settings.sun_direction.z,
             ],
             use_shadow_map: settings.use_shadow_map as u32,
-            _padding: 0,
             shadow_extent: settings.shadow_extent,
-            _padding_2: [0.0; 3],
             ..Default::default()
         };
     }

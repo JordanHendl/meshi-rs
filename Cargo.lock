@@ -612,7 +612,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#ac40c482f8e29a6bbbe646cc7a20b9f74eabd383"
+source = "git+https://github.com/JordanHendl/gohan#041c8be7baef422fbcd4b2c3d89e1662a4de96d0"
 dependencies = [
  "bincode",
  "clap",
@@ -862,9 +862,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.53"
+version = "1.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
+checksum = "6354c81bbfd62d9cfa9cb3c773c2b7b2a3a482d569de977fd0e961f6e7c00583"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1826,7 +1826,7 @@ dependencies = [
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#ac40c482f8e29a6bbbe646cc7a20b9f74eabd383"
+source = "git+https://github.com/JordanHendl/gohan#041c8be7baef422fbcd4b2c3d89e1662a4de96d0"
 dependencies = [
  "bento",
  "dashi",
@@ -2879,7 +2879,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#ac40c482f8e29a6bbbe646cc7a20b9f74eabd383"
+source = "git+https://github.com/JordanHendl/gohan#041c8be7baef422fbcd4b2c3d89e1662a4de96d0"
 dependencies = [
  "bento",
  "dashi",
@@ -3639,9 +3639,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
@@ -4394,7 +4394,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#ac40c482f8e29a6bbbe646cc7a20b9f74eabd383"
+source = "git+https://github.com/JordanHendl/gohan#041c8be7baef422fbcd4b2c3d89e1662a4de96d0"
 dependencies = [
  "bento",
  "dashi",
