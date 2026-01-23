@@ -7,6 +7,7 @@
 //! - **Frame build**: generate a sorted, batched mesh for GPU upload.
 
 pub mod debug;
+pub mod dock;
 
 use std::ops::Range;
 

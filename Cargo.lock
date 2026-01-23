@@ -2804,6 +2804,8 @@ dependencies = [
  "miso",
  "noren",
  "resource_pool",
+ "serde",
+ "serde_json",
  "tare",
  "tracing",
  "tracing-subscriber",
