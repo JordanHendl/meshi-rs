@@ -141,6 +141,172 @@ impl GuiContext {
     ) -> MenuBarLayout {
         menu_bar.submit_to_draw_list(self, options)
     }
+
+    pub fn submit_sliders(
+        &mut self,
+        sliders: &[Slider],
+        options: &SliderRenderOptions,
+    ) -> SliderLayout {
+        let metrics = &options.metrics;
+        let colors = &options.colors;
+        let position = options.position;
+        let viewport = options.viewport;
+
+        let max_label_width = sliders
+            .iter()
+            .map(|slider| text_width(&slider.label, metrics.char_width))
+            .fold(0.0_f32, f32::max)
+            .max(metrics.min_label_width);
+
+        let formatted_values: Vec<String> = sliders
+            .iter()
+            .map(|slider| {
+                if slider.show_value {
+                    format!("{:.2}", slider.value)
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+
+        let max_value_width = formatted_values
+            .iter()
+            .map(|value| text_width(value, metrics.char_width))
+            .fold(0.0_f32, f32::max)
+            .max(metrics.min_value_width);
+
+        let mut layout = SliderLayout::default();
+        let track_start_x = position[0] + metrics.padding[0] + max_label_width + metrics.label_gap;
+        let track_end_x = position[0] + options.size[0]
+            - metrics.padding[0]
+            - max_value_width
+            - metrics.value_gap;
+        let track_width = (track_end_x - track_start_x).max(1.0);
+
+        for (index, slider) in sliders.iter().enumerate() {
+            let item_y = position[1]
+                + metrics.padding[1]
+                + index as f32 * (metrics.item_height + metrics.item_gap);
+            let item_rect = MenuRect::from_position_size(
+                [position[0] + metrics.padding[0], item_y],
+                [
+                    options.size[0] - metrics.padding[0] * 2.0,
+                    metrics.item_height,
+                ],
+            );
+
+            let clamped_value = if slider.max > slider.min {
+                slider.value.clamp(slider.min, slider.max)
+            } else {
+                slider.min
+            };
+            let t = if (slider.max - slider.min).abs() < f32::EPSILON {
+                0.0
+            } else {
+                (clamped_value - slider.min) / (slider.max - slider.min)
+            };
+            let knob_center_x = track_start_x + track_width * t;
+            let track_y = item_y + (metrics.item_height - metrics.track_height) * 0.5;
+            let knob_y = item_y + (metrics.item_height - metrics.knob_height) * 0.5;
+
+            let track_rect = MenuRect::from_position_size(
+                [track_start_x, track_y],
+                [track_width, metrics.track_height],
+            );
+            let knob_rect = MenuRect::from_position_size(
+                [knob_center_x - metrics.knob_width * 0.5, knob_y],
+                [metrics.knob_width, metrics.knob_height],
+            );
+
+            let is_hovered = options.state.hovered == Some(slider.id);
+            let is_active = options.state.active == Some(slider.id);
+            let enabled = slider.enabled;
+
+            let track_color = if !enabled {
+                colors.disabled
+            } else if is_active {
+                colors.track_active
+            } else if is_hovered {
+                colors.track_hover
+            } else {
+                colors.track
+            };
+
+            let knob_color = if !enabled {
+                colors.disabled
+            } else if is_active {
+                colors.knob_active
+            } else if is_hovered {
+                colors.knob_hover
+            } else {
+                colors.knob
+            };
+
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(
+                    [track_rect.min[0], track_rect.min[1]],
+                    [track_width, metrics.track_height],
+                    track_color,
+                    viewport,
+                ),
+            ));
+
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(
+                    [knob_rect.min[0], knob_rect.min[1]],
+                    [metrics.knob_width, metrics.knob_height],
+                    knob_color,
+                    viewport,
+                ),
+            ));
+
+            let label_pos = [item_rect.min[0], item_rect.min[1] + metrics.text_offset[1]];
+            self.submit_text(GuiTextDraw {
+                text: slider.label.clone(),
+                position: label_pos,
+                color: if enabled {
+                    colors.label
+                } else {
+                    colors.disabled
+                },
+                scale: metrics.font_scale,
+            });
+
+            if slider.show_value {
+                let value_text = formatted_values.get(index).cloned().unwrap_or_default();
+                let value_pos = [
+                    track_end_x + metrics.value_gap,
+                    item_rect.min[1] + metrics.text_offset[1],
+                ];
+                self.submit_text(GuiTextDraw {
+                    text: value_text,
+                    position: value_pos,
+                    color: if enabled {
+                        colors.value
+                    } else {
+                        colors.disabled
+                    },
+                    scale: metrics.font_scale,
+                });
+            }
+
+            layout.items.push(SliderItemLayout {
+                id: slider.id,
+                track_rect,
+                knob_rect,
+                value: clamped_value,
+                min: slider.min,
+                max: slider.max,
+                enabled,
+            });
+        }
+
+        layout
+    }
 }
 
 /// Minimal draw submission payload for GUI rendering.
@@ -518,6 +684,130 @@ impl MenuItem {
             is_separator: true,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Slider {
+    pub id: u32,
+    pub label: String,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
+    pub enabled: bool,
+    pub show_value: bool,
+}
+
+impl Slider {
+    pub fn new(id: u32, label: impl Into<String>, min: f32, max: f32, value: f32) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            value,
+            min,
+            max,
+            enabled: true,
+            show_value: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SliderRenderOptions {
+    pub viewport: [f32; 2],
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub layer: GuiLayer,
+    pub metrics: SliderMetrics,
+    pub colors: SliderColors,
+    pub state: SliderState,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SliderState {
+    pub hovered: Option<u32>,
+    pub active: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SliderMetrics {
+    pub item_height: f32,
+    pub item_gap: f32,
+    pub padding: [f32; 2],
+    pub track_height: f32,
+    pub knob_width: f32,
+    pub knob_height: f32,
+    pub label_gap: f32,
+    pub value_gap: f32,
+    pub min_label_width: f32,
+    pub min_value_width: f32,
+    pub char_width: f32,
+    pub font_scale: f32,
+    pub text_offset: [f32; 2],
+}
+
+impl Default for SliderMetrics {
+    fn default() -> Self {
+        Self {
+            item_height: 30.0,
+            item_gap: 10.0,
+            padding: [12.0, 12.0],
+            track_height: 6.0,
+            knob_width: 14.0,
+            knob_height: 18.0,
+            label_gap: 12.0,
+            value_gap: 10.0,
+            min_label_width: 90.0,
+            min_value_width: 48.0,
+            char_width: 7.2,
+            font_scale: 1.0,
+            text_offset: [0.0, 7.0],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SliderColors {
+    pub track: [f32; 4],
+    pub track_hover: [f32; 4],
+    pub track_active: [f32; 4],
+    pub knob: [f32; 4],
+    pub knob_hover: [f32; 4],
+    pub knob_active: [f32; 4],
+    pub label: [f32; 4],
+    pub value: [f32; 4],
+    pub disabled: [f32; 4],
+}
+
+impl Default for SliderColors {
+    fn default() -> Self {
+        Self {
+            track: [0.18, 0.2, 0.25, 0.7],
+            track_hover: [0.22, 0.26, 0.32, 0.85],
+            track_active: [0.25, 0.3, 0.4, 0.9],
+            knob: [0.7, 0.8, 0.95, 0.95],
+            knob_hover: [0.85, 0.9, 1.0, 1.0],
+            knob_active: [0.45, 0.8, 1.0, 1.0],
+            label: [0.9, 0.92, 0.96, 1.0],
+            value: [0.75, 0.8, 0.9, 1.0],
+            disabled: [0.4, 0.42, 0.46, 0.6],
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SliderLayout {
+    pub items: Vec<SliderItemLayout>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SliderItemLayout {
+    pub id: u32,
+    pub track_rect: MenuRect,
+    pub knob_rect: MenuRect,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone)]

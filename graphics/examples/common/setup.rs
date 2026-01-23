@@ -53,15 +53,18 @@ pub fn init(
         renderer,
         sample_count: None,
         skybox_cubemap_entry: Some(DEFAULT_CUBEMAP_ENTRY.to_string()),
+        debug_mode: false,
     })
     .unwrap();
 
-    let mut db = Box::new(DB::new(&DBInfo {
-        base_dir: "",
-        layout_file: None,
-        pooled_geometry_uploads: false,
-    })
-    .expect("Unable to create database"));
+    let mut db = Box::new(
+        DB::new(&DBInfo {
+            base_dir: "",
+            layout_file: None,
+            pooled_geometry_uploads: false,
+        })
+        .expect("Unable to create database"),
+    );
 
     engine.initialize_database(&mut db);
 

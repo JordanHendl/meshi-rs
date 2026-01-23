@@ -5,9 +5,7 @@ use meshi_audio::{
 };
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
-use meshi_graphics::{
-    Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo
-};
+use meshi_graphics::{Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo};
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
 use meshi_utils::timer::Timer;
@@ -38,6 +36,8 @@ pub struct MeshiEngineInfo {
     pub headless: i32,
     /// Optional extent to override the default canvas size.
     pub canvas_extent: *const u32,
+    /// Enable debug overlays or tooling for engine subsystems (0 = disabled, 1 = enabled).
+    pub debug_mode: i32,
 }
 
 /// Primary engine instance returned by [`meshi_make_engine`].
@@ -83,6 +83,7 @@ impl MeshiEngine {
                     Some(unsafe { [*info.canvas_extent, *info.canvas_extent.add(1)] })
                 },
                 skybox_cubemap_entry: Some(noren::defaults::DEFAULT_CUBEMAP_ENTRY.to_string()),
+                debug_mode: info.debug_mode != 0,
                 ..Default::default()
             })
             .expect("failed to initialize render engine"),
@@ -96,14 +97,20 @@ impl MeshiEngine {
             })
             .expect("failed to initialize database!"),
         );
-        
+
         render.initialize_database(database.as_mut());
-        let mut audio = AudioEngine::new(&AudioEngineInfo::default());
+        let mut audio = AudioEngine::new(&AudioEngineInfo {
+            debug_mode: info.debug_mode != 0,
+            ..Default::default()
+        });
         audio.initialize_database(database.as_mut());
         Some(Box::new(MeshiEngine {
             database,
             render,
-            physics: Box::new(PhysicsSimulation::new(&Default::default())),
+            physics: Box::new(PhysicsSimulation::new(&SimulationInfo {
+                debug_mode: info.debug_mode != 0,
+                ..Default::default()
+            })),
             audio,
             frame_timer: Timer::new(),
             name: appname.to_string(),
@@ -172,6 +179,7 @@ pub extern "C" fn meshi_make_engine_headless(
         application_location,
         headless: 1,
         canvas_extent: std::ptr::null(),
+        debug_mode: 0,
     };
     meshi_make_engine(&info)
 }
@@ -347,10 +355,7 @@ pub extern "C" fn meshi_gfx_create_light(
 }
 
 #[no_mangle]
-pub extern "C" fn meshi_gfx_release_light(
-    render: *mut MeshiEngine,
-    h: *const Handle<Light>,
-) {
+pub extern "C" fn meshi_gfx_release_light(render: *mut MeshiEngine, h: *const Handle<Light>) {
     if render.is_null() || h.is_null() {
         return;
     }

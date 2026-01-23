@@ -1,11 +1,11 @@
-use glam::{Mat4, Vec2, Vec4};
-use glam::*;
 use dashi::SampleCount;
+use furikake::types::Material;
 use furikake::types::*;
+use glam::*;
+use glam::{Mat4, Vec2, Vec4};
 use meshi_ffi_structs::*;
 use noren::meta::DeviceModel;
 use resource_pool::Handle;
-use furikake::types::Material;
 
 #[derive(Default)]
 pub struct MeshObject {
@@ -341,7 +341,6 @@ impl Default for CloudSettings {
     }
 }
 
-
 #[inline]
 pub fn pack_gpu_light(s: LightInfo) -> Light {
     let mut out = Light {
@@ -382,7 +381,7 @@ pub fn pack_gpu_light(s: LightInfo) -> Light {
     // Enforce your documented semantics
     match s.ty {
         LightType::Directional => {
-            out.position_type  = Vec3::ZERO.extend(out.position_type.w);
+            out.position_type = Vec3::ZERO.extend(out.position_type.w);
             out.direction_range.w = 0.0; // infinite
             out.spot_area = Vec4::ZERO;
         }
@@ -416,4 +415,5 @@ pub struct RenderEngineInfo {
     pub renderer: RendererSelect,
     pub sample_count: Option<SampleCount>,
     pub skybox_cubemap_entry: Option<String>,
+    pub debug_mode: bool,
 }

@@ -5,7 +5,8 @@ use glam::{Vec2, Vec4, vec2};
 use meshi_ffi_structs::event::*;
 use meshi_graphics::gui::{
     GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, Menu, MenuBar, MenuBarLayout,
-    MenuBarRenderOptions, MenuBarState, MenuItem, MenuRect,
+    MenuBarRenderOptions, MenuBarState, MenuItem, MenuRect, Slider, SliderColors, SliderLayout,
+    SliderMetrics, SliderRenderOptions, SliderState,
 };
 use meshi_graphics::{RendererSelect, TextInfo};
 use meshi_utils::timer::Timer;
@@ -38,6 +39,14 @@ fn point_in_menu_rect(point: Vec2, rect: MenuRect) -> bool {
         && point.x <= rect.max[0]
         && point.y >= rect.min[1]
         && point.y <= rect.max[1]
+}
+
+fn slider_value_from_cursor(cursor: Vec2, rect: MenuRect, min: f32, max: f32) -> f32 {
+    if (max - min).abs() < f32::EPSILON {
+        return min;
+    }
+    let t = ((cursor.x - rect.min[0]) / (rect.max[0] - rect.min[0])).clamp(0.0, 1.0);
+    min + (max - min) * t
 }
 
 fn update_text(
@@ -116,6 +125,16 @@ fn main() {
         menu_layout: MenuBarLayout,
         menu_feedback: Option<String>,
         menu_feedback_until: f32,
+        slider_state: SliderState,
+        slider_layout: SliderLayout,
+        slider_values: SliderValues,
+    }
+
+    #[derive(Clone, Copy)]
+    struct SliderValues {
+        panel_opacity: f32,
+        image_scale: f32,
+        hover_boost: f32,
     }
 
     let mut data = AppData {
@@ -131,6 +150,13 @@ fn main() {
         menu_layout: MenuBarLayout::default(),
         menu_feedback: None,
         menu_feedback_until: 0.0,
+        slider_state: SliderState::default(),
+        slider_layout: SliderLayout::default(),
+        slider_values: SliderValues {
+            panel_opacity: 0.92,
+            image_scale: 1.0,
+            hover_boost: 1.06,
+        },
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -219,6 +245,9 @@ fn main() {
             },
         ],
     };
+    const PANEL_OPACITY_SLIDER: u32 = 1;
+    const IMAGE_SCALE_SLIDER: u32 = 2;
+    const HOVER_BOOST_SLIDER: u32 = 3;
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
@@ -237,10 +266,19 @@ fn main() {
 
         let hover_a = point_in_rect(data.cursor, button_a_pos, base_button_size);
         let hover_b = point_in_rect(data.cursor, button_b_pos, base_button_size);
-        let hover_scale = if hover_a || hover_b { 1.06 } else { 1.0 };
+        let hover_scale = if hover_a || hover_b {
+            data.slider_values.hover_boost
+        } else {
+            1.0
+        };
 
         let pulse = (now * 2.0).sin() * 0.1 + 0.9;
-        let panel_color = Vec4::new(0.12, 0.14, 0.18, 0.92 * pulse);
+        let panel_color = Vec4::new(
+            0.12,
+            0.14,
+            0.18,
+            (0.92 * pulse) * data.slider_values.panel_opacity,
+        );
         let title_bar_color = if data.mouse_down && title_bar_hovered {
             Vec4::new(0.28, 0.32, 0.4, 0.95)
         } else if title_bar_hovered {
@@ -264,7 +302,7 @@ fn main() {
         let image_base_pos = vec2(380.0, 140.0);
         let image_motion = vec2((now * 1.4).sin() * 12.0, (now * 0.9).cos() * 6.0);
         let image_pos = image_base_pos + image_motion;
-        let image_size = vec2(220.0, 160.0);
+        let image_size = vec2(220.0, 160.0) * data.slider_values.image_scale;
         let clip_rect = GuiClipRect::from_position_size(
             [image_base_pos.x + 16.0, image_base_pos.y + 16.0],
             [188.0, 120.0],
@@ -304,6 +342,40 @@ fn main() {
         }
 
         let clicked_open_menu = data.menu_layout.open_menu.map(|open_menu| open_menu.rect);
+        let hovered_slider = data.slider_layout.items.iter().find(|item| {
+            item.enabled
+                && (point_in_menu_rect(data.cursor, item.track_rect)
+                    || point_in_menu_rect(data.cursor, item.knob_rect))
+        });
+        data.slider_state.hovered = hovered_slider.map(|item| item.id);
+
+        if data.mouse_pressed {
+            if let Some(item) = hovered_slider {
+                data.slider_state.active = Some(item.id);
+            }
+        }
+
+        if !data.mouse_down {
+            data.slider_state.active = None;
+        }
+
+        if let Some(active_id) = data.slider_state.active {
+            if let Some(item) = data
+                .slider_layout
+                .items
+                .iter()
+                .find(|item| item.id == active_id && item.enabled)
+            {
+                let value =
+                    slider_value_from_cursor(data.cursor, item.track_rect, item.min, item.max);
+                match active_id {
+                    PANEL_OPACITY_SLIDER => data.slider_values.panel_opacity = value,
+                    IMAGE_SCALE_SLIDER => data.slider_values.image_scale = value,
+                    HOVER_BOOST_SLIDER => data.slider_values.hover_boost = value,
+                    _ => {}
+                }
+            }
+        }
 
         if data.mouse_pressed {
             if let Some(menu_index) = hovered_tab {
@@ -343,6 +415,41 @@ fn main() {
             colors: Default::default(),
             state: data.menu_state,
         };
+
+        let slider_panel_position = vec2(360.0, 100.0);
+        let slider_panel_size = vec2(260.0, 240.0);
+        let slider_options = SliderRenderOptions {
+            viewport: [viewport.x, viewport.y],
+            position: [slider_panel_position.x, slider_panel_position.y],
+            size: [slider_panel_size.x, slider_panel_size.y],
+            layer: GuiLayer::Overlay,
+            metrics: SliderMetrics::default(),
+            colors: SliderColors::default(),
+            state: data.slider_state,
+        };
+        let sliders = [
+            Slider::new(
+                PANEL_OPACITY_SLIDER,
+                "Panel Opacity",
+                0.4,
+                1.0,
+                data.slider_values.panel_opacity,
+            ),
+            Slider::new(
+                IMAGE_SCALE_SLIDER,
+                "Image Scale",
+                0.6,
+                1.4,
+                data.slider_values.image_scale,
+            ),
+            Slider::new(
+                HOVER_BOOST_SLIDER,
+                "Hover Boost",
+                1.0,
+                1.2,
+                data.slider_values.hover_boost,
+            ),
+        ];
 
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Background,
@@ -402,12 +509,14 @@ fn main() {
             GuiLayer::Overlay,
             None,
             quad_from_pixels(
-                vec2(360.0, 100.0),
-                vec2(260.0, 240.0),
+                slider_panel_position,
+                slider_panel_size,
                 Vec4::new(0.1, 0.15, 0.2, 0.2),
                 viewport,
             ),
         ));
+
+        let slider_layout = gui.submit_sliders(&sliders, &slider_options);
 
         let frame = gui.build_frame();
         setup.engine.upload_gui_frame(frame);
@@ -468,6 +577,7 @@ fn main() {
         );
 
         data.menu_layout = menu_layout;
+        data.slider_layout = slider_layout;
         data.mouse_pressed = false;
         setup.engine.update(dt);
     }

@@ -61,6 +61,7 @@ pub struct RenderEngine {
     pending_skybox_entry: Option<String>,
     frame_timer: FrameTimer,
     environment_lighting: Option<EnvironmentLightingState>,
+    debug_mode: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -140,7 +141,16 @@ impl RenderEngine {
             pending_skybox_entry: info.skybox_cubemap_entry.clone(),
             frame_timer: FrameTimer::new(60),
             environment_lighting: None,
+            debug_mode: info.debug_mode,
         })
+    }
+
+    pub fn debug_mode(&self) -> bool {
+        self.debug_mode
+    }
+
+    pub fn set_debug_mode(&mut self, enabled: bool) {
+        self.debug_mode = enabled;
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -847,9 +857,5 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon {
-        -Vec3::Y
-    } else {
-        Vec3::Y
-    }
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }

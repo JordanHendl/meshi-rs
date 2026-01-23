@@ -47,6 +47,7 @@ struct MeshiEngineInfo {
     std::int32_t headless;
     MeshiRenderBackend render_backend;
     const std::uint32_t* canvas_extent = nullptr;
+    std::int32_t debug_mode = 0;
 };
 
 struct MeshiFFIMeshObjectInfo {

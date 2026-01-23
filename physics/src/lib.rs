@@ -1,5 +1,5 @@
-use resource_pool::{Handle, Pool};
 use glam::*;
+use resource_pool::{Handle, Pool};
 use std::collections::{HashMap, HashSet};
 
 #[repr(C)]
@@ -38,6 +38,7 @@ impl Default for EnvironmentInfo {
 #[derive(Default, Clone, Copy)]
 pub struct SimulationInfo {
     pub environment: EnvironmentInfo,
+    pub debug_mode: bool,
 }
 
 #[repr(C)]
@@ -351,6 +352,14 @@ impl PhysicsSimulation {
         let default = s.materials.insert(Default::default()).unwrap();
         s.default_material = default;
         s
+    }
+
+    pub fn debug_mode(&self) -> bool {
+        self.info.debug_mode
+    }
+
+    pub fn set_debug_mode(&mut self, enabled: bool) {
+        self.info.debug_mode = enabled;
     }
 
     /// Set the global gravitational acceleration in meters per second squared.

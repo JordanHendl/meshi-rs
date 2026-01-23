@@ -2,13 +2,9 @@ use glam::{Mat4, Vec3};
 use noren::{rdb::audio::AudioClip, DB};
 use resource_pool::{Handle, Pool};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::mem::MaybeUninit;
 use std::io::{BufReader, Cursor, Read, Seek};
-use std::{
-    ffi::c_void,
-    ptr::NonNull,
-    sync::Arc,
-};
+use std::mem::MaybeUninit;
+use std::{ffi::c_void, ptr::NonNull, sync::Arc};
 use tracing::info;
 
 trait AudioReadSeek: Read + Seek + Send + Sync + 'static {}
@@ -29,6 +25,7 @@ pub struct AudioEngineInfo {
     pub sample_rate: u32,
     pub channels: u32,
     pub backend: AudioBackend,
+    pub debug_mode: bool,
 }
 
 impl Default for AudioEngineInfo {
@@ -37,6 +34,7 @@ impl Default for AudioEngineInfo {
             sample_rate: 48_000,
             channels: 2,
             backend: AudioBackend::Dummy,
+            debug_mode: false,
         }
     }
 }
@@ -119,6 +117,14 @@ impl AudioEngine {
         }
     }
 
+    pub fn debug_mode(&self) -> bool {
+        self.info.debug_mode
+    }
+
+    pub fn set_debug_mode(&mut self, enabled: bool) {
+        self.info.debug_mode = enabled;
+    }
+
     pub fn create_source(&mut self, path: &str) -> Handle<AudioSource> {
         let Some(mut db) = self.db else {
             info!("Audio database unavailable; cannot load clip '{}'", path);
@@ -184,10 +190,9 @@ impl AudioEngine {
             if backend == AudioBackend::Rodio {
                 if let Some(handle) = handle_clone {
                     let reader: Option<Box<dyn AudioReadSeek>> = match &s.source {
-                        AudioSourceData::Clip { data, .. } => Some(
-                            Box::new(Cursor::new(Arc::clone(data)))
-                                as Box<dyn AudioReadSeek>,
-                        ),
+                        AudioSourceData::Clip { data, .. } => {
+                            Some(Box::new(Cursor::new(Arc::clone(data))) as Box<dyn AudioReadSeek>)
+                        }
                     };
                     if let Some(reader) = reader {
                         let decoder = Decoder::new(BufReader::new(reader)).ok();
