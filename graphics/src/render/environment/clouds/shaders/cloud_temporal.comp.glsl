@@ -90,6 +90,7 @@ void main() {
     mat4 inv_view_proj = inverse(view_proj);
 
     vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
+    uv.y = 1.0 - uv.y;
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 clip = vec4(ndc, 1.0, 1.0);
     vec4 world = inv_view_proj * clip;

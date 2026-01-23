@@ -172,7 +172,7 @@ void main() {
     }
 
     if (params.debug_view == 1u) {
-        vec4 weather = texture(sampler2D(cloud_weather_map, cloud_sampler), v_uv);
+        vec4 weather = texture(sampler2D(cloud_weather_map, cloud_sampler), fract(v_uv));
         frag_color = vec4(weather.rgb, 1.0);
         return;
     }
@@ -203,4 +203,3 @@ void main() {
     float alpha = 1.0 - trans;
     frag_color = vec4(color.rgb, alpha);
 }
-

@@ -317,8 +317,8 @@ impl Default for CloudSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            base_altitude: -100.0,
-            top_altitude: -200.0,
+            base_altitude: 100.0,
+            top_altitude: 200.0,
             density_scale: 0.5,
             step_count: 96,
             light_step_count: 6,

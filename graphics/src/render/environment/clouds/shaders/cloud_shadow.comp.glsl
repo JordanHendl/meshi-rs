@@ -67,7 +67,8 @@ float sample_noise(texture2D tex, sampler samp, vec3 p, uvec3 dims) {
 }
 
 float sample_weather(vec2 uv) {
-    return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), uv).r;
+    vec2 wrapped = fract(uv);
+    return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), wrapped).r;
 }
 
 void main() {

@@ -100,7 +100,8 @@ vec3 curl_noise(texture2D tex, sampler samp, vec3 p, uvec3 dims) {
 }
 
 vec4 sample_weather(vec2 uv) {
-    return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), uv);
+    vec2 wrapped = fract(uv);
+    return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), wrapped);
 }
 
 float phase_hg(float cos_theta, float g) {
@@ -149,6 +150,7 @@ void main() {
     uint idx = gid.y * params.output_resolution.x + gid.x;
 
     vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
+    uv.y = 1.0 - uv.y;
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 clip = vec4(ndc, 1.0, 1.0);
     vec4 world = inv_view_proj * clip;
