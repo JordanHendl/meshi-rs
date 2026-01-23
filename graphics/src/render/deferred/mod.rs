@@ -1440,7 +1440,7 @@ impl DeferredRenderer {
                             .environment
                             .render(&self.data.viewport, camera_handle),
                     );
-                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
+//                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd

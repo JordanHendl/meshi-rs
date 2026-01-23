@@ -99,6 +99,7 @@ struct OceanDrawParams {
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
+    wave_amplitude: f32,
     _padding1: f32,
 }
 
@@ -431,6 +432,7 @@ impl OceanRenderer {
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
+            wave_amplitude: self.wave_amplitude,
             _padding1: 0.0,
         };
 
