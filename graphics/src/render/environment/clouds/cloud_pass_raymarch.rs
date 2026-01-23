@@ -8,6 +8,7 @@ use dashi::{
 use dashi::driver::command::Dispatch;
 use glam::{UVec3, Vec2, Vec3};
 use tare::utils::StagedBuffer;
+use bytemuck::cast_slice;
 
 use super::cloud_assets::CloudAssets;
 use super::cloud_pass_shadow::CloudShadowPass;
@@ -18,39 +19,57 @@ const RAYMARCH_WORKGROUP_SIZE: u32 = 8;
 #[derive(Clone, Copy, Default)]
 pub struct CloudRaymarchParams {
     pub output_resolution: [u32; 2],
+    pub _pad0: [u32; 2],                // <-- pad to 16
+
     pub base_noise_size: [u32; 3],
+    pub _pad1: u32,                     // <-- uvec3 rounds to 16
+
     pub detail_noise_size: [u32; 3],
+    pub _pad2: u32,                     // <-- uvec3 rounds to 16
+
     pub weather_map_size: u32,
     pub frame_index: u32,
     pub shadow_resolution: u32,
-    pub _padding_shadow: u32,
-    pub view_proj: [[f32; 4]; 4],
-    pub inv_view_proj: [[f32; 4]; 4],
+    pub _padding_shadow: u32,           // 16-byte block complete
+
+    pub view_proj: [[f32; 4]; 4],       // 64
+    pub inv_view_proj: [[f32; 4]; 4],   // 64
+
     pub camera_position: [f32; 3],
-    pub _padding_camera: f32,
+    pub _padding_camera: f32,           // vec3 + float = 16
+
     pub camera_near: f32,
     pub camera_far: f32,
-    pub _padding_camera_1: [f32; 2],
+    pub _padding_camera_1: [f32; 2],    // 16
+
     pub cloud_base: f32,
     pub cloud_top: f32,
     pub density_scale: f32,
-    pub step_count: u32,
+    pub step_count: u32,                // 16
+
     pub light_step_count: u32,
     pub phase_g: f32,
     pub sun_radiance: [f32; 3],
-    pub shadow_strength: f32,
+    pub shadow_strength: f32,           // vec3 + float = 16
+
     pub wind: [f32; 2],
     pub time: f32,
-    pub coverage_power: f32,
+    pub coverage_power: f32,            // 16
+
     pub detail_strength: f32,
     pub curl_strength: f32,
     pub jitter_strength: f32,
-    pub epsilon: f32,
+    pub epsilon: f32,                   // 16
+
     pub sun_direction: [f32; 3],
-    pub use_shadow_map: u32,
+    pub use_shadow_map: u32,            // vec3 + uint = 16
+
     pub _padding: u32,
     pub shadow_extent: f32,
+    pub _pad3: [f32; 2],                // <-- pad so next vec3 starts on 16
+
     pub _padding_2: [f32; 3],
+    pub _pad4: f32,                     // <-- vec3 rounds to 16
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -118,13 +137,18 @@ impl CloudRaymarchPass {
         );
 
         let pixel_count = output_resolution[0] * output_resolution[1];
+        let color_init = vec![0.0f32; (pixel_count * 4) as usize];
+        let transmittance_init = vec![1.0f32; pixel_count as usize];
+        let depth_init = vec![0.0f32; pixel_count as usize];
+        let steps_init = vec![0.0f32; pixel_count as usize];
+
         let color_buffer = ctx
             .make_buffer(&BufferInfo {
                 debug_name: "[CLOUD] Raymarch Color",
                 byte_size: pixel_count * 16,
                 visibility: MemoryVisibility::Gpu,
                 usage: BufferUsage::STORAGE,
-                initial_data: None,
+                initial_data: Some(cast_slice(&color_init)),
             })
             .expect("create cloud color buffer");
         let transmittance_buffer = ctx
@@ -133,7 +157,7 @@ impl CloudRaymarchPass {
                 byte_size: pixel_count * 4,
                 visibility: MemoryVisibility::CpuAndGpu,
                 usage: BufferUsage::STORAGE,
-                initial_data: None,
+                initial_data: Some(cast_slice(&transmittance_init)),
             })
             .expect("create cloud transmittance buffer");
         let depth_buffer = ctx
@@ -142,7 +166,7 @@ impl CloudRaymarchPass {
                 byte_size: pixel_count * 4,
                 visibility: MemoryVisibility::Gpu,
                 usage: BufferUsage::STORAGE,
-                initial_data: None,
+                initial_data: Some(cast_slice(&depth_init)),
             })
             .expect("create cloud depth buffer");
         let steps_buffer = ctx
@@ -151,7 +175,7 @@ impl CloudRaymarchPass {
                 byte_size: pixel_count * 4,
                 visibility: MemoryVisibility::Gpu,
                 usage: BufferUsage::STORAGE,
-                initial_data: None,
+                initial_data: Some(cast_slice(&steps_init)),
             })
             .expect("create cloud steps buffer");
 
@@ -159,9 +183,10 @@ impl CloudRaymarchPass {
             .make_sampler(&SamplerInfo::default())
             .expect("create cloud sampler");
 
-        let pipeline = CSOBuilder::new()
+        let pipeline = Some(CSOBuilder::new()
+            .set_debug_name("[MESHI] Cloud Raymarch")
             .shader(Some(include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes()))
-            .add_variable("cloud_raymarch_params", ShaderResource::ConstBuffer(params.device().into()))
+            .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
             .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
             .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
             .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
@@ -182,7 +207,7 @@ impl CloudRaymarchPass {
             .add_variable("cloud_depth_buffer", ShaderResource::StorageBuffer(depth_buffer.into()))
             .add_variable("cloud_steps_buffer", ShaderResource::StorageBuffer(steps_buffer.into()))
             .build(ctx)
-            .ok();
+            .unwrap());
 
         Self {
             color_buffer,
@@ -255,6 +280,7 @@ impl CloudRaymarchPass {
             _padding: 0,
             shadow_extent: settings.shadow_extent,
             _padding_2: [0.0; 3],
+            ..Default::default()
         };
     }
 
@@ -263,7 +289,6 @@ impl CloudRaymarchPass {
             return CommandStream::new().begin().end();
         };
         let output_resolution = self.output_resolution;
-
         CommandStream::new()
             .begin()
             .combine(self.params.sync_up())

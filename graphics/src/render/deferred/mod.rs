@@ -4,11 +4,11 @@ use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
-use crate::gui::GuiFrame;
 use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
+use crate::gui::GuiFrame;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{AnimationState, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
@@ -196,7 +196,7 @@ impl DeferredRenderer {
                 .expect(""),
             )
         };
-        
+
         ctx.init_gpu_timers(64).unwrap();
         CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
         let mut state = Box::new(BindlessState::new(&mut ctx));
@@ -1128,7 +1128,10 @@ impl DeferredRenderer {
     }
 
     pub fn upload_gui_frame(&mut self, frame: GuiFrame) {
-        let GuiFrame { batches, text_draws } = frame;
+        let GuiFrame {
+            batches,
+            text_draws,
+        } = frame;
         self.gui.upload_frame(GuiFrame {
             batches,
             text_draws: Vec::new(),
@@ -1251,21 +1254,21 @@ impl DeferredRenderer {
             deferred_combine_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
 
             let camera_handle = *camera;
-            let mut cloud_cmd = Some(self.subrender.clouds.update(
-                self.ctx.as_mut(),
-                self.state.as_mut(),
-                &self.data.viewport,
-                camera_handle,
-                delta_time,
-            ));
 
-            let mut gbuffer_cmd =
-                Some(self.proc.draw_builder.build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32));
-
-            self.graph.add_compute_pass(move |cmd| {
+            self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
-                    .combine(cloud_cmd.take().unwrap_or_else(|| CommandStream::new().begin().end()))
-                    .combine(gbuffer_cmd.take().unwrap_or_else(|| CommandStream::new().begin().end()))
+                    .combine(self.subrender.clouds.update(
+                        self.ctx.as_mut(),
+                        self.state.as_mut(),
+                        &self.data.viewport,
+                        camera_handle,
+                        delta_time,
+                    ))
+                    .combine(
+                        self.proc
+                            .draw_builder
+                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                    )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
                 cmd.end()
@@ -1440,7 +1443,7 @@ impl DeferredRenderer {
                             .environment
                             .render(&self.data.viewport, camera_handle),
                     );
-//                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
+                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd

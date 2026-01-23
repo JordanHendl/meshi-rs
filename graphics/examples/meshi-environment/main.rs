@@ -1,6 +1,8 @@
 use std::ffi::c_void;
 
-use dashi::Handle;
+use dashi::{
+    AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange,
+};
 use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
@@ -40,7 +42,13 @@ fn main() {
         camera: CameraController,
         _instruction_text: Handle<TextObject>,
         environment_text: Handle<TextObject>,
+        _cloud_weather_map: ImageView,
     }
+
+    let cloud_weather_map = create_cloud_test_map(setup.engine.context(), 256);
+    setup
+        .engine
+        .set_cloud_weather_map(Some(cloud_weather_map));
 
     let mut data = AppData {
         running: true,
@@ -53,6 +61,7 @@ fn main() {
             scale: 1.2,
             render_mode: common_setup::text_render_mode(&setup.db),
         }),
+        _cloud_weather_map: cloud_weather_map,
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -158,5 +167,42 @@ fn celestial_direction(
         -Vec3::Y
     } else {
         Vec3::Y
+    }
+}
+
+fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let idx = ((y * size + x) * 4) as usize;
+            let nx = x as f32 / size as f32;
+            let ny = y as f32 / size as f32;
+            let coverage = (0.5 + 0.5 * (nx * 6.0).sin() * (ny * 5.0).cos()).clamp(0.0, 1.0);
+            let cloud_type = (0.5 + 0.5 * (nx * 3.0 + ny * 2.0).cos()).clamp(0.0, 1.0);
+            let thickness = (0.6 + 0.4 * (nx * 8.0 + ny * 4.0).sin()).clamp(0.0, 1.0);
+            data[idx] = (coverage * 255.0) as u8;
+            data[idx + 1] = (cloud_type * 255.0) as u8;
+            data[idx + 2] = (thickness * 255.0) as u8;
+            data[idx + 3] = 255;
+        }
+    }
+
+    let image = ctx
+        .make_image(&ImageInfo {
+            debug_name: "[MESHI ENV] Cloud Weather Map",
+            dim: [size, size, 1],
+            layers: 1,
+            format: Format::RGBA8,
+            mip_levels: 1,
+            initial_data: Some(&data),
+            ..Default::default()
+        })
+        .expect("create cloud weather map");
+
+    ImageView {
+        img: image,
+        aspect: AspectMask::Color,
+        view_type: ImageViewType::Type2D,
+        range: SubresourceRange::new(0, 1, 0, 1),
     }
 }

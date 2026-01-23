@@ -11,7 +11,8 @@ use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use crate::structs::{CloudResolutionScale, CloudSettings};
 use dashi::cmd::Executable;
-use dashi::{CommandStream, Context, Handle, Viewport};
+use dashi::driver::command::BlitImage;
+use dashi::{CommandStream, Context, Filter, Handle, Rect2D, SubresourceRange, Viewport};
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::BindlessState;
 use glam::Mat4;
@@ -45,7 +46,8 @@ pub struct CloudRenderer {
     timings: CloudTimingResult,
     depth_view: dashi::ImageView,
     sample_count: dashi::SampleCount,
-    weather_map_dirty: bool,
+    pending_weather_map: Option<dashi::ImageView>,
+    weather_map_configured: bool,
 }
 
 impl CloudRenderer {
@@ -102,7 +104,8 @@ impl CloudRenderer {
             timings: CloudTimingResult::default(),
             depth_view,
             sample_count,
-            weather_map_dirty: false,
+            pending_weather_map: None,
+            weather_map_configured: true,
         }
     }
 
@@ -131,68 +134,47 @@ impl CloudRenderer {
 
     pub fn update(
         &mut self,
-        ctx: &mut Context,
+        _ctx: &mut Context,
         state: &mut BindlessState,
         viewport: &Viewport,
         camera: Handle<furikake::types::Camera>,
         delta_time: f32,
     ) -> CommandStream<Executable> {
-        if !self.settings.enabled {
-            self.timings = CloudTimingResult::default();
-            return CommandStream::new().begin().end();
+        let mut cmd = CommandStream::new().begin();
+
+        if let Some(view) = self.pending_weather_map.as_ref() {
+            let size = self.assets.weather_map_size;
+            cmd = cmd.blit_images(&BlitImage {
+                src: view.img,
+                dst: self.assets.weather_map.img,
+                src_range: SubresourceRange::new(0, 1, 0, 1),
+                dst_range: SubresourceRange::new(0, 1, 0, 1),
+                filter: Filter::Linear,
+                src_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: size,
+                    h: size,
+                },
+                dst_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: size,
+                    h: size,
+                },
+            });
         }
 
-        let low_resolution = calc_low_res(viewport, self.settings.low_res_scale);
-        let shadow_res_changed = self.settings.shadow.resolution != self.shadow_pass.shadow_resolution;
-        let low_res_changed = low_resolution != self.low_resolution;
-        if shadow_res_changed || low_res_changed || self.weather_map_dirty {
-            if shadow_res_changed {
-                self.shadow_pass = CloudShadowPass::new(
-                    ctx,
-                    &self.assets,
-                    self.settings.shadow.resolution,
-                    TIMER_SHADOW,
-                );
-            }
-            if low_res_changed || shadow_res_changed || self.weather_map_dirty {
-                self.low_resolution = low_resolution;
-                self.raymarch_pass = CloudRaymarchPass::new(
-                    ctx,
-                    &self.assets,
-                    &self.shadow_pass,
-                    low_resolution,
-                    TIMER_RAYMARCH,
-                );
-                self.temporal_pass = CloudTemporalPass::new(
-                    ctx,
-                    low_resolution,
-                    self.raymarch_pass.color_buffer,
-                    self.raymarch_pass.transmittance_buffer,
-                    self.raymarch_pass.depth_buffer,
-                    TIMER_TEMPORAL,
-                );
-            }
-            self.composite_pass = CloudCompositePass::new(
-                ctx,
-                &self.assets,
-                self.temporal_pass.history_color,
-                self.temporal_pass.history_transmittance,
-                self.temporal_pass.history_depth,
-                self.raymarch_pass.steps_buffer,
-                self.temporal_pass.history_weight,
-                self.shadow_pass.shadow_buffer,
-                self.depth_view,
-                self.sample_count,
-            );
-            state.register_pso_tables(self.composite_pass.pipeline());
-            self.weather_map_dirty = false;
+        if !self.settings.enabled || !self.weather_map_configured {
+            self.timings = CloudTimingResult::default();
+            return cmd.end();
         }
 
         let camera_data = match state.reserved::<ReservedBindlessCamera>("meshi_bindless_cameras") {
             Ok(cameras) => cameras.camera(camera),
             Err(_) => {
                 warn!("CloudRenderer failed to access bindless cameras");
-                return CommandStream::new().begin().end();
+                return cmd.end();
             }
         };
 
@@ -205,7 +187,7 @@ impl CloudRenderer {
 
         let sampling = CloudSamplingSettings {
             output_resolution: self.low_resolution,
-            shadow_resolution: self.settings.shadow.resolution,
+            shadow_resolution: self.shadow_pass.shadow_resolution,
             base_noise_dims: self.assets.base_noise_dims,
             detail_noise_dims: self.assets.detail_noise_dims,
             weather_map_size: self.assets.weather_map_size,
@@ -235,7 +217,6 @@ impl CloudRenderer {
             camera_far: camera_data.far,
         };
 
-        let mut cmd = CommandStream::new().begin();
         if self.settings.shadow.enabled {
             self.shadow_pass.update_settings(sampling, sampling.sun_direction, sampling.time);
             cmd = cmd.combine(self.shadow_pass.record());
@@ -265,7 +246,7 @@ impl CloudRenderer {
             self.settings.temporal.depth_sigma,
             self.settings.debug_view,
             self.settings.temporal.history_weight_scale,
-            self.settings.shadow.resolution,
+            self.shadow_pass.shadow_resolution,
             self.temporal_pass.history_index() as u32,
         );
 
@@ -289,7 +270,7 @@ impl CloudRenderer {
         &mut self,
         viewport: &Viewport,
     ) -> dashi::cmd::CommandStream<dashi::cmd::PendingGraphics> {
-        if !self.settings.enabled {
+        if !self.settings.enabled || !self.weather_map_configured {
             return dashi::cmd::CommandStream::<dashi::cmd::PendingGraphics>::subdraw();
         }
         self.composite_pass.record(viewport, TIMER_COMPOSITE)
@@ -300,8 +281,8 @@ impl CloudRenderer {
     }
 
     pub fn set_authored_weather_map(&mut self, view: Option<dashi::ImageView>) {
-        self.assets.set_authored_weather_map(view);
-        self.weather_map_dirty = true;
+        self.pending_weather_map = view;
+        self.weather_map_configured = self.pending_weather_map.is_some();
     }
 
     pub fn transmittance_buffer(&self) -> Handle<dashi::Buffer> {

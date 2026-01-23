@@ -52,7 +52,6 @@ pub struct CloudAssets {
     pub weather_map_size: u32,
     pub blue_noise_size: u32,
     pub weather_layout: CloudWeatherChannelLayout,
-    pub authored_weather_map: Option<ImageView>,
 }
 
 impl CloudAssets {
@@ -99,16 +98,11 @@ impl CloudAssets {
             weather_map_size: sizes.weather_map_size,
             blue_noise_size: sizes.blue_noise_size,
             weather_layout,
-            authored_weather_map: None,
         }
     }
 
     pub fn weather_map_view(&self) -> ImageView {
-        self.authored_weather_map.unwrap_or(self.weather_map)
-    }
-
-    pub fn set_authored_weather_map(&mut self, view: Option<ImageView>) {
-        self.authored_weather_map = view;
+        self.weather_map
     }
 }
 

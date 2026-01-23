@@ -6,6 +6,7 @@ use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, ShaderResource,
 };
 use tare::utils::StagedBuffer;
+use bytemuck::cast_slice;
 
 use super::cloud_pass_raymarch::CloudSamplingSettings;
 
@@ -219,33 +220,62 @@ struct TemporalBuffers {
 
 fn create_history_buffers(ctx: &mut Context, output_resolution: [u32; 2]) -> TemporalBuffers {
     let pixel_count = output_resolution[0] * output_resolution[1];
-    let mut buffer = |name: &str, bytes_per_pixel: u32| {
+    let history_color_init = vec![0.0f32; (pixel_count * 4) as usize];
+    let history_trans_init = vec![1.0f32; pixel_count as usize];
+    let history_depth_init = vec![0.0f32; pixel_count as usize];
+    let history_weight_init = vec![0.0f32; pixel_count as usize];
+
+    let mut buffer = |name: &str, bytes_per_pixel: u32, initial_data: Option<&[u8]>| {
         ctx.make_buffer(&BufferInfo {
             debug_name: name,
             byte_size: pixel_count * bytes_per_pixel,
             visibility: MemoryVisibility::Gpu,
             usage: BufferUsage::STORAGE,
-            initial_data: None,
+            initial_data,
         })
         .expect("create temporal buffer")
     };
 
     TemporalBuffers {
         history_color: [
-            buffer("[CLOUD] History Color 0", 16),
-            buffer("[CLOUD] History Color 1", 16),
+            buffer("[CLOUD] History Color 0", 16, Some(cast_slice(&history_color_init))),
+            buffer("[CLOUD] History Color 1", 16, Some(cast_slice(&history_color_init))),
         ],
         history_transmittance: [
-            buffer("[CLOUD] History Transmittance 0", 4),
-            buffer("[CLOUD] History Transmittance 1", 4),
+            buffer(
+                "[CLOUD] History Transmittance 0",
+                4,
+                Some(cast_slice(&history_trans_init)),
+            ),
+            buffer(
+                "[CLOUD] History Transmittance 1",
+                4,
+                Some(cast_slice(&history_trans_init)),
+            ),
         ],
         history_depth: [
-            buffer("[CLOUD] History Depth 0", 4),
-            buffer("[CLOUD] History Depth 1", 4),
+            buffer(
+                "[CLOUD] History Depth 0",
+                4,
+                Some(cast_slice(&history_depth_init)),
+            ),
+            buffer(
+                "[CLOUD] History Depth 1",
+                4,
+                Some(cast_slice(&history_depth_init)),
+            ),
         ],
         history_weight: [
-            buffer("[CLOUD] History Weight 0", 4),
-            buffer("[CLOUD] History Weight 1", 4),
+            buffer(
+                "[CLOUD] History Weight 0",
+                4,
+                Some(cast_slice(&history_weight_init)),
+            ),
+            buffer(
+                "[CLOUD] History Weight 1",
+                4,
+                Some(cast_slice(&history_weight_init)),
+            ),
         ],
     }
 }
@@ -265,12 +295,13 @@ fn build_pipeline(
     output_depth: Handle<dashi::Buffer>,
     output_weight: Handle<dashi::Buffer>,
 ) -> Option<bento::builder::CSO> {
-    CSOBuilder::new()
+    Some(CSOBuilder::new()
+        .set_debug_name("[MESHI] Cloud Temporal")
         .shader(Some(
             include_str!("shaders/cloud_temporal.comp.glsl").as_bytes(),
         ))
         .add_variable(
-            "cloud_temporal_params",
+            "params",
             ShaderResource::ConstBuffer(params.device().into()),
         )
         .add_variable(
@@ -278,7 +309,7 @@ fn build_pipeline(
             ShaderResource::StorageBuffer(current_color.into()),
         )
         .add_variable(
-            "cloud_current_transmittance",
+            "cloud_current_trans",
             ShaderResource::StorageBuffer(current_transmittance.into()),
         )
         .add_variable(
@@ -290,7 +321,7 @@ fn build_pipeline(
             ShaderResource::StorageBuffer(history_color.into()),
         )
         .add_variable(
-            "cloud_history_transmittance",
+            "cloud_history_trans",
             ShaderResource::StorageBuffer(history_transmittance.into()),
         )
         .add_variable(
@@ -306,7 +337,7 @@ fn build_pipeline(
             ShaderResource::StorageBuffer(output_color.into()),
         )
         .add_variable(
-            "cloud_output_transmittance",
+            "cloud_output_trans",
             ShaderResource::StorageBuffer(output_transmittance.into()),
         )
         .add_variable(
@@ -318,5 +349,5 @@ fn build_pipeline(
             ShaderResource::StorageBuffer(output_weight.into()),
         )
         .build(ctx)
-        .ok()
+        .unwrap())
 }

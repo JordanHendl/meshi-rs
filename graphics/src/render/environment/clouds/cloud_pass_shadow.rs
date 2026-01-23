@@ -76,9 +76,9 @@ impl CloudShadowPass {
             .make_sampler(&SamplerInfo::default())
             .expect("create cloud sampler");
 
-        let pipeline = CSOBuilder::new()
+        let pipeline = Some(CSOBuilder::new()
             .shader(Some(include_str!("shaders/cloud_shadow.comp.glsl").as_bytes()))
-            .add_variable("cloud_shadow_params", ShaderResource::ConstBuffer(params.device().into()))
+            .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
             .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
             .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
             .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
@@ -87,7 +87,7 @@ impl CloudShadowPass {
             .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
             .add_variable("cloud_shadow_buffer", ShaderResource::StorageBuffer(shadow_buffer.into()))
             .build(ctx)
-            .ok();
+            .unwrap());
 
         Self {
             shadow_buffer,
