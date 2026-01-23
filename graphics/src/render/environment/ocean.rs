@@ -54,6 +54,16 @@ pub struct OceanFrameSettings {
     pub wind_speed: f32,
     /// Scales overall wave height, slope, and velocity (1.0 = default).
     pub wave_amplitude: f32,
+    /// Multiplier for Gerstner wave amplitude relative to `wave_amplitude`.
+    pub gerstner_amplitude: f32,
+    /// Base reflectance for the Fresnel term.
+    pub fresnel_bias: f32,
+    /// Scales Fresnel reflectance contribution when blending reflections.
+    pub fresnel_strength: f32,
+    /// Overall foam intensity multiplier.
+    pub foam_strength: f32,
+    /// Foam threshold for the breaking/curvature mask.
+    pub foam_threshold: f32,
     /// Scales high-frequency capillary detail (1.0 = default).
     pub capillary_strength: f32,
     /// Time multiplier for wave evolution; values above 1.0 speed up the animation.
@@ -67,6 +77,11 @@ impl Default for OceanFrameSettings {
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
             wave_amplitude: 2.0,
+            gerstner_amplitude: 0.12,
+            fresnel_bias: 0.02,
+            fresnel_strength: 0.85,
+            foam_strength: 1.0,
+            foam_threshold: 0.55,
             capillary_strength: 1.0,
             time_scale: 1.0,
         }
@@ -100,6 +115,11 @@ struct OceanDrawParams {
     wind_dir: Vec2,
     wind_speed: f32,
     wave_amplitude: f32,
+    gerstner_amplitude: f32,
+    fresnel_bias: f32,
+    fresnel_strength: f32,
+    foam_strength: f32,
+    foam_threshold: f32,
     _padding1: f32,
 }
 
@@ -121,6 +141,11 @@ pub struct OceanRenderer {
     wind_dir: Vec2,
     wind_speed: f32,
     wave_amplitude: f32,
+    gerstner_amplitude: f32,
+    fresnel_bias: f32,
+    fresnel_strength: f32,
+    foam_strength: f32,
+    foam_threshold: f32,
     capillary_strength: f32,
     time_scale: f32,
     use_depth: bool,
@@ -314,6 +339,11 @@ impl OceanRenderer {
             wind_dir: default_frame.wind_dir,
             wind_speed: default_frame.wind_speed,
             wave_amplitude: default_frame.wave_amplitude,
+            gerstner_amplitude: default_frame.gerstner_amplitude,
+            fresnel_bias: default_frame.fresnel_bias,
+            fresnel_strength: default_frame.fresnel_strength,
+            foam_strength: default_frame.foam_strength,
+            foam_threshold: default_frame.foam_threshold,
             capillary_strength: default_frame.capillary_strength,
             time_scale: default_frame.time_scale,
             use_depth: info.use_depth,
@@ -327,6 +357,11 @@ impl OceanRenderer {
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
         self.wave_amplitude = settings.wave_amplitude;
+        self.gerstner_amplitude = settings.gerstner_amplitude;
+        self.fresnel_bias = settings.fresnel_bias;
+        self.fresnel_strength = settings.fresnel_strength;
+        self.foam_strength = settings.foam_strength;
+        self.foam_threshold = settings.foam_threshold;
         self.capillary_strength = settings.capillary_strength;
         self.time_scale = settings.time_scale;
     }
@@ -433,6 +468,11 @@ impl OceanRenderer {
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
             wave_amplitude: self.wave_amplitude,
+            gerstner_amplitude: self.gerstner_amplitude,
+            fresnel_bias: self.fresnel_bias,
+            fresnel_strength: self.fresnel_strength,
+            foam_strength: self.foam_strength,
+            foam_threshold: self.foam_threshold,
             _padding1: 0.0,
         };
 

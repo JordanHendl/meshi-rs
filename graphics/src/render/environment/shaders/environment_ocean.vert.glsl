@@ -100,6 +100,11 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     vec2 wind_dir;
     float wind_speed;
     float wave_amplitude;
+    float gerstner_amplitude;
+    float fresnel_bias;
+    float fresnel_strength;
+    float foam_strength;
+    float foam_threshold;
     float _padding1;
 } params;
 
@@ -258,7 +263,7 @@ void main() {
         0.3,
         0.35
     );
-    float gerstner_amplitude = max(params.wave_amplitude, 0.0) * 0.12;
+    float gerstner_amplitude = max(params.wave_amplitude, 0.0) * max(params.gerstner_amplitude, 0.0);
     float gravity = 9.81;
     float two_pi = 6.28318530718;
     vec2 gerstner_offset = vec2(0.0);

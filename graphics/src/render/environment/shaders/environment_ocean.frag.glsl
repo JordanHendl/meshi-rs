@@ -21,6 +21,12 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float time;
     vec2 wind_dir;
     float wind_speed;
+    float wave_amplitude;
+    float gerstner_amplitude;
+    float fresnel_bias;
+    float fresnel_strength;
+    float foam_strength;
+    float foam_threshold;
     float _padding1;
 } params;
 
@@ -92,7 +98,9 @@ void main() {
     vec3 n = normalize(v_normal);
     vec3 v = normalize(v_view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
-    float fresnel = 0.02 + (1.0 - 0.02) * pow(1.0 - ndotv, 5.0);
+    float fresnel_bias = clamp(params.fresnel_bias, 0.0, 1.0);
+    float fresnel = fresnel_bias + (1.0 - fresnel_bias) * pow(1.0 - ndotv, 5.0);
+    float fresnel_strength = max(params.fresnel_strength, 0.0);
     vec3 reflection_dir = reflect(-v, n);
     vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
 
@@ -100,11 +108,15 @@ void main() {
     float velocity = abs(v_velocity);
     float curvature = length(fwidth(n));
     float breaking = velocity * 0.35 + slope * 1.2;
-    float foam_mask = smoothstep(0.55, 0.95, breaking + curvature * 0.4);
+    float foam_threshold = clamp(params.foam_threshold, 0.0, 1.0);
+    float foam_upper = min(1.0, foam_threshold + 0.4);
+    float foam_mask = smoothstep(foam_threshold, foam_upper, breaking + curvature * 0.4);
+    float foam_strength = max(params.foam_strength, 0.0);
+    foam_mask *= foam_strength;
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
 
     vec3 color = apply_light(base_color, n, v, v_world_pos);
-    color = mix(color, env_color, clamp(fresnel * 0.85, 0.0, 1.0));
+    color = mix(color, env_color, clamp(fresnel * fresnel_strength, 0.0, 1.0));
     color += foam_color;
     float transparency = mix(0.25, 0.85, fresnel) + foam_mask * 0.15;
     float alpha = clamp(transparency, 0.1, 0.98);
