@@ -82,6 +82,8 @@ fn main() {
         update_interval_frames: 1,
         ..Default::default()
     });
+    let mut cloud_settings = setup.engine.cloud_settings();
+    cloud_settings.enabled = true;
 
     while data.running {
         let now = timer.elapsed_seconds_f32();
@@ -114,6 +116,10 @@ fn main() {
                 sun_light_intensity: 3.5,
                 moon_light_intensity: 0.4,
             });
+
+        cloud_settings.sun_direction = sun_dir;
+        cloud_settings.sun_radiance = Vec3::new(1.0, 0.95, 0.85);
+        setup.engine.set_cloud_settings(cloud_settings);
 
         setup.engine.set_text(
             data.environment_text,

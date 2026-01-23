@@ -284,7 +284,7 @@ impl CloudRaymarchPass {
                     .prepare_buffer(self.transmittance_buffer, UsageBits::COMPUTE_SHADER)
                     .prepare_buffer(self.depth_buffer, UsageBits::COMPUTE_SHADER)
                     .prepare_buffer(self.steps_buffer, UsageBits::COMPUTE_SHADER)
-                    .gpu_timer_begin(timer_index)
+//                    .gpu_timer_begin(timer_index)
                     .dispatch(&Dispatch {
                         x: (output_resolution[0] + RAYMARCH_WORKGROUP_SIZE - 1)
                             / RAYMARCH_WORKGROUP_SIZE,
@@ -295,7 +295,7 @@ impl CloudRaymarchPass {
                         bind_tables: pipeline.tables(),
                         dynamic_buffers: Default::default(),
                     })
-                    .gpu_timer_end(timer_index)
+  //                  .gpu_timer_end(timer_index)
                     .unbind_pipeline()
                     .end()
                     .append(c)

@@ -158,7 +158,7 @@ impl CloudShadowPass {
                     .begin()
                     .combine(self.params.sync_up())
                     .prepare_buffer(self.shadow_buffer, UsageBits::COMPUTE_SHADER)
-                    .gpu_timer_begin(timer_index)
+//                    .gpu_timer_begin(timer_index)
                     .dispatch(&Dispatch {
                         x: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
                         y: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
@@ -167,7 +167,7 @@ impl CloudShadowPass {
                         bind_tables: pipeline.tables(),
                         dynamic_buffers: Default::default(),
                     })
-                    .gpu_timer_end(timer_index)
+  //                  .gpu_timer_end(timer_index)
                     .unbind_pipeline()
                     .end()
                     .append(c)

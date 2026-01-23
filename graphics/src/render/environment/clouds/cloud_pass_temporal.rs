@@ -189,7 +189,7 @@ impl CloudTemporalPass {
                         self.history_weight[history_write],
                         UsageBits::COMPUTE_SHADER,
                     )
-                    .gpu_timer_begin(timer_index)
+//                    .gpu_timer_begin(timer_index)
                     .dispatch(&Dispatch {
                         x: (output_resolution[0] + TEMPORAL_WORKGROUP_SIZE - 1)
                             / TEMPORAL_WORKGROUP_SIZE,
@@ -200,7 +200,7 @@ impl CloudTemporalPass {
                         bind_tables: pipeline.tables(),
                         dynamic_buffers: Default::default(),
                     })
-                    .gpu_timer_end(timer_index)
+//                    .gpu_timer_end(timer_index)
                     .unbind_pipeline()
                     .end();
 

@@ -196,7 +196,8 @@ impl DeferredRenderer {
                 .expect(""),
             )
         };
-
+        
+        ctx.init_gpu_timers(64).unwrap();
         CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
         let mut state = Box::new(BindlessState::new(&mut ctx));
         let scene = GPUScene::new(
@@ -1250,6 +1251,13 @@ impl DeferredRenderer {
             deferred_combine_clear[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0]));
 
             let camera_handle = *camera;
+//            self.subrender.clouds.update(
+//                self.ctx.as_mut(),
+//                self.state.as_mut(),
+//                &self.data.viewport,
+//                camera_handle,
+//                delta_time,
+//            );
 
             self.graph.add_compute_pass(|mut cmd| {
                 cmd.combine(
@@ -1258,6 +1266,7 @@ impl DeferredRenderer {
                         .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                 )
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
+
                 .end()
             });
 
@@ -1373,13 +1382,6 @@ impl DeferredRenderer {
                 },
             );
 
-            //            self.subrender.clouds.update(
-            //                self.ctx.as_mut(),
-            //                self.state.as_mut(),
-            //                &self.data.viewport,
-            //                camera_handle,
-            //                delta_time,
-            //            );
             let overlay_text = self.subrender.clouds.timing_overlay_text();
             self.text.set_text(self.cloud_overlay, &overlay_text);
 
@@ -1437,7 +1439,7 @@ impl DeferredRenderer {
                             .environment
                             .render(&self.data.viewport, camera_handle),
                     );
-                    //                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
+                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
