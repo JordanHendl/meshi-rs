@@ -1,11 +1,13 @@
 use bento::builder::CSOBuilder;
 use dashi::cmd::Executable;
 use dashi::UsageBits;
+use furikake::PSOBuilderFurikakeExt;
 use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
     ShaderResource,
 };
 use dashi::driver::command::Dispatch;
+use furikake::BindlessState;
 use glam::Vec3;
 use tare::utils::StagedBuffer;
 
@@ -21,7 +23,7 @@ pub struct CloudShadowParams {
     pub base_noise_size: [u32; 3],
     pub detail_noise_size: [u32; 3],
     pub weather_map_size: u32,
-    pub _padding: u32,
+    pub camera_index: u32,
     pub cloud_base: f32,
     pub cloud_top: f32,
     pub density_scale: f32,
@@ -31,7 +33,6 @@ pub struct CloudShadowParams {
     pub coverage_power: f32,
     pub sun_direction: [f32; 3],
     pub shadow_strength: f32,
-    pub camera_position: [f32; 3],
     pub shadow_extent: f32,
 }
 
@@ -47,6 +48,7 @@ pub struct CloudShadowPass {
 impl CloudShadowPass {
     pub fn new(
         ctx: &mut Context,
+        state: &mut BindlessState,
         assets: &CloudAssets,
         shadow_resolution: u32,
         timer_index: u32,
@@ -76,18 +78,25 @@ impl CloudShadowPass {
             .make_sampler(&SamplerInfo::default())
             .expect("create cloud sampler");
 
-        let pipeline = Some(CSOBuilder::new()
-            .shader(Some(include_str!("shaders/cloud_shadow.comp.glsl").as_bytes()))
-            .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
-            .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
-            .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
-            .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
-            .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_shadow_buffer", ShaderResource::StorageBuffer(shadow_buffer.into()))
-            .build(ctx)
-            .unwrap());
+        let pipeline = Some(
+            CSOBuilder::new()
+                .shader(Some(include_str!("shaders/cloud_shadow.comp.glsl").as_bytes()))
+                .add_reserved_table_variable(state, "meshi_bindless_cameras")
+                .unwrap()
+                .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
+                .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
+                .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
+                .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
+                .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
+                .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
+                .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
+                .add_variable(
+                    "cloud_shadow_buffer",
+                    ShaderResource::StorageBuffer(shadow_buffer.into()),
+                )
+                .build(ctx)
+                .unwrap(),
+        );
 
         Self {
             shadow_buffer,
@@ -118,6 +127,7 @@ impl CloudShadowPass {
             settings.detail_noise_dims.z,
         ];
         params.weather_map_size = settings.weather_map_size;
+        params.camera_index = settings.camera_index;
         params.cloud_base = settings.cloud_base;
         params.cloud_top = settings.cloud_top;
         params.density_scale = settings.density_scale;
@@ -126,11 +136,6 @@ impl CloudShadowPass {
         params.coverage_power = settings.coverage_power;
         params.sun_direction = [sun_direction.x, sun_direction.y, sun_direction.z];
         params.shadow_strength = settings.shadow_strength;
-        params.camera_position = [
-            settings.camera_position.x,
-            settings.camera_position.y,
-            settings.camera_position.z,
-        ];
         params.shadow_extent = settings.shadow_extent;
     }
 

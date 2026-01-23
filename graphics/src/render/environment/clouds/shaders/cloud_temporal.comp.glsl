@@ -2,12 +2,22 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+struct Camera {
+    mat4 world_from_camera;
+    mat4 projection;
+    vec2 viewport;
+    float near;
+    float far;
+    float fov_y_radians;
+    uint projection_kind;
+    float _padding;
+};
+
 layout(set = 0, binding = 0) uniform CloudTemporalParams {
     uvec2 output_resolution;
-    mat4 inv_view_proj;
     mat4 prev_view_proj;
-    vec3 camera_position;
-    float _padding;
+    uint camera_index;
+    uvec3 _padding;
     float blend_factor;
     float clamp_strength;
     float depth_sigma;
@@ -25,6 +35,9 @@ layout(set = 0, binding = 8) buffer CloudOutputColor { vec4 values[]; } cloud_ou
 layout(set = 0, binding = 9) buffer CloudOutputTrans { float values[]; } cloud_output_trans;
 layout(set = 0, binding = 10) buffer CloudOutputDepth { float values[]; } cloud_output_depth;
 layout(set = 0, binding = 11) buffer CloudOutputWeight { float values[]; } cloud_output_weight;
+layout(set = 1, binding = 1) readonly buffer SceneCameras {
+    Camera cameras[];
+} meshi_bindless_cameras;
 
 // Replace both sample_buffer functions with these:
 
@@ -69,13 +82,22 @@ void main() {
     float current_trans = cloud_current_trans.values[idx];
     float current_depth = cloud_current_depth.values[idx];
 
+    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    vec3 camera_position = camera.world_from_camera[3].xyz;
+    vec3 camera_forward = normalize(-camera.world_from_camera[2].xyz);
+    mat4 view = inverse(camera.world_from_camera);
+    mat4 view_proj = camera.projection * view;
+    mat4 inv_view_proj = inverse(view_proj);
+
     vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 clip = vec4(ndc, 1.0, 1.0);
-    vec4 world = params.inv_view_proj * clip;
+    vec4 world = inv_view_proj * clip;
     world.xyz /= world.w;
-    vec3 ray_dir = normalize(world.xyz - params.camera_position);
-    vec3 world_pos = params.camera_position + ray_dir * current_depth;
+    vec3 ray_dir = normalize(world.xyz - camera_position);
+    float forward_dot = max(dot(ray_dir, camera_forward), 1e-4);
+    float ray_distance = current_depth / forward_dot;
+    vec3 world_pos = camera_position + ray_dir * ray_distance;
     vec4 prev_clip = params.prev_view_proj * vec4(world_pos, 1.0);
     vec2 prev_uv = prev_clip.xy / prev_clip.w * 0.5 + 0.5;
 

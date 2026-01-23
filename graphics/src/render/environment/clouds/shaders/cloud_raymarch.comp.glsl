@@ -4,6 +4,17 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+struct Camera {
+    mat4 world_from_camera;
+    mat4 projection;
+    vec2 viewport;
+    float near;
+    float far;
+    float fov_y_radians;
+    uint projection_kind;
+    float _padding;
+};
+
 layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uvec2 output_resolution;
     uvec3 base_noise_size;
@@ -11,11 +22,8 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uint weather_map_size;
     uint frame_index;
     uint shadow_resolution;
-    mat4 view_proj;
-    mat4 inv_view_proj;
-    vec3 camera_position;
-    float camera_near;
-    float camera_far;
+    uint camera_index;
+    uvec3 _padding;
     float cloud_base;
     float cloud_top;
     float density_scale;
@@ -59,6 +67,9 @@ layout(set = 0, binding = 12) buffer CloudDepthBuffer {
 layout(set = 0, binding = 13) buffer CloudStepsBuffer {
     float values[];
 } cloud_steps_buffer;
+layout(set = 1, binding = 1) readonly buffer SceneCameras {
+    Camera cameras[];
+} meshi_bindless_cameras;
 
 float sample_noise(texture2D tex, sampler samp, vec3 p, uvec3 dims) {
     vec3 fp = fract(p);
@@ -128,17 +139,24 @@ void main() {
         return;
     }
 
+    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    vec3 camera_position = camera.world_from_camera[3].xyz;
+    vec3 camera_forward = normalize(-camera.world_from_camera[2].xyz);
+    mat4 view = inverse(camera.world_from_camera);
+    mat4 view_proj = camera.projection * view;
+    mat4 inv_view_proj = inverse(view_proj);
+
     uint idx = gid.y * params.output_resolution.x + gid.x;
 
     vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 clip = vec4(ndc, 1.0, 1.0);
-    vec4 world = params.inv_view_proj * clip;
+    vec4 world = inv_view_proj * clip;
     world.xyz /= world.w;
-    vec3 ray_dir = normalize(world.xyz - params.camera_position);
+    vec3 ray_dir = normalize(world.xyz - camera_position);
 
-    float t0 = (params.cloud_base - params.camera_position.y) / ray_dir.y;
-    float t1 = (params.cloud_top - params.camera_position.y) / ray_dir.y;
+    float t0 = (params.cloud_base - camera_position.y) / ray_dir.y;
+    float t1 = (params.cloud_top - camera_position.y) / ray_dir.y;
     if (t0 > t1) {
         float temp = t0;
         t0 = t1;
@@ -168,7 +186,7 @@ void main() {
     float steps_used = 0.0;
 
     for (uint i = 0; i < params.step_count; ++i) {
-        vec3 sample_pos = params.camera_position + ray_dir * t;
+        vec3 sample_pos = camera_position + ray_dir * t;
         float height_frac = clamp((sample_pos.y - params.cloud_base) / (params.cloud_top - params.cloud_base), 0.0, 1.0);
 
         vec2 weather_uv = sample_pos.xz * 0.0001 + params.wind * params.time * 0.0001;
@@ -201,7 +219,9 @@ void main() {
             vec3 scatter = params.sun_radiance * phase * light_trans;
             color += transmittance * scatter * (1.0 - step_trans);
             transmittance *= step_trans;
-            depth_accum += t * (1.0 - step_trans);
+            float forward_dot = max(dot(ray_dir, camera_forward), 0.0);
+            float view_depth = t * forward_dot;
+            depth_accum += view_depth * (1.0 - step_trans);
             weight_accum += (1.0 - step_trans);
         }
 

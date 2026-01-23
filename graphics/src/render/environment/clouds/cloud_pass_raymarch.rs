@@ -5,7 +5,9 @@ use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler, SamplerInfo,
     ShaderResource,
 };
+use furikake::PSOBuilderFurikakeExt;
 use dashi::driver::command::Dispatch;
+use furikake::BindlessState;
 use glam::{UVec3, Vec2, Vec3};
 use tare::utils::StagedBuffer;
 use bytemuck::cast_slice;
@@ -24,13 +26,8 @@ pub struct CloudRaymarchParams {
     pub weather_map_size: u32,
     pub frame_index: u32,
     pub shadow_resolution: u32,
-
-    pub view_proj: [[f32; 4]; 4],
-    pub inv_view_proj: [[f32; 4]; 4],
-
-    pub camera_position: [f32; 3],
-    pub camera_near: f32,
-    pub camera_far: f32,
+    pub camera_index: u32,
+    pub _padding: [u32; 3],
 
     pub cloud_base: f32,
     pub cloud_top: f32,
@@ -82,11 +79,7 @@ pub struct CloudSamplingSettings {
     pub frame_index: u32,
     pub time: f32,
     pub use_shadow_map: bool,
-    pub view_proj: [[f32; 4]; 4],
-    pub inv_view_proj: [[f32; 4]; 4],
-    pub camera_position: Vec3,
-    pub camera_near: f32,
-    pub camera_far: f32,
+    pub camera_index: u32,
 }
 
 pub struct CloudRaymarchPass {
@@ -104,6 +97,7 @@ pub struct CloudRaymarchPass {
 impl CloudRaymarchPass {
     pub fn new(
         ctx: &mut Context,
+        state: &mut BindlessState,
         assets: &CloudAssets,
         shadow_pass: &CloudShadowPass,
         output_resolution: [u32; 2],
@@ -167,31 +161,35 @@ impl CloudRaymarchPass {
             .make_sampler(&SamplerInfo::default())
             .expect("create cloud sampler");
 
-        let pipeline = Some(CSOBuilder::new()
-            .set_debug_name("[MESHI] Cloud Raymarch")
-            .shader(Some(include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes()))
-            .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
-            .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
-            .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
-            .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
-            .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
-            .add_variable("cloud_blue_noise", ShaderResource::Image(assets.blue_noise))
-            .add_variable("cloud_blue_sampler", ShaderResource::Sampler(sampler))
-            .add_variable(
-                "cloud_shadow_buffer",
-                ShaderResource::StorageBuffer(shadow_pass.shadow_buffer.into()),
-            )
-            .add_variable("cloud_color_buffer", ShaderResource::StorageBuffer(color_buffer.into()))
-            .add_variable(
-                "cloud_transmittance_buffer",
-                ShaderResource::StorageBuffer(transmittance_buffer.into()),
-            )
-            .add_variable("cloud_depth_buffer", ShaderResource::StorageBuffer(depth_buffer.into()))
-            .add_variable("cloud_steps_buffer", ShaderResource::StorageBuffer(steps_buffer.into()))
-            .build(ctx)
-            .unwrap());
+        let pipeline = Some(
+            CSOBuilder::new()
+                .set_debug_name("[MESHI] Cloud Raymarch")
+                .shader(Some(include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes()))
+                .add_reserved_table_variable(state, "meshi_bindless_cameras")
+                .unwrap()
+                .add_variable("params", ShaderResource::ConstBuffer(params.device().into()))
+                .add_variable("cloud_weather_map", ShaderResource::Image(assets.weather_map_view()))
+                .add_variable("cloud_weather_sampler", ShaderResource::Sampler(sampler))
+                .add_variable("cloud_base_noise", ShaderResource::Image(assets.base_noise))
+                .add_variable("cloud_base_sampler", ShaderResource::Sampler(sampler))
+                .add_variable("cloud_detail_noise", ShaderResource::Image(assets.detail_noise))
+                .add_variable("cloud_detail_sampler", ShaderResource::Sampler(sampler))
+                .add_variable("cloud_blue_noise", ShaderResource::Image(assets.blue_noise))
+                .add_variable("cloud_blue_sampler", ShaderResource::Sampler(sampler))
+                .add_variable(
+                    "cloud_shadow_buffer",
+                    ShaderResource::StorageBuffer(shadow_pass.shadow_buffer.into()),
+                )
+                .add_variable("cloud_color_buffer", ShaderResource::StorageBuffer(color_buffer.into()))
+                .add_variable(
+                    "cloud_transmittance_buffer",
+                    ShaderResource::StorageBuffer(transmittance_buffer.into()),
+                )
+                .add_variable("cloud_depth_buffer", ShaderResource::StorageBuffer(depth_buffer.into()))
+                .add_variable("cloud_steps_buffer", ShaderResource::StorageBuffer(steps_buffer.into()))
+                .build(ctx)
+                .unwrap(),
+        );
 
         Self {
             color_buffer,
@@ -224,15 +222,7 @@ impl CloudRaymarchPass {
             weather_map_size: settings.weather_map_size,
             frame_index: settings.frame_index,
             shadow_resolution: settings.shadow_resolution,
-            view_proj: settings.view_proj,
-            inv_view_proj: settings.inv_view_proj,
-            camera_position: [
-                settings.camera_position.x,
-                settings.camera_position.y,
-                settings.camera_position.z,
-            ],
-            camera_near: settings.camera_near,
-            camera_far: settings.camera_far,
+            camera_index: settings.camera_index,
             cloud_base: settings.cloud_base,
             cloud_top: settings.cloud_top,
             density_scale: settings.density_scale,

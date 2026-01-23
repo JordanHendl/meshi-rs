@@ -317,14 +317,14 @@ impl Default for CloudSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            base_altitude: 1500.0,
-            top_altitude: 4000.0,
+            base_altitude: -100.0,
+            top_altitude: -200.0,
             density_scale: 0.5,
             step_count: 96,
             light_step_count: 6,
             phase_g: 0.6,
             wind: Vec2::new(1.0, 0.0),
-            wind_speed: 20.0,
+            wind_speed: 0.2,
             low_res_scale: CloudResolutionScale::Quarter,
             coverage_power: 1.2,
             detail_strength: 0.6,

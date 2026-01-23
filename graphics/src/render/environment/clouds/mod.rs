@@ -64,10 +64,24 @@ impl CloudRenderer {
         let settings = CloudSettings::default();
         let low_resolution = calc_low_res(viewport, settings.low_res_scale);
 
-        let shadow_pass = CloudShadowPass::new(ctx, &assets, settings.shadow.resolution, TIMER_SHADOW);
-        let raymarch_pass = CloudRaymarchPass::new(ctx, &assets, &shadow_pass, low_resolution, TIMER_RAYMARCH);
+        let shadow_pass = CloudShadowPass::new(
+            ctx,
+            state,
+            &assets,
+            settings.shadow.resolution,
+            TIMER_SHADOW,
+        );
+        let raymarch_pass = CloudRaymarchPass::new(
+            ctx,
+            state,
+            &assets,
+            &shadow_pass,
+            low_resolution,
+            TIMER_RAYMARCH,
+        );
         let temporal_pass = CloudTemporalPass::new(
             ctx,
+            state,
             low_resolution,
             raymarch_pass.color_buffer,
             raymarch_pass.transmittance_buffer,
@@ -180,8 +194,7 @@ impl CloudRenderer {
 
         let view = camera_data.world_from_camera.inverse();
         let view_proj = camera_data.projection * view;
-        let inv_view_proj = view_proj.inverse();
-        let camera_position = camera_data.world_from_camera.w_axis.truncate();
+        let camera_index = camera.slot as u32;
 
         self.time += delta_time;
 
@@ -210,11 +223,7 @@ impl CloudRenderer {
             frame_index: self.frame_index,
             time: self.time,
             use_shadow_map: self.settings.shadow.enabled,
-            view_proj: view_proj.to_cols_array_2d(),
-            inv_view_proj: inv_view_proj.to_cols_array_2d(),
-            camera_position,
-            camera_near: camera_data.near,
-            camera_far: camera_data.far,
+            camera_index,
         };
 
         if self.settings.shadow.enabled {

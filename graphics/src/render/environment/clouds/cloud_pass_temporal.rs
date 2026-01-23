@@ -5,9 +5,10 @@ use dashi::driver::command::Dispatch;
 use dashi::{
     BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, ShaderResource,
 };
+use furikake::BindlessState;
 use tare::utils::StagedBuffer;
 use bytemuck::cast_slice;
-
+use furikake::PSOBuilderFurikakeExt;
 use super::cloud_pass_raymarch::CloudSamplingSettings;
 
 const TEMPORAL_WORKGROUP_SIZE: u32 = 8;
@@ -16,10 +17,9 @@ const TEMPORAL_WORKGROUP_SIZE: u32 = 8;
 #[derive(Clone, Copy, Default)]
 pub struct CloudTemporalParams {
     pub output_resolution: [u32; 2],
-    pub inv_view_proj: [[f32; 4]; 4],
     pub prev_view_proj: [[f32; 4]; 4],
-    pub camera_position: [f32; 3],
-    pub _padding: f32,
+    pub camera_index: u32,
+    pub _padding: [u32; 3],
     pub blend_factor: f32,
     pub clamp_strength: f32,
     pub depth_sigma: f32,
@@ -51,6 +51,7 @@ pub struct CloudTemporalPass {
 impl CloudTemporalPass {
     pub fn new(
         ctx: &mut Context,
+        state: &mut BindlessState,
         output_resolution: [u32; 2],
         current_color: Handle<dashi::Buffer>,
         current_transmittance: Handle<dashi::Buffer>,
@@ -73,6 +74,7 @@ impl CloudTemporalPass {
         let pipelines = [
             build_pipeline(
                 ctx,
+                state,
                 &params,
                 current_color,
                 current_transmittance,
@@ -88,6 +90,7 @@ impl CloudTemporalPass {
             ),
             build_pipeline(
                 ctx,
+                state,
                 &params,
                 current_color,
                 current_transmittance,
@@ -129,14 +132,9 @@ impl CloudTemporalPass {
         let params = &mut self.params.as_slice_mut::<CloudTemporalParams>()[0];
         *params = CloudTemporalParams {
             output_resolution: settings.output_resolution,
-            inv_view_proj: settings.inv_view_proj,
             prev_view_proj,
-            camera_position: [
-                settings.camera_position.x,
-                settings.camera_position.y,
-                settings.camera_position.z,
-            ],
-            _padding: 0.0,
+            camera_index: settings.camera_index,
+            _padding: [0; 3],
             blend_factor: temporal.blend_factor,
             clamp_strength: temporal.clamp_strength,
             depth_sigma: temporal.depth_sigma,
@@ -282,6 +280,7 @@ fn create_history_buffers(ctx: &mut Context, output_resolution: [u32; 2]) -> Tem
 
 fn build_pipeline(
     ctx: &mut Context,
+    state: &mut BindlessState,
     params: &StagedBuffer,
     current_color: Handle<dashi::Buffer>,
     current_transmittance: Handle<dashi::Buffer>,
@@ -300,6 +299,8 @@ fn build_pipeline(
         .shader(Some(
             include_str!("shaders/cloud_temporal.comp.glsl").as_bytes(),
         ))
+        .add_reserved_table_variable(state, "meshi_bindless_cameras")
+        .unwrap()
         .add_variable(
             "params",
             ShaderResource::ConstBuffer(params.device().into()),

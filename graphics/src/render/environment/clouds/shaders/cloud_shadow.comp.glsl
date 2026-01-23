@@ -3,12 +3,23 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+struct Camera {
+    mat4 world_from_camera;
+    mat4 projection;
+    vec2 viewport;
+    float near;
+    float far;
+    float fov_y_radians;
+    uint projection_kind;
+    float _padding;
+};
+
 layout(set = 0, binding = 0) uniform CloudShadowParams {
     uint shadow_resolution;
     uvec3 base_noise_size;
     uvec3 detail_noise_size;
     uint weather_map_size;
-    uint _padding;
+    uint camera_index;
     float cloud_base;
     float cloud_top;
     float density_scale;
@@ -18,7 +29,6 @@ layout(set = 0, binding = 0) uniform CloudShadowParams {
     float coverage_power;
     vec3 sun_direction;
     float shadow_strength;
-    vec3 camera_position;
     float shadow_extent;
 } params;
 
@@ -31,6 +41,9 @@ layout(set = 0, binding = 6) uniform sampler cloud_detail_sampler;
 layout(set = 0, binding = 7) buffer CloudShadowBuffer {
     float values[];
 } cloud_shadow_buffer;
+layout(set = 1, binding = 1) readonly buffer SceneCameras {
+    Camera cameras[];
+} meshi_bindless_cameras;
 
 float hash11(float p) {
     p = fract(p * 0.1031);
@@ -63,9 +76,11 @@ void main() {
         return;
     }
 
+    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    vec3 camera_position = camera.world_from_camera[3].xyz;
     vec2 uv = (vec2(gid) + 0.5) / float(params.shadow_resolution);
     vec2 centered = (uv * 2.0 - 1.0) * params.shadow_extent;
-    vec3 origin = params.camera_position + vec3(centered.x, params.cloud_top, centered.y);
+    vec3 origin = camera_position + vec3(centered.x, params.cloud_top, centered.y);
     vec3 dir = normalize(-params.sun_direction);
 
     float layer_depth = params.cloud_top - params.cloud_base;
