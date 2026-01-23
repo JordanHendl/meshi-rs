@@ -332,6 +332,14 @@ impl GuiContext {
             state.position,
             [initial_display_size[0], metrics.title_bar_height],
         );
+        let initial_grip_pos = [state.position[0] + metrics.grip_padding, state.position[1]];
+        let initial_grip_rect =
+            MenuRect::from_position_size(initial_grip_pos, metrics.grip_size);
+        let initial_drag_rect = if metrics.grip_size[0] > 0.0 {
+            initial_grip_rect
+        } else {
+            initial_title_bar_rect
+        };
 
         let button_size = metrics.button_size;
         let button_gap = metrics.button_gap;
@@ -365,7 +373,7 @@ impl GuiContext {
                 state.resize_anchor = interaction.cursor;
                 state.resize_start_pos = state.position;
                 state.resize_start_size = state.size;
-            } else if point_in_rect(interaction.cursor, initial_title_bar_rect) {
+            } else if point_in_rect(interaction.cursor, initial_drag_rect) {
                 state.drag_active = true;
                 state.drag_offset = sub2(interaction.cursor, state.position);
             }
@@ -544,6 +552,38 @@ impl GuiContext {
             color: colors.title_text,
             scale: metrics.title_text_scale,
         });
+
+        if !state.minimized && metrics.resize_handle_size > 0.0 {
+            let handle_size = metrics.resize_handle_size;
+            let edge_length = metrics.resize_edge_length;
+            let edge_thickness = metrics.resize_edge_thickness.max(1.0);
+            let left = state.position[0];
+            let top = state.position[1];
+            let right = state.position[0] + display_size[0];
+            let bottom = state.position[1] + display_size[1];
+            let center_x = state.position[0] + (display_size[0] - edge_length) * 0.5;
+            let center_y = state.position[1] + (display_size[1] - edge_length) * 0.5;
+
+            for (pos, size) in [
+                ([left, top], [handle_size, handle_size]),
+                ([right - handle_size, top], [handle_size, handle_size]),
+                ([left, bottom - handle_size], [handle_size, handle_size]),
+                (
+                    [right - handle_size, bottom - handle_size],
+                    [handle_size, handle_size],
+                ),
+                ([center_x, top], [edge_length, edge_thickness]),
+                ([center_x, bottom - edge_thickness], [edge_length, edge_thickness]),
+                ([left, center_y], [edge_thickness, edge_length]),
+                ([right - edge_thickness, center_y], [edge_thickness, edge_length]),
+            ] {
+                self.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(pos, size, colors.resize_handle, viewport),
+                ));
+            }
+        }
 
         PanelLayout {
             title_bar_rect,
@@ -1112,6 +1152,9 @@ pub struct PanelMetrics {
     pub grip_size: [f32; 2],
     pub grip_padding: f32,
     pub resize_margin: f32,
+    pub resize_handle_size: f32,
+    pub resize_edge_length: f32,
+    pub resize_edge_thickness: f32,
     pub shadow_offset: [f32; 2],
     pub outline_thickness: f32,
     pub minimized_extra_height: f32,
@@ -1131,6 +1174,9 @@ impl Default for PanelMetrics {
             grip_size: [22.0, 32.0],
             grip_padding: 8.0,
             resize_margin: 8.0,
+            resize_handle_size: 8.0,
+            resize_edge_length: 18.0,
+            resize_edge_thickness: 2.0,
             shadow_offset: [6.0, 6.0],
             outline_thickness: 1.0,
             minimized_extra_height: 6.0,
@@ -1152,6 +1198,7 @@ pub struct PanelColors {
     pub button_text: [f32; 4],
     pub grip: [f32; 4],
     pub grip_dots: [f32; 4],
+    pub resize_handle: [f32; 4],
 }
 
 impl Default for PanelColors {
@@ -1169,6 +1216,7 @@ impl Default for PanelColors {
             button_text: [0.9, 0.93, 1.0, 1.0],
             grip: [0.12, 0.14, 0.18, 0.6],
             grip_dots: [0.3, 0.36, 0.5, 0.8],
+            resize_handle: [0.32, 0.38, 0.5, 0.8],
         }
     }
 }
