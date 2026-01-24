@@ -203,8 +203,9 @@ impl GuiInput {
 /// Primary GUI state owned by the renderer/user layer.
 #[derive(Debug, Default)]
 pub struct GuiContext {
-    draws: Vec<GuiDraw>,
+    draws: Vec<GuiQueuedDraw>,
     text_draws: Vec<GuiTextDraw>,
+    draw_sequence: u64,
 }
 
 impl GuiContext {
@@ -213,6 +214,7 @@ impl GuiContext {
         Self {
             draws: Vec::new(),
             text_draws: Vec::new(),
+            draw_sequence: 0,
         }
     }
 
@@ -221,7 +223,9 @@ impl GuiContext {
 
     /// Submit a draw call to be collected for this frame.
     pub fn submit_draw(&mut self, draw: GuiDraw) {
-        self.draws.push(draw);
+        let order = self.draw_sequence;
+        self.draw_sequence = self.draw_sequence.wrapping_add(1);
+        self.draws.push(GuiQueuedDraw { order, draw });
     }
 
     /// Submit a text draw call to be collected for this frame.
@@ -232,31 +236,34 @@ impl GuiContext {
     /// Build a frame mesh by sorting by layer and grouping by texture id.
     pub fn build_frame(&mut self) -> GuiFrame {
         if self.draws.is_empty() && self.text_draws.is_empty() {
+            self.draw_sequence = 0;
             return GuiFrame::default();
         }
 
         let text_draws = self.text_draws.drain(..).collect();
 
         if self.draws.is_empty() {
+            self.draw_sequence = 0;
             return GuiFrame {
                 batches: Vec::new(),
                 text_draws,
             };
         }
 
-        let mut indexed: Vec<(usize, GuiDraw)> = self.draws.drain(..).enumerate().collect();
-        indexed.sort_by(|(a_index, a), (b_index, b)| {
-            a.layer
-                .cmp(&b.layer)
-                .then_with(|| a.texture_id.cmp(&b.texture_id))
-                .then_with(|| a_index.cmp(b_index))
+        self.draws.sort_by(|a, b| {
+            a.draw
+                .layer
+                .cmp(&b.draw.layer)
+                .then_with(|| a.draw.texture_id.cmp(&b.draw.texture_id))
+                .then_with(|| a.order.cmp(&b.order))
         });
 
         let mut batches: Vec<GuiBatchMesh> = Vec::new();
         let mut current_batch: Option<GuiBatch> = None;
         let mut current_mesh = GuiMesh::default();
 
-        for (_, draw) in indexed {
+        for queued in self.draws.drain(..) {
+            let draw = queued.draw;
             let needs_new_batch = current_batch.as_ref().map_or(true, |batch| {
                 batch.layer != draw.layer
                     || batch.texture_id != draw.texture_id
@@ -316,6 +323,7 @@ impl GuiContext {
             });
         }
 
+        self.draw_sequence = 0;
         GuiFrame {
             batches,
             text_draws,
@@ -801,6 +809,12 @@ impl GuiContext {
             closed: state.closed,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GuiQueuedDraw {
+    order: u64,
+    draw: GuiDraw,
 }
 
 /// Minimal draw submission payload for GUI rendering.
