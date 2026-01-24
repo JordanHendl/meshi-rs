@@ -28,7 +28,7 @@ pub enum EventSource {
 }
 
 #[repr(C)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum KeyCode {
     // Alphanumeric keys
     A = 0,

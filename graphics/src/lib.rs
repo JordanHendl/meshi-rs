@@ -67,6 +67,7 @@ pub struct RenderEngine {
     renderer_select: RendererSelect,
     debug_gui: DebugGui,
     pending_gui_frame: Option<gui::GuiFrame>,
+    gui_input: gui::GuiInput,
     sky_settings: SkyFrameSettings,
     skybox_settings: SkyboxFrameSettings,
     ocean_settings: OceanFrameSettings,
@@ -157,6 +158,7 @@ impl RenderEngine {
             renderer_select,
             debug_gui: DebugGui::new(),
             pending_gui_frame: None,
+            gui_input: gui::GuiInput::default(),
             sky_settings: SkyFrameSettings::default(),
             skybox_settings: SkyboxFrameSettings::default(),
             ocean_settings: OceanFrameSettings::default(),
@@ -401,6 +403,14 @@ impl RenderEngine {
         self.pending_gui_frame = Some(frame);
     }
 
+    pub fn gui_input(&self) -> &gui::GuiInput {
+        &self.gui_input
+    }
+
+    pub fn gui_input_mut(&mut self) -> &mut gui::GuiInput {
+        &mut self.gui_input
+    }
+
     pub fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &glam::Mat4) {
         self.renderer.set_object_transform(handle, transform);
     }
@@ -415,6 +425,7 @@ impl RenderEngine {
 
         let mut triggered = false;
         let debug_gui_ptr = &mut self.debug_gui as *mut DebugGui;
+        let gui_input_ptr = &mut self.gui_input as *mut gui::GuiInput;
 
         if let Some(cb) = self.event_cb.as_mut() {
             self.displays.for_each_occupied_mut(|dis| {
@@ -426,6 +437,9 @@ impl RenderEngine {
                             triggered = true;
                             unsafe {
                                 (*debug_gui_ptr).handle_event(&e);
+                            }
+                            unsafe {
+                                (*gui_input_ptr).handle_event(&e);
                             }
                             let c = cb.event_cb;
                             c(&mut e, cb.user_data);
@@ -449,6 +463,9 @@ impl RenderEngine {
                             unsafe {
                                 (*debug_gui_ptr).handle_event(&e);
                             }
+                            unsafe {
+                                (*gui_input_ptr).handle_event(&e);
+                            }
                         }
                     });
                 }
@@ -457,6 +474,7 @@ impl RenderEngine {
     }
 
     pub fn update(&mut self, delta_time: f32) {
+        self.gui_input.begin_frame();
         self.publish_events();
         let viewport = self.renderer.viewport();
         let viewport_size = Vec2::new(viewport.area.w, viewport.area.h);
@@ -935,9 +953,5 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon {
-        -Vec3::Y
-    } else {
-        Vec3::Y
-    }
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }

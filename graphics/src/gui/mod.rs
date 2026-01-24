@@ -9,11 +9,190 @@
 pub mod debug;
 pub mod dock;
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use crate::render::gui::{GuiMesh, GuiVertex};
+use glam::Vec2;
+use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 
 const GUI_NO_TEXTURE_ID: u32 = u32::MAX;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GuiId(u64);
+
+impl GuiId {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u32> for GuiId {
+    fn from(value: u32) -> Self {
+        Self(value as u64)
+    }
+}
+
+impl From<usize> for GuiId {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GuiInteraction {
+    pub hovered: bool,
+    pub active: bool,
+    pub focused: bool,
+    pub clicked: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuiInput {
+    pub cursor: Vec2,
+    pub scroll_delta: Vec2,
+    pub mouse_down: bool,
+    pub mouse_pressed: bool,
+    pub mouse_released: bool,
+    hot: Option<GuiId>,
+    active: Option<GuiId>,
+    focused: Option<GuiId>,
+    last_key_pressed: Option<KeyCode>,
+    keys_down: HashSet<KeyCode>,
+}
+
+impl Default for GuiInput {
+    fn default() -> Self {
+        Self {
+            cursor: Vec2::ZERO,
+            scroll_delta: Vec2::ZERO,
+            mouse_down: false,
+            mouse_pressed: false,
+            mouse_released: false,
+            hot: None,
+            active: None,
+            focused: None,
+            last_key_pressed: None,
+            keys_down: HashSet::new(),
+        }
+    }
+}
+
+impl GuiInput {
+    pub fn begin_frame(&mut self) {
+        if !self.mouse_down {
+            self.active = None;
+        }
+        self.scroll_delta = Vec2::ZERO;
+        self.mouse_pressed = false;
+        self.mouse_released = false;
+        self.hot = None;
+        self.last_key_pressed = None;
+    }
+
+    pub fn handle_event(&mut self, event: &Event) {
+        unsafe {
+            match (event.source(), event.event_type()) {
+                (EventSource::Mouse, EventType::CursorMoved) => {
+                    self.cursor = event.motion2d();
+                }
+                (EventSource::Mouse, EventType::Motion2D) => {
+                    self.scroll_delta += event.motion2d();
+                }
+                (EventSource::MouseButton, EventType::Pressed) => {
+                    self.mouse_pressed = true;
+                    self.mouse_down = true;
+                    if let Some(hot) = self.hot {
+                        self.active = Some(hot);
+                        self.focused = Some(hot);
+                    }
+                }
+                (EventSource::MouseButton, EventType::Released) => {
+                    self.mouse_down = false;
+                    self.mouse_released = true;
+                }
+                (EventSource::Key, EventType::Pressed) => {
+                    let key = event.key();
+                    self.keys_down.insert(key);
+                    self.last_key_pressed = Some(key);
+                }
+                (EventSource::Key, EventType::Released) => {
+                    let key = event.key();
+                    self.keys_down.remove(&key);
+                }
+                (EventSource::Window, EventType::WindowUnfocused) => {
+                    self.focused = None;
+                    self.active = None;
+                    self.hot = None;
+                    self.keys_down.clear();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn interact(&mut self, id: GuiId, hovered: bool) -> GuiInteraction {
+        if hovered {
+            self.hot = Some(id);
+        }
+
+        if self.mouse_pressed && hovered {
+            self.active = Some(id);
+            self.focused = Some(id);
+        }
+
+        let mut clicked = false;
+        if self.mouse_released && self.active == Some(id) {
+            clicked = hovered;
+            if !self.mouse_down {
+                self.active = None;
+            }
+        }
+
+        if !self.mouse_down && self.active == Some(id) {
+            self.active = None;
+        }
+
+        GuiInteraction {
+            hovered: self.hot == Some(id),
+            active: self.active == Some(id),
+            focused: self.focused == Some(id),
+            clicked,
+        }
+    }
+
+    pub fn hot(&self) -> Option<GuiId> {
+        self.hot
+    }
+
+    pub fn active(&self) -> Option<GuiId> {
+        self.active
+    }
+
+    pub fn focused(&self) -> Option<GuiId> {
+        self.focused
+    }
+
+    pub fn is_key_down(&self, key: KeyCode) -> bool {
+        self.keys_down.contains(&key)
+    }
+
+    pub fn last_key_pressed(&self) -> Option<KeyCode> {
+        self.last_key_pressed
+    }
+
+    pub fn clear_focus(&mut self) {
+        self.focused = None;
+    }
+
+    pub fn set_focus(&mut self, id: GuiId) {
+        self.focused = Some(id);
+    }
+}
 
 /// Primary GUI state owned by the renderer/user layer.
 #[derive(Debug, Default)]
