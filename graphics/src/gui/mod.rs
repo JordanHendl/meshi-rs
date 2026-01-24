@@ -15,7 +15,7 @@ pub use icon_atlas::{
     ToolbarIconId,
 };
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::render::gui::{GuiMesh, GuiVertex};
@@ -344,6 +344,14 @@ impl GuiContext {
         options: &MenuPopupRenderOptions,
     ) -> MenuPopupLayout {
         menu.submit_to_draw_list(self, options)
+    }
+
+    pub fn submit_command_palette(
+        &mut self,
+        palette: &CommandPalette,
+        options: &mut CommandPaletteRenderOptions,
+    ) -> CommandPaletteLayout {
+        palette.submit_to_draw_list(self, options)
     }
 
     pub fn submit_sliders(
@@ -1634,6 +1642,476 @@ impl MenuItem {
 }
 
 #[derive(Debug, Clone)]
+pub struct CommandPalette {
+    pub items: Vec<CommandPaletteItem>,
+}
+
+impl CommandPalette {
+    pub fn new(items: Vec<CommandPaletteItem>) -> Self {
+        Self { items }
+    }
+
+    pub fn submit_to_draw_list(
+        &self,
+        ctx: &mut GuiContext,
+        options: &mut CommandPaletteRenderOptions,
+    ) -> CommandPaletteLayout {
+        let metrics = &options.metrics;
+        let colors = &options.colors;
+        let viewport = options.viewport;
+        let position = options.position;
+        let size = options.size;
+
+        let palette_rect = MenuRect::from_position_size(position, size);
+        let input_pos = [
+            position[0] + metrics.padding[0],
+            position[1] + metrics.padding[1],
+        ];
+        let input_width = size[0] - metrics.padding[0] * 2.0;
+        let input_rect =
+            MenuRect::from_position_size(input_pos, [input_width, metrics.input_height]);
+
+        ctx.submit_draw(GuiDraw::new(
+            options.layer,
+            None,
+            quad_from_pixels(position, size, colors.background, viewport),
+        ));
+        ctx.submit_draw(GuiDraw::new(
+            options.layer,
+            None,
+            quad_from_pixels(
+                input_pos,
+                [input_width, metrics.input_height],
+                colors.input_background,
+                viewport,
+            ),
+        ));
+
+        let query_text = if options.state.query.is_empty() {
+            ctx.submit_text(GuiTextDraw {
+                text: metrics.placeholder_text.clone(),
+                position: [
+                    input_pos[0] + metrics.input_padding[0],
+                    input_pos[1] + metrics.text_offset[1],
+                ],
+                color: colors.placeholder_text,
+                scale: metrics.font_scale,
+            });
+            None
+        } else {
+            Some(options.state.query.clone())
+        };
+
+        if let Some(query) = query_text {
+            ctx.submit_text(GuiTextDraw {
+                text: query,
+                position: [
+                    input_pos[0] + metrics.input_padding[0],
+                    input_pos[1] + metrics.text_offset[1],
+                ],
+                color: colors.input_text,
+                scale: metrics.font_scale,
+            });
+        }
+
+        let list_start_y = input_rect.max[1] + metrics.input_gap;
+        let list_height =
+            size[1] - metrics.padding[1] * 2.0 - metrics.input_height - metrics.input_gap;
+        let max_visible = if list_height <= 0.0 {
+            0
+        } else {
+            (list_height / (metrics.item_height + metrics.item_gap)).floor() as usize
+        };
+
+        let filtered_indices = options.state.filtered_indices(&self.items);
+        options
+            .state
+            .update_scroll(filtered_indices.len(), max_visible.max(1));
+
+        let mut layout = CommandPaletteLayout {
+            rect: palette_rect,
+            input_rect,
+            ..Default::default()
+        };
+
+        if filtered_indices.is_empty() {
+            ctx.submit_text(GuiTextDraw {
+                text: "No commands found".to_string(),
+                position: [
+                    position[0] + metrics.padding[0],
+                    list_start_y + metrics.text_offset[1],
+                ],
+                color: colors.empty_text,
+                scale: metrics.font_scale,
+            });
+            return layout;
+        }
+
+        let start_index = options.state.scroll_offset.min(filtered_indices.len());
+        let end_index = (start_index + max_visible.max(1)).min(filtered_indices.len());
+        let mut cursor_y = list_start_y;
+
+        for (visible_index, item_index) in
+            filtered_indices[start_index..end_index].iter().enumerate()
+        {
+            let item = &self.items[*item_index];
+            let item_rect = MenuRect::from_position_size(
+                [position[0] + metrics.padding[0], cursor_y],
+                [size[0] - metrics.padding[0] * 2.0, metrics.item_height],
+            );
+            let is_selected = options.state.selected == start_index + visible_index;
+
+            if is_selected {
+                ctx.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(
+                        [item_rect.min[0], item_rect.min[1]],
+                        [
+                            item_rect.max[0] - item_rect.min[0],
+                            item_rect.max[1] - item_rect.min[1],
+                        ],
+                        colors.item_hover,
+                        viewport,
+                    ),
+                ));
+            }
+
+            ctx.submit_text(GuiTextDraw {
+                text: item.label.clone(),
+                position: [
+                    item_rect.min[0] + metrics.item_padding[0],
+                    item_rect.min[1] + metrics.text_offset[1],
+                ],
+                color: colors.item_text,
+                scale: metrics.font_scale,
+            });
+
+            if let Some(shortcut) = item.shortcut.as_ref() {
+                let shortcut_width = text_width(shortcut, metrics.char_width);
+                let shortcut_pos = [
+                    item_rect.max[0] - metrics.item_padding[0] - shortcut_width,
+                    item_rect.min[1] + metrics.text_offset[1],
+                ];
+                ctx.submit_text(GuiTextDraw {
+                    text: shortcut.clone(),
+                    position: shortcut_pos,
+                    color: colors.shortcut_text,
+                    scale: metrics.font_scale,
+                });
+            }
+
+            layout.items.push(CommandPaletteItemLayout {
+                id: item.id,
+                rect: item_rect,
+                action_id: item.action_id,
+            });
+
+            cursor_y += metrics.item_height + metrics.item_gap;
+        }
+
+        layout
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandPaletteItem {
+    pub id: u32,
+    pub label: String,
+    pub action_id: Option<u32>,
+    pub shortcut: Option<String>,
+    pub keywords: Vec<String>,
+}
+
+impl CommandPaletteItem {
+    pub fn new(id: u32, label: impl Into<String>) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            action_id: None,
+            shortcut: None,
+            keywords: Vec::new(),
+        }
+    }
+
+    pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self {
+        self.shortcut = Some(shortcut.into());
+        self
+    }
+
+    pub fn with_keywords(mut self, keywords: Vec<String>) -> Self {
+        self.keywords = keywords;
+        self
+    }
+
+    fn matches_query(&self, query: &str) -> bool {
+        let query_lower = query.to_lowercase();
+        if query_lower.is_empty() {
+            return true;
+        }
+        let label_match = self.label.to_lowercase().contains(&query_lower);
+        let shortcut_match = self
+            .shortcut
+            .as_ref()
+            .map(|shortcut| shortcut.to_lowercase().contains(&query_lower))
+            .unwrap_or(false);
+        let keyword_match = self
+            .keywords
+            .iter()
+            .any(|keyword| keyword.to_lowercase().contains(&query_lower));
+
+        label_match || shortcut_match || keyword_match
+    }
+}
+
+#[derive(Debug)]
+pub struct CommandPaletteRenderOptions<'a> {
+    pub viewport: [f32; 2],
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub layer: GuiLayer,
+    pub metrics: CommandPaletteMetrics,
+    pub colors: CommandPaletteColors,
+    pub state: &'a mut CommandPaletteState,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandPaletteState {
+    pub query: String,
+    pub selected: usize,
+    pub scroll_offset: usize,
+    pub history: Vec<u32>,
+    pub history_capacity: usize,
+}
+
+impl Default for CommandPaletteState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            selected: 0,
+            scroll_offset: 0,
+            history: Vec::new(),
+            history_capacity: 10,
+        }
+    }
+}
+
+impl CommandPaletteState {
+    pub fn handle_input(
+        &mut self,
+        input: &GuiInput,
+        items: &[CommandPaletteItem],
+    ) -> Option<CommandPaletteAction> {
+        let Some(key) = input.last_key_pressed() else {
+            return None;
+        };
+
+        match key {
+            KeyCode::ArrowDown => {
+                let filtered = self.filtered_indices(items);
+                if !filtered.is_empty() && self.selected + 1 < filtered.len() {
+                    self.selected += 1;
+                }
+            }
+            KeyCode::ArrowUp => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                }
+            }
+            KeyCode::Enter => {
+                let filtered = self.filtered_indices(items);
+                if let Some(item_index) = filtered.get(self.selected) {
+                    let item = &items[*item_index];
+                    self.record_history(item.id);
+                    return Some(CommandPaletteAction {
+                        id: item.id,
+                        action_id: item.action_id,
+                    });
+                }
+            }
+            KeyCode::Backspace => {
+                self.query.pop();
+                self.selected = 0;
+            }
+            KeyCode::Escape => {
+                self.query.clear();
+                self.selected = 0;
+            }
+            _ => {
+                let shift_down = input.is_key_down(KeyCode::Shift);
+                if let Some(ch) = keycode_to_char(key, shift_down) {
+                    self.query.push(ch);
+                    self.selected = 0;
+                }
+            }
+        }
+
+        let filtered = self.filtered_indices(items);
+        self.clamp_selection(filtered.len());
+        None
+    }
+
+    pub fn filtered_indices(&self, items: &[CommandPaletteItem]) -> Vec<usize> {
+        if items.is_empty() {
+            return Vec::new();
+        }
+
+        let mut id_to_index = HashMap::new();
+        for (index, item) in items.iter().enumerate() {
+            id_to_index.insert(item.id, index);
+        }
+
+        let query = self.query.trim();
+        let mut indices = Vec::new();
+        let mut seen = HashSet::new();
+
+        let push_item = |indices: &mut Vec<usize>, seen: &mut HashSet<usize>, index: usize| {
+            if seen.insert(index) {
+                indices.push(index);
+            }
+        };
+
+        for id in &self.history {
+            if let Some(&index) = id_to_index.get(id) {
+                let item = &items[index];
+                if query.is_empty() || item.matches_query(query) {
+                    push_item(&mut indices, &mut seen, index);
+                }
+            }
+        }
+
+        for (index, item) in items.iter().enumerate() {
+            if !query.is_empty() && !item.matches_query(query) {
+                continue;
+            }
+            push_item(&mut indices, &mut seen, index);
+        }
+
+        indices
+    }
+
+    pub fn record_history(&mut self, id: u32) {
+        if let Some(existing_index) = self.history.iter().position(|entry| *entry == id) {
+            self.history.remove(existing_index);
+        }
+        self.history.insert(0, id);
+        if self.history.len() > self.history_capacity {
+            self.history.truncate(self.history_capacity);
+        }
+    }
+
+    fn clamp_selection(&mut self, total: usize) {
+        if total == 0 {
+            self.selected = 0;
+            self.scroll_offset = 0;
+        } else if self.selected >= total {
+            self.selected = total - 1;
+        }
+    }
+
+    fn update_scroll(&mut self, total: usize, max_visible: usize) {
+        self.clamp_selection(total);
+
+        if total == 0 || max_visible == 0 {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + max_visible {
+            self.scroll_offset = self.selected + 1 - max_visible;
+        }
+
+        if self.scroll_offset + max_visible > total {
+            self.scroll_offset = total.saturating_sub(max_visible);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CommandPaletteAction {
+    pub id: u32,
+    pub action_id: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandPaletteMetrics {
+    pub padding: [f32; 2],
+    pub input_height: f32,
+    pub input_gap: f32,
+    pub input_padding: [f32; 2],
+    pub item_height: f32,
+    pub item_gap: f32,
+    pub item_padding: [f32; 2],
+    pub shortcut_gap: f32,
+    pub char_width: f32,
+    pub font_scale: f32,
+    pub text_offset: [f32; 2],
+    pub placeholder_text: String,
+}
+
+impl Default for CommandPaletteMetrics {
+    fn default() -> Self {
+        Self {
+            padding: [16.0, 16.0],
+            input_height: 32.0,
+            input_gap: 10.0,
+            input_padding: [10.0, 6.0],
+            item_height: 28.0,
+            item_gap: 4.0,
+            item_padding: [10.0, 6.0],
+            shortcut_gap: 12.0,
+            char_width: 7.2,
+            font_scale: 1.0,
+            text_offset: [0.0, 7.0],
+            placeholder_text: "Type a command...".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CommandPaletteColors {
+    pub background: [f32; 4],
+    pub input_background: [f32; 4],
+    pub input_text: [f32; 4],
+    pub placeholder_text: [f32; 4],
+    pub item_text: [f32; 4],
+    pub item_hover: [f32; 4],
+    pub shortcut_text: [f32; 4],
+    pub empty_text: [f32; 4],
+}
+
+impl Default for CommandPaletteColors {
+    fn default() -> Self {
+        Self {
+            background: [0.12, 0.14, 0.18, 0.94],
+            input_background: [0.16, 0.18, 0.22, 0.9],
+            input_text: [0.92, 0.95, 1.0, 1.0],
+            placeholder_text: [0.55, 0.6, 0.7, 1.0],
+            item_text: [0.9, 0.92, 0.96, 1.0],
+            item_hover: [0.2, 0.24, 0.32, 0.95],
+            shortcut_text: [0.65, 0.7, 0.78, 1.0],
+            empty_text: [0.6, 0.65, 0.72, 1.0],
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct CommandPaletteLayout {
+    pub rect: MenuRect,
+    pub input_rect: MenuRect,
+    pub items: Vec<CommandPaletteItemLayout>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CommandPaletteItemLayout {
+    pub id: u32,
+    pub rect: MenuRect,
+    pub action_id: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Slider {
     pub id: u32,
     pub label: String,
@@ -2172,6 +2650,60 @@ fn popup_anchor_position(anchor: MenuPopupAnchor, size: [f32; 2]) -> [f32; 2] {
 
 fn text_width(text: &str, char_width: f32) -> f32 {
     text.chars().count() as f32 * char_width
+}
+
+fn keycode_to_char(key: KeyCode, shift: bool) -> Option<char> {
+    match key {
+        KeyCode::A => Some(if shift { 'A' } else { 'a' }),
+        KeyCode::B => Some(if shift { 'B' } else { 'b' }),
+        KeyCode::C => Some(if shift { 'C' } else { 'c' }),
+        KeyCode::D => Some(if shift { 'D' } else { 'd' }),
+        KeyCode::E => Some(if shift { 'E' } else { 'e' }),
+        KeyCode::F => Some(if shift { 'F' } else { 'f' }),
+        KeyCode::G => Some(if shift { 'G' } else { 'g' }),
+        KeyCode::H => Some(if shift { 'H' } else { 'h' }),
+        KeyCode::I => Some(if shift { 'I' } else { 'i' }),
+        KeyCode::J => Some(if shift { 'J' } else { 'j' }),
+        KeyCode::K => Some(if shift { 'K' } else { 'k' }),
+        KeyCode::L => Some(if shift { 'L' } else { 'l' }),
+        KeyCode::M => Some(if shift { 'M' } else { 'm' }),
+        KeyCode::N => Some(if shift { 'N' } else { 'n' }),
+        KeyCode::O => Some(if shift { 'O' } else { 'o' }),
+        KeyCode::P => Some(if shift { 'P' } else { 'p' }),
+        KeyCode::Q => Some(if shift { 'Q' } else { 'q' }),
+        KeyCode::R => Some(if shift { 'R' } else { 'r' }),
+        KeyCode::S => Some(if shift { 'S' } else { 's' }),
+        KeyCode::T => Some(if shift { 'T' } else { 't' }),
+        KeyCode::U => Some(if shift { 'U' } else { 'u' }),
+        KeyCode::V => Some(if shift { 'V' } else { 'v' }),
+        KeyCode::W => Some(if shift { 'W' } else { 'w' }),
+        KeyCode::X => Some(if shift { 'X' } else { 'x' }),
+        KeyCode::Y => Some(if shift { 'Y' } else { 'y' }),
+        KeyCode::Z => Some(if shift { 'Z' } else { 'z' }),
+        KeyCode::Digit0 => Some(if shift { ')' } else { '0' }),
+        KeyCode::Digit1 => Some(if shift { '!' } else { '1' }),
+        KeyCode::Digit2 => Some(if shift { '@' } else { '2' }),
+        KeyCode::Digit3 => Some(if shift { '#' } else { '3' }),
+        KeyCode::Digit4 => Some(if shift { '$' } else { '4' }),
+        KeyCode::Digit5 => Some(if shift { '%' } else { '5' }),
+        KeyCode::Digit6 => Some(if shift { '^' } else { '6' }),
+        KeyCode::Digit7 => Some(if shift { '&' } else { '7' }),
+        KeyCode::Digit8 => Some(if shift { '*' } else { '8' }),
+        KeyCode::Digit9 => Some(if shift { '(' } else { '9' }),
+        KeyCode::Space => Some(' '),
+        KeyCode::Minus => Some(if shift { '_' } else { '-' }),
+        KeyCode::Equals => Some(if shift { '+' } else { '=' }),
+        KeyCode::LeftBracket => Some(if shift { '{' } else { '[' }),
+        KeyCode::RightBracket => Some(if shift { '}' } else { ']' }),
+        KeyCode::Backslash => Some(if shift { '|' } else { '\\' }),
+        KeyCode::Semicolon => Some(if shift { ':' } else { ';' }),
+        KeyCode::Apostrophe => Some(if shift { '"' } else { '\'' }),
+        KeyCode::Comma => Some(if shift { '<' } else { ',' }),
+        KeyCode::Period => Some(if shift { '>' } else { '.' }),
+        KeyCode::Slash => Some(if shift { '?' } else { '/' }),
+        KeyCode::GraveAccent => Some(if shift { '~' } else { '`' }),
+        _ => None,
+    }
 }
 
 fn menu_dropdown_width(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
