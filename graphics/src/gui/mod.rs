@@ -8,6 +8,12 @@
 
 pub mod debug;
 pub mod dock;
+pub mod icon_atlas;
+
+pub use icon_atlas::{
+    GuiIconAtlas, GuiIconAtlasError, GuiIconAtlasInfo, GuiIconRect, GuiIconUv, MenuGlyphId,
+    ToolbarIconId,
+};
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -512,8 +518,7 @@ impl GuiContext {
             [initial_display_size[0], metrics.title_bar_height],
         );
         let initial_grip_pos = [state.position[0] + metrics.grip_padding, state.position[1]];
-        let initial_grip_rect =
-            MenuRect::from_position_size(initial_grip_pos, metrics.grip_size);
+        let initial_grip_rect = MenuRect::from_position_size(initial_grip_pos, metrics.grip_size);
         let initial_drag_rect = if metrics.grip_size[0] > 0.0 {
             initial_grip_rect
         } else {
@@ -752,9 +757,15 @@ impl GuiContext {
                     [handle_size, handle_size],
                 ),
                 ([center_x, top], [edge_length, edge_thickness]),
-                ([center_x, bottom - edge_thickness], [edge_length, edge_thickness]),
+                (
+                    [center_x, bottom - edge_thickness],
+                    [edge_length, edge_thickness],
+                ),
                 ([left, center_y], [edge_thickness, edge_length]),
-                ([right - edge_thickness, center_y], [edge_thickness, edge_length]),
+                (
+                    [right - edge_thickness, center_y],
+                    [edge_thickness, edge_length],
+                ),
             ] {
                 self.submit_draw(GuiDraw::new(
                     options.layer,
