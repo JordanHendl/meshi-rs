@@ -330,6 +330,14 @@ impl GuiContext {
         menu_bar.submit_to_draw_list(self, options)
     }
 
+    pub fn submit_menu_popup(
+        &mut self,
+        menu: &MenuPopup,
+        options: &MenuPopupRenderOptions,
+    ) -> MenuPopupLayout {
+        menu.submit_to_draw_list(self, options)
+    }
+
     pub fn submit_sliders(
         &mut self,
         sliders: &[Slider],
@@ -1115,17 +1123,448 @@ impl MenuBar {
                         });
                     }
 
+                    if item.enabled {
+                        if let Some(submenu_items) = item.submenu.as_ref() {
+                            if options.state.open_submenu == Some((menu_index, item_index)) {
+                                let submenu_width =
+                                    menu_items_dropdown_width(submenu_items, metrics);
+                                let submenu_height =
+                                    menu_items_dropdown_height(submenu_items, metrics);
+                                let submenu_pos = [item_rect.max[0], item_rect.min[1]];
+                                let submenu_rect = MenuRect::from_position_size(
+                                    submenu_pos,
+                                    [submenu_width, submenu_height],
+                                );
+
+                                layout.open_submenu = Some(OpenSubmenuLayout {
+                                    menu_index,
+                                    item_index,
+                                    rect: submenu_rect,
+                                });
+
+                                ctx.submit_draw(GuiDraw::new(
+                                    options.layer,
+                                    None,
+                                    quad_from_pixels(
+                                        submenu_pos,
+                                        [submenu_width, submenu_height],
+                                        colors.dropdown_background,
+                                        viewport,
+                                    ),
+                                ));
+
+                                let mut submenu_y = submenu_pos[1] + metrics.dropdown_padding[1];
+                                for (submenu_index, submenu_item) in
+                                    submenu_items.iter().enumerate()
+                                {
+                                    if submenu_item.is_separator {
+                                        let line_y = submenu_y + metrics.separator_padding;
+                                        ctx.submit_draw(GuiDraw::new(
+                                            options.layer,
+                                            None,
+                                            quad_from_pixels(
+                                                [
+                                                    submenu_pos[0] + metrics.dropdown_padding[0],
+                                                    line_y,
+                                                ],
+                                                [
+                                                    submenu_width
+                                                        - metrics.dropdown_padding[0] * 2.0,
+                                                    metrics.separator_thickness,
+                                                ],
+                                                colors.separator,
+                                                viewport,
+                                            ),
+                                        ));
+                                        submenu_y += metrics.separator_thickness
+                                            + metrics.separator_padding * 2.0;
+                                        continue;
+                                    }
+
+                                    let submenu_item_rect = MenuRect::from_position_size(
+                                        [submenu_pos[0], submenu_y],
+                                        [submenu_width, metrics.item_height],
+                                    );
+                                    let submenu_text_color = if submenu_item.enabled {
+                                        colors.text
+                                    } else {
+                                        colors.disabled_text
+                                    };
+
+                                    if submenu_item.enabled
+                                        && options.state.hovered_item
+                                            == Some((menu_index, submenu_index))
+                                    {
+                                        ctx.submit_draw(GuiDraw::new(
+                                            options.layer,
+                                            None,
+                                            quad_from_pixels(
+                                                [
+                                                    submenu_item_rect.min[0],
+                                                    submenu_item_rect.min[1],
+                                                ],
+                                                [submenu_width, metrics.item_height],
+                                                colors.item_hover,
+                                                viewport,
+                                            ),
+                                        ));
+                                    }
+
+                                    if submenu_item.checked {
+                                        let check_pos = [
+                                            submenu_item_rect.min[0] + metrics.item_padding[0],
+                                            submenu_item_rect.min[1] + metrics.text_offset[1],
+                                        ];
+                                        ctx.submit_text(GuiTextDraw {
+                                            text: "✓".to_string(),
+                                            position: check_pos,
+                                            color: colors.checked_text,
+                                            scale: metrics.font_scale,
+                                        });
+                                    }
+
+                                    let submenu_label_x = submenu_item_rect.min[0]
+                                        + metrics.item_padding[0]
+                                        + metrics.checkmark_width;
+                                    let submenu_label_pos = [
+                                        submenu_label_x,
+                                        submenu_item_rect.min[1] + metrics.text_offset[1],
+                                    ];
+                                    ctx.submit_text(GuiTextDraw {
+                                        text: submenu_item.label.clone(),
+                                        position: submenu_label_pos,
+                                        color: submenu_text_color,
+                                        scale: metrics.font_scale,
+                                    });
+
+                                    if let Some(shortcut) = &submenu_item.shortcut {
+                                        let shortcut_width =
+                                            text_width(shortcut, metrics.char_width);
+                                        let shortcut_pos = [
+                                            submenu_item_rect.max[0]
+                                                - metrics.item_padding[0]
+                                                - shortcut_width,
+                                            submenu_item_rect.min[1] + metrics.text_offset[1],
+                                        ];
+                                        ctx.submit_text(GuiTextDraw {
+                                            text: shortcut.clone(),
+                                            position: shortcut_pos,
+                                            color: submenu_text_color,
+                                            scale: metrics.font_scale,
+                                        });
+                                    }
+
+                                    layout.item_rects.push(MenuItemLayout {
+                                        menu_index,
+                                        item_index: submenu_index,
+                                        parent_item_index: Some(item_index),
+                                        depth: 1,
+                                        rect: submenu_item_rect,
+                                        action_id: submenu_item.action_id,
+                                        enabled: submenu_item.enabled,
+                                        has_submenu: submenu_item.submenu.is_some(),
+                                    });
+
+                                    submenu_y += metrics.item_height;
+                                }
+                            }
+                        }
+                    }
+
                     layout.item_rects.push(MenuItemLayout {
                         menu_index,
                         item_index,
+                        parent_item_index: None,
+                        depth: 0,
                         rect: item_rect,
                         action_id: item.action_id,
                         enabled: item.enabled,
+                        has_submenu: item.submenu.is_some(),
                     });
 
                     item_y += metrics.item_height;
                 }
             }
+        }
+
+        layout
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MenuPopup {
+    pub items: Vec<MenuItem>,
+}
+
+impl MenuPopup {
+    pub fn submit_to_draw_list(
+        &self,
+        ctx: &mut GuiContext,
+        options: &MenuPopupRenderOptions,
+    ) -> MenuPopupLayout {
+        let metrics = &options.metrics;
+        let colors = &options.colors;
+        let viewport = options.viewport;
+
+        let dropdown_width = menu_items_dropdown_width(&self.items, metrics);
+        let dropdown_height = menu_items_dropdown_height(&self.items, metrics);
+        let dropdown_pos = popup_anchor_position(options.anchor, [dropdown_width, dropdown_height]);
+        let dropdown_rect =
+            MenuRect::from_position_size(dropdown_pos, [dropdown_width, dropdown_height]);
+
+        let mut layout = MenuPopupLayout {
+            rect: dropdown_rect,
+            ..Default::default()
+        };
+
+        ctx.submit_draw(GuiDraw::new(
+            options.layer,
+            None,
+            quad_from_pixels(
+                dropdown_pos,
+                [dropdown_width, dropdown_height],
+                colors.dropdown_background,
+                viewport,
+            ),
+        ));
+
+        let mut item_y = dropdown_pos[1] + metrics.dropdown_padding[1];
+
+        for (item_index, item) in self.items.iter().enumerate() {
+            if item.is_separator {
+                let line_y = item_y + metrics.separator_padding;
+                ctx.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(
+                        [dropdown_pos[0] + metrics.dropdown_padding[0], line_y],
+                        [
+                            dropdown_width - metrics.dropdown_padding[0] * 2.0,
+                            metrics.separator_thickness,
+                        ],
+                        colors.separator,
+                        viewport,
+                    ),
+                ));
+                item_y += metrics.separator_thickness + metrics.separator_padding * 2.0;
+                continue;
+            }
+
+            let item_rect = MenuRect::from_position_size(
+                [dropdown_pos[0], item_y],
+                [dropdown_width, metrics.item_height],
+            );
+            let text_color = if item.enabled {
+                colors.text
+            } else {
+                colors.disabled_text
+            };
+
+            if item.enabled
+                && options.state.hovered_item
+                    == Some(MenuPopupItemRef {
+                        item_index,
+                        parent_item_index: None,
+                        depth: 0,
+                    })
+            {
+                ctx.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(
+                        [item_rect.min[0], item_rect.min[1]],
+                        [dropdown_width, metrics.item_height],
+                        colors.item_hover,
+                        viewport,
+                    ),
+                ));
+            }
+
+            if item.checked {
+                let check_pos = [
+                    item_rect.min[0] + metrics.item_padding[0],
+                    item_rect.min[1] + metrics.text_offset[1],
+                ];
+                ctx.submit_text(GuiTextDraw {
+                    text: "✓".to_string(),
+                    position: check_pos,
+                    color: colors.checked_text,
+                    scale: metrics.font_scale,
+                });
+            }
+
+            let label_x = item_rect.min[0] + metrics.item_padding[0] + metrics.checkmark_width;
+            let label_pos = [label_x, item_rect.min[1] + metrics.text_offset[1]];
+            ctx.submit_text(GuiTextDraw {
+                text: item.label.clone(),
+                position: label_pos,
+                color: text_color,
+                scale: metrics.font_scale,
+            });
+
+            if let Some(shortcut) = &item.shortcut {
+                let shortcut_width = text_width(shortcut, metrics.char_width);
+                let shortcut_pos = [
+                    item_rect.max[0] - metrics.item_padding[0] - shortcut_width,
+                    item_rect.min[1] + metrics.text_offset[1],
+                ];
+                ctx.submit_text(GuiTextDraw {
+                    text: shortcut.clone(),
+                    position: shortcut_pos,
+                    color: text_color,
+                    scale: metrics.font_scale,
+                });
+            }
+
+            if item.enabled {
+                if let Some(submenu_items) = item.submenu.as_ref() {
+                    if options.state.open_submenu == Some(item_index) {
+                        let submenu_width = menu_items_dropdown_width(submenu_items, metrics);
+                        let submenu_height = menu_items_dropdown_height(submenu_items, metrics);
+                        let submenu_pos = [item_rect.max[0], item_rect.min[1]];
+                        let submenu_rect = MenuRect::from_position_size(
+                            submenu_pos,
+                            [submenu_width, submenu_height],
+                        );
+
+                        layout.open_submenu = Some(MenuPopupSubmenuLayout {
+                            item_index,
+                            rect: submenu_rect,
+                        });
+
+                        ctx.submit_draw(GuiDraw::new(
+                            options.layer,
+                            None,
+                            quad_from_pixels(
+                                submenu_pos,
+                                [submenu_width, submenu_height],
+                                colors.dropdown_background,
+                                viewport,
+                            ),
+                        ));
+
+                        let mut submenu_y = submenu_pos[1] + metrics.dropdown_padding[1];
+                        for (submenu_index, submenu_item) in submenu_items.iter().enumerate() {
+                            if submenu_item.is_separator {
+                                let line_y = submenu_y + metrics.separator_padding;
+                                ctx.submit_draw(GuiDraw::new(
+                                    options.layer,
+                                    None,
+                                    quad_from_pixels(
+                                        [submenu_pos[0] + metrics.dropdown_padding[0], line_y],
+                                        [
+                                            submenu_width - metrics.dropdown_padding[0] * 2.0,
+                                            metrics.separator_thickness,
+                                        ],
+                                        colors.separator,
+                                        viewport,
+                                    ),
+                                ));
+                                submenu_y +=
+                                    metrics.separator_thickness + metrics.separator_padding * 2.0;
+                                continue;
+                            }
+
+                            let submenu_item_rect = MenuRect::from_position_size(
+                                [submenu_pos[0], submenu_y],
+                                [submenu_width, metrics.item_height],
+                            );
+                            let submenu_text_color = if submenu_item.enabled {
+                                colors.text
+                            } else {
+                                colors.disabled_text
+                            };
+
+                            if submenu_item.enabled
+                                && options.state.hovered_item
+                                    == Some(MenuPopupItemRef {
+                                        item_index: submenu_index,
+                                        parent_item_index: Some(item_index),
+                                        depth: 1,
+                                    })
+                            {
+                                ctx.submit_draw(GuiDraw::new(
+                                    options.layer,
+                                    None,
+                                    quad_from_pixels(
+                                        [submenu_item_rect.min[0], submenu_item_rect.min[1]],
+                                        [submenu_width, metrics.item_height],
+                                        colors.item_hover,
+                                        viewport,
+                                    ),
+                                ));
+                            }
+
+                            if submenu_item.checked {
+                                let check_pos = [
+                                    submenu_item_rect.min[0] + metrics.item_padding[0],
+                                    submenu_item_rect.min[1] + metrics.text_offset[1],
+                                ];
+                                ctx.submit_text(GuiTextDraw {
+                                    text: "✓".to_string(),
+                                    position: check_pos,
+                                    color: colors.checked_text,
+                                    scale: metrics.font_scale,
+                                });
+                            }
+
+                            let submenu_label_x = submenu_item_rect.min[0]
+                                + metrics.item_padding[0]
+                                + metrics.checkmark_width;
+                            let submenu_label_pos = [
+                                submenu_label_x,
+                                submenu_item_rect.min[1] + metrics.text_offset[1],
+                            ];
+                            ctx.submit_text(GuiTextDraw {
+                                text: submenu_item.label.clone(),
+                                position: submenu_label_pos,
+                                color: submenu_text_color,
+                                scale: metrics.font_scale,
+                            });
+
+                            if let Some(shortcut) = &submenu_item.shortcut {
+                                let shortcut_width = text_width(shortcut, metrics.char_width);
+                                let shortcut_pos = [
+                                    submenu_item_rect.max[0]
+                                        - metrics.item_padding[0]
+                                        - shortcut_width,
+                                    submenu_item_rect.min[1] + metrics.text_offset[1],
+                                ];
+                                ctx.submit_text(GuiTextDraw {
+                                    text: shortcut.clone(),
+                                    position: shortcut_pos,
+                                    color: submenu_text_color,
+                                    scale: metrics.font_scale,
+                                });
+                            }
+
+                            layout.item_rects.push(MenuPopupItemLayout {
+                                item_index: submenu_index,
+                                parent_item_index: Some(item_index),
+                                depth: 1,
+                                rect: submenu_item_rect,
+                                action_id: submenu_item.action_id,
+                                enabled: submenu_item.enabled,
+                                has_submenu: submenu_item.submenu.is_some(),
+                            });
+
+                            submenu_y += metrics.item_height;
+                        }
+                    }
+                }
+            }
+
+            layout.item_rects.push(MenuPopupItemLayout {
+                item_index,
+                parent_item_index: None,
+                depth: 0,
+                rect: item_rect,
+                action_id: item.action_id,
+                enabled: item.enabled,
+                has_submenu: item.submenu.is_some(),
+            });
+
+            item_y += metrics.item_height;
         }
 
         layout
@@ -1146,6 +1585,7 @@ pub struct MenuItem {
     pub checked: bool,
     pub action_id: Option<u32>,
     pub is_separator: bool,
+    pub submenu: Option<Vec<MenuItem>>,
 }
 
 impl MenuItem {
@@ -1157,7 +1597,13 @@ impl MenuItem {
             checked: false,
             action_id: None,
             is_separator: false,
+            submenu: None,
         }
+    }
+
+    pub fn with_submenu(mut self, items: Vec<MenuItem>) -> Self {
+        self.submenu = Some(items);
+        self
     }
 
     pub fn separator() -> Self {
@@ -1168,6 +1614,7 @@ impl MenuItem {
             checked: false,
             action_id: None,
             is_separator: true,
+            submenu: None,
         }
     }
 }
@@ -1499,6 +1946,47 @@ pub struct MenuBarState {
     pub open_menu: Option<usize>,
     pub hovered_menu: Option<usize>,
     pub hovered_item: Option<(usize, usize)>,
+    pub open_submenu: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MenuPopupRenderOptions {
+    pub viewport: [f32; 2],
+    pub anchor: MenuPopupAnchor,
+    pub layer: GuiLayer,
+    pub metrics: MenuLayoutMetrics,
+    pub colors: MenuColors,
+    pub state: MenuPopupState,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MenuPopupState {
+    pub hovered_item: Option<MenuPopupItemRef>,
+    pub open_submenu: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenuPopupItemRef {
+    pub item_index: usize,
+    pub parent_item_index: Option<usize>,
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MenuPopupAnchor {
+    Position([f32; 2]),
+    Rect {
+        rect: MenuRect,
+        align: MenuPopupAlign,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MenuPopupAlign {
+    BelowLeft,
+    BelowRight,
+    AboveLeft,
+    AboveRight,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1574,6 +2062,14 @@ pub struct MenuBarLayout {
     pub menu_tabs: Vec<MenuTabLayout>,
     pub item_rects: Vec<MenuItemLayout>,
     pub open_menu: Option<OpenMenuLayout>,
+    pub open_submenu: Option<OpenSubmenuLayout>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct MenuPopupLayout {
+    pub rect: MenuRect,
+    pub item_rects: Vec<MenuPopupItemLayout>,
+    pub open_submenu: Option<MenuPopupSubmenuLayout>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1589,12 +2085,39 @@ pub struct OpenMenuLayout {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct MenuItemLayout {
+pub struct OpenSubmenuLayout {
     pub menu_index: usize,
     pub item_index: usize,
     pub rect: MenuRect,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MenuPopupSubmenuLayout {
+    pub item_index: usize,
+    pub rect: MenuRect,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MenuItemLayout {
+    pub menu_index: usize,
+    pub item_index: usize,
+    pub parent_item_index: Option<usize>,
+    pub depth: usize,
+    pub rect: MenuRect,
     pub action_id: Option<u32>,
     pub enabled: bool,
+    pub has_submenu: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MenuPopupItemLayout {
+    pub item_index: usize,
+    pub parent_item_index: Option<usize>,
+    pub depth: usize,
+    pub rect: MenuRect,
+    pub action_id: Option<u32>,
+    pub enabled: bool,
+    pub has_submenu: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1612,13 +2135,42 @@ impl MenuRect {
     }
 }
 
+impl Default for MenuRect {
+    fn default() -> Self {
+        Self {
+            min: [0.0, 0.0],
+            max: [0.0, 0.0],
+        }
+    }
+}
+
+fn popup_anchor_position(anchor: MenuPopupAnchor, size: [f32; 2]) -> [f32; 2] {
+    match anchor {
+        MenuPopupAnchor::Position(position) => position,
+        MenuPopupAnchor::Rect { rect, align } => match align {
+            MenuPopupAlign::BelowLeft => [rect.min[0], rect.max[1]],
+            MenuPopupAlign::BelowRight => [rect.max[0] - size[0], rect.max[1]],
+            MenuPopupAlign::AboveLeft => [rect.min[0], rect.min[1] - size[1]],
+            MenuPopupAlign::AboveRight => [rect.max[0] - size[0], rect.min[1] - size[1]],
+        },
+    }
+}
+
 fn text_width(text: &str, char_width: f32) -> f32 {
     text.chars().count() as f32 * char_width
 }
 
 fn menu_dropdown_width(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
+    menu_items_dropdown_width(&menu.items, metrics)
+}
+
+fn menu_dropdown_height(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
+    menu_items_dropdown_height(&menu.items, metrics)
+}
+
+fn menu_items_dropdown_width(items: &[MenuItem], metrics: &MenuLayoutMetrics) -> f32 {
     let mut max_width: f32 = 0.0;
-    for item in &menu.items {
+    for item in items {
         if item.is_separator {
             continue;
         }
@@ -1643,9 +2195,9 @@ fn menu_dropdown_width(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
     max_width.max(metrics.menu_padding[0] * 2.0 + 60.0)
 }
 
-fn menu_dropdown_height(menu: &Menu, metrics: &MenuLayoutMetrics) -> f32 {
+fn menu_items_dropdown_height(items: &[MenuItem], metrics: &MenuLayoutMetrics) -> f32 {
     let mut height = metrics.dropdown_padding[1] * 2.0;
-    for item in &menu.items {
+    for item in items {
         if item.is_separator {
             height += metrics.separator_thickness + metrics.separator_padding * 2.0;
         } else {

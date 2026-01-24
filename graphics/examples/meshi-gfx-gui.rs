@@ -149,6 +149,7 @@ fn main() {
             open_menu: None,
             hovered_menu: None,
             hovered_item: None,
+            open_submenu: None,
         },
         menu_layout: MenuBarLayout::default(),
         menu_feedback: None,
@@ -214,14 +215,45 @@ fn main() {
                         checked: false,
                         action_id: Some(1),
                         is_separator: false,
+                        submenu: None,
                     },
                     MenuItem {
                         label: "Open".to_string(),
                         enabled: true,
                         shortcut: Some("Ctrl+O".to_string()),
                         checked: false,
-                        action_id: Some(2),
+                        action_id: None,
                         is_separator: false,
+                        submenu: Some(vec![
+                            MenuItem {
+                                label: "Project".to_string(),
+                                enabled: true,
+                                shortcut: None,
+                                checked: false,
+                                action_id: Some(20),
+                                is_separator: false,
+                                submenu: None,
+                            },
+                            MenuItem {
+                                label: "Recent".to_string(),
+                                enabled: true,
+                                shortcut: None,
+                                checked: false,
+                                action_id: Some(21),
+                                is_separator: false,
+                                submenu: None,
+                            },
+                            MenuItem::separator(),
+                            MenuItem {
+                                label: "Templates".to_string(),
+                                enabled: true,
+                                shortcut: None,
+                                checked: false,
+                                action_id: Some(22),
+                                is_separator: false,
+                                submenu: None,
+                            },
+                        ]),
                     },
                     MenuItem::separator(),
                     MenuItem {
@@ -231,6 +263,7 @@ fn main() {
                         checked: false,
                         action_id: Some(3),
                         is_separator: false,
+                        submenu: None,
                     },
                 ],
             },
@@ -244,6 +277,7 @@ fn main() {
                         checked: true,
                         action_id: Some(10),
                         is_separator: false,
+                        submenu: None,
                     },
                     MenuItem {
                         label: "Show Guides".to_string(),
@@ -252,6 +286,7 @@ fn main() {
                         checked: false,
                         action_id: Some(11),
                         is_separator: false,
+                        submenu: None,
                     },
                 ],
             },
@@ -283,13 +318,29 @@ fn main() {
                     item.item_index,
                     item.action_id,
                     item.enabled,
+                    item.has_submenu,
+                    item.depth,
                 )
             });
 
         data.menu_state.hovered_menu = hovered_tab;
         data.menu_state.hovered_item = hovered_item
-            .filter(|(_, _, _, enabled)| *enabled)
-            .map(|(menu_index, item_index, _, _)| (menu_index, item_index));
+            .filter(|(_, _, _, enabled, _, _)| *enabled)
+            .map(|(menu_index, item_index, _, _, _, _)| (menu_index, item_index));
+
+        if let Some(open_menu) = data.menu_state.open_menu {
+            if let Some((menu_index, item_index, _, enabled, has_submenu, depth)) = hovered_item {
+                if enabled && depth == 0 && has_submenu && menu_index == open_menu {
+                    data.menu_state.open_submenu = Some((menu_index, item_index));
+                } else if depth == 0 {
+                    data.menu_state.open_submenu = None;
+                }
+            } else {
+                data.menu_state.open_submenu = None;
+            }
+        } else {
+            data.menu_state.open_submenu = None;
+        }
 
         if data.menu_state.open_menu.is_some()
             && hovered_tab.is_some()
@@ -297,31 +348,44 @@ fn main() {
             && !data.mouse_down
         {
             data.menu_state.open_menu = hovered_tab;
+            data.menu_state.open_submenu = None;
         }
 
         let clicked_open_menu = data.menu_layout.open_menu.map(|open_menu| open_menu.rect);
+        let clicked_open_submenu = data
+            .menu_layout
+            .open_submenu
+            .map(|open_submenu| open_submenu.rect);
 
         if data.mouse_pressed {
             if let Some(menu_index) = hovered_tab {
                 if data.menu_state.open_menu == Some(menu_index) {
                     data.menu_state.open_menu = None;
+                    data.menu_state.open_submenu = None;
                 } else {
                     data.menu_state.open_menu = Some(menu_index);
+                    data.menu_state.open_submenu = None;
                 }
-            } else if let Some((_, _, action_id, enabled)) = hovered_item {
-                if enabled {
+            } else if let Some((_, _, action_id, enabled, has_submenu, depth)) = hovered_item {
+                if enabled && ((!has_submenu && depth == 0) || depth == 1) {
                     if let Some(action_id) = action_id {
                         data.menu_feedback = Some(format!("Selected menu action {}", action_id));
                         data.menu_feedback_until = now + 2.0;
                     }
                     data.menu_state.open_menu = None;
+                    data.menu_state.open_submenu = None;
                 }
             } else if let Some(open_rect) = clicked_open_menu {
-                if !point_in_menu_rect(data.cursor, open_rect) {
+                let in_submenu = clicked_open_submenu
+                    .map(|submenu_rect| point_in_menu_rect(data.cursor, submenu_rect))
+                    .unwrap_or(false);
+                if !point_in_menu_rect(data.cursor, open_rect) && !in_submenu {
                     data.menu_state.open_menu = None;
+                    data.menu_state.open_submenu = None;
                 }
             } else {
                 data.menu_state.open_menu = None;
+                data.menu_state.open_submenu = None;
             }
         }
 
