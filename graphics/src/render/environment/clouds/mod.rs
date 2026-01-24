@@ -259,18 +259,18 @@ impl CloudRenderer {
             self.temporal_pass.history_index() as u32,
         );
 
-//        self.timings.shadow_ms = _ctx
-//            .get_elapsed_gpu_time_ms(TIMER_SHADOW as usize)
-//            .unwrap_or(0.0);
-//        self.timings.raymarch_ms = _ctx
-//            .get_elapsed_gpu_time_ms(TIMER_RAYMARCH as usize)
-//            .unwrap_or(0.0);
-//        self.timings.temporal_ms = _ctx
-//            .get_elapsed_gpu_time_ms(TIMER_TEMPORAL as usize)
-//            .unwrap_or(0.0);
-//        self.timings.composite_ms = _ctx
-//            .get_elapsed_gpu_time_ms(TIMER_COMPOSITE as usize)
-//            .unwrap_or(0.0);
+        self.timings.shadow_ms = _ctx
+            .get_elapsed_gpu_time_ms(TIMER_SHADOW as usize)
+            .unwrap_or(0.0);
+        self.timings.raymarch_ms = _ctx
+            .get_elapsed_gpu_time_ms(TIMER_RAYMARCH as usize)
+            .unwrap_or(0.0);
+        self.timings.temporal_ms = _ctx
+            .get_elapsed_gpu_time_ms(TIMER_TEMPORAL as usize)
+            .unwrap_or(0.0);
+        self.timings.composite_ms = _ctx
+            .get_elapsed_gpu_time_ms(TIMER_COMPOSITE as usize)
+            .unwrap_or(0.0);
 
         cmd.end()
     }
