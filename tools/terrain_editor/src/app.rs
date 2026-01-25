@@ -6,14 +6,17 @@ use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::{
     Camera, DB, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo,
     RendererSelect, TextInfo, TextRenderMode, WindowInfo,
+    rdb::terrain::{TerrainChunkArtifact, TerrainMutationOpKind},
 };
 use meshi_utils::timer::Timer;
 use tracing::warn;
 
-use crate::dbgen::{TerrainDbgen, TerrainGenerationRequest};
+use crate::dbgen::{TerrainBrushRequest, TerrainDbgen, TerrainGenerationRequest};
 use meshi_graphics::TerrainRenderObject;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
+const DEFAULT_BRUSH_RADIUS: f32 = 8.0;
+const DEFAULT_BRUSH_STRENGTH: f32 = 1.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerrainMode {
@@ -33,6 +36,8 @@ impl TerrainMode {
 struct EventState {
     running: bool,
     toggle_mode: bool,
+    cursor: Vec2,
+    mouse_pressed: bool,
 }
 
 pub struct TerrainEditorApp {
@@ -114,6 +119,8 @@ impl TerrainEditorApp {
         let event_state = Box::new(EventState {
             running: true,
             toggle_mode: false,
+            cursor: Vec2::ZERO,
+            mouse_pressed: false,
         });
 
         let mut app = Self {
@@ -152,12 +159,19 @@ impl TerrainEditorApp {
                         state.toggle_mode = true;
                     }
                 }
+                if e.source() == EventSource::Mouse && e.event_type() == EventType::CursorMoved {
+                    state.cursor = e.motion2d();
+                }
+                if e.source() == EventSource::MouseButton {
+                    if e.event_type() == EventType::Pressed {
+                        state.mouse_pressed = true;
+                    }
+                }
             }
         }
 
         let state_ptr = &mut *self.event_state as *mut EventState;
-        self.engine
-            .set_event_cb(callback, state_ptr as *mut c_void);
+        self.engine.set_event_cb(callback, state_ptr as *mut c_void);
     }
 
     fn update(&mut self, dt: f32) {
@@ -174,6 +188,10 @@ impl TerrainEditorApp {
         if self.needs_refresh {
             self.refresh_terrain();
             self.needs_refresh = false;
+        }
+
+        if self.terrain_mode == TerrainMode::Manual {
+            self.handle_manual_brush();
         }
 
         self.engine.update(dt);
@@ -216,15 +234,7 @@ impl TerrainEditorApp {
             }
 
             self.persistence_error = persistence_error;
-            self.update_status_text();
-            let render_object = TerrainRenderObject {
-                key: request.chunk_key.clone(),
-                artifact: chunk,
-                transform: Mat4::IDENTITY,
-            };
-            self.terrain_objects.clear();
-            self.terrain_objects.push(render_object);
-            self.engine.set_terrain_render_objects(&self.terrain_objects);
+            self.update_rendered_chunk(request.chunk_key.clone(), chunk);
         }
     }
 
@@ -249,6 +259,72 @@ impl TerrainEditorApp {
                 render_mode: text_render_mode(&self.db),
             },
         );
+    }
+
+    fn handle_manual_brush(&mut self) {
+        if !self.event_state.mouse_pressed {
+            return;
+        }
+        self.event_state.mouse_pressed = false;
+
+        let chunk_key = "terrain/editor-preview".to_string();
+        let world_pos = self.cursor_to_world(self.event_state.cursor, &chunk_key);
+        let request = TerrainBrushRequest {
+            chunk_key: chunk_key.clone(),
+            mode: self.terrain_mode.label().to_string(),
+            world_pos: [world_pos.x, world_pos.y, world_pos.z],
+            radius: DEFAULT_BRUSH_RADIUS,
+            strength: DEFAULT_BRUSH_STRENGTH,
+            tool: TerrainMutationOpKind::SphereAdd,
+        };
+
+        match self.dbgen.apply_brush(&request, &self.rdb_path) {
+            Ok(artifact) => {
+                self.persistence_error = None;
+                if let Ok(mut rdb) = RDBFile::load(&self.rdb_path) {
+                    if let Ok(artifact) = rdb.fetch::<TerrainChunkArtifact>(&request.chunk_key) {
+                        self.update_rendered_chunk(request.chunk_key, artifact);
+                        return;
+                    }
+                }
+                self.update_rendered_chunk(request.chunk_key, artifact);
+            }
+            Err(err) => {
+                warn!(error = %err, "Failed to apply terrain brush.");
+                self.persistence_error = Some(format!("Brush apply failed: {err}"));
+                self.update_status_text();
+            }
+        }
+    }
+
+    fn cursor_to_world(&self, cursor: Vec2, chunk_key: &str) -> Vec3 {
+        let chunk_coords = self.dbgen.chunk_coords_for_key(chunk_key);
+        let tile_size = 1.0;
+        let tiles_per_chunk = [32_u32, 32_u32];
+        let chunk_size_x = tiles_per_chunk[0] as f32 * tile_size;
+        let chunk_size_y = tiles_per_chunk[1] as f32 * tile_size;
+        let origin_x = chunk_coords[0] as f32 * chunk_size_x;
+        let origin_y = chunk_coords[1] as f32 * chunk_size_y;
+        let u = (cursor.x / self.window_size.x).clamp(0.0, 1.0);
+        let v = (cursor.y / self.window_size.y).clamp(0.0, 1.0);
+        Vec3::new(
+            origin_x + u * chunk_size_x,
+            origin_y + (1.0 - v) * chunk_size_y,
+            0.0,
+        )
+    }
+
+    fn update_rendered_chunk(&mut self, chunk_key: String, artifact: TerrainChunkArtifact) {
+        self.update_status_text();
+        let render_object = TerrainRenderObject {
+            key: chunk_key,
+            artifact,
+            transform: Mat4::IDENTITY,
+        };
+        self.terrain_objects.clear();
+        self.terrain_objects.push(render_object);
+        self.engine
+            .set_terrain_render_objects(&self.terrain_objects);
     }
 
     fn shutdown(mut self) {
