@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec4, vec2};
+use glam::{Vec2, Vec3, Vec4, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 
 use crate::gui::{
@@ -7,7 +7,7 @@ use crate::gui::{
 };
 use crate::render::environment::ocean::OceanFrameSettings;
 use crate::render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
-use crate::structs::{CloudDebugView, CloudSettings};
+use crate::structs::{CloudDebugView, CloudResolutionScale, CloudSettings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DebugTab {
@@ -44,15 +44,38 @@ struct DebugSliderValues {
     ocean_foam_threshold: f32,
     ocean_capillary_strength: f32,
     ocean_time_scale: f32,
+    cloud_enabled: f32,
     cloud_base_altitude: f32,
     cloud_top_altitude: f32,
     cloud_density_scale: f32,
+    cloud_light_step_count: f32,
     cloud_coverage_power: f32,
     cloud_detail_strength: f32,
+    cloud_curl_strength: f32,
+    cloud_jitter_strength: f32,
+    cloud_epsilon: f32,
+    cloud_wind_x: f32,
+    cloud_wind_y: f32,
     cloud_wind_speed: f32,
+    cloud_low_res_scale: f32,
     cloud_phase_g: f32,
     cloud_step_count: f32,
+    cloud_sun_radiance_r: f32,
+    cloud_sun_radiance_g: f32,
+    cloud_sun_radiance_b: f32,
+    cloud_sun_direction_x: f32,
+    cloud_sun_direction_y: f32,
+    cloud_sun_direction_z: f32,
+    cloud_shadow_enabled: f32,
+    cloud_shadow_resolution: f32,
+    cloud_shadow_extent: f32,
+    cloud_shadow_strength: f32,
+    cloud_temporal_blend_factor: f32,
+    cloud_temporal_clamp_strength: f32,
+    cloud_temporal_depth_sigma: f32,
+    cloud_temporal_history_weight_scale: f32,
     cloud_debug_view: f32,
+    cloud_performance_budget_ms: f32,
 }
 
 pub struct DebugGuiBindings {
@@ -121,15 +144,38 @@ impl DebugGui {
                 ocean_foam_threshold: 0.55,
                 ocean_capillary_strength: 1.0,
                 ocean_time_scale: 1.0,
+                cloud_enabled: 1.0,
                 cloud_base_altitude: 300.0,
                 cloud_top_altitude: 400.0,
                 cloud_density_scale: 0.5,
+                cloud_light_step_count: 18.0,
                 cloud_coverage_power: 1.2,
                 cloud_detail_strength: 0.6,
+                cloud_curl_strength: 0.0,
+                cloud_jitter_strength: 1.0,
+                cloud_epsilon: 0.01,
+                cloud_wind_x: 1.0,
+                cloud_wind_y: 0.0,
                 cloud_wind_speed: 0.2,
+                cloud_low_res_scale: 0.0,
                 cloud_phase_g: 0.6,
                 cloud_step_count: 96.0,
+                cloud_sun_radiance_r: 1.0,
+                cloud_sun_radiance_g: 1.0,
+                cloud_sun_radiance_b: 1.0,
+                cloud_sun_direction_x: 0.0,
+                cloud_sun_direction_y: -1.0,
+                cloud_sun_direction_z: 0.0,
+                cloud_shadow_enabled: 0.0,
+                cloud_shadow_resolution: 256.0,
+                cloud_shadow_extent: 50000.0,
+                cloud_shadow_strength: 1.0,
+                cloud_temporal_blend_factor: 0.9,
+                cloud_temporal_clamp_strength: 0.7,
+                cloud_temporal_depth_sigma: 15.0,
+                cloud_temporal_history_weight_scale: 1.0,
                 cloud_debug_view: 0.0,
+                cloud_performance_budget_ms: 4.0,
             },
         }
     }
@@ -236,15 +282,40 @@ impl DebugGui {
                     self.slider_values.ocean_time_scale = ocean.time_scale;
                 }
                 if let Some(clouds) = bindings.cloud_settings.as_ref() {
+                    self.slider_values.cloud_enabled = clouds.enabled as u32 as f32;
                     self.slider_values.cloud_base_altitude = clouds.base_altitude;
                     self.slider_values.cloud_top_altitude = clouds.top_altitude;
                     self.slider_values.cloud_density_scale = clouds.density_scale;
+                    self.slider_values.cloud_light_step_count = clouds.light_step_count as f32;
                     self.slider_values.cloud_coverage_power = clouds.coverage_power;
                     self.slider_values.cloud_detail_strength = clouds.detail_strength;
+                    self.slider_values.cloud_curl_strength = clouds.curl_strength;
+                    self.slider_values.cloud_jitter_strength = clouds.jitter_strength;
+                    self.slider_values.cloud_epsilon = clouds.epsilon;
+                    self.slider_values.cloud_wind_x = clouds.wind.x;
+                    self.slider_values.cloud_wind_y = clouds.wind.y;
                     self.slider_values.cloud_wind_speed = clouds.wind_speed;
+                    self.slider_values.cloud_low_res_scale =
+                        cloud_resolution_scale_value(clouds.low_res_scale);
                     self.slider_values.cloud_phase_g = clouds.phase_g;
                     self.slider_values.cloud_step_count = clouds.step_count as f32;
+                    self.slider_values.cloud_sun_radiance_r = clouds.sun_radiance.x;
+                    self.slider_values.cloud_sun_radiance_g = clouds.sun_radiance.y;
+                    self.slider_values.cloud_sun_radiance_b = clouds.sun_radiance.z;
+                    self.slider_values.cloud_sun_direction_x = clouds.sun_direction.x;
+                    self.slider_values.cloud_sun_direction_y = clouds.sun_direction.y;
+                    self.slider_values.cloud_sun_direction_z = clouds.sun_direction.z;
+                    self.slider_values.cloud_shadow_enabled = clouds.shadow.enabled as u32 as f32;
+                    self.slider_values.cloud_shadow_resolution = clouds.shadow.resolution as f32;
+                    self.slider_values.cloud_shadow_extent = clouds.shadow.extent;
+                    self.slider_values.cloud_shadow_strength = clouds.shadow.strength;
+                    self.slider_values.cloud_temporal_blend_factor = clouds.temporal.blend_factor;
+                    self.slider_values.cloud_temporal_clamp_strength = clouds.temporal.clamp_strength;
+                    self.slider_values.cloud_temporal_depth_sigma = clouds.temporal.depth_sigma;
+                    self.slider_values.cloud_temporal_history_weight_scale =
+                        clouds.temporal.history_weight_scale;
                     self.slider_values.cloud_debug_view = clouds.debug_view as u32 as f32;
+                    self.slider_values.cloud_performance_budget_ms = clouds.performance_budget_ms;
                 }
             }
         }
@@ -409,15 +480,38 @@ impl DebugGui {
                     207 => self.slider_values.ocean_foam_threshold = value,
                     208 => self.slider_values.ocean_capillary_strength = value,
                     209 => self.slider_values.ocean_time_scale = value,
+                    300 => self.slider_values.cloud_enabled = value,
                     301 => self.slider_values.cloud_base_altitude = value,
                     302 => self.slider_values.cloud_top_altitude = value,
                     303 => self.slider_values.cloud_density_scale = value,
-                    304 => self.slider_values.cloud_coverage_power = value,
-                    305 => self.slider_values.cloud_detail_strength = value,
-                    306 => self.slider_values.cloud_wind_speed = value,
-                    307 => self.slider_values.cloud_phase_g = value,
-                    308 => self.slider_values.cloud_step_count = value,
-                    309 => self.slider_values.cloud_debug_view = value,
+                    304 => self.slider_values.cloud_step_count = value,
+                    305 => self.slider_values.cloud_light_step_count = value,
+                    306 => self.slider_values.cloud_phase_g = value,
+                    307 => self.slider_values.cloud_wind_x = value,
+                    308 => self.slider_values.cloud_wind_y = value,
+                    309 => self.slider_values.cloud_wind_speed = value,
+                    310 => self.slider_values.cloud_low_res_scale = value,
+                    311 => self.slider_values.cloud_coverage_power = value,
+                    312 => self.slider_values.cloud_detail_strength = value,
+                    313 => self.slider_values.cloud_curl_strength = value,
+                    314 => self.slider_values.cloud_jitter_strength = value,
+                    315 => self.slider_values.cloud_epsilon = value,
+                    316 => self.slider_values.cloud_sun_radiance_r = value,
+                    317 => self.slider_values.cloud_sun_radiance_g = value,
+                    318 => self.slider_values.cloud_sun_radiance_b = value,
+                    319 => self.slider_values.cloud_sun_direction_x = value,
+                    320 => self.slider_values.cloud_sun_direction_y = value,
+                    321 => self.slider_values.cloud_sun_direction_z = value,
+                    322 => self.slider_values.cloud_shadow_enabled = value,
+                    323 => self.slider_values.cloud_shadow_resolution = value,
+                    324 => self.slider_values.cloud_shadow_extent = value,
+                    325 => self.slider_values.cloud_shadow_strength = value,
+                    326 => self.slider_values.cloud_temporal_blend_factor = value,
+                    327 => self.slider_values.cloud_temporal_clamp_strength = value,
+                    328 => self.slider_values.cloud_temporal_depth_sigma = value,
+                    329 => self.slider_values.cloud_temporal_history_weight_scale = value,
+                    330 => self.slider_values.cloud_debug_view = value,
+                    331 => self.slider_values.cloud_performance_budget_ms = value,
                     _ => {}
                 }
             }
@@ -521,6 +615,11 @@ impl DebugGui {
                 }
             }
             if let Some(clouds) = bindings.cloud_settings.as_mut() {
+                let new_enabled = self.slider_values.cloud_enabled >= 0.5;
+                if clouds.enabled != new_enabled {
+                    clouds.enabled = new_enabled;
+                    cloud_dirty = true;
+                }
                 let new_value = self.slider_values.cloud_base_altitude.clamp(0.0, 3000.0);
                 if (clouds.base_altitude - new_value).abs() > f32::EPSILON {
                     clouds.base_altitude = new_value;
@@ -540,6 +639,42 @@ impl DebugGui {
                     clouds.density_scale = new_value;
                     cloud_dirty = true;
                 }
+                let new_value = self.slider_values.cloud_step_count.clamp(8.0, 256.0).round();
+                let new_steps = new_value as u32;
+                if clouds.step_count != new_steps {
+                    clouds.step_count = new_steps;
+                    cloud_dirty = true;
+                }
+                let new_value =
+                    self.slider_values.cloud_light_step_count.clamp(4.0, 128.0).round();
+                let new_steps = new_value as u32;
+                if clouds.light_step_count != new_steps {
+                    clouds.light_step_count = new_steps;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_phase_g.clamp(-0.2, 0.9);
+                if (clouds.phase_g - new_value).abs() > f32::EPSILON {
+                    clouds.phase_g = new_value;
+                    cloud_dirty = true;
+                }
+                let new_wind_x = self.slider_values.cloud_wind_x.clamp(-5.0, 5.0);
+                let new_wind_y = self.slider_values.cloud_wind_y.clamp(-5.0, 5.0);
+                if (clouds.wind.x - new_wind_x).abs() > f32::EPSILON
+                    || (clouds.wind.y - new_wind_y).abs() > f32::EPSILON
+                {
+                    clouds.wind = Vec2::new(new_wind_x, new_wind_y);
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_wind_speed.clamp(0.0, 5.0);
+                if (clouds.wind_speed - new_value).abs() > f32::EPSILON {
+                    clouds.wind_speed = new_value;
+                    cloud_dirty = true;
+                }
+                let new_scale = cloud_resolution_scale_from_value(self.slider_values.cloud_low_res_scale);
+                if clouds.low_res_scale != new_scale {
+                    clouds.low_res_scale = new_scale;
+                    cloud_dirty = true;
+                }
                 let new_value = self.slider_values.cloud_coverage_power.clamp(0.1, 4.0);
                 if (clouds.coverage_power - new_value).abs() > f32::EPSILON {
                     clouds.coverage_power = new_value;
@@ -550,25 +685,91 @@ impl DebugGui {
                     clouds.detail_strength = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_wind_speed.clamp(0.0, 2.0);
-                if (clouds.wind_speed - new_value).abs() > f32::EPSILON {
-                    clouds.wind_speed = new_value;
+                let new_value = self.slider_values.cloud_curl_strength.clamp(0.0, 2.0);
+                if (clouds.curl_strength - new_value).abs() > f32::EPSILON {
+                    clouds.curl_strength = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_phase_g.clamp(-0.2, 0.9);
-                if (clouds.phase_g - new_value).abs() > f32::EPSILON {
-                    clouds.phase_g = new_value;
+                let new_value = self.slider_values.cloud_jitter_strength.clamp(0.0, 2.0);
+                if (clouds.jitter_strength - new_value).abs() > f32::EPSILON {
+                    clouds.jitter_strength = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_step_count.clamp(8.0, 256.0).round();
-                let new_steps = new_value as u32;
-                if clouds.step_count != new_steps {
-                    clouds.step_count = new_steps;
+                let new_value = self.slider_values.cloud_epsilon.clamp(0.0001, 0.1);
+                if (clouds.epsilon - new_value).abs() > f32::EPSILON {
+                    clouds.epsilon = new_value;
+                    cloud_dirty = true;
+                }
+                let new_radiance = Vec3::new(
+                    self.slider_values.cloud_sun_radiance_r.clamp(0.0, 10.0),
+                    self.slider_values.cloud_sun_radiance_g.clamp(0.0, 10.0),
+                    self.slider_values.cloud_sun_radiance_b.clamp(0.0, 10.0),
+                );
+                if (clouds.sun_radiance - new_radiance).length_squared() > f32::EPSILON {
+                    clouds.sun_radiance = new_radiance;
+                    cloud_dirty = true;
+                }
+                let new_direction = Vec3::new(
+                    self.slider_values.cloud_sun_direction_x.clamp(-1.0, 1.0),
+                    self.slider_values.cloud_sun_direction_y.clamp(-1.0, 1.0),
+                    self.slider_values.cloud_sun_direction_z.clamp(-1.0, 1.0),
+                );
+                if (clouds.sun_direction - new_direction).length_squared() > f32::EPSILON {
+                    clouds.sun_direction = new_direction;
+                    cloud_dirty = true;
+                }
+                let new_shadow_enabled = self.slider_values.cloud_shadow_enabled >= 0.5;
+                if clouds.shadow.enabled != new_shadow_enabled {
+                    clouds.shadow.enabled = new_shadow_enabled;
+                    cloud_dirty = true;
+                }
+                let new_shadow_resolution =
+                    self.slider_values.cloud_shadow_resolution.clamp(64.0, 2048.0).round() as u32;
+                if clouds.shadow.resolution != new_shadow_resolution {
+                    clouds.shadow.resolution = new_shadow_resolution;
+                    cloud_dirty = true;
+                }
+                let new_shadow_extent = self.slider_values.cloud_shadow_extent.clamp(1000.0, 200000.0);
+                if (clouds.shadow.extent - new_shadow_extent).abs() > f32::EPSILON {
+                    clouds.shadow.extent = new_shadow_extent;
+                    cloud_dirty = true;
+                }
+                let new_shadow_strength = self.slider_values.cloud_shadow_strength.clamp(0.0, 2.0);
+                if (clouds.shadow.strength - new_shadow_strength).abs() > f32::EPSILON {
+                    clouds.shadow.strength = new_shadow_strength;
+                    cloud_dirty = true;
+                }
+                let new_temporal_blend = self.slider_values.cloud_temporal_blend_factor.clamp(0.0, 1.0);
+                if (clouds.temporal.blend_factor - new_temporal_blend).abs() > f32::EPSILON {
+                    clouds.temporal.blend_factor = new_temporal_blend;
+                    cloud_dirty = true;
+                }
+                let new_temporal_clamp = self.slider_values.cloud_temporal_clamp_strength.clamp(0.0, 1.0);
+                if (clouds.temporal.clamp_strength - new_temporal_clamp).abs() > f32::EPSILON {
+                    clouds.temporal.clamp_strength = new_temporal_clamp;
+                    cloud_dirty = true;
+                }
+                let new_temporal_sigma = self.slider_values.cloud_temporal_depth_sigma.clamp(0.1, 100.0);
+                if (clouds.temporal.depth_sigma - new_temporal_sigma).abs() > f32::EPSILON {
+                    clouds.temporal.depth_sigma = new_temporal_sigma;
+                    cloud_dirty = true;
+                }
+                let new_temporal_history =
+                    self.slider_values.cloud_temporal_history_weight_scale.clamp(0.0, 4.0);
+                if (clouds.temporal.history_weight_scale - new_temporal_history).abs()
+                    > f32::EPSILON
+                {
+                    clouds.temporal.history_weight_scale = new_temporal_history;
                     cloud_dirty = true;
                 }
                 let new_view = cloud_debug_view_from_value(self.slider_values.cloud_debug_view);
                 if clouds.debug_view != new_view {
                     clouds.debug_view = new_view;
+                    cloud_dirty = true;
+                }
+                let new_budget = self.slider_values.cloud_performance_budget_ms.clamp(0.1, 20.0);
+                if (clouds.performance_budget_ms - new_budget).abs() > f32::EPSILON {
+                    clouds.performance_budget_ms = new_budget;
                     cloud_dirty = true;
                 }
             }
@@ -888,6 +1089,13 @@ impl DebugGui {
                 ],
                 DebugGraphicsTab::Clouds => vec![
                     Slider::new(
+                        300,
+                        "Enabled",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_enabled,
+                    ),
+                    Slider::new(
                         301,
                         "Base Altitude",
                         0.0,
@@ -910,45 +1118,199 @@ impl DebugGui {
                     ),
                     Slider::new(
                         304,
-                        "Coverage Power",
-                        0.1,
-                        4.0,
-                        self.slider_values.cloud_coverage_power,
-                    ),
-                    Slider::new(
-                        305,
-                        "Detail Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_detail_strength,
-                    ),
-                    Slider::new(
-                        306,
-                        "Wind Speed",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_wind_speed,
-                    ),
-                    Slider::new(
-                        307,
-                        "Phase G",
-                        -0.2,
-                        0.9,
-                        self.slider_values.cloud_phase_g,
-                    ),
-                    Slider::new(
-                        308,
                         "Step Count",
                         8.0,
                         256.0,
                         self.slider_values.cloud_step_count,
                     ),
                     Slider::new(
+                        305,
+                        "Light Step Count",
+                        4.0,
+                        128.0,
+                        self.slider_values.cloud_light_step_count,
+                    ),
+                    Slider::new(
+                        306,
+                        "Phase G",
+                        -0.2,
+                        0.9,
+                        self.slider_values.cloud_phase_g,
+                    ),
+                    Slider::new(
+                        307,
+                        "Wind X",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_wind_x,
+                    ),
+                    Slider::new(
+                        308,
+                        "Wind Y",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_wind_y,
+                    ),
+                    Slider::new(
                         309,
+                        "Wind Speed",
+                        0.0,
+                        5.0,
+                        self.slider_values.cloud_wind_speed,
+                    ),
+                    Slider::new(
+                        310,
+                        "Low Res Scale",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_low_res_scale,
+                    ),
+                    Slider::new(
+                        311,
+                        "Coverage Power",
+                        0.1,
+                        4.0,
+                        self.slider_values.cloud_coverage_power,
+                    ),
+                    Slider::new(
+                        312,
+                        "Detail Strength",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_detail_strength,
+                    ),
+                    Slider::new(
+                        313,
+                        "Curl Strength",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_curl_strength,
+                    ),
+                    Slider::new(
+                        314,
+                        "Jitter Strength",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_jitter_strength,
+                    ),
+                    Slider::new(
+                        315,
+                        "Epsilon",
+                        0.0001,
+                        0.1,
+                        self.slider_values.cloud_epsilon,
+                    ),
+                    Slider::new(
+                        316,
+                        "Sun Radiance R",
+                        0.0,
+                        10.0,
+                        self.slider_values.cloud_sun_radiance_r,
+                    ),
+                    Slider::new(
+                        317,
+                        "Sun Radiance G",
+                        0.0,
+                        10.0,
+                        self.slider_values.cloud_sun_radiance_g,
+                    ),
+                    Slider::new(
+                        318,
+                        "Sun Radiance B",
+                        0.0,
+                        10.0,
+                        self.slider_values.cloud_sun_radiance_b,
+                    ),
+                    Slider::new(
+                        319,
+                        "Sun Dir X",
+                        -1.0,
+                        1.0,
+                        self.slider_values.cloud_sun_direction_x,
+                    ),
+                    Slider::new(
+                        320,
+                        "Sun Dir Y",
+                        -1.0,
+                        1.0,
+                        self.slider_values.cloud_sun_direction_y,
+                    ),
+                    Slider::new(
+                        321,
+                        "Sun Dir Z",
+                        -1.0,
+                        1.0,
+                        self.slider_values.cloud_sun_direction_z,
+                    ),
+                    Slider::new(
+                        322,
+                        "Shadow Enabled",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_shadow_enabled,
+                    ),
+                    Slider::new(
+                        323,
+                        "Shadow Resolution",
+                        64.0,
+                        2048.0,
+                        self.slider_values.cloud_shadow_resolution,
+                    ),
+                    Slider::new(
+                        324,
+                        "Shadow Extent",
+                        1000.0,
+                        200000.0,
+                        self.slider_values.cloud_shadow_extent,
+                    ),
+                    Slider::new(
+                        325,
+                        "Shadow Strength",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_shadow_strength,
+                    ),
+                    Slider::new(
+                        326,
+                        "Temporal Blend",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_temporal_blend_factor,
+                    ),
+                    Slider::new(
+                        327,
+                        "Temporal Clamp",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_temporal_clamp_strength,
+                    ),
+                    Slider::new(
+                        328,
+                        "Temporal Depth Sigma",
+                        0.1,
+                        100.0,
+                        self.slider_values.cloud_temporal_depth_sigma,
+                    ),
+                    Slider::new(
+                        329,
+                        "Temporal History Scale",
+                        0.0,
+                        4.0,
+                        self.slider_values.cloud_temporal_history_weight_scale,
+                    ),
+                    Slider::new(
+                        330,
                         "Debug View",
                         0.0,
                         6.0,
                         self.slider_values.cloud_debug_view,
+                    ),
+                    Slider::new(
+                        331,
+                        "Budget (ms)",
+                        0.1,
+                        20.0,
+                        self.slider_values.cloud_performance_budget_ms,
                     ),
                 ],
             };
@@ -1102,6 +1464,21 @@ fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
         CloudDebugView::StepHeatmap => "Step Heatmap",
         CloudDebugView::TemporalWeight => "Temporal Weight",
         CloudDebugView::Stats => "Stats",
+    }
+}
+
+fn cloud_resolution_scale_from_value(value: f32) -> CloudResolutionScale {
+    if value.round() < 0.5 {
+        CloudResolutionScale::Half
+    } else {
+        CloudResolutionScale::Quarter
+    }
+}
+
+fn cloud_resolution_scale_value(scale: CloudResolutionScale) -> f32 {
+    match scale {
+        CloudResolutionScale::Half => 0.0,
+        CloudResolutionScale::Quarter => 1.0,
     }
 }
 

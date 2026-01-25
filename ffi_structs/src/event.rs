@@ -600,19 +600,6 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
             _ => None,
         },
         WEvent::DeviceEvent {
-            event: DeviceEvent::MouseMotion { delta },
-            ..
-        } => Some(Event {
-            event_type: EventType::Motion2D,
-            source: EventSource::Mouse,
-            payload: Payload {
-                motion2d: Motion2DPayload {
-                    motion: vec2(delta.0 as f32, delta.1 as f32),
-                },
-            },
-            timestamp: 0,
-        }),
-        WEvent::DeviceEvent {
             event: DeviceEvent::MouseWheel { delta },
             ..
         } => {
