@@ -317,7 +317,7 @@ pub struct CloudSettings {
 impl Default for CloudSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             base_altitude: 300.0,
             top_altitude: 400.0,
             density_scale: 0.5,

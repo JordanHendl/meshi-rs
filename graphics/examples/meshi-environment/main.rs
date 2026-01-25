@@ -97,6 +97,11 @@ fn main() {
     });
     let mut cloud_settings = setup.engine.cloud_settings();
     cloud_settings.enabled = true;
+    setup.engine.set_cloud_settings(cloud_settings);
+    setup.engine.set_ocean_settings(OceanFrameSettings {
+        enabled: true,
+        ..Default::default()
+    });
 
     let terrain_objects = build_default_terrain_chunk().map(|artifact| {
         let bounds_min = Vec3::from(artifact.bounds_min);
@@ -148,7 +153,7 @@ fn main() {
 
         cloud_settings.sun_direction = sun_dir;
         cloud_settings.sun_radiance = Vec3::new(1.0, 0.95, 0.85);
-//        setup.engine.set_cloud_settings(cloud_settings);
+        setup.engine.set_cloud_settings(cloud_settings);
 
         setup.engine.set_text(
             data.environment_text,

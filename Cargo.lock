@@ -612,7 +612,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#4d1a0cb7a8cc2977fd2fa7f984f118de6c1b72e9"
+source = "git+https://github.com/JordanHendl/gohan#97d418ad78da58d341a0b632ff6ea4fde37445c0"
 dependencies = [
  "bincode",
  "clap",
@@ -1359,7 +1359,7 @@ dependencies = [
 [[package]]
 name = "dashi"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/dashi#620ca3858820ccbea2e1675065c8dae5e055b99a"
+source = "git+https://github.com/JordanHendl/dashi#2e2e3c21ea130282af1a66889d858214963140e7"
 dependencies = [
  "anyhow",
  "ash",
@@ -1831,7 +1831,7 @@ dependencies = [
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#4d1a0cb7a8cc2977fd2fa7f984f118de6c1b72e9"
+source = "git+https://github.com/JordanHendl/gohan#97d418ad78da58d341a0b632ff6ea4fde37445c0"
 dependencies = [
  "bento",
  "dashi",
@@ -2886,7 +2886,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#4d1a0cb7a8cc2977fd2fa7f984f118de6c1b72e9"
+source = "git+https://github.com/JordanHendl/gohan#97d418ad78da58d341a0b632ff6ea4fde37445c0"
 dependencies = [
  "bento",
  "dashi",
@@ -3816,7 +3816,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 [[package]]
 name = "resource_pool"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/ResourcePool#f73cc83485ed385eb0244af37d7f9511b806ed6d"
+source = "git+https://github.com/JordanHendl/ResourcePool#f7d9cd5ce8156275fc039ee20a4807e910ef23d5"
 dependencies = [
  "bytemuck",
 ]
@@ -4410,7 +4410,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#4d1a0cb7a8cc2977fd2fa7f984f118de6c1b72e9"
+source = "git+https://github.com/JordanHendl/gohan#97d418ad78da58d341a0b632ff6ea4fde37445c0"
 dependencies = [
  "bento",
  "dashi",
@@ -6138,9 +6138,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.16"
+version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfcd145825aace48cff44a8844de64bf75feec3080e0aa5cdbde72961ae51a65"
+checksum = "02aae0f83f69aafc94776e879363e9771d7ecbffe2c7fbb6c14c5e00dfe88439"
 
 [[package]]
 name = "zune-core"

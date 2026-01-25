@@ -78,7 +78,7 @@ impl Default for SkyboxFrameSettings {
 impl Default for SkyFrameSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             sun_direction: Some(Vec3::Y),
             sun_color: Vec3::ONE,
             sun_intensity: 1.0,

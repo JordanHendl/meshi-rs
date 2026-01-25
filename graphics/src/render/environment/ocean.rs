@@ -73,7 +73,7 @@ pub struct OceanFrameSettings {
 impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
             wave_amplitude: 2.0,

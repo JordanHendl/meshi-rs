@@ -137,6 +137,30 @@ fn main() {
         common_setup::CameraSetup::default(),
         renderer,
     );
+    setup.engine.set_skybox_settings(SkyboxFrameSettings {
+        intensity: 1.0,
+        use_procedural_cubemap: true,
+        update_interval_frames: 1,
+        ..Default::default()
+    });
+    let mut sky_settings = SkyFrameSettings {
+        enabled: true,
+        ..Default::default()
+    };
+    sky_settings.sun_direction = Some(Vec3::new(-0.2, -1.0, -0.3).normalize());
+    setup
+        .engine
+        .set_environment_lighting(EnvironmentLightingSettings {
+            sky: sky_settings,
+            ..Default::default()
+        });
+    let mut cloud_settings = setup.engine.cloud_settings();
+    cloud_settings.enabled = true;
+    setup.engine.set_cloud_settings(cloud_settings);
+    setup.engine.set_ocean_settings(OceanFrameSettings {
+        enabled: true,
+        ..Default::default()
+    });
 
     let model = setup
         .db
