@@ -41,6 +41,10 @@ use tare::graph::*;
 use tare::transient::TransientAllocator;
 use tracing::{info, warn};
 
+mod shadow;
+
+use shadow::{ShadowPass, ShadowPassInfo};
+
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -151,6 +155,7 @@ pub struct DeferredRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
+    shadow: ShadowPass,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
 }
@@ -420,6 +425,14 @@ impl DeferredRenderer {
             ),
         };
 
+        let shadow = ShadowPass::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            &proc.draw_builder,
+            &data.dynamic,
+            ShadowPassInfo::default(),
+        );
+
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
         text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
@@ -444,6 +457,7 @@ impl DeferredRenderer {
             psos,
             text,
             gui,
+            shadow,
             depth,
             cloud_overlay,
         }
@@ -839,8 +853,12 @@ impl DeferredRenderer {
         info: &RenderObjectInfo,
     ) -> Result<Handle<RenderObject>, MeshiError> {
         let scene_mask = match info {
-            RenderObjectInfo::Model(_) => PassMask::OPAQUE_GEOMETRY as u32,
-            RenderObjectInfo::SkinnedModel(_) => PassMask::OPAQUE_GEOMETRY as u32,
+            RenderObjectInfo::Model(_) => {
+                PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
+            }
+            RenderObjectInfo::SkinnedModel(_) => {
+                PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
+            }
             RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT as u32,
             RenderObjectInfo::Empty => PassMask::OPAQUE_GEOMETRY as u32,
         };
@@ -1330,6 +1348,35 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
+            let shadow_resolution = self.shadow.resolution();
+            let shadow_viewport = Viewport {
+                area: FRect2D {
+                    x: 0.0,
+                    y: 0.0,
+                    w: shadow_resolution as f32,
+                    h: shadow_resolution as f32,
+                },
+                scissor: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: shadow_resolution,
+                    h: shadow_resolution,
+                },
+                ..Default::default()
+            };
+            let shadow_map = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Shadow Map {view_idx}"),
+                dim: [shadow_resolution, shadow_resolution, 1],
+                layers: 1,
+                format: Format::D24S8,
+                mip_levels: 1,
+                samples: self.shadow.sample_count(),
+                initial_data: None,
+                ..Default::default()
+            });
+            let mut shadow_map = shadow_map;
+            shadow_map.view.aspect = AspectMask::Depth;
+
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_pass_attachments[0] = Some(position.view);
             deferred_pass_attachments[1] = Some(diffuse.view);
@@ -1361,6 +1408,11 @@ impl DeferredRenderer {
                             .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
                     )
                     .combine(
+                        self.proc
+                            .draw_builder
+                            .build_draws(BIN_SHADOW, view_idx as u32),
+                    )
+                    .combine(
                         self.subrender
                             .environment
                             .build_terrain_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
@@ -1369,6 +1421,53 @@ impl DeferredRenderer {
 
                 cmd.end()
             });
+
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            // Shadow map pass.                                               //
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
+            self.graph.add_subpass(
+                &SubpassInfo {
+                    viewport: shadow_viewport,
+                    color_attachments: [None; 8],
+                    depth_attachment: Some(shadow_map.view),
+                    clear_values: shadow_clear,
+                    depth_clear: Some(self.shadow.depth_clear_value()),
+                },
+                |mut cmd| {
+                    let indices = self
+                        .state
+                        .binding("meshi_bindless_indices")
+                        .unwrap()
+                        .binding();
+
+                    let indices_handle = match indices {
+                        ReservedBinding::TableBinding {
+                            binding: _,
+                            resources,
+                        } => match resources[0].resource {
+                            ShaderResource::StorageBuffer(view) => Some(view.handle),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+
+                    let Some(indices_handle) = indices_handle else {
+                        return cmd;
+                    };
+
+                    cmd.combine(self.shadow.record(
+                        &shadow_viewport,
+                        &mut self.data.dynamic,
+                        camera_handle,
+                        indices_handle,
+                        self.proc.draw_builder.draw_list(),
+                        self.proc.draw_builder.draw_count(),
+                    ))
+                },
+            );
 
             // Deferred SPLIT pass. Renders the following framebuffers:
             // 1) Position
@@ -1492,13 +1591,12 @@ impl DeferredRenderer {
                 },
             );
 
-            let overlay_text = if self.subrender.clouds.settings().debug_view
-                == CloudDebugView::Stats
-            {
-                self.subrender.clouds.timing_overlay_text()
-            } else {
-                String::new()
-            };
+            let overlay_text =
+                if self.subrender.clouds.settings().debug_view == CloudDebugView::Stats {
+                    self.subrender.clouds.timing_overlay_text()
+                } else {
+                    String::new()
+                };
             self.text.set_text(self.cloud_overlay, &overlay_text);
 
             ///////////////////////////////////////////////////////////////////

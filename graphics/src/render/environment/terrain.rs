@@ -432,7 +432,8 @@ impl TerrainRenderer {
             let (scene_handle, transform_handle) = scene.register_object(&SceneObjectInfo {
                 local: Default::default(),
                 global: Default::default(),
-                scene_mask: crate::render::deferred::PassMask::OPAQUE_GEOMETRY as u32,
+                scene_mask: crate::render::deferred::PassMask::OPAQUE_GEOMETRY as u32
+                    | crate::render::deferred::PassMask::SHADOW as u32,
                 scene_type: SceneNodeType::Renderable,
             });
 
