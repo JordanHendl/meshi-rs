@@ -1746,6 +1746,10 @@ impl CommandPalette {
         let list_start_y = input_rect.max[1] + metrics.input_gap;
         let list_height =
             size[1] - metrics.padding[1] * 2.0 - metrics.input_height - metrics.input_gap;
+        let list_rect = MenuRect::from_position_size(
+            [position[0], list_start_y],
+            [size[0], list_height],
+        );
         let max_visible = if list_height <= 0.0 {
             0
         } else {
@@ -1753,6 +1757,9 @@ impl CommandPalette {
         };
 
         let filtered_indices = options.state.filtered_indices(&self.items);
+        if let Some(scroll_wheel) = options.scroll_wheel.as_ref() {
+            scroll_wheel.apply(options.state, filtered_indices.len(), list_rect);
+        }
         options
             .state
             .update_scroll(filtered_indices.len(), max_visible.max(1));
@@ -1902,6 +1909,50 @@ pub struct CommandPaletteRenderOptions<'a> {
     pub metrics: CommandPaletteMetrics,
     pub colors: CommandPaletteColors,
     pub state: &'a mut CommandPaletteState,
+    pub scroll_wheel: Option<CommandPaletteScrollWheel<'a>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandPaletteScrollWheel<'a> {
+    pub input: &'a GuiInput,
+    pub lines_per_scroll: f32,
+    pub require_hover: bool,
+}
+
+impl<'a> CommandPaletteScrollWheel<'a> {
+    pub fn new(input: &'a GuiInput) -> Self {
+        Self {
+            input,
+            lines_per_scroll: 3.0,
+            require_hover: true,
+        }
+    }
+
+    fn apply(&self, state: &mut CommandPaletteState, total: usize, list_rect: MenuRect) {
+        if total == 0 {
+            state.selected = 0;
+            return;
+        }
+
+        let delta = self.input.scroll_delta.y;
+        if delta.abs() <= f32::EPSILON {
+            return;
+        }
+
+        let cursor = [self.input.cursor.x, self.input.cursor.y];
+        if self.require_hover && !list_rect.contains(cursor) {
+            return;
+        }
+
+        let scroll_lines = (delta * self.lines_per_scroll).round() as i32;
+        if scroll_lines == 0 {
+            return;
+        }
+
+        let max_index = total.saturating_sub(1) as i32;
+        let next = (state.selected as i32 - scroll_lines).clamp(0, max_index);
+        state.selected = next as usize;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2653,6 +2704,13 @@ impl MenuRect {
             min: position,
             max: [position[0] + size[0], position[1] + size[1]],
         }
+    }
+
+    pub fn contains(&self, point: [f32; 2]) -> bool {
+        point[0] >= self.min[0]
+            && point[0] <= self.max[0]
+            && point[1] >= self.min[1]
+            && point[1] <= self.max[1]
     }
 }
 
