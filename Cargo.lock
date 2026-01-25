@@ -1469,6 +1469,9 @@ dependencies = [
 [[package]]
 name = "editor"
 version = "0.1.0"
+dependencies = [
+ "meshi-graphics",
+]
 
 [[package]]
 name = "eframe"
