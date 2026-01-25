@@ -250,6 +250,9 @@ impl GuiRenderer {
     }
 
     pub fn upload_frame(&mut self, frame: GuiFrame) {
+        if frame.batches.is_empty() {
+            self.mesh_range = GuiMeshRange::default();
+        }
         self.batch_meshes = frame.batches;
     }
 
