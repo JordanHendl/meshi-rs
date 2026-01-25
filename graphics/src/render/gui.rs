@@ -1,6 +1,6 @@
 use bento::builder::{AttachmentDesc, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use bytemuck::{Pod, Zeroable};
+use bytemuck::{cast_slice, Pod, Zeroable};
 use dashi::cmd::{PendingGraphics, Recording};
 use dashi::driver::command::Draw;
 use dashi::{
@@ -11,6 +11,8 @@ use dashi::{
 use furikake::PSOBuilderFurikakeExt;
 use resource_pool::{resource_list::ResourceList, Handle};
 use tare::utils::StagedBuffer;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tracing::{error, warn};
 
 use crate::gui::{GuiBatchMesh, GuiClipRect, GuiFrame};
@@ -54,6 +56,9 @@ pub struct GuiRenderer {
     index_capacity: usize,
     mesh_range: GuiMeshRange,
     batch_meshes: Vec<GuiBatchMesh>,
+    last_batch_count: usize,
+    last_single_batch_hash: Option<u64>,
+    last_single_batch_range: GuiMeshRange,
 }
 
 fn to_handle(handle: Handle<GuiObjectData>) -> Handle<GuiObject> {
@@ -75,6 +80,9 @@ impl GuiRenderer {
             index_capacity: 131_072,
             mesh_range: GuiMeshRange::default(),
             batch_meshes: Vec::new(),
+            last_batch_count: 0,
+            last_single_batch_hash: None,
+            last_single_batch_range: GuiMeshRange::default(),
         }
     }
 
@@ -290,29 +298,68 @@ impl GuiRenderer {
                 });
         } else {
             let batches = std::mem::take(&mut self.batch_meshes);
-            for batch in &batches {
-                let range = self.upload_mesh_inner(&batch.mesh);
-                if range.index_count == 0 {
-                    continue;
+            if batches.len() == 1 {
+                let batch = &batches[0];
+                let hash = hash_gui_batch_mesh(batch);
+                let mut range = self.last_single_batch_range;
+                let mut needs_upload = true;
+
+                if self.last_batch_count == 1 && self.last_single_batch_hash == Some(hash) {
+                    needs_upload = false;
+                } else {
+                    range = self.upload_mesh_inner(&batch.mesh);
+                    self.last_single_batch_hash = Some(hash);
+                    self.last_single_batch_range = range;
                 }
 
-                let scissor = batch
-                    .batch
-                    .clip_rect
-                    .map(|clip| scissor_from_clip(clip, viewport))
-                    .unwrap_or(viewport.scissor);
-                let batch_viewport = Viewport { scissor, ..*viewport };
+                if range.index_count > 0 {
+                    let scissor = batch
+                        .batch
+                        .clip_rect
+                        .map(|clip| scissor_from_clip(clip, viewport))
+                        .unwrap_or(viewport.scissor);
+                    let batch_viewport = Viewport { scissor, ..*viewport };
 
-                graphics_cmd = graphics_cmd
-                    .combine(self.sync_mesh_range(range))
-                    .update_viewport(&batch_viewport)
-                    .draw(&Draw {
-                        bind_tables,
-                        count: range.index_count as u32,
-                        instance_count: 1,
-                        ..Default::default()
-                    });
+                    if needs_upload {
+                        graphics_cmd = graphics_cmd.combine(self.sync_mesh_range(range));
+                    }
+
+                    graphics_cmd = graphics_cmd
+                        .update_viewport(&batch_viewport)
+                        .draw(&Draw {
+                            bind_tables,
+                            count: range.index_count as u32,
+                            instance_count: 1,
+                            ..Default::default()
+                        });
+                }
+            } else {
+                self.last_single_batch_hash = None;
+                for batch in &batches {
+                    let range = self.upload_mesh_inner(&batch.mesh);
+                    if range.index_count == 0 {
+                        continue;
+                    }
+
+                    let scissor = batch
+                        .batch
+                        .clip_rect
+                        .map(|clip| scissor_from_clip(clip, viewport))
+                        .unwrap_or(viewport.scissor);
+                    let batch_viewport = Viewport { scissor, ..*viewport };
+
+                    graphics_cmd = graphics_cmd
+                        .combine(self.sync_mesh_range(range))
+                        .update_viewport(&batch_viewport)
+                        .draw(&Draw {
+                            bind_tables,
+                            count: range.index_count as u32,
+                            instance_count: 1,
+                            ..Default::default()
+                        });
+                }
             }
+            self.last_batch_count = batches.len();
             self.batch_meshes = batches;
         }
 
@@ -393,6 +440,28 @@ impl GuiRenderer {
 
         stream
     }
+}
+
+fn hash_gui_batch_mesh(batch: &GuiBatchMesh) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    batch.batch.layer.hash(&mut hasher);
+    batch.batch.texture_id.hash(&mut hasher);
+    batch.batch.index_range.start.hash(&mut hasher);
+    batch.batch.index_range.end.hash(&mut hasher);
+    match batch.batch.clip_rect {
+        Some(clip) => {
+            1u8.hash(&mut hasher);
+            for value in clip.min.iter().chain(clip.max.iter()) {
+                hasher.write_u32(value.to_bits());
+            }
+        }
+        None => {
+            0u8.hash(&mut hasher);
+        }
+    }
+    hasher.write(cast_slice(&batch.mesh.vertices));
+    hasher.write(cast_slice(&batch.mesh.indices));
+    hasher.finish()
 }
 
 fn scissor_from_clip(clip: GuiClipRect, viewport: &Viewport) -> Rect2D {
