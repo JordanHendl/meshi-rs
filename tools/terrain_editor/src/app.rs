@@ -1,12 +1,14 @@
 use std::ffi::c_void;
+use std::path::PathBuf;
 
 use glam::{Mat4, Vec2, Vec3, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::{
-    Camera, DB, DBInfo, Display, DisplayInfo, RenderEngine, RenderEngineInfo, RendererSelect,
-    TextInfo, TextRenderMode, WindowInfo,
+    Camera, DB, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo,
+    RendererSelect, TextInfo, TextRenderMode, WindowInfo,
 };
 use meshi_utils::timer::Timer;
+use tracing::warn;
 
 use crate::dbgen::{TerrainDbgen, TerrainGenerationRequest};
 use meshi_graphics::TerrainRenderObject;
@@ -45,6 +47,8 @@ pub struct TerrainEditorApp {
     dbgen: TerrainDbgen,
     event_state: Box<EventState>,
     needs_refresh: bool,
+    persistence_error: Option<String>,
+    rdb_path: PathBuf,
 }
 
 impl TerrainEditorApp {
@@ -59,14 +63,20 @@ impl TerrainEditorApp {
         })
         .expect("Failed to initialize render engine");
 
+        let base_dir = "";
         let mut db = Box::new(
             DB::new(&DBInfo {
-                base_dir: "",
+                base_dir,
                 layout_file: None,
                 pooled_geometry_uploads: false,
             })
             .expect("Unable to create database"),
         );
+        let rdb_path = if base_dir.is_empty() {
+            PathBuf::from("terrain.rdb")
+        } else {
+            PathBuf::from(base_dir).join("terrain.rdb")
+        };
 
         engine.initialize_database(&mut db);
 
@@ -118,6 +128,8 @@ impl TerrainEditorApp {
             dbgen: TerrainDbgen::new(0),
             event_state,
             needs_refresh: true,
+            persistence_error: None,
+            rdb_path,
         };
 
         app.register_events();
@@ -174,6 +186,37 @@ impl TerrainEditorApp {
         };
 
         if let Some(chunk) = self.dbgen.generate_chunk(&request) {
+            let mut persistence_error = None;
+            let mut rdb = match RDBFile::load(&self.rdb_path) {
+                Ok(rdb) => rdb,
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        path = %self.rdb_path.display(),
+                        "Failed to load terrain RDB; creating new file."
+                    );
+                    RDBFile::new()
+                }
+            };
+
+            if let Err(err) = rdb.upsert(&request.chunk_key, &chunk) {
+                warn!(
+                    error = %err,
+                    entry = %request.chunk_key,
+                    "Failed to upsert terrain chunk artifact."
+                );
+                persistence_error = Some(format!("RDB upsert failed: {err}"));
+            } else if let Err(err) = rdb.save(&self.rdb_path) {
+                warn!(
+                    error = %err,
+                    path = %self.rdb_path.display(),
+                    "Failed to save terrain RDB."
+                );
+                persistence_error = Some(format!("RDB save failed: {err}"));
+            }
+
+            self.persistence_error = persistence_error;
+            self.update_status_text();
             let render_object = TerrainRenderObject {
                 key: request.chunk_key.clone(),
                 artifact: chunk,
@@ -186,11 +229,15 @@ impl TerrainEditorApp {
     }
 
     fn update_status_text(&mut self) {
-        let status = format!(
+        let mut status = format!(
             "Terrain Editor | Mode: {} | DBGen: {} | Tab to toggle",
             self.terrain_mode.label(),
             self.dbgen.status()
         );
+        if let Some(error) = &self.persistence_error {
+            status.push_str(" | ");
+            status.push_str(error);
+        }
         self.engine.set_text(self.status_text, &status);
         self.engine.set_text_info(
             self.status_text,

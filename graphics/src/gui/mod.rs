@@ -250,15 +250,21 @@ impl GuiContext {
             };
         }
 
-        self.draws.sort_by(|a, b| {
-            a.draw
-                .layer
-                .cmp(&b.draw.layer)
-                .then_with(|| a.draw.texture_id.cmp(&b.draw.texture_id))
-                .then_with(|| a.order.cmp(&b.order))
+        let draws_sorted = self.draws.is_sorted_by(|a, b| {
+            (a.draw.layer, a.draw.texture_id, a.order)
+                <= (b.draw.layer, b.draw.texture_id, b.order)
         });
+        if !draws_sorted {
+            self.draws.sort_by(|a, b| {
+                a.draw
+                    .layer
+                    .cmp(&b.draw.layer)
+                    .then_with(|| a.draw.texture_id.cmp(&b.draw.texture_id))
+                    .then_with(|| a.order.cmp(&b.order))
+            });
+        }
 
-        let mut batches: Vec<GuiBatchMesh> = Vec::new();
+        let mut batches: Vec<GuiBatchMesh> = Vec::with_capacity(self.draws.len());
         let mut current_batch: Option<GuiBatch> = None;
         let mut current_mesh = GuiMesh::default();
 
@@ -288,15 +294,38 @@ impl GuiContext {
             }
 
             let base_vertex = current_mesh.vertices.len() as u32;
-            current_mesh
-                .vertices
-                .extend(draw.quad.vertices().into_iter().map(|vertex| GuiVertex {
-                    position: vertex.position,
-                    uv: vertex.uv,
-                    color: vertex.color,
-                    texture_id: draw.texture_id.unwrap_or(GUI_NO_TEXTURE_ID),
+            let texture_id = draw.texture_id.unwrap_or(GUI_NO_TEXTURE_ID);
+            let vertices = &draw.quad;
+            current_mesh.vertices.extend_from_slice(&[
+                GuiVertex {
+                    position: vertices.positions[0],
+                    uv: vertices.uvs[0],
+                    color: vertices.color,
+                    texture_id,
                     _padding: [0; 3],
-                }));
+                },
+                GuiVertex {
+                    position: vertices.positions[1],
+                    uv: vertices.uvs[1],
+                    color: vertices.color,
+                    texture_id,
+                    _padding: [0; 3],
+                },
+                GuiVertex {
+                    position: vertices.positions[2],
+                    uv: vertices.uvs[2],
+                    color: vertices.color,
+                    texture_id,
+                    _padding: [0; 3],
+                },
+                GuiVertex {
+                    position: vertices.positions[3],
+                    uv: vertices.uvs[3],
+                    color: vertices.color,
+                    texture_id,
+                    _padding: [0; 3],
+                },
+            ]);
             current_mesh.indices.extend_from_slice(&[
                 base_vertex,
                 base_vertex + 1,
