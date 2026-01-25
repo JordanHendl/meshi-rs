@@ -105,11 +105,35 @@ impl TerrainDbgen {
         request: &TerrainBrushRequest,
         rdb_path: &Path,
     ) -> Result<TerrainChunkArtifact, String> {
+        let mut rdb = RDBFile::load(rdb_path).unwrap_or_else(|_| RDBFile::new());
+        let artifact = self.apply_brush_internal(request, &mut rdb)?;
+        rdb.save(rdb_path)
+            .map_err(|err| format!("Brush RDB save failed: {err}"))?;
+        Ok(artifact)
+    }
+
+    pub fn apply_brush_in_memory(
+        &mut self,
+        request: &TerrainBrushRequest,
+        rdb: &mut RDBFile,
+    ) -> Result<TerrainChunkArtifact, String> {
+        self.apply_brush_internal(request, rdb)
+    }
+
+    pub fn chunk_coords_for_key(&self, chunk_key: &str) -> [i32; 2] {
+        let chunk_hash = hash_chunk_key(self.seed, chunk_key);
+        [chunk_hash as i32, (chunk_hash >> 32) as i32]
+    }
+
+    fn apply_brush_internal(
+        &mut self,
+        request: &TerrainBrushRequest,
+        rdb: &mut RDBFile,
+    ) -> Result<TerrainChunkArtifact, String> {
         let chunk_coords = self.chunk_coords_for_key(&request.chunk_key);
         let project_key = sanitize_project_key(&request.chunk_key);
         let chunk_hash = hash_chunk_key(self.seed, &request.chunk_key);
 
-        let mut rdb = RDBFile::load(rdb_path).unwrap_or_else(|_| RDBFile::new());
         let mut settings = rdb
             .fetch::<TerrainProjectSettings>(&project_settings_entry(&project_key))
             .unwrap_or_else(|_| {
@@ -145,7 +169,7 @@ impl TerrainDbgen {
             .map_err(|err| format!("Mutation layer upsert failed: {err}"))?;
 
         let (order, event_id) = next_op_order_and_event(
-            &mut rdb,
+            rdb,
             &project_key,
             layer_id,
             settings.active_mutation_version,
@@ -178,17 +202,17 @@ impl TerrainDbgen {
         )
         .map_err(|err| format!("Mutation op add failed: {err}"))?;
 
-        mark_chunk_dirty(&mut rdb, &project_key, &settings, chunk_coords)
+        mark_chunk_dirty(rdb, &project_key, &settings, chunk_coords)
             .map_err(|err| format!("Chunk dirty update failed: {err}"))?;
 
         let context =
-            prepare_terrain_build_context(&mut rdb, &project_key).map_err(|err| err.to_string())?;
+            prepare_terrain_build_context(rdb, &project_key).map_err(|err| err.to_string())?;
         let build_request = TerrainChunkBuildRequest {
             chunk_coords,
             lod: lod_from_mode(&request.mode),
         };
         let outcome = build_terrain_chunk_with_context(
-            &mut rdb,
+            rdb,
             &project_key,
             &context,
             build_request,
@@ -202,15 +226,8 @@ impl TerrainDbgen {
 
         rdb.upsert(&request.chunk_key, &artifact)
             .map_err(|err| format!("Brush artifact upsert failed: {err}"))?;
-        rdb.save(rdb_path)
-            .map_err(|err| format!("Brush RDB save failed: {err}"))?;
 
         Ok(artifact)
-    }
-
-    pub fn chunk_coords_for_key(&self, chunk_key: &str) -> [i32; 2] {
-        let chunk_hash = hash_chunk_key(self.seed, chunk_key);
-        [chunk_hash as i32, (chunk_hash >> 32) as i32]
     }
 }
 
