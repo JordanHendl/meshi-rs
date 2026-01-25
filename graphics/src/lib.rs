@@ -491,7 +491,7 @@ impl RenderEngine {
         };
         let debug_output = self
             .debug_gui
-            .build_frame(viewport_size, renderer_label, bindings);
+            .build_frame(viewport_size, renderer_label, self.average_frame_time_ms(), bindings);
 
         if debug_output.skybox_dirty {
             self.renderer

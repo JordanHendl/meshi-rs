@@ -84,6 +84,8 @@ pub struct DebugGui {
     debug_panel_position: Vec2,
     drag_target: Option<DragTarget>,
     drag_offset: Vec2,
+    scroll_offset: f32,
+    scroll_delta: f32,
     slider_values: DebugSliderValues,
 }
 
@@ -102,6 +104,8 @@ impl DebugGui {
             debug_panel_position: vec2(560.0, 60.0),
             drag_target: None,
             drag_offset: Vec2::ZERO,
+            scroll_offset: 0.0,
+            scroll_delta: 0.0,
             slider_values: DebugSliderValues {
                 skybox_intensity: 1.0,
                 sun_intensity: 1.0,
@@ -139,6 +143,9 @@ impl DebugGui {
             {
                 self.cursor = event.motion2d();
             }
+            if event.source() == EventSource::Mouse && event.event_type() == EventType::Motion2D {
+                self.scroll_delta += event.motion2d().y;
+            }
             if event.source() == EventSource::MouseButton {
                 if event.event_type() == EventType::Pressed {
                     self.mouse_pressed = true;
@@ -173,6 +180,7 @@ impl DebugGui {
         &mut self,
         viewport: Vec2,
         renderer_label: &str,
+        average_frame_time_ms: Option<f64>,
         bindings: DebugGuiBindings,
     ) -> DebugGuiOutput {
         if self.debug_toggle_requested {
@@ -186,7 +194,7 @@ impl DebugGui {
 
         let debug_mode = unsafe { bindings.debug_mode.as_ref().copied().unwrap_or(false) };
         if !debug_mode {
-            self.mouse_pressed = false;
+            self.reset_for_hidden();
             let mut cloud_dirty = false;
             unsafe {
                 if let Some(clouds) = bindings.cloud_settings.as_mut() {
@@ -241,15 +249,44 @@ impl DebugGui {
             }
         }
 
-        let debug_panel_size = vec2(340.0, 420.0);
+        let debug_panel_size = vec2(400.0, 520.0);
         let debug_title_bar_height = 28.0;
+        let debug_taskbar_height = 26.0;
         let debug_panel_position = self.debug_panel_position;
         let debug_title_bar_pos = debug_panel_position;
         let debug_title_bar_size = vec2(debug_panel_size.x, debug_title_bar_height);
         let debug_title_hovered =
             point_in_rect(self.cursor, debug_title_bar_pos, debug_title_bar_size);
+        let debug_taskbar_pos = vec2(
+            debug_panel_position.x,
+            debug_panel_position.y + debug_panel_size.y - debug_taskbar_height,
+        );
+        let debug_taskbar_size = vec2(debug_panel_size.x, debug_taskbar_height);
+        let close_button_size = vec2(64.0, 18.0);
+        let reset_button_size = vec2(92.0, 18.0);
+        let button_padding = 10.0;
+        let button_gap = 8.0;
+        let close_button_pos = vec2(
+            debug_taskbar_pos.x + debug_taskbar_size.x - button_padding - close_button_size.x,
+            debug_taskbar_pos.y + 4.0,
+        );
+        let reset_button_pos = vec2(
+            close_button_pos.x - button_gap - reset_button_size.x,
+            debug_taskbar_pos.y + 4.0,
+        );
+        let close_button_hovered =
+            point_in_rect(self.cursor, close_button_pos, close_button_size);
+        let reset_button_hovered =
+            point_in_rect(self.cursor, reset_button_pos, reset_button_size);
+        let mut close_requested = false;
 
         if self.mouse_pressed {
+            if close_button_hovered {
+                close_requested = true;
+            } else if reset_button_hovered {
+                self.debug_panel_position = vec2(560.0, 60.0);
+                self.scroll_offset = 0.0;
+            }
             if debug_title_hovered {
                 self.drag_target = Some(DragTarget::DebugPanel);
                 self.drag_offset = self.cursor - debug_panel_position;
@@ -279,6 +316,7 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_tab = *tab;
                     self.debug_slider_state.active = None;
+                    self.scroll_offset = 0.0;
                 }
             }
         }
@@ -300,6 +338,7 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_graphics_tab = *tab;
                     self.debug_slider_state.active = None;
+                    self.scroll_offset = 0.0;
                 }
             }
         }
@@ -361,6 +400,22 @@ impl DebugGui {
                     _ => {}
                 }
             }
+        }
+
+        if close_requested {
+            unsafe {
+                if let Some(debug_mode) = bindings.debug_mode.as_mut() {
+                    *debug_mode = false;
+                }
+            }
+            self.reset_for_hidden();
+            return DebugGuiOutput {
+                frame: None,
+                skybox_dirty: false,
+                sky_dirty: false,
+                ocean_dirty: false,
+                cloud_dirty: false,
+            };
         }
 
         let mut skybox_dirty = false;
@@ -593,27 +648,97 @@ impl DebugGui {
             text_start = vec2(debug_panel_position.x + 16.0, subtab_y + subtab_height + 10.0);
         }
 
-        gui.submit_text(GuiTextDraw {
-            text: format!("Renderer: {renderer_label}"),
-            position: [text_start.x, text_start.y],
-            color: Vec4::new(0.85, 0.9, 0.98, 1.0).to_array(),
-            scale: 0.9,
-        });
-        gui.submit_text(GuiTextDraw {
-            text: format!("Debug mode: {}", debug_mode),
-            position: [text_start.x, text_start.y + 18.0],
-            color: Vec4::new(0.75, 0.8, 0.9, 1.0).to_array(),
-            scale: 0.85,
-        });
+        let avg_ms = average_frame_time_ms;
+        let fps_text = avg_ms
+            .map(|ms| {
+                if ms > 0.0 {
+                    format!("{:.1}", 1000.0 / ms)
+                } else {
+                    "--".to_string()
+                }
+            })
+            .unwrap_or_else(|| "--".to_string());
+        let avg_ms_text = avg_ms
+            .map(|ms| format!("{ms:.2}"))
+            .unwrap_or_else(|| "--".to_string());
+
+        let mut info_lines = vec![
+            format!("Renderer: {renderer_label}"),
+            format!("Debug mode: {debug_mode}"),
+            format!("FPS: {fps_text} ({avg_ms_text} ms avg)"),
+            format!("Viewport: {:.0} x {:.0}", viewport.x, viewport.y),
+        ];
+
+        if self.debug_tab == DebugTab::Graphics {
+            match self.debug_graphics_tab {
+                DebugGraphicsTab::Sky => {
+                    if let Some(sky) = unsafe { bindings.sky_settings.as_ref() } {
+                        info_lines.push(format!("Sky enabled: {}", sky.enabled));
+                        if let Some(dir) = sky.sun_direction {
+                            info_lines.push(format!(
+                                "Sun dir: {:.2}, {:.2}, {:.2}",
+                                dir.x, dir.y, dir.z
+                            ));
+                        }
+                        if let Some(dir) = sky.moon_direction {
+                            info_lines.push(format!(
+                                "Moon dir: {:.2}, {:.2}, {:.2}",
+                                dir.x, dir.y, dir.z
+                            ));
+                        }
+                        if let Some(time) = sky.time_of_day {
+                            info_lines.push(format!("Time of day: {:.2}h", time));
+                        }
+                    }
+                }
+                DebugGraphicsTab::Ocean => {
+                    if let Some(ocean) = unsafe { bindings.ocean_settings.as_ref() } {
+                        info_lines.push(format!("Ocean enabled: {}", ocean.enabled));
+                        info_lines.push(format!(
+                            "Wind dir: {:.2}, {:.2}",
+                            ocean.wind_dir.x, ocean.wind_dir.y
+                        ));
+                    }
+                }
+                DebugGraphicsTab::Clouds => {
+                    if let Some(clouds) = unsafe { bindings.cloud_settings.as_ref() } {
+                        info_lines.push(format!(
+                            "Altitude: {:.0}-{:.0} m",
+                            clouds.base_altitude, clouds.top_altitude
+                        ));
+                        info_lines.push(format!("Step count: {}", clouds.step_count));
+                        info_lines.push(format!(
+                            "Debug view: {}",
+                            cloud_debug_view_label(clouds.debug_view)
+                        ));
+                    }
+                }
+            }
+        }
+
+        let line_height = 18.0;
+        for (index, line) in info_lines.iter().enumerate() {
+            gui.submit_text(GuiTextDraw {
+                text: line.clone(),
+                position: [text_start.x, text_start.y + index as f32 * line_height],
+                color: Vec4::new(0.75, 0.8, 0.9, 1.0).to_array(),
+                scale: if index == 0 { 0.9 } else { 0.85 },
+            });
+        }
+        let slider_start_y = text_start.y + info_lines.len() as f32 * line_height + 8.0;
 
         let mut debug_slider_layout = SliderLayout::default();
         if self.debug_tab == DebugTab::Graphics {
+            let slider_area_height = debug_panel_size.y
+                - (slider_start_y - debug_panel_position.y)
+                - 12.0
+                - debug_taskbar_height;
             let debug_slider_options = SliderRenderOptions {
                 viewport: [viewport.x, viewport.y],
-                position: [debug_panel_position.x, text_start.y + 40.0],
+                position: [debug_panel_position.x, slider_start_y],
                 size: [
                     debug_panel_size.x,
-                    debug_panel_size.y - (text_start.y - debug_panel_position.y) - 52.0,
+                    slider_area_height,
                 ],
                 layer: GuiLayer::Overlay,
                 metrics: SliderMetrics {
@@ -794,15 +919,102 @@ impl DebugGui {
                     ),
                 ],
             };
-            debug_slider_layout = gui.submit_sliders(&debug_sliders, &debug_slider_options);
+            let metrics = debug_slider_options.metrics;
+            let row_height = metrics.item_height + metrics.item_gap;
+            let total_items = debug_sliders.len();
+            let total_height = metrics.padding[1] * 2.0
+                + total_items as f32 * metrics.item_height
+                + total_items.saturating_sub(1) as f32 * metrics.item_gap;
+            let max_scroll = (total_height - slider_area_height).max(0.0);
+            let slider_area_pos = vec2(
+                debug_slider_options.position[0],
+                debug_slider_options.position[1],
+            );
+            let slider_area_hovered = point_in_rect(
+                self.cursor,
+                slider_area_pos,
+                vec2(debug_slider_options.size[0], slider_area_height),
+            );
+            if slider_area_hovered && self.scroll_delta.abs() > 0.0 {
+                self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0)
+                    .clamp(0.0, max_scroll);
+            }
+            self.scroll_delta = 0.0;
+
+            let start_index = (self.scroll_offset / row_height).floor() as usize;
+            let offset_y = -(self.scroll_offset - start_index as f32 * row_height);
+            let visible_count =
+                ((slider_area_height - offset_y).max(0.0) / row_height).ceil() as usize + 1;
+            let end_index = (start_index + visible_count).min(total_items);
+            let visible_sliders = if start_index < end_index {
+                &debug_sliders[start_index..end_index]
+            } else {
+                &debug_sliders[0..0]
+            };
+
+            let mut scroll_options = debug_slider_options;
+            scroll_options.position[1] += offset_y;
+            debug_slider_layout = gui.submit_sliders(visible_sliders, &scroll_options);
         } else {
             gui.submit_text(GuiTextDraw {
                 text: "No debug data available.".to_string(),
-                position: [text_start.x, text_start.y + 40.0],
+                position: [text_start.x, slider_start_y],
                 color: Vec4::new(0.7, 0.75, 0.85, 1.0).to_array(),
                 scale: 0.85,
             });
+            self.scroll_delta = 0.0;
         }
+
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(
+                debug_taskbar_pos,
+                debug_taskbar_size,
+                Vec4::new(0.12, 0.16, 0.22, 0.95),
+                viewport,
+            ),
+        ));
+        gui.submit_text(GuiTextDraw {
+            text: "Debug Tools".to_string(),
+            position: [debug_taskbar_pos.x + 12.0, debug_taskbar_pos.y + 6.0],
+            color: Vec4::new(0.82, 0.86, 0.92, 1.0).to_array(),
+            scale: 0.8,
+        });
+
+        let reset_color = if reset_button_hovered {
+            Vec4::new(0.22, 0.3, 0.38, 0.96)
+        } else {
+            Vec4::new(0.16, 0.22, 0.3, 0.95)
+        };
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(reset_button_pos, reset_button_size, reset_color, viewport),
+        ));
+        gui.submit_text(GuiTextDraw {
+            text: "Reset Pos".to_string(),
+            position: [reset_button_pos.x + 8.0, reset_button_pos.y + 3.0],
+            color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
+            scale: 0.75,
+        });
+
+        let close_color = if close_button_hovered {
+            Vec4::new(0.32, 0.22, 0.26, 0.96)
+        } else {
+            Vec4::new(0.26, 0.18, 0.22, 0.95)
+        };
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(close_button_pos, close_button_size, close_color, viewport),
+        ));
+        gui.submit_text(GuiTextDraw {
+            text: "Close".to_string(),
+            position: [close_button_pos.x + 14.0, close_button_pos.y + 3.0],
+            color: Vec4::new(0.95, 0.9, 0.92, 1.0).to_array(),
+            scale: 0.75,
+        });
 
         self.debug_slider_layout = debug_slider_layout;
         self.mouse_pressed = false;
@@ -815,6 +1027,16 @@ impl DebugGui {
             cloud_dirty,
         }
     }
+
+    fn reset_for_hidden(&mut self) {
+        self.mouse_pressed = false;
+        self.mouse_down = false;
+        self.drag_target = None;
+        self.debug_slider_state = SliderState::default();
+        self.debug_slider_layout = SliderLayout::default();
+        self.scroll_offset = 0.0;
+        self.scroll_delta = 0.0;
+    }
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
@@ -826,6 +1048,18 @@ fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
         5 => CloudDebugView::TemporalWeight,
         6 => CloudDebugView::Stats,
         _ => CloudDebugView::None,
+    }
+}
+
+fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
+    match view {
+        CloudDebugView::None => "None",
+        CloudDebugView::WeatherMap => "Weather Map",
+        CloudDebugView::ShadowMap => "Shadow Map",
+        CloudDebugView::Transmittance => "Transmittance",
+        CloudDebugView::StepHeatmap => "Step Heatmap",
+        CloudDebugView::TemporalWeight => "Temporal Weight",
+        CloudDebugView::Stats => "Stats",
     }
 }
 
