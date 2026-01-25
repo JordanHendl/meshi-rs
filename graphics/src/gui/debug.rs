@@ -249,9 +249,19 @@ impl DebugGui {
             }
         }
 
-        let debug_panel_size = vec2(400.0, 520.0);
-        let debug_title_bar_height = 28.0;
-        let debug_taskbar_height = 26.0;
+        let debug_panel_width = (viewport.x * 0.34).clamp(320.0, 520.0);
+        let debug_panel_height = (viewport.y * 0.7).clamp(360.0, 720.0);
+        let debug_panel_size = vec2(debug_panel_width, debug_panel_height);
+        let ui_scale = (debug_panel_height / 520.0).clamp(0.85, 1.2);
+        let debug_title_bar_height = 28.0 * ui_scale;
+        let debug_taskbar_height = 26.0 * ui_scale;
+        let panel_margin = 16.0 * ui_scale;
+        let panel_min_pos = vec2(panel_margin, panel_margin);
+        let panel_max_pos = vec2(
+            (viewport.x - debug_panel_size.x - panel_margin).max(panel_margin),
+            (viewport.y - debug_panel_size.y - panel_margin).max(panel_margin),
+        );
+        self.debug_panel_position = self.debug_panel_position.clamp(panel_min_pos, panel_max_pos);
         let debug_panel_position = self.debug_panel_position;
         let debug_title_bar_pos = debug_panel_position;
         let debug_title_bar_size = vec2(debug_panel_size.x, debug_title_bar_height);
@@ -262,17 +272,17 @@ impl DebugGui {
             debug_panel_position.y + debug_panel_size.y - debug_taskbar_height,
         );
         let debug_taskbar_size = vec2(debug_panel_size.x, debug_taskbar_height);
-        let close_button_size = vec2(64.0, 18.0);
-        let reset_button_size = vec2(92.0, 18.0);
-        let button_padding = 10.0;
-        let button_gap = 8.0;
+        let close_button_size = vec2(64.0, 18.0) * ui_scale;
+        let reset_button_size = vec2(92.0, 18.0) * ui_scale;
+        let button_padding = 10.0 * ui_scale;
+        let button_gap = 8.0 * ui_scale;
         let close_button_pos = vec2(
             debug_taskbar_pos.x + debug_taskbar_size.x - button_padding - close_button_size.x,
-            debug_taskbar_pos.y + 4.0,
+            debug_taskbar_pos.y + 4.0 * ui_scale,
         );
         let reset_button_pos = vec2(
             close_button_pos.x - button_gap - reset_button_size.x,
-            debug_taskbar_pos.y + 4.0,
+            debug_taskbar_pos.y + 4.0 * ui_scale,
         );
         let close_button_hovered =
             point_in_rect(self.cursor, close_button_pos, close_button_size);
@@ -284,7 +294,10 @@ impl DebugGui {
             if close_button_hovered {
                 close_requested = true;
             } else if reset_button_hovered {
-                self.debug_panel_position = vec2(560.0, 60.0);
+                self.debug_panel_position = vec2(
+                    (viewport.x - debug_panel_size.x - panel_margin).max(panel_margin),
+                    panel_margin,
+                );
                 self.scroll_offset = 0.0;
             }
             if debug_title_hovered {
@@ -305,14 +318,16 @@ impl DebugGui {
         }
 
         if self.mouse_pressed {
-            let tab_height = 26.0;
-            let tab_width = (debug_panel_size.x - 24.0) / 3.0;
-            let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0;
-            let tab_x = debug_panel_position.x + 12.0;
+            let tab_height = 26.0 * ui_scale;
+            let tab_padding = 12.0 * ui_scale;
+            let tab_gap = 6.0 * ui_scale;
+            let tab_width = (debug_panel_size.x - tab_padding * 2.0) / 3.0;
+            let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0 * ui_scale;
+            let tab_x = debug_panel_position.x + tab_padding;
             let tabs = [DebugTab::Graphics, DebugTab::Physics, DebugTab::Audio];
             for (index, tab) in tabs.iter().enumerate() {
                 let tab_pos = vec2(tab_x + tab_width * index as f32, tab_y);
-                let tab_size = vec2(tab_width - 6.0, tab_height);
+                let tab_size = vec2(tab_width - tab_gap, tab_height);
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_tab = *tab;
                     self.debug_slider_state.active = None;
@@ -322,11 +337,17 @@ impl DebugGui {
         }
 
         if self.mouse_pressed && self.debug_tab == DebugTab::Graphics {
-            let tab_height = 26.0;
-            let subtab_height = 22.0;
-            let subtab_width = (debug_panel_size.x - 24.0) / 3.0;
-            let subtab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0 + tab_height + 6.0;
-            let subtab_x = debug_panel_position.x + 12.0;
+            let tab_height = 26.0 * ui_scale;
+            let subtab_height = 22.0 * ui_scale;
+            let subtab_padding = 12.0 * ui_scale;
+            let subtab_gap = 6.0 * ui_scale;
+            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / 3.0;
+            let subtab_y = debug_title_bar_pos.y
+                + debug_title_bar_height
+                + 6.0 * ui_scale
+                + tab_height
+                + 6.0 * ui_scale;
+            let subtab_x = debug_panel_position.x + subtab_padding;
             let subtabs = [
                 DebugGraphicsTab::Sky,
                 DebugGraphicsTab::Ocean,
@@ -334,7 +355,7 @@ impl DebugGui {
             ];
             for (index, tab) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
-                let tab_size = vec2(subtab_width - 6.0, subtab_height);
+                let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_graphics_tab = *tab;
                     self.debug_slider_state.active = None;
@@ -582,10 +603,12 @@ impl DebugGui {
             scale: 0.95,
         });
 
-        let tab_height = 26.0;
-        let tab_width = (debug_panel_size.x - 24.0) / 3.0;
-        let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0;
-        let tab_x = debug_panel_position.x + 12.0;
+        let tab_height = 26.0 * ui_scale;
+        let tab_padding = 12.0 * ui_scale;
+        let tab_gap = 6.0 * ui_scale;
+        let tab_width = (debug_panel_size.x - tab_padding * 2.0) / 3.0;
+        let tab_y = debug_title_bar_pos.y + debug_title_bar_height + 6.0 * ui_scale;
+        let tab_x = debug_panel_position.x + tab_padding;
         let tabs = [
             (DebugTab::Graphics, "Graphics"),
             (DebugTab::Physics, "Physics"),
@@ -593,7 +616,7 @@ impl DebugGui {
         ];
         for (index, (tab, label)) in tabs.iter().enumerate() {
             let tab_pos = vec2(tab_x + tab_width * index as f32, tab_y);
-            let tab_size = vec2(tab_width - 6.0, tab_height);
+            let tab_size = vec2(tab_width - tab_gap, tab_height);
             let selected = self.debug_tab == *tab;
             let tab_color = if selected {
                 Vec4::new(0.22, 0.28, 0.38, 0.96)
@@ -607,18 +630,23 @@ impl DebugGui {
             ));
             gui.submit_text(GuiTextDraw {
                 text: (*label).to_string(),
-                position: [tab_pos.x + 10.0, tab_pos.y + 6.0],
+                position: [tab_pos.x + 10.0 * ui_scale, tab_pos.y + 6.0 * ui_scale],
                 color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
                 scale: 0.85,
             });
         }
 
-        let subtab_height = 22.0;
-        let mut text_start = vec2(debug_panel_position.x + 16.0, tab_y + tab_height + 12.0);
+        let subtab_height = 22.0 * ui_scale;
+        let mut text_start = vec2(
+            debug_panel_position.x + 16.0 * ui_scale,
+            tab_y + tab_height + 12.0 * ui_scale,
+        );
         if self.debug_tab == DebugTab::Graphics {
-            let subtab_width = (debug_panel_size.x - 24.0) / 3.0;
-            let subtab_y = tab_y + tab_height + 6.0;
-            let subtab_x = debug_panel_position.x + 12.0;
+            let subtab_padding = 12.0 * ui_scale;
+            let subtab_gap = 6.0 * ui_scale;
+            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / 3.0;
+            let subtab_y = tab_y + tab_height + 6.0 * ui_scale;
+            let subtab_x = debug_panel_position.x + subtab_padding;
             let subtabs = [
                 (DebugGraphicsTab::Sky, "Sky"),
                 (DebugGraphicsTab::Ocean, "Ocean"),
@@ -626,7 +654,7 @@ impl DebugGui {
             ];
             for (index, (tab, label)) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
-                let tab_size = vec2(subtab_width - 6.0, subtab_height);
+                let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
                 let selected = self.debug_graphics_tab == *tab;
                 let tab_color = if selected {
                     Vec4::new(0.2, 0.26, 0.34, 0.96)
@@ -640,12 +668,15 @@ impl DebugGui {
                 ));
                 gui.submit_text(GuiTextDraw {
                     text: (*label).to_string(),
-                    position: [tab_pos.x + 10.0, tab_pos.y + 4.0],
+                    position: [tab_pos.x + 10.0 * ui_scale, tab_pos.y + 4.0 * ui_scale],
                     color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
                     scale: 0.8,
                 });
             }
-            text_start = vec2(debug_panel_position.x + 16.0, subtab_y + subtab_height + 10.0);
+            text_start = vec2(
+                debug_panel_position.x + 16.0 * ui_scale,
+                subtab_y + subtab_height + 10.0 * ui_scale,
+            );
         }
 
         let avg_ms = average_frame_time_ms;
@@ -716,7 +747,7 @@ impl DebugGui {
             }
         }
 
-        let line_height = 18.0;
+        let line_height = 18.0 * ui_scale;
         for (index, line) in info_lines.iter().enumerate() {
             gui.submit_text(GuiTextDraw {
                 text: line.clone(),
@@ -725,14 +756,16 @@ impl DebugGui {
                 scale: if index == 0 { 0.9 } else { 0.85 },
             });
         }
-        let slider_start_y = text_start.y + info_lines.len() as f32 * line_height + 8.0;
+        let slider_start_y =
+            text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
 
         let mut debug_slider_layout = SliderLayout::default();
         if self.debug_tab == DebugTab::Graphics {
-            let slider_area_height = debug_panel_size.y
+            let slider_area_height = (debug_panel_size.y
                 - (slider_start_y - debug_panel_position.y)
-                - 12.0
-                - debug_taskbar_height;
+                - 12.0 * ui_scale
+                - debug_taskbar_height)
+                .max(0.0);
             let debug_slider_options = SliderRenderOptions {
                 viewport: [viewport.x, viewport.y],
                 position: [debug_panel_position.x, slider_start_y],
@@ -742,8 +775,8 @@ impl DebugGui {
                 ],
                 layer: GuiLayer::Overlay,
                 metrics: SliderMetrics {
-                    item_height: 26.0,
-                    item_gap: 8.0,
+                    item_height: (26.0 * ui_scale).clamp(22.0, 32.0),
+                    item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
                     ..SliderMetrics::default()
                 },
                 colors: SliderColors::default(),
@@ -936,7 +969,7 @@ impl DebugGui {
                 vec2(debug_slider_options.size[0], slider_area_height),
             );
             if slider_area_hovered && self.scroll_delta.abs() > 0.0 {
-                self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0)
+                self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0 * ui_scale)
                     .clamp(0.0, max_scroll);
             }
             self.scroll_delta = 0.0;
@@ -977,7 +1010,10 @@ impl DebugGui {
         ));
         gui.submit_text(GuiTextDraw {
             text: "Debug Tools".to_string(),
-            position: [debug_taskbar_pos.x + 12.0, debug_taskbar_pos.y + 6.0],
+            position: [
+                debug_taskbar_pos.x + 12.0 * ui_scale,
+                debug_taskbar_pos.y + 6.0 * ui_scale,
+            ],
             color: Vec4::new(0.82, 0.86, 0.92, 1.0).to_array(),
             scale: 0.8,
         });
@@ -994,7 +1030,10 @@ impl DebugGui {
         ));
         gui.submit_text(GuiTextDraw {
             text: "Reset Pos".to_string(),
-            position: [reset_button_pos.x + 8.0, reset_button_pos.y + 3.0],
+            position: [
+                reset_button_pos.x + 8.0 * ui_scale,
+                reset_button_pos.y + 3.0 * ui_scale,
+            ],
             color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
             scale: 0.75,
         });
@@ -1011,7 +1050,10 @@ impl DebugGui {
         ));
         gui.submit_text(GuiTextDraw {
             text: "Close".to_string(),
-            position: [close_button_pos.x + 14.0, close_button_pos.y + 3.0],
+            position: [
+                close_button_pos.x + 14.0 * ui_scale,
+                close_button_pos.y + 3.0 * ui_scale,
+            ],
             color: Vec4::new(0.95, 0.9, 0.92, 1.0).to_array(),
             scale: 0.75,
         });
