@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use glam::{Mat4, Vec2, Vec3, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
+use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
     Camera, DB, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo,
     RendererSelect, TextInfo, TextRenderMode, WindowInfo,
@@ -12,18 +13,13 @@ use meshi_utils::timer::Timer;
 use tracing::warn;
 
 use crate::dbgen::{TerrainBrushRequest, TerrainDbgen, TerrainGenerationRequest};
+use crate::ui::{FocusedInput, TerrainEditorUi, TerrainEditorUiData, TerrainEditorUiInput};
 use meshi_graphics::TerrainRenderObject;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
 const DEFAULT_BRUSH_RADIUS: f32 = 8.0;
 const DEFAULT_BRUSH_STRENGTH: f32 = 1.0;
 const DEFAULT_CHUNK_KEY: &str = "terrain/editor-preview";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputMode {
-    Normal,
-    EditDbPath,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerrainMode {
@@ -44,6 +40,8 @@ struct EventState {
     running: bool,
     cursor: Vec2,
     mouse_pressed: bool,
+    mouse_down: bool,
+    mouse_released: bool,
     key_presses: Vec<KeyCode>,
     shift_down: bool,
     control_down: bool,
@@ -59,6 +57,7 @@ pub struct TerrainEditorApp {
     terrain_mode: TerrainMode,
     terrain_objects: Vec<TerrainRenderObject>,
     dbgen: TerrainDbgen,
+    ui: TerrainEditorUi,
     event_state: Box<EventState>,
     needs_refresh: bool,
     persistence_error: Option<String>,
@@ -67,9 +66,20 @@ pub struct TerrainEditorApp {
     rdb_open: Option<RDBFile>,
     chunk_keys: Vec<String>,
     selected_chunk_index: Option<usize>,
-    input_mode: InputMode,
     db_dirty: bool,
     status_note: Option<String>,
+    focused_input: Option<FocusedInput>,
+    generation_seed: u64,
+    generation_lod: u8,
+    generation_graph_id: String,
+    seed_input: String,
+    lod_input: String,
+    graph_id_input: String,
+    brush_radius: f32,
+    brush_strength: f32,
+    brush_tool: TerrainMutationOpKind,
+    ui_hovered: bool,
+    last_world_cursor: Vec2,
 }
 
 impl TerrainEditorApp {
@@ -136,10 +146,16 @@ impl TerrainEditorApp {
             running: true,
             cursor: Vec2::ZERO,
             mouse_pressed: false,
+            mouse_down: false,
+            mouse_released: false,
             key_presses: Vec::new(),
             shift_down: false,
             control_down: false,
         });
+
+        let generation_seed = 0_u64;
+        let generation_lod = 0_u8;
+        let generation_graph_id = String::new();
 
         let mut app = Self {
             engine,
@@ -151,6 +167,7 @@ impl TerrainEditorApp {
             terrain_mode: TerrainMode::Procedural,
             terrain_objects: Vec::new(),
             dbgen: TerrainDbgen::new(0),
+            ui: TerrainEditorUi::new(window_size_vec),
             event_state,
             needs_refresh: true,
             persistence_error: None,
@@ -159,9 +176,20 @@ impl TerrainEditorApp {
             rdb_open: None,
             chunk_keys: Vec::new(),
             selected_chunk_index: None,
-            input_mode: InputMode::Normal,
             db_dirty: false,
             status_note: None,
+            focused_input: None,
+            generation_seed,
+            generation_lod,
+            generation_graph_id: generation_graph_id.clone(),
+            seed_input: generation_seed.to_string(),
+            lod_input: generation_lod.to_string(),
+            graph_id_input: generation_graph_id,
+            brush_radius: DEFAULT_BRUSH_RADIUS,
+            brush_strength: DEFAULT_BRUSH_STRENGTH,
+            brush_tool: TerrainMutationOpKind::SphereAdd,
+            ui_hovered: false,
+            last_world_cursor: Vec2::ZERO,
         };
 
         app.rdb_path_input = app.rdb_path.to_string_lossy().to_string();
@@ -205,6 +233,10 @@ impl TerrainEditorApp {
                 if e.source() == EventSource::MouseButton {
                     if e.event_type() == EventType::Pressed {
                         state.mouse_pressed = true;
+                        state.mouse_down = true;
+                    } else if e.event_type() == EventType::Released {
+                        state.mouse_down = false;
+                        state.mouse_released = true;
                     }
                 }
             }
@@ -219,15 +251,96 @@ impl TerrainEditorApp {
         for key in key_presses {
             self.handle_key_press(key);
         }
+        self.sync_generation_inputs();
+
+        let mut gui = GuiContext::new();
+        let ui_input = TerrainEditorUiInput {
+            cursor: self.event_state.cursor,
+            mouse_pressed: self.event_state.mouse_pressed,
+            mouse_down: self.event_state.mouse_down,
+            mouse_released: self.event_state.mouse_released,
+        };
+        let ui_data = TerrainEditorUiData {
+            viewport: self.window_size,
+            db_path: &self.rdb_path_input,
+            db_dirty: self.db_dirty,
+            db_open: self.rdb_open.is_some(),
+            chunk_keys: &self.chunk_keys,
+            selected_chunk: self.selected_chunk_index,
+            seed_input: &self.seed_input,
+            lod_input: &self.lod_input,
+            graph_id_input: &self.graph_id_input,
+            brush_tool: self.brush_tool,
+            brush_radius: self.brush_radius,
+            brush_strength: self.brush_strength,
+        };
+        let ui_output =
+            self.ui
+                .build(&mut gui, &ui_input, &ui_data, self.focused_input);
+
+        let mouse_pressed = self.event_state.mouse_pressed;
+        if mouse_pressed && ui_output.ui_hovered {
+            self.event_state.mouse_pressed = false;
+        }
+        self.ui_hovered = ui_output.ui_hovered;
+        if !self.ui_hovered {
+            self.last_world_cursor = self.event_state.cursor;
+        }
+
+        if ui_output.open_clicked {
+            self.open_database_from_input();
+        }
+        if ui_output.save_clicked {
+            self.commit_database();
+        }
+        if ui_output.generate_clicked {
+            self.refresh_terrain();
+        }
+        if ui_output.brush_apply_clicked {
+            self.apply_brush_at_cursor();
+        }
+        if ui_output.prev_chunk_clicked {
+            self.select_prev_chunk();
+        }
+        if ui_output.next_chunk_clicked {
+            self.select_next_chunk();
+        }
+        if let Some(index) = ui_output.select_chunk {
+            self.select_chunk(index);
+        }
+        if let Some(tool) = ui_output.brush_tool {
+            self.brush_tool = tool;
+        }
+        if let Some(radius) = ui_output.brush_radius {
+            self.brush_radius = radius;
+        }
+        if let Some(strength) = ui_output.brush_strength {
+            self.brush_strength = strength;
+        }
+        let previous_focus = self.focused_input;
+        if let Some(focused) = ui_output.focused_input {
+            self.focused_input = Some(focused);
+        } else if ui_output.ui_hovered && mouse_pressed {
+            self.focused_input = None;
+        }
+        if previous_focus != self.focused_input {
+            self.update_status_text();
+        }
+
+        let frame = gui.build_frame();
+        self.engine.upload_gui_frame(frame);
 
         if self.needs_refresh {
             self.refresh_terrain();
             self.needs_refresh = false;
         }
 
-        if self.terrain_mode == TerrainMode::Manual {
+        if self.terrain_mode == TerrainMode::Manual && !self.ui_hovered {
             self.handle_manual_brush();
         }
+
+        self.event_state.mouse_pressed = false;
+        self.event_state.mouse_released = false;
 
         self.engine.update(dt);
     }
@@ -236,10 +349,11 @@ impl TerrainEditorApp {
         let chunk_key = self.current_chunk_key();
         let request = TerrainGenerationRequest {
             chunk_key: chunk_key.clone(),
-            mode: self.terrain_mode.label().to_string(),
+            generator_graph_id: self.generation_graph_id.clone(),
+            lod: self.generation_lod,
         };
 
-        let Some(rdb) = self.rdb_open.as_mut() else {
+        let Some(mut rdb) = self.rdb_open.take() else {
             self.persistence_error = Some("No database open.".to_string());
             self.update_status_text();
             return;
@@ -287,7 +401,7 @@ impl TerrainEditorApp {
         );
         status.push_str(" | Tab: toggle | Ctrl+O: open | Ctrl+W: close | Ctrl+S: save");
         status.push_str(" | Up/Down: select chunk");
-        if self.input_mode == InputMode::EditDbPath {
+        if self.focused_input == Some(FocusedInput::DbPath) {
             status.push_str("\nDB Path: ");
             status.push_str(&self.rdb_path_input);
             status.push_str(" (Enter to open, Esc to cancel)");
@@ -313,16 +427,34 @@ impl TerrainEditorApp {
         );
     }
 
+    fn sync_generation_inputs(&mut self) {
+        if let Ok(seed) = self.seed_input.trim().parse::<u64>() {
+            if seed != self.generation_seed {
+                self.generation_seed = seed;
+                self.dbgen.set_seed(seed);
+            }
+        }
+
+        if let Ok(lod) = self.lod_input.trim().parse::<u8>() {
+            self.generation_lod = lod;
+        }
+
+        self.generation_graph_id = self.graph_id_input.trim().to_string();
+    }
+
     fn handle_manual_brush(&mut self) {
         if !self.event_state.mouse_pressed {
             return;
         }
         self.event_state.mouse_pressed = false;
+        self.apply_brush_at_cursor();
+    }
 
+    fn apply_brush_at_cursor(&mut self) {
         let chunk_key = self.current_chunk_key();
-        let world_pos = self.cursor_to_world(self.event_state.cursor, &chunk_key);
+        let world_pos = self.cursor_to_world(self.last_world_cursor, &chunk_key);
 
-        let Some(rdb) = self.rdb_open.as_mut() else {
+        let Some(mut rdb) = self.rdb_open.take() else {
             self.persistence_error = Some("No database open.".to_string());
             self.update_status_text();
             return;
@@ -330,14 +462,18 @@ impl TerrainEditorApp {
 
         let request = TerrainBrushRequest {
             chunk_key: chunk_key.clone(),
-            mode: self.terrain_mode.label().to_string(),
+            generator_graph_id: self.generation_graph_id.clone(),
+            lod: self.generation_lod,
             world_pos: [world_pos.x, world_pos.y, world_pos.z],
-            radius: DEFAULT_BRUSH_RADIUS,
-            strength: DEFAULT_BRUSH_STRENGTH,
-            tool: TerrainMutationOpKind::SphereAdd,
+            radius: self.brush_radius,
+            strength: self.brush_strength,
+            tool: self.brush_tool,
         };
 
-        match self.dbgen.apply_brush_in_memory(&request, rdb) {
+        let result = self.dbgen.apply_brush_in_memory(&request, &mut rdb);
+        self.rdb_open = Some(rdb);
+
+        match result {
             Ok(artifact) => {
                 self.persistence_error = None;
                 self.db_dirty = true;
@@ -387,8 +523,8 @@ impl TerrainEditorApp {
     }
 
     fn handle_key_press(&mut self, key: KeyCode) {
-        if self.input_mode == InputMode::EditDbPath {
-            self.handle_db_path_input(key);
+        if let Some(focused) = self.focused_input {
+            self.handle_focused_input(focused, key);
             return;
         }
 
@@ -404,7 +540,7 @@ impl TerrainEditorApp {
                 self.update_status_text();
             }
             KeyCode::O if control => {
-                self.input_mode = InputMode::EditDbPath;
+                self.focused_input = Some(FocusedInput::DbPath);
                 self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
                 self.status_note = Some("Editing database path".to_string());
                 self.update_status_text();
@@ -425,34 +561,73 @@ impl TerrainEditorApp {
         }
     }
 
-    fn handle_db_path_input(&mut self, key: KeyCode) {
+    fn handle_focused_input(&mut self, focused: FocusedInput, key: KeyCode) {
         match key {
             KeyCode::Escape => {
-                self.input_mode = InputMode::Normal;
+                self.focused_input = None;
                 self.status_note = None;
                 self.update_status_text();
             }
             KeyCode::Enter => {
-                let path = PathBuf::from(self.rdb_path_input.trim());
-                if path.as_os_str().is_empty() {
-                    self.persistence_error = Some("Database path cannot be empty.".to_string());
-                } else {
-                    self.open_database(path);
+                if focused == FocusedInput::DbPath {
+                    self.open_database_from_input();
                 }
-                self.input_mode = InputMode::Normal;
+                self.focused_input = None;
                 self.status_note = None;
                 self.update_status_text();
             }
             KeyCode::Backspace => {
-                self.rdb_path_input.pop();
+                match focused {
+                    FocusedInput::DbPath => {
+                        self.rdb_path_input.pop();
+                    }
+                    FocusedInput::Seed => {
+                        self.seed_input.pop();
+                    }
+                    FocusedInput::Lod => {
+                        self.lod_input.pop();
+                    }
+                    FocusedInput::GeneratorGraph => {
+                        self.graph_id_input.pop();
+                    }
+                }
                 self.update_status_text();
             }
             _ => {
                 if let Some(ch) = keycode_to_char(key, self.event_state.shift_down) {
-                    self.rdb_path_input.push(ch);
+                    match focused {
+                        FocusedInput::DbPath => {
+                            self.rdb_path_input.push(ch);
+                        }
+                        FocusedInput::Seed => {
+                            if ch.is_ascii_digit() {
+                                self.seed_input.push(ch);
+                            }
+                        }
+                        FocusedInput::Lod => {
+                            if ch.is_ascii_digit() {
+                                self.lod_input.push(ch);
+                            }
+                        }
+                        FocusedInput::GeneratorGraph => {
+                            if !ch.is_control() {
+                                self.graph_id_input.push(ch);
+                            }
+                        }
+                    }
                     self.update_status_text();
                 }
             }
+        }
+    }
+
+    fn open_database_from_input(&mut self) {
+        let path = PathBuf::from(self.rdb_path_input.trim());
+        if path.as_os_str().is_empty() {
+            self.persistence_error = Some("Database path cannot be empty.".to_string());
+            self.update_status_text();
+        } else {
+            self.open_database(path);
         }
     }
 
@@ -563,9 +738,7 @@ impl TerrainEditorApp {
         } else {
             index - 1
         };
-        self.selected_chunk_index = Some(new_index);
-        self.load_selected_chunk();
-        self.update_status_text();
+        self.select_chunk(new_index);
     }
 
     fn select_next_chunk(&mut self) {
@@ -574,7 +747,14 @@ impl TerrainEditorApp {
         }
         let index = self.selected_chunk_index.unwrap_or(0);
         let new_index = (index + 1) % self.chunk_keys.len();
-        self.selected_chunk_index = Some(new_index);
+        self.select_chunk(new_index);
+    }
+
+    fn select_chunk(&mut self, index: usize) {
+        if index >= self.chunk_keys.len() {
+            return;
+        }
+        self.selected_chunk_index = Some(index);
         self.load_selected_chunk();
         self.update_status_text();
     }

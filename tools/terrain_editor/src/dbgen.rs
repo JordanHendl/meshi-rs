@@ -17,13 +17,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone, Debug)]
 pub struct TerrainGenerationRequest {
     pub chunk_key: String,
-    pub mode: String,
+    pub generator_graph_id: String,
+    pub lod: u8,
 }
 
 #[derive(Clone, Debug)]
 pub struct TerrainBrushRequest {
     pub chunk_key: String,
-    pub mode: String,
+    pub generator_graph_id: String,
+    pub lod: u8,
     pub world_pos: [f32; 3],
     pub radius: f32,
     pub strength: f32,
@@ -43,6 +45,10 @@ impl TerrainDbgen {
         "stub"
     }
 
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+    }
+
     pub fn generate_chunk(
         &mut self,
         request: &TerrainGenerationRequest,
@@ -54,13 +60,13 @@ impl TerrainDbgen {
         let mut settings = TerrainProjectSettings::default();
         settings.name = format!("Terrain Preview {}", request.chunk_key);
         settings.seed = self.seed ^ chunk_hash;
-        if !request.mode.is_empty() {
-            settings.generator_graph_id = request.mode.clone();
+        if !request.generator_graph_id.is_empty() {
+            settings.generator_graph_id = request.generator_graph_id.clone();
         }
 
         let mut generator = TerrainGeneratorDefinition::default();
-        if !request.mode.is_empty() {
-            generator.graph_id = request.mode.clone();
+        if !request.generator_graph_id.is_empty() {
+            generator.graph_id = request.generator_graph_id.clone();
         }
 
         let mutation_layer = TerrainMutationLayer::default();
@@ -85,7 +91,7 @@ impl TerrainDbgen {
         let context = prepare_terrain_build_context(&mut rdb, &project_key).ok()?;
         let request = TerrainChunkBuildRequest {
             chunk_coords,
-            lod: lod_from_mode(&request.mode),
+            lod: request.lod,
         };
         let outcome = build_terrain_chunk_with_context(
             &mut rdb,
@@ -142,16 +148,16 @@ impl TerrainDbgen {
                 settings.seed = self.seed ^ chunk_hash;
                 settings
             });
-        if !request.mode.is_empty() {
-            settings.generator_graph_id = request.mode.clone();
+        if !request.generator_graph_id.is_empty() {
+            settings.generator_graph_id = request.generator_graph_id.clone();
         }
 
         let generator_entry_key = generator_entry(&project_key, settings.active_generator_version);
         let mut generator = rdb
             .fetch::<TerrainGeneratorDefinition>(&generator_entry_key)
             .unwrap_or_default();
-        if !request.mode.is_empty() {
-            generator.graph_id = request.mode.clone();
+        if !request.generator_graph_id.is_empty() {
+            generator.graph_id = request.generator_graph_id.clone();
         }
 
         let layer_id = "layer-1";
@@ -209,7 +215,7 @@ impl TerrainDbgen {
             prepare_terrain_build_context(rdb, &project_key).map_err(|err| err.to_string())?;
         let build_request = TerrainChunkBuildRequest {
             chunk_coords,
-            lod: lod_from_mode(&request.mode),
+            lod: request.lod,
         };
         let outcome = build_terrain_chunk_with_context(
             rdb,
@@ -229,12 +235,6 @@ impl TerrainDbgen {
 
         Ok(artifact)
     }
-}
-
-fn lod_from_mode(mode: &str) -> u8 {
-    mode.strip_prefix("lod")
-        .and_then(|lod| lod.parse::<u8>().ok())
-        .unwrap_or(0)
 }
 
 fn hash_chunk_key(seed: u64, chunk_key: &str) -> u64 {
