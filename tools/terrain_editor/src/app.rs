@@ -353,27 +353,36 @@ impl TerrainEditorApp {
             lod: self.generation_lod,
         };
 
-        let Some(mut rdb) = self.rdb_open.take() else {
+        let Some(rdb) = self.rdb_open.as_mut() else {
             self.persistence_error = Some("No database open.".to_string());
             self.update_status_text();
             return;
         };
 
-        if let Some(chunk) = self.dbgen.generate_chunk(&request) {
-            if let Err(err) = rdb.upsert(&request.chunk_key, &chunk) {
-                warn!(
-                    error = %err,
-                    entry = %request.chunk_key,
-                    "Failed to upsert terrain chunk artifact."
-                );
-                self.persistence_error = Some(format!("RDB upsert failed: {err}"));
-            } else {
-                self.persistence_error = None;
-                self.db_dirty = true;
-                self.ensure_chunk_key(&request.chunk_key);
-            }
+        match self.dbgen.generate_chunk(&request) {
+            Ok(chunk) => {
+                if let Err(err) = rdb.upsert(&request.chunk_key, &chunk) {
+                    warn!(
+                        error = %err,
+                        entry = %request.chunk_key,
+                        "Failed to upsert terrain chunk artifact."
+                    );
+                    self.persistence_error = Some(format!("RDB upsert failed: {err}"));
+                } else {
+                    self.persistence_error = None;
+                    self.db_dirty = true;
+                    self.ensure_chunk_key(&request.chunk_key);
+                    self.status_note = Some("Terrain generated.".to_string());
+                }
 
-            self.update_rendered_chunk(request.chunk_key.clone(), chunk);
+                self.update_rendered_chunk(request.chunk_key.clone(), chunk);
+            }
+            Err(err) => {
+                warn!(error = %err, "Terrain generation failed.");
+                self.persistence_error = Some(format!("Generation failed: {err}"));
+                self.status_note = Some("Terrain generation failed. Check cache inputs.".to_string());
+                self.update_status_text();
+            }
         }
     }
 
@@ -478,11 +487,13 @@ impl TerrainEditorApp {
                 self.persistence_error = None;
                 self.db_dirty = true;
                 self.ensure_chunk_key(&request.chunk_key);
+                self.status_note = Some("Brush applied.".to_string());
                 self.update_rendered_chunk(request.chunk_key, artifact);
             }
             Err(err) => {
                 warn!(error = %err, "Failed to apply terrain brush.");
                 self.persistence_error = Some(format!("Brush apply failed: {err}"));
+                self.status_note = Some("Brush apply failed.".to_string());
                 self.update_status_text();
             }
         }
@@ -640,6 +651,7 @@ impl TerrainEditorApp {
                     path = %path.display(),
                     "Failed to load terrain RDB; creating new file."
                 );
+                self.status_note = Some("Failed to load RDB; created new database.".to_string());
                 RDBFile::new()
             }
         };
@@ -649,6 +661,9 @@ impl TerrainEditorApp {
         self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
         self.db_dirty = false;
         self.persistence_error = None;
+        if self.status_note.is_none() {
+            self.status_note = Some("Database opened.".to_string());
+        }
         self.rebuild_chunk_keys();
         if self.selected_chunk_index.is_none() {
             self.needs_refresh = true;
@@ -681,6 +696,7 @@ impl TerrainEditorApp {
                 "Failed to save terrain RDB."
             );
             self.persistence_error = Some(format!("RDB save failed: {err}"));
+            self.status_note = Some("Database save failed.".to_string());
         } else {
             self.persistence_error = None;
             self.db_dirty = false;

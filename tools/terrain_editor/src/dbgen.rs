@@ -52,7 +52,7 @@ impl TerrainDbgen {
     pub fn generate_chunk(
         &mut self,
         request: &TerrainGenerationRequest,
-    ) -> Option<TerrainChunkArtifact> {
+    ) -> Result<TerrainChunkArtifact, String> {
         let chunk_hash = hash_chunk_key(self.seed, &request.chunk_key);
         let chunk_coords = self.chunk_coords_for_key(&request.chunk_key);
         let project_key = sanitize_project_key(&request.chunk_key);
@@ -72,12 +72,12 @@ impl TerrainDbgen {
         let mutation_layer = TerrainMutationLayer::default();
         let mut rdb = RDBFile::new();
         rdb.add(&project_settings_entry(&project_key), &settings)
-            .ok()?;
+            .map_err(|err| format!("Project settings add failed: {err}"))?;
         rdb.add(
             &generator_entry(&project_key, settings.active_generator_version),
             &generator,
         )
-        .ok()?;
+        .map_err(|err| format!("Generator add failed: {err}"))?;
         rdb.add(
             &mutation_layer_entry(
                 &project_key,
@@ -86,9 +86,10 @@ impl TerrainDbgen {
             ),
             &mutation_layer,
         )
-        .ok()?;
+        .map_err(|err| format!("Mutation layer add failed: {err}"))?;
 
-        let context = prepare_terrain_build_context(&mut rdb, &project_key).ok()?;
+        let context = prepare_terrain_build_context(&mut rdb, &project_key)
+            .map_err(|err| format!("Terrain build context failed: {err}"))?;
         let request = TerrainChunkBuildRequest {
             chunk_coords,
             lod: request.lod,
@@ -101,9 +102,11 @@ impl TerrainDbgen {
             |_| {},
             || false,
         )
-        .ok()?;
+        .map_err(|err| format!("Terrain build failed: {err}"))?;
 
-        outcome.artifact
+        outcome
+            .artifact
+            .ok_or_else(|| "Terrain build returned no artifact".to_string())
     }
 
     pub fn apply_brush(

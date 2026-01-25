@@ -391,6 +391,7 @@ impl DeferredRenderer {
             &info.initial_viewport,
             depth,
             info.sample_count,
+            environment.environment_cubemap_view(),
         );
         let mut subrender = Renderers {
             environment,

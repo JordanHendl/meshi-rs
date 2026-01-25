@@ -10,6 +10,7 @@ use dashi::execution::CommandRing;
 use dashi::QueueType;
 use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
 use graphics::CloudRenderer;
+use noren::rdb::imagery::{HostCubemap, ImageInfo as NorenImageInfo};
 
 fn hash_transmittance(ctx: &mut Context, buffer: dashi::Handle<dashi::Buffer>) -> u64 {
     let view = BufferView::new(buffer);
@@ -33,6 +34,41 @@ fn submit_compute(queue: &mut CommandRing, stream: dashi::CommandStream<Executab
         .submit(&Default::default())
         .expect("submit cloud compute");
     queue.wait_all().expect("wait cloud compute");
+}
+
+fn default_environment_cubemap(ctx: &mut Context) -> ImageView {
+    let face = vec![135, 206, 235, 255];
+    let faces = [
+        face.clone(),
+        face.clone(),
+        face.clone(),
+        face.clone(),
+        face.clone(),
+        face,
+    ];
+
+    let info = NorenImageInfo {
+        name: "[TEST CLOUD] Environment Cubemap".to_string(),
+        dim: [1, 1, 1],
+        layers: 6,
+        format: Format::RGBA8,
+        mip_levels: 1,
+    };
+
+    let cubemap = HostCubemap::from_faces(info, faces).expect("create env cubemap");
+    let mut dashi_info = cubemap.info.dashi_cube();
+    dashi_info.initial_data = Some(cubemap.data());
+
+    let image = ctx
+        .make_image(&dashi_info)
+        .expect("create env cubemap image");
+
+    ImageView {
+        img: image,
+        aspect: AspectMask::Color,
+        view_type: ImageViewType::Cube,
+        range: SubresourceRange::new(0, cubemap.info.mip_levels, 0, 6),
+    }
 }
 
 #[test]
@@ -87,14 +123,28 @@ fn cloud_transmittance_deterministic_and_jittered() {
         })
         .expect("create camera");
 
-    let mut clouds_a =
-        CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
+    let environment_view = default_environment_cubemap(&mut ctx);
+    let mut clouds_a = CloudRenderer::new(
+        &mut ctx,
+        &mut state,
+        &viewport,
+        depth_view,
+        SampleCount::S1,
+        environment_view,
+    );
     let clouds_a_cmd = clouds_a.update(&mut ctx, &mut state, &viewport, camera, 0.0);
     submit_compute(&mut queue, clouds_a_cmd);
     let hash_a = hash_transmittance(&mut ctx, clouds_a.transmittance_buffer());
 
-    let mut clouds_b =
-        CloudRenderer::new(&mut ctx, &mut state, &viewport, depth_view, SampleCount::S1);
+    let environment_view_b = default_environment_cubemap(&mut ctx);
+    let mut clouds_b = CloudRenderer::new(
+        &mut ctx,
+        &mut state,
+        &viewport,
+        depth_view,
+        SampleCount::S1,
+        environment_view_b,
+    );
     let clouds_b_cmd = clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
     submit_compute(&mut queue, clouds_b_cmd);
     let hash_b = hash_transmittance(&mut ctx, clouds_b.transmittance_buffer());

@@ -4,7 +4,7 @@ use dashi::UsageBits;
 use dashi::cmd::Executable;
 use dashi::driver::command::Dispatch;
 use dashi::{
-    BufferInfo, BufferUsage, CommandStream, Context, Handle, MemoryVisibility, Sampler,
+    BufferInfo, BufferUsage, CommandStream, Context, Handle, ImageView, MemoryVisibility, Sampler,
     SamplerInfo, ShaderResource,
 };
 use furikake::BindlessState;
@@ -100,6 +100,7 @@ impl CloudRaymarchPass {
         state: &mut BindlessState,
         assets: &CloudAssets,
         shadow_pass: &CloudShadowPass,
+        environment_map: ImageView,
         output_resolution: [u32; 2],
         timer_index: u32,
     ) -> Self {
@@ -208,6 +209,14 @@ impl CloudRaymarchPass {
                 .add_variable(
                     "cloud_steps_buffer",
                     ShaderResource::StorageBuffer(steps_buffer.into()),
+                )
+                .add_variable(
+                    "cloud_environment_map",
+                    ShaderResource::Image(environment_map),
+                )
+                .add_variable(
+                    "cloud_environment_sampler",
+                    ShaderResource::Sampler(sampler),
                 )
                 .build(ctx)
                 .unwrap(),

@@ -268,6 +268,10 @@ impl EnvironmentRenderer {
             .end()
     }
 
+    pub fn environment_cubemap_view(&self) -> dashi::ImageView {
+        self.sky.environment_cubemap_view()
+    }
+
     pub fn color_format(&self) -> Format {
         self.color_format
     }

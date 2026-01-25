@@ -12,7 +12,7 @@ use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use crate::structs::{CloudResolutionScale, CloudSettings};
 use dashi::cmd::Executable;
 use dashi::driver::command::BlitImage;
-use dashi::{CommandStream, Context, Filter, Handle, Rect2D, SubresourceRange, Viewport};
+use dashi::{CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport};
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::BindlessState;
 use glam::Mat4;
@@ -57,6 +57,7 @@ impl CloudRenderer {
         viewport: &Viewport,
         depth_view: dashi::ImageView,
         sample_count: dashi::SampleCount,
+        environment_map: ImageView,
     ) -> Self {
         let _ = ctx.init_gpu_timers(TIMER_COUNT);
 
@@ -76,6 +77,7 @@ impl CloudRenderer {
             state,
             &assets,
             &shadow_pass,
+            environment_map,
             low_resolution,
             TIMER_RAYMARCH,
         );

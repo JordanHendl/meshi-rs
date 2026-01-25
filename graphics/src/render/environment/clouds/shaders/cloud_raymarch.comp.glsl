@@ -67,6 +67,8 @@ layout(set = 0, binding = 12) buffer CloudDepthBuffer {
 layout(set = 0, binding = 13) buffer CloudStepsBuffer {
     float values[];
 } cloud_steps_buffer;
+layout(set = 0, binding = 14) uniform textureCube cloud_environment_map;
+layout(set = 0, binding = 15) uniform sampler cloud_environment_sampler;
 layout(set = 1, binding = 1) readonly buffer SceneCameras {
     Camera cameras[];
 } meshi_bindless_cameras;
@@ -148,6 +150,10 @@ float light_march(vec3 origin, vec3 dir, float max_dist, uint steps, float sigma
         }
     }
     return trans;
+}
+
+vec3 sample_environment(vec3 direction) {
+    return texture(samplerCube(cloud_environment_map, cloud_environment_sampler), direction).rgb;
 }
 
 vec3 light_direction(Light light, vec3 sample_pos, out float attenuation, out float max_dist, out float spot_factor) {
@@ -260,9 +266,11 @@ void main() {
             vec3 scatter = vec3(0.0);
             int light_count = meshi_bindless_lights.lights.length();
             if (light_count == 0) {
-                float phase = phase_hg(dot(ray_dir, normalize(params.sun_direction)), params.phase_g);
-                float light_trans = light_march(sample_pos, params.sun_direction, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
-                scatter = params.sun_radiance * phase * light_trans;
+                vec3 sun_dir = normalize(params.sun_direction);
+                vec3 env_tint = sample_environment(sun_dir);
+                float phase = phase_hg(dot(ray_dir, sun_dir), params.phase_g);
+                float light_trans = light_march(sample_pos, sun_dir, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
+                scatter = params.sun_radiance * env_tint * phase * light_trans;
             } else {
                 for (int light_index = 0; light_index < light_count; ++light_index) {
                     Light light = meshi_bindless_lights.lights[light_index];
@@ -283,6 +291,9 @@ void main() {
                     }
                     float phase = phase_hg(dot(ray_dir, light_dir), params.phase_g);
                     vec3 light_color = light.color_intensity.rgb * light.color_intensity.w;
+                    if (light_type == LIGHT_TYPE_DIRECTIONAL) {
+                        light_color *= sample_environment(light_dir);
+                    }
                     scatter += light_color * phase * light_trans * attenuation * spot_factor;
                 }
             }

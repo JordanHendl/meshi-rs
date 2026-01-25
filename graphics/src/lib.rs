@@ -199,7 +199,6 @@ impl RenderEngine {
             Ok(cubemap) => {
                 let mut settings = self.skybox_settings.clone();
                 settings.cubemap = Some(cubemap);
-                settings.use_procedural_cubemap = false;
                 self.skybox_settings = settings.clone();
                 self.renderer.set_skybox_settings(settings);
             }

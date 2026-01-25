@@ -702,10 +702,12 @@ impl TerrainRenderer {
             return None;
         };
         let db = unsafe { db.as_mut() };
-        let mut geometry = match db
-            .geometry_mut()
-            .enter_gpu_geometry(&geometry_entry, host_geometry.clone())
-        {
+        let geometry_store = db.geometry_mut();
+        let _ = geometry_store.unref_entry(&geometry_entry);
+        let mut geometry = match geometry_store.enter_gpu_geometry(
+            &geometry_entry,
+            host_geometry.clone(),
+        ) {
             Ok(geometry) => geometry,
             Err(err) => {
                 warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
