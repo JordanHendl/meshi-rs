@@ -1,7 +1,9 @@
 use meshi_graphics::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, Menu, MenuBar, MenuBarRenderOptions,
-    MenuBarState, MenuColors, MenuLayoutMetrics,
+    MenuBarState, MenuColors, MenuItem, MenuLayoutMetrics,
 };
+
+use crate::project::ProjectManager;
 
 pub struct EditorUi {
     menu_bar: MenuBar,
@@ -37,7 +39,8 @@ impl EditorUi {
         }
     }
 
-    pub fn build(&mut self, gui: &mut GuiContext) {
+    pub fn build(&mut self, gui: &mut GuiContext, project_manager: &ProjectManager) {
+        self.refresh_file_menu(project_manager);
         let metrics = MenuLayoutMetrics::default();
         let _menu_layout = self.menu_bar.submit_to_draw_list(
             gui,
@@ -57,7 +60,12 @@ impl EditorUi {
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Overlay,
             None,
-            quad_from_pixels(panel_position, panel_size, [0.08, 0.09, 0.1, 0.92], self.viewport),
+            quad_from_pixels(
+                panel_position,
+                panel_size,
+                [0.08, 0.09, 0.1, 0.92],
+                self.viewport,
+            ),
         ));
 
         gui.submit_text(GuiTextDraw {
@@ -66,6 +74,40 @@ impl EditorUi {
             color: [0.9, 0.92, 0.96, 1.0],
             scale: 1.0,
         });
+    }
+
+    fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {
+        let recent_entries = project_manager.recent_projects_with_status();
+        let recent_menu_items = if recent_entries.is_empty() {
+            let mut item = MenuItem::new("No recent projects");
+            item.enabled = false;
+            vec![item]
+        } else {
+            recent_entries
+                .into_iter()
+                .map(|(path, exists)| {
+                    let mut item = MenuItem::new(path);
+                    item.enabled = exists;
+                    item
+                })
+                .collect()
+        };
+
+        let file_items = vec![
+            MenuItem::new("New Project"),
+            MenuItem::new("Open Project"),
+            MenuItem::separator(),
+            MenuItem::new("Recent Projects").with_submenu(recent_menu_items),
+        ];
+
+        if let Some(file_menu) = self
+            .menu_bar
+            .menus
+            .iter_mut()
+            .find(|menu| menu.label == "File")
+        {
+            file_menu.items = file_items;
+        }
     }
 }
 
