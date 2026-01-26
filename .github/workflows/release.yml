@@ -79,8 +79,8 @@ jobs:
           echo what 
           ls .
           mkdir -p artifacts
-          tar -czf artifacts/meshi-c-headers.tar.gz -C include meshi
-          (cd include && zip -r ../artifacts/meshi-c-headers.zip meshi)
+          tar -czf artifacts/meshi-c-headers.tar.gz -C capi meshi-rs
+          (cd capi && zip -r ../artifacts/meshi-c-headers.zip meshi-rs)
           echo 3
           ls artifacts/
           echo 3.5
