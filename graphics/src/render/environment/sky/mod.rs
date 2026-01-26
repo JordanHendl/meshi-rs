@@ -21,6 +21,8 @@ use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo
 use tare::utils::StagedBuffer;
 use tracing::warn;
 
+use crate::gui::debug::{debug_register, PageType};
+use crate::gui::Slider;
 #[derive(Clone)]
 pub struct SkyboxInfo {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
@@ -66,18 +68,20 @@ impl Default for SkyboxInfo {
 
 impl Default for SkyboxFrameSettings {
     fn default() -> Self {
-        Self {
+        let mut settings = Self {
             cubemap: None,
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
-        }
+        };
+        settings.register_debug();
+        settings
     }
 }
 
 impl Default for SkyFrameSettings {
     fn default() -> Self {
-        Self {
+        let mut settings = Self {
             enabled: false,
             sun_direction: Some(Vec3::Y),
             sun_color: Vec3::ONE,
@@ -90,6 +94,52 @@ impl Default for SkyFrameSettings {
             time_of_day: None,
             latitude_degrees: None,
             longitude_degrees: None,
+        };
+        settings.register_debug();
+        settings
+    }
+}
+
+impl SkyboxFrameSettings {
+    pub fn register_debug(&mut self) {
+        unsafe {
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Skybox Intensity", 0.2, 2.0, 0.0),
+                &mut self.intensity as *mut f32,
+                "Skybox Intensity",
+            );
+        }
+    }
+}
+
+impl SkyFrameSettings {
+    pub fn register_debug(&mut self) {
+        unsafe {
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
+                &mut self.sun_intensity as *mut f32,
+                "Sun Intensity",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
+                &mut self.sun_angular_radius as *mut f32,
+                "Sun Angular Radius",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
+                &mut self.moon_intensity as *mut f32,
+                "Moon Intensity",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
+                &mut self.moon_angular_radius as *mut f32,
+                "Moon Angular Radius",
+            );
         }
     }
 }

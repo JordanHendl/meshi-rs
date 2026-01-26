@@ -143,7 +143,8 @@ impl RenderEngine {
             })
             .expect("Failed to make render queue");
 
-        let cloud_settings = renderer.cloud_settings();
+        let mut cloud_settings = renderer.cloud_settings();
+        render::environment::clouds::register_cloud_debug(&mut cloud_settings);
 
         Ok(Self {
             displays: Pool::new(8),
@@ -208,23 +209,30 @@ impl RenderEngine {
     }
 
     pub fn set_skybox_settings(&mut self, settings: SkyboxFrameSettings) {
+        let mut settings = settings;
+        settings.register_debug();
         self.skybox_settings = settings.clone();
         self.renderer.set_skybox_settings(settings);
     }
 
     pub fn set_sky_settings(&mut self, settings: SkyFrameSettings) {
+        let mut settings = settings;
+        settings.register_debug();
         self.sky_settings = settings.clone();
         self.renderer.set_sky_settings(settings);
     }
 
     pub fn set_ocean_settings(&mut self, settings: OceanFrameSettings) {
+        let mut settings = settings;
+        settings.register_debug();
         self.ocean_settings = settings;
-        self.renderer.set_ocean_settings(settings);
+        self.renderer.set_ocean_settings(self.ocean_settings);
     }
 
     pub fn set_environment_lighting(&mut self, settings: EnvironmentLightingSettings) {
         self.sky_settings = settings.sky.clone();
-        let sky_settings = settings.sky.clone();
+        self.sky_settings.register_debug();
+        let sky_settings = self.sky_settings.clone();
         let (sun_direction, moon_direction) = resolve_sun_moon_direction(&sky_settings);
         let sun_info = directional_light_info(
             sun_direction,
@@ -392,6 +400,8 @@ impl RenderEngine {
     }
 
     pub fn set_cloud_settings(&mut self, settings: CloudSettings) {
+        let mut settings = settings;
+        render::environment::clouds::register_cloud_debug(&mut settings);
         self.cloud_settings = settings;
         self.renderer.set_cloud_settings(self.cloud_settings);
     }

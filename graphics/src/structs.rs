@@ -399,6 +399,15 @@ pub struct CloudSettings {
     pub temporal: CloudTemporalSettings,
     pub debug_view: CloudDebugView,
     pub performance_budget_ms: f32,
+    pub debug_enabled: f32,
+    pub debug_step_count: f32,
+    pub debug_light_step_count: f32,
+    pub debug_low_res_scale: f32,
+    pub debug_multi_scatter_shadowed: f32,
+    pub debug_shadow_enabled: f32,
+    pub debug_shadow_resolution: f32,
+    pub debug_shadow_cascade_count: f32,
+    pub debug_view_value: f32,
 }
 
 impl Default for CloudSettings {
@@ -436,6 +445,15 @@ impl Default for CloudSettings {
             temporal: CloudTemporalSettings::default(),
             debug_view: CloudDebugView::None,
             performance_budget_ms: 4.0,
+            debug_enabled: 0.0,
+            debug_step_count: 64.0,
+            debug_light_step_count: 12.0,
+            debug_low_res_scale: 1.0,
+            debug_multi_scatter_shadowed: 1.0,
+            debug_shadow_enabled: 0.0,
+            debug_shadow_resolution: 128.0,
+            debug_shadow_cascade_count: 1.0,
+            debug_view_value: 0.0,
         }
     }
 }

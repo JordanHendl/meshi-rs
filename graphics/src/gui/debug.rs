@@ -1,5 +1,7 @@
 use glam::{Vec2, Vec3, Vec4, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
+use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, Slider, SliderColors,
@@ -21,6 +23,100 @@ enum DebugGraphicsTab {
     Sky,
     Ocean,
     Clouds,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageType {
+    Sky,
+    Ocean,
+    Clouds,
+    Physics,
+    Audio,
+}
+
+#[derive(Clone)]
+struct DebugRegistryItem {
+    id: u32,
+    page: PageType,
+    label: String,
+    min: f32,
+    max: f32,
+    enabled: bool,
+    show_value: bool,
+    value_ptr: *mut f32,
+}
+
+unsafe impl Send for DebugRegistryItem {}
+static DEBUG_REGISTRY: OnceLock<Mutex<Vec<DebugRegistryItem>>> = OnceLock::new();
+static DEBUG_REGISTRY_NEXT_ID: AtomicU32 = AtomicU32::new(10_000);
+
+pub unsafe fn debug_register(
+    page: PageType,
+    slider: Slider,
+    value_ptr: *mut f32,
+    label: &str,
+) -> u32 {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    if let Some(entry) = registry.iter_mut().find(|entry| {
+        entry.page == page && entry.value_ptr == value_ptr && entry.label == label
+    }) {
+        entry.min = slider.min;
+        entry.max = slider.max;
+        entry.enabled = slider.enabled;
+        entry.show_value = slider.show_value;
+        return entry.id;
+    }
+    let id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    registry.push(DebugRegistryItem {
+        id,
+        page,
+        label: label.to_string(),
+        min: slider.min,
+        max: slider.max,
+        enabled: slider.enabled,
+        show_value: slider.show_value,
+        value_ptr,
+    });
+    id
+}
+
+unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    registry
+        .iter()
+        .filter(|entry| entry.page == page)
+        .map(|entry| {
+            let value = if entry.value_ptr.is_null() {
+                0.0
+            } else {
+                *entry.value_ptr
+            };
+            Slider {
+                id: entry.id,
+                label: entry.label.clone(),
+                value,
+                min: entry.min,
+                max: entry.max,
+                enabled: entry.enabled,
+                show_value: entry.show_value,
+            }
+        })
+        .collect()
+}
+
+unsafe fn debug_registry_update_value(id: u32, value: f32) -> bool {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    if let Some(entry) = registry.iter_mut().find(|entry| entry.id == id) {
+        if !entry.value_ptr.is_null() {
+            let clamped = value.clamp(entry.min, entry.max);
+            *entry.value_ptr = clamped;
+        }
+        return true;
+    }
+    false
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -373,8 +469,8 @@ impl DebugGui {
                     self.slider_values.ocean_capillary_strength = ocean.capillary_strength;
                     self.slider_values.ocean_time_scale = ocean.time_scale;
                 }
-                if let Some(clouds) = bindings.cloud_settings.as_ref() {
-                    self.slider_values.cloud_enabled = clouds.enabled as u32 as f32;
+                if let Some(clouds) = bindings.cloud_settings.as_mut() {
+                    self.slider_values.cloud_enabled = clouds.debug_enabled;
                     self.slider_values.cloud_layer_a_base_altitude = clouds.layer_a.base_altitude;
                     self.slider_values.cloud_layer_a_top_altitude = clouds.layer_a.top_altitude;
                     self.slider_values.cloud_layer_a_density_scale = clouds.layer_a.density_scale;
@@ -389,19 +485,17 @@ impl DebugGui {
                     self.slider_values.cloud_layer_b_wind_x = clouds.layer_b.wind.x;
                     self.slider_values.cloud_layer_b_wind_y = clouds.layer_b.wind.y;
                     self.slider_values.cloud_layer_b_wind_speed = clouds.layer_b.wind_speed;
-                    self.slider_values.cloud_light_step_count = clouds.light_step_count as f32;
+                    self.slider_values.cloud_light_step_count = clouds.debug_light_step_count;
                     self.slider_values.cloud_coverage_power = clouds.coverage_power;
                     self.slider_values.cloud_detail_strength = clouds.detail_strength;
                     self.slider_values.cloud_curl_strength = clouds.curl_strength;
                     self.slider_values.cloud_jitter_strength = clouds.jitter_strength;
                     self.slider_values.cloud_epsilon = clouds.epsilon;
-                    self.slider_values.cloud_low_res_scale =
-                        cloud_resolution_scale_value(clouds.low_res_scale);
+                    self.slider_values.cloud_low_res_scale = clouds.debug_low_res_scale;
                     self.slider_values.cloud_phase_g = clouds.phase_g;
                     self.slider_values.cloud_multi_scatter_strength = clouds.multi_scatter_strength;
-                    self.slider_values.cloud_multi_scatter_shadowed =
-                        clouds.multi_scatter_respects_shadow as u32 as f32;
-                    self.slider_values.cloud_step_count = clouds.step_count as f32;
+                    self.slider_values.cloud_multi_scatter_shadowed = clouds.debug_multi_scatter_shadowed;
+                    self.slider_values.cloud_step_count = clouds.debug_step_count;
                     self.slider_values.cloud_sun_radiance_r = clouds.sun_radiance.x;
                     self.slider_values.cloud_sun_radiance_g = clouds.sun_radiance.y;
                     self.slider_values.cloud_sun_radiance_b = clouds.sun_radiance.z;
@@ -417,12 +511,11 @@ impl DebugGui {
                     self.slider_values.cloud_atmosphere_haze_r = clouds.atmosphere_haze_color.x;
                     self.slider_values.cloud_atmosphere_haze_g = clouds.atmosphere_haze_color.y;
                     self.slider_values.cloud_atmosphere_haze_b = clouds.atmosphere_haze_color.z;
-                    self.slider_values.cloud_shadow_enabled = clouds.shadow.enabled as u32 as f32;
-                    self.slider_values.cloud_shadow_resolution = clouds.shadow.resolution as f32;
+                    self.slider_values.cloud_shadow_enabled = clouds.debug_shadow_enabled;
+                    self.slider_values.cloud_shadow_resolution = clouds.debug_shadow_resolution;
                     self.slider_values.cloud_shadow_extent = clouds.shadow.extent;
                     self.slider_values.cloud_shadow_strength = clouds.shadow.strength;
-                    self.slider_values.cloud_shadow_cascade_count =
-                        clouds.shadow.cascades.cascade_count as f32;
+                    self.slider_values.cloud_shadow_cascade_count = clouds.debug_shadow_cascade_count;
                     self.slider_values.cloud_shadow_split_lambda =
                         clouds.shadow.cascades.split_lambda;
                     self.slider_values.cloud_temporal_blend_factor = clouds.temporal.blend_factor;
@@ -430,8 +523,20 @@ impl DebugGui {
                     self.slider_values.cloud_temporal_depth_sigma = clouds.temporal.depth_sigma;
                     self.slider_values.cloud_temporal_history_weight_scale =
                         clouds.temporal.history_weight_scale;
-                    self.slider_values.cloud_debug_view = clouds.debug_view as u32 as f32;
+                    self.slider_values.cloud_debug_view = clouds.debug_view_value;
                     self.slider_values.cloud_performance_budget_ms = clouds.performance_budget_ms;
+
+                    clouds.debug_enabled = clouds.enabled as u32 as f32;
+                    clouds.debug_step_count = clouds.step_count as f32;
+                    clouds.debug_light_step_count = clouds.light_step_count as f32;
+                    clouds.debug_low_res_scale = cloud_resolution_scale_value(clouds.low_res_scale);
+                    clouds.debug_multi_scatter_shadowed =
+                        clouds.multi_scatter_respects_shadow as u32 as f32;
+                    clouds.debug_shadow_enabled = clouds.shadow.enabled as u32 as f32;
+                    clouds.debug_shadow_resolution = clouds.shadow.resolution as f32;
+                    clouds.debug_shadow_cascade_count =
+                        clouds.shadow.cascades.cascade_count as f32;
+                    clouds.debug_view_value = clouds.debug_view as u32 as f32;
                 }
             }
         }
@@ -551,15 +656,11 @@ impl DebugGui {
             }
         }
 
-        let hovered_debug_slider = if self.debug_tab == DebugTab::Graphics {
-            self.debug_slider_layout.items.iter().find(|item| {
-                item.enabled
-                    && (point_in_menu_rect(self.cursor, item.track_rect)
-                        || point_in_menu_rect(self.cursor, item.knob_rect))
-            })
-        } else {
-            None
-        };
+        let hovered_debug_slider = self.debug_slider_layout.items.iter().find(|item| {
+            item.enabled
+                && (point_in_menu_rect(self.cursor, item.track_rect)
+                    || point_in_menu_rect(self.cursor, item.knob_rect))
+        });
         self.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
 
         if self.mouse_pressed {
@@ -581,6 +682,7 @@ impl DebugGui {
             {
                 let value =
                     slider_value_from_cursor(self.cursor, item.track_rect, item.min, item.max);
+                let mut handled = true;
                 match active_id {
                     101 => self.slider_values.skybox_intensity = value,
                     102 => self.slider_values.sun_intensity = value,
@@ -663,7 +765,12 @@ impl DebugGui {
                     348 => self.slider_values.cloud_temporal_history_weight_scale = value,
                     349 => self.slider_values.cloud_debug_view = value,
                     350 => self.slider_values.cloud_performance_budget_ms = value,
-                    _ => {}
+                    _ => handled = false,
+                }
+                if !handled {
+                    unsafe {
+                        debug_registry_update_value(active_id, value);
+                    }
                 }
             }
         }
@@ -846,11 +953,12 @@ impl DebugGui {
                 }
             }
             if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                let new_enabled = self.slider_values.cloud_enabled >= 0.5;
+                let new_enabled = clouds.debug_enabled >= 0.5;
                 if clouds.enabled != new_enabled {
                     clouds.enabled = new_enabled;
                     cloud_dirty = true;
                 }
+                clouds.debug_enabled = clouds.enabled as u32 as f32;
                 let new_value = self.slider_values.cloud_layer_a_base_altitude.clamp(0.0, 3000.0);
                 if (clouds.layer_a.base_altitude - new_value).abs() > f32::EPSILON {
                     clouds.layer_a.base_altitude = new_value;
@@ -925,29 +1033,32 @@ impl DebugGui {
                     clouds.layer_b.wind_speed = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_step_count.clamp(8.0, 256.0).round();
+                let new_value = clouds.debug_step_count.clamp(8.0, 256.0).round();
                 let new_steps = new_value as u32;
                 if clouds.step_count != new_steps {
                     clouds.step_count = new_steps;
                     cloud_dirty = true;
                 }
+                clouds.debug_step_count = clouds.step_count as f32;
                 let new_value =
-                    self.slider_values.cloud_light_step_count.clamp(4.0, 128.0).round();
+                    clouds.debug_light_step_count.clamp(4.0, 128.0).round();
                 let new_steps = new_value as u32;
                 if clouds.light_step_count != new_steps {
                     clouds.light_step_count = new_steps;
                     cloud_dirty = true;
                 }
+                clouds.debug_light_step_count = clouds.light_step_count as f32;
                 let new_value = self.slider_values.cloud_phase_g.clamp(-0.2, 0.9);
                 if (clouds.phase_g - new_value).abs() > f32::EPSILON {
                     clouds.phase_g = new_value;
                     cloud_dirty = true;
                 }
-                let new_scale = cloud_resolution_scale_from_value(self.slider_values.cloud_low_res_scale);
+                let new_scale = cloud_resolution_scale_from_value(clouds.debug_low_res_scale);
                 if clouds.low_res_scale != new_scale {
                     clouds.low_res_scale = new_scale;
                     cloud_dirty = true;
                 }
+                clouds.debug_low_res_scale = cloud_resolution_scale_value(clouds.low_res_scale);
                 let new_value = self.slider_values.cloud_coverage_power.clamp(0.1, 4.0);
                 if (clouds.coverage_power - new_value).abs() > f32::EPSILON {
                     clouds.coverage_power = new_value;
@@ -978,11 +1089,13 @@ impl DebugGui {
                     clouds.multi_scatter_strength = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_multi_scatter_shadowed >= 0.5;
+                let new_value = clouds.debug_multi_scatter_shadowed >= 0.5;
                 if clouds.multi_scatter_respects_shadow != new_value {
                     clouds.multi_scatter_respects_shadow = new_value;
                     cloud_dirty = true;
                 }
+                clouds.debug_multi_scatter_shadowed =
+                    clouds.multi_scatter_respects_shadow as u32 as f32;
                 let new_radiance = Vec3::new(
                     self.slider_values.cloud_sun_radiance_r.clamp(0.0, 10.0),
                     self.slider_values.cloud_sun_radiance_g.clamp(0.0, 10.0),
@@ -1032,17 +1145,19 @@ impl DebugGui {
                     clouds.atmosphere_haze_color = new_value;
                     cloud_dirty = true;
                 }
-                let new_shadow_enabled = self.slider_values.cloud_shadow_enabled >= 0.5;
+                let new_shadow_enabled = clouds.debug_shadow_enabled >= 0.5;
                 if clouds.shadow.enabled != new_shadow_enabled {
                     clouds.shadow.enabled = new_shadow_enabled;
                     cloud_dirty = true;
                 }
+                clouds.debug_shadow_enabled = clouds.shadow.enabled as u32 as f32;
                 let new_shadow_resolution =
-                    self.slider_values.cloud_shadow_resolution.clamp(64.0, 2048.0).round() as u32;
+                    clouds.debug_shadow_resolution.clamp(64.0, 2048.0).round() as u32;
                 if clouds.shadow.resolution != new_shadow_resolution {
                     clouds.shadow.resolution = new_shadow_resolution;
                     cloud_dirty = true;
                 }
+                clouds.debug_shadow_resolution = clouds.shadow.resolution as f32;
                 let new_shadow_extent = self.slider_values.cloud_shadow_extent.clamp(1000.0, 200000.0);
                 if (clouds.shadow.extent - new_shadow_extent).abs() > f32::EPSILON {
                     clouds.shadow.extent = new_shadow_extent;
@@ -1054,11 +1169,13 @@ impl DebugGui {
                     cloud_dirty = true;
                 }
                 let new_cascade_count =
-                    self.slider_values.cloud_shadow_cascade_count.clamp(1.0, 4.0).round() as u32;
+                    clouds.debug_shadow_cascade_count.clamp(1.0, 4.0).round() as u32;
                 if clouds.shadow.cascades.cascade_count != new_cascade_count {
                     clouds.shadow.cascades.cascade_count = new_cascade_count;
                     cloud_dirty = true;
                 }
+                clouds.debug_shadow_cascade_count =
+                    clouds.shadow.cascades.cascade_count as f32;
                 let new_split_lambda =
                     self.slider_values.cloud_shadow_split_lambda.clamp(0.0, 1.0);
                 if (clouds.shadow.cascades.split_lambda - new_split_lambda).abs() > f32::EPSILON {
@@ -1088,11 +1205,12 @@ impl DebugGui {
                     clouds.temporal.history_weight_scale = new_temporal_history;
                     cloud_dirty = true;
                 }
-                let new_view = cloud_debug_view_from_value(self.slider_values.cloud_debug_view);
+                let new_view = cloud_debug_view_from_value(clouds.debug_view_value);
                 if clouds.debug_view != new_view {
                     clouds.debug_view = new_view;
                     cloud_dirty = true;
                 }
+                clouds.debug_view_value = clouds.debug_view as u32 as f32;
                 let new_budget = self.slider_values.cloud_performance_budget_ms.clamp(0.1, 20.0);
                 if (clouds.performance_budget_ms - new_budget).abs() > f32::EPSILON {
                     clouds.performance_budget_ms = new_budget;
@@ -1291,7 +1409,29 @@ impl DebugGui {
             text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
 
         let mut debug_slider_layout = SliderLayout::default();
-        if self.debug_tab == DebugTab::Graphics {
+        let page_type = if self.debug_tab == DebugTab::Graphics {
+            match self.debug_graphics_tab {
+                DebugGraphicsTab::Sky => PageType::Sky,
+                DebugGraphicsTab::Ocean => PageType::Ocean,
+                DebugGraphicsTab::Clouds => PageType::Clouds,
+            }
+        } else {
+            match self.debug_tab {
+                DebugTab::Physics => PageType::Physics,
+                DebugTab::Audio => PageType::Audio,
+                DebugTab::Graphics => PageType::Sky,
+            }
+        };
+        let mut debug_sliders = unsafe { debug_registry_sliders(page_type) };
+        if debug_sliders.is_empty() {
+            gui.submit_text(GuiTextDraw {
+                text: "No debug data available.".to_string(),
+                position: [text_start.x, slider_start_y],
+                color: Vec4::new(0.7, 0.75, 0.85, 1.0).to_array(),
+                scale: 0.85,
+            });
+            self.scroll_delta = 0.0;
+        } else {
             let slider_area_height = (debug_panel_size.y
                 - (slider_start_y - debug_panel_position.y)
                 - 12.0 * ui_scale
@@ -1300,10 +1440,7 @@ impl DebugGui {
             let debug_slider_options = SliderRenderOptions {
                 viewport: [viewport.x, viewport.y],
                 position: [debug_panel_position.x, slider_start_y],
-                size: [
-                    debug_panel_size.x,
-                    slider_area_height,
-                ],
+                size: [debug_panel_size.x, slider_area_height],
                 layer: GuiLayer::Overlay,
                 metrics: SliderMetrics {
                     item_height: (26.0 * ui_scale).clamp(22.0, 32.0),
@@ -1312,582 +1449,6 @@ impl DebugGui {
                 },
                 colors: SliderColors::default(),
                 state: self.debug_slider_state,
-            };
-
-            let debug_sliders = match self.debug_graphics_tab {
-                DebugGraphicsTab::Sky => vec![
-                    Slider::new(
-                        101,
-                        "Skybox Intensity",
-                        0.2,
-                        2.0,
-                        self.slider_values.skybox_intensity,
-                    ),
-                    Slider::new(
-                        102,
-                        "Sun Intensity",
-                        0.1,
-                        5.0,
-                        self.slider_values.sun_intensity,
-                    ),
-                    Slider::new(
-                        103,
-                        "Sun Angular Radius",
-                        0.001,
-                        0.05,
-                        self.slider_values.sun_angular_radius,
-                    ),
-                    Slider::new(
-                        104,
-                        "Moon Intensity",
-                        0.0,
-                        2.0,
-                        self.slider_values.moon_intensity,
-                    ),
-                    Slider::new(
-                        105,
-                        "Moon Angular Radius",
-                        0.001,
-                        0.05,
-                        self.slider_values.moon_angular_radius,
-                    ),
-                ],
-                DebugGraphicsTab::Ocean => vec![
-                    Slider::new(
-                        201,
-                        "Wind Speed",
-                        0.1,
-                        20.0,
-                        self.slider_values.ocean_wind_speed,
-                    ),
-                    Slider::new(
-                        202,
-                        "Fetch Length",
-                        10.0,
-                        200000.0,
-                        self.slider_values.ocean_fetch_length,
-                    ),
-                    Slider::new(
-                        203,
-                        "Swell Dir X",
-                        -1.0,
-                        1.0,
-                        self.slider_values.ocean_swell_dir_x,
-                    ),
-                    Slider::new(
-                        204,
-                        "Swell Dir Y",
-                        -1.0,
-                        1.0,
-                        self.slider_values.ocean_swell_dir_y,
-                    ),
-                    Slider::new(
-                        205,
-                        "Current X",
-                        -5.0,
-                        5.0,
-                        self.slider_values.ocean_current_x,
-                    ),
-                    Slider::new(
-                        206,
-                        "Current Y",
-                        -5.0,
-                        5.0,
-                        self.slider_values.ocean_current_y,
-                    ),
-                    Slider::new(
-                        207,
-                        "Wave Amplitude",
-                        0.1,
-                        10.0,
-                        self.slider_values.ocean_wave_amplitude,
-                    ),
-                    Slider::new(
-                        208,
-                        "Gerstner Amplitude",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_gerstner_amplitude,
-                    ),
-                    Slider::new(
-                        209,
-                        "Cascade Spectrum Near",
-                        0.0,
-                        2.0,
-                        self.slider_values.ocean_cascade_spectrum_near,
-                    ),
-                    Slider::new(
-                        210,
-                        "Cascade Spectrum Mid",
-                        0.0,
-                        2.0,
-                        self.slider_values.ocean_cascade_spectrum_mid,
-                    ),
-                    Slider::new(
-                        211,
-                        "Cascade Spectrum Far",
-                        0.0,
-                        2.0,
-                        self.slider_values.ocean_cascade_spectrum_far,
-                    ),
-                    Slider::new(
-                        212,
-                        "Cascade Swell Near",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_cascade_swell_near,
-                    ),
-                    Slider::new(
-                        213,
-                        "Cascade Swell Mid",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_cascade_swell_mid,
-                    ),
-                    Slider::new(
-                        214,
-                        "Cascade Swell Far",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_cascade_swell_far,
-                    ),
-                    Slider::new(
-                        215,
-                        "Depth Meters",
-                        0.0,
-                        5000.0,
-                        self.slider_values.ocean_depth_meters,
-                    ),
-                    Slider::new(
-                        216,
-                        "Depth Damping",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_depth_damping,
-                    ),
-                    Slider::new(
-                        217,
-                        "Fresnel Bias",
-                        0.0,
-                        0.2,
-                        self.slider_values.ocean_fresnel_bias,
-                    ),
-                    Slider::new(
-                        218,
-                        "Fresnel Strength",
-                        0.0,
-                        1.5,
-                        self.slider_values.ocean_fresnel_strength,
-                    ),
-                    Slider::new(
-                        219,
-                        "Foam Strength",
-                        0.0,
-                        4.0,
-                        self.slider_values.ocean_foam_strength,
-                    ),
-                    Slider::new(
-                        220,
-                        "Foam Threshold",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_foam_threshold,
-                    ),
-                    Slider::new(
-                        221,
-                        "Foam Advection",
-                        0.0,
-                        2.0,
-                        self.slider_values.ocean_foam_advection,
-                    ),
-                    Slider::new(
-                        222,
-                        "Foam Decay",
-                        0.0,
-                        1.0,
-                        self.slider_values.ocean_foam_decay,
-                    ),
-                    Slider::new(
-                        223,
-                        "Foam Noise Scale",
-                        0.01,
-                        1.0,
-                        self.slider_values.ocean_foam_noise_scale,
-                    ),
-                    Slider::new(
-                        224,
-                        "Capillary Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.ocean_capillary_strength,
-                    ),
-                    Slider::new(
-                        225,
-                        "Time Scale",
-                        0.1,
-                        4.0,
-                        self.slider_values.ocean_time_scale,
-                    ),
-                ],
-                DebugGraphicsTab::Clouds => vec![
-                    Slider::new(
-                        300,
-                        "Enabled",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_enabled,
-                    ),
-                    Slider::new(
-                        301,
-                        "Layer A Base Alt",
-                        0.0,
-                        3000.0,
-                        self.slider_values.cloud_layer_a_base_altitude,
-                    ),
-                    Slider::new(
-                        302,
-                        "Layer A Top Alt",
-                        100.0,
-                        6000.0,
-                        self.slider_values.cloud_layer_a_top_altitude,
-                    ),
-                    Slider::new(
-                        303,
-                        "Layer A Density",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_layer_a_density_scale,
-                    ),
-                    Slider::new(
-                        304,
-                        "Layer A Noise Scale",
-                        0.1,
-                        2.0,
-                        self.slider_values.cloud_layer_a_noise_scale,
-                    ),
-                    Slider::new(
-                        305,
-                        "Layer A Wind X",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_layer_a_wind_x,
-                    ),
-                    Slider::new(
-                        306,
-                        "Layer A Wind Y",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_layer_a_wind_y,
-                    ),
-                    Slider::new(
-                        307,
-                        "Layer A Wind Speed",
-                        0.0,
-                        5.0,
-                        self.slider_values.cloud_layer_a_wind_speed,
-                    ),
-                    Slider::new(
-                        308,
-                        "Layer B Base Alt",
-                        0.0,
-                        12000.0,
-                        self.slider_values.cloud_layer_b_base_altitude,
-                    ),
-                    Slider::new(
-                        309,
-                        "Layer B Top Alt",
-                        100.0,
-                        20000.0,
-                        self.slider_values.cloud_layer_b_top_altitude,
-                    ),
-                    Slider::new(
-                        310,
-                        "Layer B Density",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_layer_b_density_scale,
-                    ),
-                    Slider::new(
-                        311,
-                        "Layer B Noise Scale",
-                        0.1,
-                        2.0,
-                        self.slider_values.cloud_layer_b_noise_scale,
-                    ),
-                    Slider::new(
-                        312,
-                        "Layer B Wind X",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_layer_b_wind_x,
-                    ),
-                    Slider::new(
-                        313,
-                        "Layer B Wind Y",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_layer_b_wind_y,
-                    ),
-                    Slider::new(
-                        314,
-                        "Layer B Wind Speed",
-                        0.0,
-                        5.0,
-                        self.slider_values.cloud_layer_b_wind_speed,
-                    ),
-                    Slider::new(
-                        315,
-                        "Step Count",
-                        8.0,
-                        256.0,
-                        self.slider_values.cloud_step_count,
-                    ),
-                    Slider::new(
-                        316,
-                        "Light Step Count",
-                        4.0,
-                        128.0,
-                        self.slider_values.cloud_light_step_count,
-                    ),
-                    Slider::new(
-                        317,
-                        "Phase G",
-                        -0.2,
-                        0.9,
-                        self.slider_values.cloud_phase_g,
-                    ),
-                    Slider::new(
-                        318,
-                        "Low Res Scale",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_low_res_scale,
-                    ),
-                    Slider::new(
-                        319,
-                        "Coverage Power",
-                        0.1,
-                        4.0,
-                        self.slider_values.cloud_coverage_power,
-                    ),
-                    Slider::new(
-                        320,
-                        "Detail Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_detail_strength,
-                    ),
-                    Slider::new(
-                        321,
-                        "Curl Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_curl_strength,
-                    ),
-                    Slider::new(
-                        322,
-                        "Jitter Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_jitter_strength,
-                    ),
-                    Slider::new(
-                        323,
-                        "Epsilon",
-                        0.0001,
-                        0.1,
-                        self.slider_values.cloud_epsilon,
-                    ),
-                    Slider::new(
-                        324,
-                        "Multi Scatter Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_multi_scatter_strength,
-                    ),
-                    Slider::new(
-                        325,
-                        "Multi Scatter Shadowed",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_multi_scatter_shadowed,
-                    ),
-                    Slider::new(
-                        326,
-                        "Sun Radiance R",
-                        0.0,
-                        10.0,
-                        self.slider_values.cloud_sun_radiance_r,
-                    ),
-                    Slider::new(
-                        327,
-                        "Sun Radiance G",
-                        0.0,
-                        10.0,
-                        self.slider_values.cloud_sun_radiance_g,
-                    ),
-                    Slider::new(
-                        328,
-                        "Sun Radiance B",
-                        0.0,
-                        10.0,
-                        self.slider_values.cloud_sun_radiance_b,
-                    ),
-                    Slider::new(
-                        329,
-                        "Sun Dir X",
-                        -1.0,
-                        1.0,
-                        self.slider_values.cloud_sun_direction_x,
-                    ),
-                    Slider::new(
-                        330,
-                        "Sun Dir Y",
-                        -1.0,
-                        1.0,
-                        self.slider_values.cloud_sun_direction_y,
-                    ),
-                    Slider::new(
-                        331,
-                        "Sun Dir Z",
-                        -1.0,
-                        1.0,
-                        self.slider_values.cloud_sun_direction_z,
-                    ),
-                    Slider::new(
-                        332,
-                        "Atmos View Strength",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_atmosphere_view_strength,
-                    ),
-                    Slider::new(
-                        333,
-                        "Atmos View Extinction",
-                        0.0,
-                        0.005,
-                        self.slider_values.cloud_atmosphere_view_extinction,
-                    ),
-                    Slider::new(
-                        334,
-                        "Atmos Light Trans",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_atmosphere_light_transmittance,
-                    ),
-                    Slider::new(
-                        335,
-                        "Atmos Haze Strength",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_atmosphere_haze_strength,
-                    ),
-                    Slider::new(
-                        336,
-                        "Atmos Haze R",
-                        0.0,
-                        1.5,
-                        self.slider_values.cloud_atmosphere_haze_r,
-                    ),
-                    Slider::new(
-                        337,
-                        "Atmos Haze G",
-                        0.0,
-                        1.5,
-                        self.slider_values.cloud_atmosphere_haze_g,
-                    ),
-                    Slider::new(
-                        338,
-                        "Atmos Haze B",
-                        0.0,
-                        1.5,
-                        self.slider_values.cloud_atmosphere_haze_b,
-                    ),
-                    Slider::new(
-                        339,
-                        "Shadow Enabled",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_shadow_enabled,
-                    ),
-                    Slider::new(
-                        340,
-                        "Shadow Resolution",
-                        64.0,
-                        2048.0,
-                        self.slider_values.cloud_shadow_resolution,
-                    ),
-                    Slider::new(
-                        341,
-                        "Shadow Extent",
-                        1000.0,
-                        200000.0,
-                        self.slider_values.cloud_shadow_extent,
-                    ),
-                    Slider::new(
-                        342,
-                        "Shadow Strength",
-                        0.0,
-                        2.0,
-                        self.slider_values.cloud_shadow_strength,
-                    ),
-                    Slider::new(
-                        343,
-                        "Shadow Cascades",
-                        1.0,
-                        4.0,
-                        self.slider_values.cloud_shadow_cascade_count,
-                    ),
-                    Slider::new(
-                        344,
-                        "Shadow Split Lambda",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_shadow_split_lambda,
-                    ),
-                    Slider::new(
-                        345,
-                        "Temporal Blend",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_temporal_blend_factor,
-                    ),
-                    Slider::new(
-                        346,
-                        "Temporal Clamp",
-                        0.0,
-                        1.0,
-                        self.slider_values.cloud_temporal_clamp_strength,
-                    ),
-                    Slider::new(
-                        347,
-                        "Temporal Depth Sigma",
-                        0.1,
-                        100.0,
-                        self.slider_values.cloud_temporal_depth_sigma,
-                    ),
-                    Slider::new(
-                        348,
-                        "Temporal History Scale",
-                        0.0,
-                        4.0,
-                        self.slider_values.cloud_temporal_history_weight_scale,
-                    ),
-                    Slider::new(
-                        349,
-                        "Debug View",
-                        0.0,
-                        23.0,
-                        self.slider_values.cloud_debug_view,
-                    ),
-                    Slider::new(
-                        350,
-                        "Budget (ms)",
-                        0.1,
-                        20.0,
-                        self.slider_values.cloud_performance_budget_ms,
-                    ),
-                ],
             };
             let metrics = debug_slider_options.metrics;
             let row_height = metrics.item_height + metrics.item_gap;
@@ -1925,14 +1486,6 @@ impl DebugGui {
             let mut scroll_options = debug_slider_options;
             scroll_options.position[1] += offset_y;
             debug_slider_layout = gui.submit_sliders(visible_sliders, &scroll_options);
-        } else {
-            gui.submit_text(GuiTextDraw {
-                text: "No debug data available.".to_string(),
-                position: [text_start.x, slider_start_y],
-                color: Vec4::new(0.7, 0.75, 0.85, 1.0).to_array(),
-                scale: 0.85,
-            });
-            self.scroll_delta = 0.0;
         }
 
         gui.submit_draw(GuiDraw::new(

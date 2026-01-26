@@ -10,6 +10,8 @@ use cloud_pass_raymarch::{CloudLayerSampling, CloudRaymarchPass, CloudSamplingSe
 use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use crate::structs::{CloudResolutionScale, CloudSettings};
+use crate::gui::debug::{debug_register, PageType};
+use crate::gui::Slider;
 use dashi::cmd::Executable;
 use dashi::driver::command::BlitImage;
 use dashi::{CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport};
@@ -48,6 +50,330 @@ pub struct CloudRenderer {
     sample_count: dashi::SampleCount,
     pending_weather_map: Option<dashi::ImageView>,
     weather_map_configured: bool,
+}
+
+pub fn register_cloud_debug(settings: &mut CloudSettings) {
+    settings.debug_enabled = settings.enabled as u32 as f32;
+    settings.debug_step_count = settings.step_count as f32;
+    settings.debug_light_step_count = settings.light_step_count as f32;
+    settings.debug_low_res_scale = if settings.low_res_scale == CloudResolutionScale::Half {
+        0.0
+    } else {
+        1.0
+    };
+    settings.debug_multi_scatter_shadowed = settings.multi_scatter_respects_shadow as u32 as f32;
+    settings.debug_shadow_enabled = settings.shadow.enabled as u32 as f32;
+    settings.debug_shadow_resolution = settings.shadow.resolution as f32;
+    settings.debug_shadow_cascade_count = settings.shadow.cascades.cascade_count as f32;
+    settings.debug_view_value = settings.debug_view as u32 as f32;
+    unsafe {
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Enabled", 0.0, 1.0, 0.0),
+            &mut settings.debug_enabled as *mut f32,
+            "Enabled",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Base Alt", 0.0, 3000.0, 0.0),
+            &mut settings.layer_a.base_altitude as *mut f32,
+            "Layer A Base Alt",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Top Alt", 100.0, 6000.0, 0.0),
+            &mut settings.layer_a.top_altitude as *mut f32,
+            "Layer A Top Alt",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Density", 0.0, 2.0, 0.0),
+            &mut settings.layer_a.density_scale as *mut f32,
+            "Layer A Density",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Noise Scale", 0.1, 2.0, 0.0),
+            &mut settings.layer_a.noise_scale as *mut f32,
+            "Layer A Noise Scale",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Wind X", -5.0, 5.0, 0.0),
+            &mut settings.layer_a.wind.x as *mut f32,
+            "Layer A Wind X",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Wind Y", -5.0, 5.0, 0.0),
+            &mut settings.layer_a.wind.y as *mut f32,
+            "Layer A Wind Y",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer A Wind Speed", 0.0, 5.0, 0.0),
+            &mut settings.layer_a.wind_speed as *mut f32,
+            "Layer A Wind Speed",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Base Alt", 0.0, 12000.0, 0.0),
+            &mut settings.layer_b.base_altitude as *mut f32,
+            "Layer B Base Alt",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Top Alt", 100.0, 20000.0, 0.0),
+            &mut settings.layer_b.top_altitude as *mut f32,
+            "Layer B Top Alt",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Density", 0.0, 2.0, 0.0),
+            &mut settings.layer_b.density_scale as *mut f32,
+            "Layer B Density",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Noise Scale", 0.1, 2.0, 0.0),
+            &mut settings.layer_b.noise_scale as *mut f32,
+            "Layer B Noise Scale",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Wind X", -5.0, 5.0, 0.0),
+            &mut settings.layer_b.wind.x as *mut f32,
+            "Layer B Wind X",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Wind Y", -5.0, 5.0, 0.0),
+            &mut settings.layer_b.wind.y as *mut f32,
+            "Layer B Wind Y",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Layer B Wind Speed", 0.0, 5.0, 0.0),
+            &mut settings.layer_b.wind_speed as *mut f32,
+            "Layer B Wind Speed",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Step Count", 8.0, 256.0, 0.0),
+            &mut settings.debug_step_count as *mut f32,
+            "Step Count",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Light Step Count", 4.0, 128.0, 0.0),
+            &mut settings.debug_light_step_count as *mut f32,
+            "Light Step Count",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Phase G", -0.2, 0.9, 0.0),
+            &mut settings.phase_g as *mut f32,
+            "Phase G",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Low Res Scale", 0.0, 1.0, 0.0),
+            &mut settings.debug_low_res_scale as *mut f32,
+            "Low Res Scale",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Coverage Power", 0.1, 4.0, 0.0),
+            &mut settings.coverage_power as *mut f32,
+            "Coverage Power",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Detail Strength", 0.0, 2.0, 0.0),
+            &mut settings.detail_strength as *mut f32,
+            "Detail Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Curl Strength", 0.0, 2.0, 0.0),
+            &mut settings.curl_strength as *mut f32,
+            "Curl Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Jitter Strength", 0.0, 2.0, 0.0),
+            &mut settings.jitter_strength as *mut f32,
+            "Jitter Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Epsilon", 0.0001, 0.1, 0.0),
+            &mut settings.epsilon as *mut f32,
+            "Epsilon",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Multi Scatter Strength", 0.0, 2.0, 0.0),
+            &mut settings.multi_scatter_strength as *mut f32,
+            "Multi Scatter Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Multi Scatter Shadowed", 0.0, 1.0, 0.0),
+            &mut settings.debug_multi_scatter_shadowed as *mut f32,
+            "Multi Scatter Shadowed",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Radiance R", 0.0, 10.0, 0.0),
+            &mut settings.sun_radiance.x as *mut f32,
+            "Sun Radiance R",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Radiance G", 0.0, 10.0, 0.0),
+            &mut settings.sun_radiance.y as *mut f32,
+            "Sun Radiance G",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Radiance B", 0.0, 10.0, 0.0),
+            &mut settings.sun_radiance.z as *mut f32,
+            "Sun Radiance B",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Dir X", -1.0, 1.0, 0.0),
+            &mut settings.sun_direction.x as *mut f32,
+            "Sun Dir X",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Dir Y", -1.0, 1.0, 0.0),
+            &mut settings.sun_direction.y as *mut f32,
+            "Sun Dir Y",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Sun Dir Z", -1.0, 1.0, 0.0),
+            &mut settings.sun_direction.z as *mut f32,
+            "Sun Dir Z",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos View Strength", 0.0, 1.0, 0.0),
+            &mut settings.atmosphere_view_strength as *mut f32,
+            "Atmos View Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos View Extinction", 0.0, 0.005, 0.0),
+            &mut settings.atmosphere_view_extinction as *mut f32,
+            "Atmos View Extinction",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos Light Trans", 0.0, 1.0, 0.0),
+            &mut settings.atmosphere_light_transmittance as *mut f32,
+            "Atmos Light Trans",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos Haze Strength", 0.0, 1.0, 0.0),
+            &mut settings.atmosphere_haze_strength as *mut f32,
+            "Atmos Haze Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos Haze R", 0.0, 1.5, 0.0),
+            &mut settings.atmosphere_haze_color.x as *mut f32,
+            "Atmos Haze R",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos Haze G", 0.0, 1.5, 0.0),
+            &mut settings.atmosphere_haze_color.y as *mut f32,
+            "Atmos Haze G",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Atmos Haze B", 0.0, 1.5, 0.0),
+            &mut settings.atmosphere_haze_color.z as *mut f32,
+            "Atmos Haze B",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Enabled", 0.0, 1.0, 0.0),
+            &mut settings.debug_shadow_enabled as *mut f32,
+            "Shadow Enabled",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.debug_shadow_resolution as *mut f32,
+            "Shadow Resolution",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Extent", 1000.0, 200000.0, 0.0),
+            &mut settings.shadow.extent as *mut f32,
+            "Shadow Extent",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Strength", 0.0, 2.0, 0.0),
+            &mut settings.shadow.strength as *mut f32,
+            "Shadow Strength",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Cascades", 1.0, 4.0, 0.0),
+            &mut settings.debug_shadow_cascade_count as *mut f32,
+            "Shadow Cascades",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Shadow Split Lambda", 0.0, 1.0, 0.0),
+            &mut settings.shadow.cascades.split_lambda as *mut f32,
+            "Shadow Split Lambda",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Temporal Blend", 0.0, 1.0, 0.0),
+            &mut settings.temporal.blend_factor as *mut f32,
+            "Temporal Blend",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Temporal Clamp", 0.0, 1.0, 0.0),
+            &mut settings.temporal.clamp_strength as *mut f32,
+            "Temporal Clamp",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Temporal Depth Sigma", 0.1, 100.0, 0.0),
+            &mut settings.temporal.depth_sigma as *mut f32,
+            "Temporal Depth Sigma",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Temporal History Scale", 0.0, 4.0, 0.0),
+            &mut settings.temporal.history_weight_scale as *mut f32,
+            "Temporal History Scale",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Debug View", 0.0, 23.0, 0.0),
+            &mut settings.debug_view_value as *mut f32,
+            "Debug View",
+        );
+        debug_register(
+            PageType::Clouds,
+            Slider::new(0, "Budget (ms)", 0.1, 20.0, 0.0),
+            &mut settings.performance_budget_ms as *mut f32,
+            "Budget (ms)",
+        );
+    }
 }
 
 impl CloudRenderer {
