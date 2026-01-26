@@ -45,18 +45,26 @@ struct DebugSliderValues {
     ocean_capillary_strength: f32,
     ocean_time_scale: f32,
     cloud_enabled: f32,
-    cloud_base_altitude: f32,
-    cloud_top_altitude: f32,
-    cloud_density_scale: f32,
+    cloud_layer_a_base_altitude: f32,
+    cloud_layer_a_top_altitude: f32,
+    cloud_layer_a_density_scale: f32,
+    cloud_layer_a_noise_scale: f32,
+    cloud_layer_a_wind_x: f32,
+    cloud_layer_a_wind_y: f32,
+    cloud_layer_a_wind_speed: f32,
+    cloud_layer_b_base_altitude: f32,
+    cloud_layer_b_top_altitude: f32,
+    cloud_layer_b_density_scale: f32,
+    cloud_layer_b_noise_scale: f32,
+    cloud_layer_b_wind_x: f32,
+    cloud_layer_b_wind_y: f32,
+    cloud_layer_b_wind_speed: f32,
     cloud_light_step_count: f32,
     cloud_coverage_power: f32,
     cloud_detail_strength: f32,
     cloud_curl_strength: f32,
     cloud_jitter_strength: f32,
     cloud_epsilon: f32,
-    cloud_wind_x: f32,
-    cloud_wind_y: f32,
-    cloud_wind_speed: f32,
     cloud_low_res_scale: f32,
     cloud_phase_g: f32,
     cloud_step_count: f32,
@@ -147,18 +155,26 @@ impl DebugGui {
                 ocean_capillary_strength: 1.0,
                 ocean_time_scale: 1.0,
                 cloud_enabled: 1.0,
-                cloud_base_altitude: 300.0,
-                cloud_top_altitude: 400.0,
-                cloud_density_scale: 0.5,
+                cloud_layer_a_base_altitude: 300.0,
+                cloud_layer_a_top_altitude: 400.0,
+                cloud_layer_a_density_scale: 0.5,
+                cloud_layer_a_noise_scale: 1.0,
+                cloud_layer_a_wind_x: 1.0,
+                cloud_layer_a_wind_y: 0.0,
+                cloud_layer_a_wind_speed: 0.2,
+                cloud_layer_b_base_altitude: 650.0,
+                cloud_layer_b_top_altitude: 900.0,
+                cloud_layer_b_density_scale: 0.22,
+                cloud_layer_b_noise_scale: 0.7,
+                cloud_layer_b_wind_x: -0.4,
+                cloud_layer_b_wind_y: 0.2,
+                cloud_layer_b_wind_speed: 0.35,
                 cloud_light_step_count: 18.0,
                 cloud_coverage_power: 1.2,
                 cloud_detail_strength: 0.6,
                 cloud_curl_strength: 0.0,
                 cloud_jitter_strength: 1.0,
                 cloud_epsilon: 0.01,
-                cloud_wind_x: 1.0,
-                cloud_wind_y: 0.0,
-                cloud_wind_speed: 0.2,
                 cloud_low_res_scale: 0.0,
                 cloud_phase_g: 0.6,
                 cloud_step_count: 96.0,
@@ -287,18 +303,26 @@ impl DebugGui {
                 }
                 if let Some(clouds) = bindings.cloud_settings.as_ref() {
                     self.slider_values.cloud_enabled = clouds.enabled as u32 as f32;
-                    self.slider_values.cloud_base_altitude = clouds.base_altitude;
-                    self.slider_values.cloud_top_altitude = clouds.top_altitude;
-                    self.slider_values.cloud_density_scale = clouds.density_scale;
+                    self.slider_values.cloud_layer_a_base_altitude = clouds.layer_a.base_altitude;
+                    self.slider_values.cloud_layer_a_top_altitude = clouds.layer_a.top_altitude;
+                    self.slider_values.cloud_layer_a_density_scale = clouds.layer_a.density_scale;
+                    self.slider_values.cloud_layer_a_noise_scale = clouds.layer_a.noise_scale;
+                    self.slider_values.cloud_layer_a_wind_x = clouds.layer_a.wind.x;
+                    self.slider_values.cloud_layer_a_wind_y = clouds.layer_a.wind.y;
+                    self.slider_values.cloud_layer_a_wind_speed = clouds.layer_a.wind_speed;
+                    self.slider_values.cloud_layer_b_base_altitude = clouds.layer_b.base_altitude;
+                    self.slider_values.cloud_layer_b_top_altitude = clouds.layer_b.top_altitude;
+                    self.slider_values.cloud_layer_b_density_scale = clouds.layer_b.density_scale;
+                    self.slider_values.cloud_layer_b_noise_scale = clouds.layer_b.noise_scale;
+                    self.slider_values.cloud_layer_b_wind_x = clouds.layer_b.wind.x;
+                    self.slider_values.cloud_layer_b_wind_y = clouds.layer_b.wind.y;
+                    self.slider_values.cloud_layer_b_wind_speed = clouds.layer_b.wind_speed;
                     self.slider_values.cloud_light_step_count = clouds.light_step_count as f32;
                     self.slider_values.cloud_coverage_power = clouds.coverage_power;
                     self.slider_values.cloud_detail_strength = clouds.detail_strength;
                     self.slider_values.cloud_curl_strength = clouds.curl_strength;
                     self.slider_values.cloud_jitter_strength = clouds.jitter_strength;
                     self.slider_values.cloud_epsilon = clouds.epsilon;
-                    self.slider_values.cloud_wind_x = clouds.wind.x;
-                    self.slider_values.cloud_wind_y = clouds.wind.y;
-                    self.slider_values.cloud_wind_speed = clouds.wind_speed;
                     self.slider_values.cloud_low_res_scale =
                         cloud_resolution_scale_value(clouds.low_res_scale);
                     self.slider_values.cloud_phase_g = clouds.phase_g;
@@ -489,39 +513,47 @@ impl DebugGui {
                     208 => self.slider_values.ocean_capillary_strength = value,
                     209 => self.slider_values.ocean_time_scale = value,
                     300 => self.slider_values.cloud_enabled = value,
-                    301 => self.slider_values.cloud_base_altitude = value,
-                    302 => self.slider_values.cloud_top_altitude = value,
-                    303 => self.slider_values.cloud_density_scale = value,
-                    304 => self.slider_values.cloud_step_count = value,
-                    305 => self.slider_values.cloud_light_step_count = value,
-                    306 => self.slider_values.cloud_phase_g = value,
-                    307 => self.slider_values.cloud_wind_x = value,
-                    308 => self.slider_values.cloud_wind_y = value,
-                    309 => self.slider_values.cloud_wind_speed = value,
-                    310 => self.slider_values.cloud_low_res_scale = value,
-                    311 => self.slider_values.cloud_coverage_power = value,
-                    312 => self.slider_values.cloud_detail_strength = value,
-                    313 => self.slider_values.cloud_curl_strength = value,
-                    314 => self.slider_values.cloud_jitter_strength = value,
-                    315 => self.slider_values.cloud_epsilon = value,
-                    316 => self.slider_values.cloud_sun_radiance_r = value,
-                    317 => self.slider_values.cloud_sun_radiance_g = value,
-                    318 => self.slider_values.cloud_sun_radiance_b = value,
-                    319 => self.slider_values.cloud_sun_direction_x = value,
-                    320 => self.slider_values.cloud_sun_direction_y = value,
-                    321 => self.slider_values.cloud_sun_direction_z = value,
-                    322 => self.slider_values.cloud_shadow_enabled = value,
-                    323 => self.slider_values.cloud_shadow_resolution = value,
-                    324 => self.slider_values.cloud_shadow_extent = value,
-                    325 => self.slider_values.cloud_shadow_strength = value,
-                    332 => self.slider_values.cloud_shadow_cascade_count = value,
-                    333 => self.slider_values.cloud_shadow_split_lambda = value,
-                    326 => self.slider_values.cloud_temporal_blend_factor = value,
-                    327 => self.slider_values.cloud_temporal_clamp_strength = value,
-                    328 => self.slider_values.cloud_temporal_depth_sigma = value,
-                    329 => self.slider_values.cloud_temporal_history_weight_scale = value,
-                    330 => self.slider_values.cloud_debug_view = value,
-                    331 => self.slider_values.cloud_performance_budget_ms = value,
+                    301 => self.slider_values.cloud_layer_a_base_altitude = value,
+                    302 => self.slider_values.cloud_layer_a_top_altitude = value,
+                    303 => self.slider_values.cloud_layer_a_density_scale = value,
+                    304 => self.slider_values.cloud_layer_a_noise_scale = value,
+                    305 => self.slider_values.cloud_layer_a_wind_x = value,
+                    306 => self.slider_values.cloud_layer_a_wind_y = value,
+                    307 => self.slider_values.cloud_layer_a_wind_speed = value,
+                    308 => self.slider_values.cloud_layer_b_base_altitude = value,
+                    309 => self.slider_values.cloud_layer_b_top_altitude = value,
+                    310 => self.slider_values.cloud_layer_b_density_scale = value,
+                    311 => self.slider_values.cloud_layer_b_noise_scale = value,
+                    312 => self.slider_values.cloud_layer_b_wind_x = value,
+                    313 => self.slider_values.cloud_layer_b_wind_y = value,
+                    314 => self.slider_values.cloud_layer_b_wind_speed = value,
+                    315 => self.slider_values.cloud_step_count = value,
+                    316 => self.slider_values.cloud_light_step_count = value,
+                    317 => self.slider_values.cloud_phase_g = value,
+                    318 => self.slider_values.cloud_low_res_scale = value,
+                    319 => self.slider_values.cloud_coverage_power = value,
+                    320 => self.slider_values.cloud_detail_strength = value,
+                    321 => self.slider_values.cloud_curl_strength = value,
+                    322 => self.slider_values.cloud_jitter_strength = value,
+                    323 => self.slider_values.cloud_epsilon = value,
+                    324 => self.slider_values.cloud_sun_radiance_r = value,
+                    325 => self.slider_values.cloud_sun_radiance_g = value,
+                    326 => self.slider_values.cloud_sun_radiance_b = value,
+                    327 => self.slider_values.cloud_sun_direction_x = value,
+                    328 => self.slider_values.cloud_sun_direction_y = value,
+                    329 => self.slider_values.cloud_sun_direction_z = value,
+                    330 => self.slider_values.cloud_shadow_enabled = value,
+                    331 => self.slider_values.cloud_shadow_resolution = value,
+                    332 => self.slider_values.cloud_shadow_extent = value,
+                    333 => self.slider_values.cloud_shadow_strength = value,
+                    334 => self.slider_values.cloud_shadow_cascade_count = value,
+                    335 => self.slider_values.cloud_shadow_split_lambda = value,
+                    336 => self.slider_values.cloud_temporal_blend_factor = value,
+                    337 => self.slider_values.cloud_temporal_clamp_strength = value,
+                    338 => self.slider_values.cloud_temporal_depth_sigma = value,
+                    339 => self.slider_values.cloud_temporal_history_weight_scale = value,
+                    340 => self.slider_values.cloud_debug_view = value,
+                    341 => self.slider_values.cloud_performance_budget_ms = value,
                     _ => {}
                 }
             }
@@ -630,23 +662,78 @@ impl DebugGui {
                     clouds.enabled = new_enabled;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_base_altitude.clamp(0.0, 3000.0);
-                if (clouds.base_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.base_altitude = new_value;
+                let new_value = self.slider_values.cloud_layer_a_base_altitude.clamp(0.0, 3000.0);
+                if (clouds.layer_a.base_altitude - new_value).abs() > f32::EPSILON {
+                    clouds.layer_a.base_altitude = new_value;
                     cloud_dirty = true;
                 }
-                let min_top = clouds.base_altitude + 10.0;
+                let min_top = clouds.layer_a.base_altitude + 10.0;
                 let new_value = self
                     .slider_values
-                    .cloud_top_altitude
+                    .cloud_layer_a_top_altitude
                     .clamp(min_top, 6000.0);
-                if (clouds.top_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.top_altitude = new_value;
+                if (clouds.layer_a.top_altitude - new_value).abs() > f32::EPSILON {
+                    clouds.layer_a.top_altitude = new_value;
                     cloud_dirty = true;
                 }
-                let new_value = self.slider_values.cloud_density_scale.clamp(0.0, 2.0);
-                if (clouds.density_scale - new_value).abs() > f32::EPSILON {
-                    clouds.density_scale = new_value;
+                let new_value = self.slider_values.cloud_layer_a_density_scale.clamp(0.0, 2.0);
+                if (clouds.layer_a.density_scale - new_value).abs() > f32::EPSILON {
+                    clouds.layer_a.density_scale = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_a_noise_scale.clamp(0.1, 2.0);
+                if (clouds.layer_a.noise_scale - new_value).abs() > f32::EPSILON {
+                    clouds.layer_a.noise_scale = new_value;
+                    cloud_dirty = true;
+                }
+                let new_wind_x = self.slider_values.cloud_layer_a_wind_x.clamp(-5.0, 5.0);
+                let new_wind_y = self.slider_values.cloud_layer_a_wind_y.clamp(-5.0, 5.0);
+                if (clouds.layer_a.wind.x - new_wind_x).abs() > f32::EPSILON
+                    || (clouds.layer_a.wind.y - new_wind_y).abs() > f32::EPSILON
+                {
+                    clouds.layer_a.wind = Vec2::new(new_wind_x, new_wind_y);
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_a_wind_speed.clamp(0.0, 5.0);
+                if (clouds.layer_a.wind_speed - new_value).abs() > f32::EPSILON {
+                    clouds.layer_a.wind_speed = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_b_base_altitude.clamp(0.0, 12000.0);
+                if (clouds.layer_b.base_altitude - new_value).abs() > f32::EPSILON {
+                    clouds.layer_b.base_altitude = new_value;
+                    cloud_dirty = true;
+                }
+                let min_top = clouds.layer_b.base_altitude + 10.0;
+                let new_value = self
+                    .slider_values
+                    .cloud_layer_b_top_altitude
+                    .clamp(min_top, 20000.0);
+                if (clouds.layer_b.top_altitude - new_value).abs() > f32::EPSILON {
+                    clouds.layer_b.top_altitude = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_b_density_scale.clamp(0.0, 2.0);
+                if (clouds.layer_b.density_scale - new_value).abs() > f32::EPSILON {
+                    clouds.layer_b.density_scale = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_b_noise_scale.clamp(0.1, 2.0);
+                if (clouds.layer_b.noise_scale - new_value).abs() > f32::EPSILON {
+                    clouds.layer_b.noise_scale = new_value;
+                    cloud_dirty = true;
+                }
+                let new_wind_x = self.slider_values.cloud_layer_b_wind_x.clamp(-5.0, 5.0);
+                let new_wind_y = self.slider_values.cloud_layer_b_wind_y.clamp(-5.0, 5.0);
+                if (clouds.layer_b.wind.x - new_wind_x).abs() > f32::EPSILON
+                    || (clouds.layer_b.wind.y - new_wind_y).abs() > f32::EPSILON
+                {
+                    clouds.layer_b.wind = Vec2::new(new_wind_x, new_wind_y);
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_layer_b_wind_speed.clamp(0.0, 5.0);
+                if (clouds.layer_b.wind_speed - new_value).abs() > f32::EPSILON {
+                    clouds.layer_b.wind_speed = new_value;
                     cloud_dirty = true;
                 }
                 let new_value = self.slider_values.cloud_step_count.clamp(8.0, 256.0).round();
@@ -665,19 +752,6 @@ impl DebugGui {
                 let new_value = self.slider_values.cloud_phase_g.clamp(-0.2, 0.9);
                 if (clouds.phase_g - new_value).abs() > f32::EPSILON {
                     clouds.phase_g = new_value;
-                    cloud_dirty = true;
-                }
-                let new_wind_x = self.slider_values.cloud_wind_x.clamp(-5.0, 5.0);
-                let new_wind_y = self.slider_values.cloud_wind_y.clamp(-5.0, 5.0);
-                if (clouds.wind.x - new_wind_x).abs() > f32::EPSILON
-                    || (clouds.wind.y - new_wind_y).abs() > f32::EPSILON
-                {
-                    clouds.wind = Vec2::new(new_wind_x, new_wind_y);
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_wind_speed.clamp(0.0, 5.0);
-                if (clouds.wind_speed - new_value).abs() > f32::EPSILON {
-                    clouds.wind_speed = new_value;
                     cloud_dirty = true;
                 }
                 let new_scale = cloud_resolution_scale_from_value(self.slider_values.cloud_low_res_scale);
@@ -957,8 +1031,12 @@ impl DebugGui {
                 DebugGraphicsTab::Clouds => {
                     if let Some(clouds) = unsafe { bindings.cloud_settings.as_ref() } {
                         info_lines.push(format!(
-                            "Altitude: {:.0}-{:.0} m",
-                            clouds.base_altitude, clouds.top_altitude
+                            "Layer A: {:.0}-{:.0} m",
+                            clouds.layer_a.base_altitude, clouds.layer_a.top_altitude
+                        ));
+                        info_lines.push(format!(
+                            "Layer B: {:.0}-{:.0} m",
+                            clouds.layer_b.base_altitude, clouds.layer_b.top_altitude
                         ));
                         info_lines.push(format!("Step count: {}", clouds.step_count));
                         info_lines.push(format!(
@@ -1119,230 +1197,286 @@ impl DebugGui {
                     ),
                     Slider::new(
                         301,
-                        "Base Altitude",
+                        "Layer A Base Alt",
                         0.0,
                         3000.0,
-                        self.slider_values.cloud_base_altitude,
+                        self.slider_values.cloud_layer_a_base_altitude,
                     ),
                     Slider::new(
                         302,
-                        "Top Altitude",
+                        "Layer A Top Alt",
                         100.0,
                         6000.0,
-                        self.slider_values.cloud_top_altitude,
+                        self.slider_values.cloud_layer_a_top_altitude,
                     ),
                     Slider::new(
                         303,
-                        "Density Scale",
+                        "Layer A Density",
                         0.0,
                         2.0,
-                        self.slider_values.cloud_density_scale,
+                        self.slider_values.cloud_layer_a_density_scale,
                     ),
                     Slider::new(
                         304,
+                        "Layer A Noise Scale",
+                        0.1,
+                        2.0,
+                        self.slider_values.cloud_layer_a_noise_scale,
+                    ),
+                    Slider::new(
+                        305,
+                        "Layer A Wind X",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_layer_a_wind_x,
+                    ),
+                    Slider::new(
+                        306,
+                        "Layer A Wind Y",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_layer_a_wind_y,
+                    ),
+                    Slider::new(
+                        307,
+                        "Layer A Wind Speed",
+                        0.0,
+                        5.0,
+                        self.slider_values.cloud_layer_a_wind_speed,
+                    ),
+                    Slider::new(
+                        308,
+                        "Layer B Base Alt",
+                        0.0,
+                        12000.0,
+                        self.slider_values.cloud_layer_b_base_altitude,
+                    ),
+                    Slider::new(
+                        309,
+                        "Layer B Top Alt",
+                        100.0,
+                        20000.0,
+                        self.slider_values.cloud_layer_b_top_altitude,
+                    ),
+                    Slider::new(
+                        310,
+                        "Layer B Density",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_layer_b_density_scale,
+                    ),
+                    Slider::new(
+                        311,
+                        "Layer B Noise Scale",
+                        0.1,
+                        2.0,
+                        self.slider_values.cloud_layer_b_noise_scale,
+                    ),
+                    Slider::new(
+                        312,
+                        "Layer B Wind X",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_layer_b_wind_x,
+                    ),
+                    Slider::new(
+                        313,
+                        "Layer B Wind Y",
+                        -5.0,
+                        5.0,
+                        self.slider_values.cloud_layer_b_wind_y,
+                    ),
+                    Slider::new(
+                        314,
+                        "Layer B Wind Speed",
+                        0.0,
+                        5.0,
+                        self.slider_values.cloud_layer_b_wind_speed,
+                    ),
+                    Slider::new(
+                        315,
                         "Step Count",
                         8.0,
                         256.0,
                         self.slider_values.cloud_step_count,
                     ),
                     Slider::new(
-                        305,
+                        316,
                         "Light Step Count",
                         4.0,
                         128.0,
                         self.slider_values.cloud_light_step_count,
                     ),
                     Slider::new(
-                        306,
+                        317,
                         "Phase G",
                         -0.2,
                         0.9,
                         self.slider_values.cloud_phase_g,
                     ),
                     Slider::new(
-                        307,
-                        "Wind X",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_wind_x,
-                    ),
-                    Slider::new(
-                        308,
-                        "Wind Y",
-                        -5.0,
-                        5.0,
-                        self.slider_values.cloud_wind_y,
-                    ),
-                    Slider::new(
-                        309,
-                        "Wind Speed",
-                        0.0,
-                        5.0,
-                        self.slider_values.cloud_wind_speed,
-                    ),
-                    Slider::new(
-                        310,
+                        318,
                         "Low Res Scale",
                         0.0,
                         1.0,
                         self.slider_values.cloud_low_res_scale,
                     ),
                     Slider::new(
-                        311,
+                        319,
                         "Coverage Power",
                         0.1,
                         4.0,
                         self.slider_values.cloud_coverage_power,
                     ),
                     Slider::new(
-                        312,
+                        320,
                         "Detail Strength",
                         0.0,
                         2.0,
                         self.slider_values.cloud_detail_strength,
                     ),
                     Slider::new(
-                        313,
+                        321,
                         "Curl Strength",
                         0.0,
                         2.0,
                         self.slider_values.cloud_curl_strength,
                     ),
                     Slider::new(
-                        314,
+                        322,
                         "Jitter Strength",
                         0.0,
                         2.0,
                         self.slider_values.cloud_jitter_strength,
                     ),
                     Slider::new(
-                        315,
+                        323,
                         "Epsilon",
                         0.0001,
                         0.1,
                         self.slider_values.cloud_epsilon,
                     ),
                     Slider::new(
-                        316,
+                        324,
                         "Sun Radiance R",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_r,
                     ),
                     Slider::new(
-                        317,
+                        325,
                         "Sun Radiance G",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_g,
                     ),
                     Slider::new(
-                        318,
+                        326,
                         "Sun Radiance B",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_b,
                     ),
                     Slider::new(
-                        319,
+                        327,
                         "Sun Dir X",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_x,
                     ),
                     Slider::new(
-                        320,
+                        328,
                         "Sun Dir Y",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_y,
                     ),
                     Slider::new(
-                        321,
+                        329,
                         "Sun Dir Z",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_z,
                     ),
                     Slider::new(
-                        322,
+                        330,
                         "Shadow Enabled",
                         0.0,
                         1.0,
                         self.slider_values.cloud_shadow_enabled,
                     ),
                     Slider::new(
-                        323,
+                        331,
                         "Shadow Resolution",
                         64.0,
                         2048.0,
                         self.slider_values.cloud_shadow_resolution,
                     ),
                     Slider::new(
-                        324,
+                        332,
                         "Shadow Extent",
                         1000.0,
                         200000.0,
                         self.slider_values.cloud_shadow_extent,
                     ),
                     Slider::new(
-                        325,
+                        333,
                         "Shadow Strength",
                         0.0,
                         2.0,
                         self.slider_values.cloud_shadow_strength,
                     ),
                     Slider::new(
-                        332,
+                        334,
                         "Shadow Cascades",
                         1.0,
                         4.0,
                         self.slider_values.cloud_shadow_cascade_count,
                     ),
                     Slider::new(
-                        333,
+                        335,
                         "Shadow Split Lambda",
                         0.0,
                         1.0,
                         self.slider_values.cloud_shadow_split_lambda,
                     ),
                     Slider::new(
-                        326,
+                        336,
                         "Temporal Blend",
                         0.0,
                         1.0,
                         self.slider_values.cloud_temporal_blend_factor,
                     ),
                     Slider::new(
-                        327,
+                        337,
                         "Temporal Clamp",
                         0.0,
                         1.0,
                         self.slider_values.cloud_temporal_clamp_strength,
                     ),
                     Slider::new(
-                        328,
+                        338,
                         "Temporal Depth Sigma",
                         0.1,
                         100.0,
                         self.slider_values.cloud_temporal_depth_sigma,
                     ),
                     Slider::new(
-                        329,
+                        339,
                         "Temporal History Scale",
                         0.0,
                         4.0,
                         self.slider_values.cloud_temporal_history_weight_scale,
                     ),
                     Slider::new(
-                        330,
+                        340,
                         "Debug View",
                         0.0,
-                        6.0,
+                        8.0,
                         self.slider_values.cloud_debug_view,
                     ),
                     Slider::new(
-                        331,
+                        341,
                         "Budget (ms)",
                         0.1,
                         20.0,
@@ -1480,13 +1614,15 @@ impl DebugGui {
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
-    match value.round().clamp(0.0, 6.0) as u32 {
+    match value.round().clamp(0.0, 8.0) as u32 {
         1 => CloudDebugView::WeatherMap,
         2 => CloudDebugView::ShadowMap,
         3 => CloudDebugView::Transmittance,
         4 => CloudDebugView::StepHeatmap,
         5 => CloudDebugView::TemporalWeight,
         6 => CloudDebugView::Stats,
+        7 => CloudDebugView::LayerA,
+        8 => CloudDebugView::LayerB,
         _ => CloudDebugView::None,
     }
 }
@@ -1500,6 +1636,8 @@ fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
         CloudDebugView::StepHeatmap => "Step Heatmap",
         CloudDebugView::TemporalWeight => "Temporal Weight",
         CloudDebugView::Stats => "Stats",
+        CloudDebugView::LayerA => "Layer A",
+        CloudDebugView::LayerB => "Layer B",
     }
 }
 

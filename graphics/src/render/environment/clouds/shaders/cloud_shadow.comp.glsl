@@ -25,11 +25,18 @@ layout(set = 0, binding = 0, scalar) uniform CloudShadowParams {
     uvec3 detail_noise_size;
     uint weather_map_size;
     uint camera_index;
-    float cloud_base;
-    float cloud_top;
-    float density_scale;
-    float _padding_1;
-    vec2 wind;
+    float cloud_base_a;
+    float cloud_top_a;
+    float density_scale_a;
+    float noise_scale_a;
+    vec2 wind_a;
+    float cloud_base_b;
+    float cloud_top_b;
+    float density_scale_b;
+    float noise_scale_b;
+    vec2 wind_b;
+    uvec3 weather_channels_a;
+    uvec3 weather_channels_b;
     float time;
     float coverage_power;
     vec3 sun_direction;
@@ -72,9 +79,17 @@ float sample_noise(texture2D tex, sampler samp, vec3 p, uvec3 dims) {
     return mix(n0, n1, fz);
 }
 
-float sample_weather(vec2 uv) {
-    vec2 wrapped = fract(uv);
-    return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), wrapped).r;
+float weather_channel(vec4 weather, uint channel) {
+    if (channel == 0u) {
+        return weather.r;
+    }
+    if (channel == 1u) {
+        return weather.g;
+    }
+    if (channel == 2u) {
+        return weather.b;
+    }
+    return weather.a;
 }
 
 void main() {
@@ -96,27 +111,57 @@ void main() {
     vec2 uv = (vec2(gid) + 0.5) / float(cascade_resolution);
     float cascade_extent = params.cascade_extents[cascade_index];
     vec2 centered = (uv * 2.0 - 1.0) * cascade_extent;
-    vec3 origin = camera_position + vec3(centered.x, params.cloud_top, centered.y);
+    float max_top = max(params.cloud_top_a, params.cloud_top_b);
+    float min_base = min(params.cloud_base_a, params.cloud_base_b);
+    vec3 origin = camera_position + vec3(centered.x, max_top, centered.y);
     vec3 dir = normalize(-params.sun_direction);
 
-    float layer_depth = params.cloud_top - params.cloud_base;
+    float layer_depth = max_top - min_base;
+    if (layer_depth <= 0.0) {
+        uint cascade_offset = params.cascade_offsets[cascade_index];
+        uint idx = cascade_offset + gid.y * cascade_resolution + gid.x;
+        cloud_shadow_buffer.values[idx] = 1.0;
+        return;
+    }
     float step_count = 12.0;
     float step_size = layer_depth / step_count;
     float transmittance = 1.0;
 
     for (uint i = 0; i < uint(step_count); ++i) {
-        float h = params.cloud_top - float(i) * step_size;
+        float h = max_top - float(i) * step_size;
         vec3 sample_pos = vec3(origin.x, h, origin.z) + dir * (float(i) * step_size);
-        float height_frac = clamp((h - params.cloud_base) / layer_depth, 0.0, 1.0);
+        float sigma = 0.0;
 
-        vec2 weather_uv = (sample_pos.xz * 0.0001) + params.wind * params.time * 0.0001;
-        float coverage = pow(sample_weather(weather_uv), params.coverage_power);
-        vec3 base_pos = sample_pos * 0.00025;
-        float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
-        float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
-        float density = max(base_noise * coverage - (1.0 - height_frac), 0.0);
-        density = mix(density, density * detail_noise, 0.5);
-        float sigma = density * params.density_scale;
+        if (h >= params.cloud_base_a && h <= params.cloud_top_a && params.density_scale_a > 0.0) {
+            float height_frac = clamp((h - params.cloud_base_a) / max(params.cloud_top_a - params.cloud_base_a, 1.0), 0.0, 1.0);
+            float weather_scale = 0.0001 * params.noise_scale_a;
+            vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_a * params.time * weather_scale;
+            vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
+            float coverage = pow(weather_channel(weather, params.weather_channels_a.x), params.coverage_power);
+            float thickness = weather_channel(weather, params.weather_channels_a.z);
+            vec3 base_pos = sample_pos * (0.00025 * params.noise_scale_a);
+            float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
+            float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
+            float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
+            density = mix(density, density * detail_noise, 0.5);
+            sigma += density * params.density_scale_a;
+        }
+
+        if (h >= params.cloud_base_b && h <= params.cloud_top_b && params.density_scale_b > 0.0) {
+            float height_frac = clamp((h - params.cloud_base_b) / max(params.cloud_top_b - params.cloud_base_b, 1.0), 0.0, 1.0);
+            float weather_scale = 0.0001 * params.noise_scale_b;
+            vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_b * params.time * weather_scale;
+            vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
+            float coverage = pow(weather_channel(weather, params.weather_channels_b.x), params.coverage_power);
+            float thickness = weather_channel(weather, params.weather_channels_b.z);
+            vec3 base_pos = sample_pos * (0.00025 * params.noise_scale_b);
+            float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
+            float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
+            float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
+            density = mix(density, density * detail_noise, 0.5);
+            sigma += density * params.density_scale_b;
+        }
+
         transmittance *= exp(-sigma * step_size * params.shadow_strength);
         if (transmittance < 0.01) {
             break;

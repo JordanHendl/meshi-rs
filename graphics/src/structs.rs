@@ -249,6 +249,8 @@ pub enum CloudDebugView {
     StepHeatmap = 4,
     TemporalWeight = 5,
     Stats = 6,
+    LayerA = 7,
+    LayerB = 8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -315,16 +317,36 @@ impl Default for CloudTemporalSettings {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CloudSettings {
-    pub enabled: bool,
+pub struct CloudLayerSettings {
     pub base_altitude: f32,
     pub top_altitude: f32,
     pub density_scale: f32,
+    pub noise_scale: f32,
+    pub wind: Vec2,
+    pub wind_speed: f32,
+}
+
+impl Default for CloudLayerSettings {
+    fn default() -> Self {
+        Self {
+            base_altitude: 300.0,
+            top_altitude: 400.0,
+            density_scale: 0.5,
+            noise_scale: 1.0,
+            wind: Vec2::new(1.0, 0.0),
+            wind_speed: 0.2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloudSettings {
+    pub enabled: bool,
+    pub layer_a: CloudLayerSettings,
+    pub layer_b: CloudLayerSettings,
     pub step_count: u32,
     pub light_step_count: u32,
     pub phase_g: f32,
-    pub wind: Vec2,
-    pub wind_speed: f32,
     pub low_res_scale: CloudResolutionScale,
     pub coverage_power: f32,
     pub detail_strength: f32,
@@ -343,14 +365,18 @@ impl Default for CloudSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            base_altitude: 300.0,
-            top_altitude: 400.0,
-            density_scale: 0.5,
+            layer_a: CloudLayerSettings::default(),
+            layer_b: CloudLayerSettings {
+                base_altitude: 650.0,
+                top_altitude: 900.0,
+                density_scale: 0.22,
+                noise_scale: 0.7,
+                wind: Vec2::new(-0.4, 0.2),
+                wind_speed: 0.35,
+            },
             step_count: 96,
             light_step_count: 18,
             phase_g: 0.6,
-            wind: Vec2::new(1.0, 0.0),
-            wind_speed: 0.2,
             low_res_scale: CloudResolutionScale::Half,
             coverage_power: 1.2,
             detail_strength: 0.6,

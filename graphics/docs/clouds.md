@@ -4,10 +4,10 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 
 ## High-Level Overview
 
-The cloud system is a single-layer, view-ray-marched volume with optional shadow prepass and temporal reuse:
+The cloud system is a two-layer, view-ray-marched volume with optional shadow prepass and temporal reuse:
 
 1. **Weather-driven density field** – a 2D weather map provides coverage/type/thickness. This drives a layered density function that combines base and detail noise.
-2. **Low-res raymarch** – the camera frustum is intersected against a fixed-height cloud slab (`base_altitude` → `top_altitude`). Density is sampled along view rays and integrated with Beer–Lambert extinction.
+2. **Low-res raymarch** – the camera frustum is intersected against two cloud slabs (`layer_a` + `layer_b`). Density is sampled along view rays and integrated with Beer–Lambert extinction, then composited in depth order.
 3. **Lighting and shadows** – lighting uses a Henyey–Greenstein phase function with either a directional sun or scene lights. A separate shadow pass generates a top-down transmittance map to accelerate sun lighting.
 4. **Temporal reprojection** – history buffers (color/transmittance/depth/weight) are reprojected and clamped to stabilize noise/jitter.
 5. **Depth-aware upsample + composite** – low-res clouds are upsampled against scene depth, then blended into the scene color.
@@ -23,7 +23,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
   * **R** – coverage `[0..1]`.
   * **G** – cloud type `[0..1]` (used to bias vertical density and detail response).
   * **B** – thickness `[0..1]`.
-  * **A** – reserved (unused in the current pipeline).
+  * **A** – layer B coverage `[0..1]` (layer B shares G/B for type/thickness by default).
 
 ### BaseNoise3D / DetailNoise3D
 * **Format**: `R8`.
@@ -53,7 +53,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
   * WeatherMap2D (`RGBA8`).
   * BaseNoise3D atlas (`R8`).
   * DetailNoise3D atlas (`R8`).
-  * Cloud layer parameters (base/top altitude, density, wind, coverage).
+  * Cloud layer parameters (base/top altitude, density, noise scale, wind, coverage).
   * Sun direction.
 * **Output**:
   * `CloudShadowMap2D` transmittance buffer (`float`).
@@ -68,7 +68,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
   * BlueNoise2D.
   * Sun direction + radiance.
   * Optional CloudShadowMap2D (falls back to light marching if disabled).
-  * Wind + time.
+  * Per-layer wind + time.
 * **Outputs (low-res)**:
   * `CloudColor` (HDR `vec4` buffer).
   * `CloudTransmittance` (`float`).
@@ -78,7 +78,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
   * Uses exponential transmittance integration per step.
   * Early-out when `transmittance < epsilon`.
   * Blue-noise jitter offsets the starting point along the ray to reduce banding.
-  * The raymarch operates on a fixed-height slab; there is no horizon intersection with a curved atmosphere.
+  * The raymarch operates on fixed-height slabs; there is no horizon intersection with a curved atmosphere.
 
 ### Pass C – Temporal Reprojection
 * **Inputs**:
@@ -104,11 +104,10 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 
 ## Tuning Knobs (`CloudSettings`)
 
-* **Altitude**: `base_altitude`, `top_altitude`.
-* **Density**: `density_scale`.
+* **Layer A**: `layer_a.base_altitude`, `layer_a.top_altitude`, `layer_a.density_scale`, `layer_a.noise_scale`, `layer_a.wind`, `layer_a.wind_speed`.
+* **Layer B**: `layer_b.base_altitude`, `layer_b.top_altitude`, `layer_b.density_scale`, `layer_b.noise_scale`, `layer_b.wind`, `layer_b.wind_speed`.
 * **Raymarch Steps**: `step_count`, `light_step_count`.
 * **Phase**: `phase_g` (Henyey–Greenstein).
-* **Wind**: `wind`, `wind_speed`.
 * **Resolution**: `low_res_scale` (1/2 or 1/4).
 * **Shadow**: `shadow.enabled`, `shadow.resolution`, `shadow.extent`, `shadow.strength`.
 * **Temporal**: `temporal.blend_factor`, `temporal.clamp_strength`, `temporal.depth_sigma`.
@@ -125,6 +124,8 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 4. **StepHeatmap** – normalized step usage.
 5. **TemporalWeight** – history weight/disocclusion visualization.
 6. **Stats** – enable the cloud performance timing overlay.
+7. **LayerA** – isolate layer A.
+8. **LayerB** – isolate layer B.
 
 ## Determinism
 
@@ -136,7 +137,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 
 The raymarch shader performs the following steps per pixel:
 
-1. **Frustum ray setup** – the pixel's NDC is unprojected to a world-space ray. The ray is intersected against the cloud slab defined by `cloud_base`/`cloud_top`. The first sample is jittered with blue noise.  
+1. **Frustum ray setup** – the pixel's NDC is unprojected to a world-space ray. The ray is intersected against each cloud slab defined by `layer_a`/`layer_b`. The first sample is jittered with blue noise.  
 2. **Weather sampling** – the weather map is sampled at `world.xz` with wind/time offsets to drive large-scale variation:
    * **Coverage**: `weather.r` raised to `coverage_power` controls overall occupancy.
    * **Type**: `weather.g` biases the vertical response and detail influence.
@@ -188,7 +189,7 @@ The implementation mirrors Nubis-inspired techniques in several key ways:
 
 **Present (implemented in this renderer):**
 
-* Single-layer cloud slab with configurable base/top altitude.
+* Two cloud slabs with configurable base/top altitude (layer A + layer B).
 * Weather-driven coverage/type/thickness.
 * Base + detail 3D noise, plus optional curl noise distortion.
 * Directional sun lighting with either shadow map sampling or short light marches.
@@ -197,7 +198,7 @@ The implementation mirrors Nubis-inspired techniques in several key ways:
 
 **Missing / Simplified compared to a full Nubis pipeline:**
 
-* **No multi-layer cloud system** – Nubis often blends multiple cloud types (e.g., cumulus + cirrus). This renderer is a single slab.
+* **No curved atmosphere intersection** – slabs are flat, so horizon curvature is not modeled.
 * **No explicit erosion/ambient occlusion maps** – Nubis frequently uses erosion or curl noise textures to carve edges; here, erosion is approximated via detail noise.
 * **No multiple scattering approximation** – lighting is single-scatter only; there is no volumetric multiple-scattering or energy-conserving compensation.
 * **No atmospheric coupling** – the cloud lighting does not integrate atmospheric transmittance or aerial perspective.

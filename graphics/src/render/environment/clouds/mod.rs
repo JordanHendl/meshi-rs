@@ -6,7 +6,7 @@ pub mod cloud_pass_composite;
 
 use cloud_assets::{CloudAssets, CloudNoiseSizes};
 use cloud_pass_composite::CloudCompositePass;
-use cloud_pass_raymarch::{CloudRaymarchPass, CloudSamplingSettings};
+use cloud_pass_raymarch::{CloudLayerSampling, CloudRaymarchPass, CloudSamplingSettings};
 use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use crate::structs::{CloudResolutionScale, CloudSettings};
@@ -230,15 +230,27 @@ impl CloudRenderer {
             base_noise_dims: self.assets.base_noise_dims,
             detail_noise_dims: self.assets.detail_noise_dims,
             weather_map_size: self.assets.weather_map_size,
-            cloud_base: self.settings.base_altitude,
-            cloud_top: self.settings.top_altitude,
-            density_scale: self.settings.density_scale,
+            layer_a: CloudLayerSampling {
+                cloud_base: self.settings.layer_a.base_altitude,
+                cloud_top: self.settings.layer_a.top_altitude,
+                density_scale: self.settings.layer_a.density_scale,
+                noise_scale: self.settings.layer_a.noise_scale,
+                wind: self.settings.layer_a.wind * self.settings.layer_a.wind_speed,
+                weather_channels: self.assets.weather_layout.layer_a.as_u32(),
+            },
+            layer_b: CloudLayerSampling {
+                cloud_base: self.settings.layer_b.base_altitude,
+                cloud_top: self.settings.layer_b.top_altitude,
+                density_scale: self.settings.layer_b.density_scale,
+                noise_scale: self.settings.layer_b.noise_scale,
+                wind: self.settings.layer_b.wind * self.settings.layer_b.wind_speed,
+                weather_channels: self.assets.weather_layout.layer_b.as_u32(),
+            },
             step_count: self.settings.step_count,
             light_step_count: self.settings.light_step_count,
             phase_g: self.settings.phase_g,
             sun_radiance: self.settings.sun_radiance,
             sun_direction: self.settings.sun_direction.normalize_or_zero(),
-            wind: self.settings.wind * self.settings.wind_speed,
             coverage_power: self.settings.coverage_power,
             detail_strength: self.settings.detail_strength,
             curl_strength: self.settings.curl_strength,
@@ -257,6 +269,7 @@ impl CloudRenderer {
             time: self.time,
             use_shadow_map: self.settings.shadow.enabled,
             camera_index,
+            debug_view: self.settings.debug_view as u32,
         };
 
         if self.settings.shadow.enabled {

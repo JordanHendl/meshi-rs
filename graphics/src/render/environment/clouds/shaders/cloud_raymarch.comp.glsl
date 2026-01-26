@@ -29,16 +29,24 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uint shadow_cascade_offsets[4];
     float shadow_cascade_strengths[4];
     uint camera_index;
-    uvec3 _padding;
-    float cloud_base;
-    float cloud_top;
-    float density_scale;
+    uvec3 weather_channels_a;
+    uint debug_view;
+    float cloud_base_a;
+    float cloud_top_a;
+    float density_scale_a;
+    float noise_scale_a;
+    vec2 wind_a;
+    float cloud_base_b;
+    float cloud_top_b;
+    float density_scale_b;
+    float noise_scale_b;
+    vec2 wind_b;
+    uvec3 weather_channels_b;
     uint step_count;
     uint light_step_count;
     float phase_g;
     vec3 sun_radiance;
     float shadow_strength;
-    vec2 wind;
     float time;
     float coverage_power;
     float detail_strength;
@@ -128,6 +136,19 @@ vec4 sample_weather(vec2 uv) {
     return texture(sampler2D(cloud_weather_map, cloud_weather_sampler), wrapped);
 }
 
+float weather_channel(vec4 weather, uint channel) {
+    if (channel == 0u) {
+        return weather.r;
+    }
+    if (channel == 1u) {
+        return weather.g;
+    }
+    if (channel == 2u) {
+        return weather.b;
+    }
+    return weather.a;
+}
+
 float phase_hg(float cos_theta, float g) {
     float g2 = g * g;
     float denom = pow(1.0 + g2 - 2.0 * g * cos_theta, 1.5);
@@ -209,42 +230,46 @@ vec3 light_direction(Light light, vec3 sample_pos, out float attenuation, out fl
     return light_dir;
 }
 
-void main() {
-    uvec2 gid = gl_GlobalInvocationID.xy;
-    if (gid.x >= params.output_resolution.x || gid.y >= params.output_resolution.y) {
-        return;
+struct LayerResult {
+    vec3 color;
+    float trans;
+    float depth;
+    float weight;
+    float steps;
+};
+
+LayerResult march_layer(
+    vec3 camera_position,
+    vec3 camera_forward,
+    mat4 view,
+    vec3 ray_dir,
+    uvec2 gid,
+    float cloud_base,
+    float cloud_top,
+    float density_scale,
+    float noise_scale,
+    vec2 wind,
+    uvec3 weather_channels
+) {
+    LayerResult result;
+    result.color = vec3(0.0);
+    result.trans = 1.0;
+    result.depth = 0.0;
+    result.weight = 0.0;
+    result.steps = 0.0;
+    if (cloud_top <= cloud_base || density_scale <= 0.0) {
+        return result;
     }
 
-    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
-    vec3 camera_position = camera.world_from_camera[3].xyz;
-    vec3 camera_forward = normalize(-camera.world_from_camera[2].xyz);
-    mat4 view = inverse(camera.world_from_camera);
-    mat4 view_proj = camera.projection * view;
-    mat4 inv_view_proj = inverse(view_proj);
-
-    uint idx = gid.y * params.output_resolution.x + gid.x;
-
-    vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
-    uv.y = 1.0 - uv.y;
-    vec2 ndc = uv * 2.0 - 1.0;
-    vec4 clip = vec4(ndc, 1.0, 1.0);
-    vec4 world = inv_view_proj * clip;
-    world.xyz /= world.w;
-    vec3 ray_dir = normalize(world.xyz - camera_position);
-
-    float t0 = (params.cloud_base - camera_position.y) / ray_dir.y;
-    float t1 = (params.cloud_top - camera_position.y) / ray_dir.y;
+    float t0 = (cloud_base - camera_position.y) / ray_dir.y;
+    float t1 = (cloud_top - camera_position.y) / ray_dir.y;
     if (t0 > t1) {
         float temp = t0;
         t0 = t1;
         t1 = temp;
     }
     if (t1 <= 0.0) {
-        cloud_color_buffer.values[idx] = vec4(0.0);
-        cloud_transmittance_buffer.values[idx] = 1.0;
-        cloud_depth_buffer.values[idx] = 0.0;
-        cloud_steps_buffer.values[idx] = 0.0;
-        return;
+        return result;
     }
 
     float start = max(t0, 0.0);
@@ -264,15 +289,16 @@ void main() {
 
     for (uint i = 0; i < params.step_count; ++i) {
         vec3 sample_pos = camera_position + ray_dir * t;
-        float height_frac = clamp((sample_pos.y - params.cloud_base) / (params.cloud_top - params.cloud_base), 0.0, 1.0);
+        float height_frac = clamp((sample_pos.y - cloud_base) / (cloud_top - cloud_base), 0.0, 1.0);
 
-        vec2 weather_uv = sample_pos.xz * 0.0001 + params.wind * params.time * 0.0001;
+        float weather_scale = 0.0001 * noise_scale;
+        vec2 weather_uv = sample_pos.xz * weather_scale + wind * params.time * weather_scale;
         vec4 weather = sample_weather(weather_uv);
-        float coverage = pow(weather.r, params.coverage_power);
-        float type = weather.g;
-        float thickness = weather.b;
+        float coverage = pow(weather_channel(weather, weather_channels.x), params.coverage_power);
+        float type = weather_channel(weather, weather_channels.y);
+        float thickness = weather_channel(weather, weather_channels.z);
 
-        vec3 base_pos = sample_pos * 0.00025 + vec3(params.wind * params.time * 0.01, 0.0);
+        vec3 base_pos = sample_pos * (0.00025 * noise_scale) + vec3(wind * params.time * 0.01, 0.0);
         if (params.curl_strength > 0.0) {
             vec3 curl = curl_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
             base_pos += curl * params.curl_strength;
@@ -284,7 +310,7 @@ void main() {
         density *= mix(1.0, type, 0.5);
 
         if (density > 0.001) {
-            float sigma_t = density * params.density_scale;
+            float sigma_t = density * density_scale;
             float step_trans = exp(-sigma_t * step_size);
             vec3 scatter = vec3(0.0);
             int light_count = meshi_bindless_lights.lights.length();
@@ -338,10 +364,111 @@ void main() {
         }
     }
 
-    float depth = weight_accum > 0.0 ? depth_accum / weight_accum : 0.0;
+    result.color = color;
+    result.trans = clamp(transmittance, 0.0, 1.0);
+    result.depth = weight_accum > 0.0 ? depth_accum / weight_accum : 0.0;
+    result.weight = weight_accum;
+    result.steps = steps_used / step_count;
+    return result;
+}
+
+void main() {
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= params.output_resolution.x || gid.y >= params.output_resolution.y) {
+        return;
+    }
+
+    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    vec3 camera_position = camera.world_from_camera[3].xyz;
+    vec3 camera_forward = normalize(-camera.world_from_camera[2].xyz);
+    mat4 view = inverse(camera.world_from_camera);
+    mat4 view_proj = camera.projection * view;
+    mat4 inv_view_proj = inverse(view_proj);
+
+    uint idx = gid.y * params.output_resolution.x + gid.x;
+
+    vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
+    uv.y = 1.0 - uv.y;
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 clip = vec4(ndc, 1.0, 1.0);
+    vec4 world = inv_view_proj * clip;
+    world.xyz /= world.w;
+    vec3 ray_dir = normalize(world.xyz - camera_position);
+
+    LayerResult layer_a = march_layer(
+        camera_position,
+        camera_forward,
+        view,
+        ray_dir,
+        gid,
+        params.cloud_base_a,
+        params.cloud_top_a,
+        params.density_scale_a,
+        params.noise_scale_a,
+        params.wind_a,
+        params.weather_channels_a
+    );
+
+    LayerResult layer_b = march_layer(
+        camera_position,
+        camera_forward,
+        view,
+        ray_dir,
+        gid,
+        params.cloud_base_b,
+        params.cloud_top_b,
+        params.density_scale_b,
+        params.noise_scale_b,
+        params.wind_b,
+        params.weather_channels_b
+    );
+
+    if (params.debug_view == 7u) {
+        layer_b.color = vec3(0.0);
+        layer_b.trans = 1.0;
+        layer_b.depth = 0.0;
+        layer_b.weight = 0.0;
+    }
+    if (params.debug_view == 8u) {
+        layer_a.color = vec3(0.0);
+        layer_a.trans = 1.0;
+        layer_a.depth = 0.0;
+        layer_a.weight = 0.0;
+    }
+
+    vec3 color = vec3(0.0);
+    float transmittance = 1.0;
+    float depth = 0.0;
+    float steps_used = 0.0;
+    bool has_a = layer_a.weight > 0.0;
+    bool has_b = layer_b.weight > 0.0;
+
+    if (has_a && has_b) {
+        bool a_first = layer_a.depth <= layer_b.depth;
+        if (a_first) {
+            color = layer_a.color + layer_a.trans * layer_b.color;
+            transmittance = layer_a.trans * layer_b.trans;
+            depth = layer_a.depth;
+        } else {
+            color = layer_b.color + layer_b.trans * layer_a.color;
+            transmittance = layer_b.trans * layer_a.trans;
+            depth = layer_b.depth;
+        }
+        steps_used = (layer_a.steps + layer_b.steps) * 0.5;
+    } else if (has_a) {
+        color = layer_a.color;
+        transmittance = layer_a.trans;
+        depth = layer_a.depth;
+        steps_used = layer_a.steps;
+    } else if (has_b) {
+        color = layer_b.color;
+        transmittance = layer_b.trans;
+        depth = layer_b.depth;
+        steps_used = layer_b.steps;
+    }
 
     cloud_color_buffer.values[idx] = vec4(color, 1.0);
     cloud_transmittance_buffer.values[idx] = clamp(transmittance, 0.0, 1.0);
     cloud_depth_buffer.values[idx] = depth;
-    cloud_steps_buffer.values[idx] = steps_used / step_count;
+    cloud_steps_buffer.values[idx] = steps_used;
 }

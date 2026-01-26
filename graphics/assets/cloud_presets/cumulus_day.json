@@ -1,13 +1,24 @@
 {
   "enabled": true,
-  "base_altitude": 1400.0,
-  "top_altitude": 3800.0,
-  "density_scale": 0.65,
+  "layer_a": {
+    "base_altitude": 1400.0,
+    "top_altitude": 3800.0,
+    "density_scale": 0.65,
+    "noise_scale": 1.0,
+    "wind": [1.0, 0.25],
+    "wind_speed": 18.0
+  },
+  "layer_b": {
+    "base_altitude": 6500.0,
+    "top_altitude": 9000.0,
+    "density_scale": 0.18,
+    "noise_scale": 0.6,
+    "wind": [-0.4, 0.2],
+    "wind_speed": 12.0
+  },
   "step_count": 96,
   "light_step_count": 6,
   "phase_g": 0.6,
-  "wind": [1.0, 0.25],
-  "wind_speed": 18.0,
   "low_res_scale": "Quarter",
   "coverage_power": 1.2,
   "detail_strength": 0.7,

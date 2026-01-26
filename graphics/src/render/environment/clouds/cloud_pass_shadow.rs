@@ -28,11 +28,18 @@ pub struct CloudShadowParams {
     pub detail_noise_size: [u32; 3],
     pub weather_map_size: u32,
     pub camera_index: u32,
-    pub cloud_base: f32,
-    pub cloud_top: f32,
-    pub density_scale: f32,
-    pub _padding_1: f32,
-    pub wind: [f32; 2],
+    pub cloud_base_a: f32,
+    pub cloud_top_a: f32,
+    pub density_scale_a: f32,
+    pub noise_scale_a: f32,
+    pub wind_a: [f32; 2],
+    pub cloud_base_b: f32,
+    pub cloud_top_b: f32,
+    pub density_scale_b: f32,
+    pub noise_scale_b: f32,
+    pub wind_b: [f32; 2],
+    pub weather_channels_a: [u32; 3],
+    pub weather_channels_b: [u32; 3],
     pub time: f32,
     pub coverage_power: f32,
     pub sun_direction: [f32; 3],
@@ -174,10 +181,18 @@ impl CloudShadowPass {
         ];
         params.weather_map_size = settings.weather_map_size;
         params.camera_index = settings.camera_index;
-        params.cloud_base = settings.cloud_base;
-        params.cloud_top = settings.cloud_top;
-        params.density_scale = settings.density_scale;
-        params.wind = [settings.wind.x, settings.wind.y];
+        params.cloud_base_a = settings.layer_a.cloud_base;
+        params.cloud_top_a = settings.layer_a.cloud_top;
+        params.density_scale_a = settings.layer_a.density_scale;
+        params.noise_scale_a = settings.layer_a.noise_scale;
+        params.wind_a = [settings.layer_a.wind.x, settings.layer_a.wind.y];
+        params.cloud_base_b = settings.layer_b.cloud_base;
+        params.cloud_top_b = settings.layer_b.cloud_top;
+        params.density_scale_b = settings.layer_b.density_scale;
+        params.noise_scale_b = settings.layer_b.noise_scale;
+        params.wind_b = [settings.layer_b.wind.x, settings.layer_b.wind.y];
+        params.weather_channels_a = settings.layer_a.weather_channels;
+        params.weather_channels_b = settings.layer_b.weather_channels;
         params.time = time;
         params.coverage_power = settings.coverage_power;
         params.sun_direction = [sun_direction.x, sun_direction.y, sun_direction.z];

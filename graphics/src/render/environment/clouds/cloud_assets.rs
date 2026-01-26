@@ -23,19 +23,39 @@ impl Default for CloudNoiseSizes {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CloudWeatherChannelLayout {
+pub struct CloudWeatherChannels {
     pub coverage: u8,
     pub cloud_type: u8,
     pub thickness: u8,
+}
+
+impl CloudWeatherChannels {
+    pub fn as_u32(self) -> [u32; 3] {
+        [self.coverage as u32, self.cloud_type as u32, self.thickness as u32]
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloudWeatherChannelLayout {
+    pub layer_a: CloudWeatherChannels,
+    /// Layer B defaults to alpha coverage and shares G/B for type/thickness.
+    pub layer_b: CloudWeatherChannels,
     pub reserved: u8,
 }
 
 impl Default for CloudWeatherChannelLayout {
     fn default() -> Self {
         Self {
-            coverage: 0,
-            cloud_type: 1,
-            thickness: 2,
+            layer_a: CloudWeatherChannels {
+                coverage: 0,
+                cloud_type: 1,
+                thickness: 2,
+            },
+            layer_b: CloudWeatherChannels {
+                coverage: 3,
+                cloud_type: 1,
+                thickness: 2,
+            },
             reserved: 3,
         }
     }
@@ -166,18 +186,19 @@ fn create_weather_map(
             let nx = x as f32 / size as f32;
             let ny = y as f32 / size as f32;
             let coverage = fbm_2d(nx, ny, 2.0, 4, 0x1bad_cafe).powf(1.15);
+            let coverage_b = fbm_2d(nx, ny, 1.6, 3, 0x33ee_aa55).powf(1.1);
             let cloud_type = fbm_2d(nx, ny, 1.3, 3, 0x55aa_22ff);
             let thickness = fbm_2d(nx, ny, 3.1, 4, 0x0ddc_4411).powf(0.9);
             let channels = [
                 (coverage * 255.0) as u8,
                 (cloud_type * 255.0) as u8,
                 (thickness * 255.0) as u8,
-                255,
+                (coverage_b * 255.0) as u8,
             ];
-            data[idx + layout.coverage as usize] = channels[0];
-            data[idx + layout.cloud_type as usize] = channels[1];
-            data[idx + layout.thickness as usize] = channels[2];
-            data[idx + layout.reserved as usize] = channels[3];
+            data[idx + layout.layer_a.coverage as usize] = channels[0];
+            data[idx + layout.layer_a.cloud_type as usize] = channels[1];
+            data[idx + layout.layer_a.thickness as usize] = channels[2];
+            data[idx + layout.layer_b.coverage as usize] = channels[3];
         }
     }
 
