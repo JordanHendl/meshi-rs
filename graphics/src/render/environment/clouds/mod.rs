@@ -70,6 +70,7 @@ impl CloudRenderer {
             state,
             &assets,
             settings.shadow.resolution,
+            settings.shadow.cascades.cascade_count,
             TIMER_SHADOW,
         );
         let raymarch_pass = CloudRaymarchPass::new(

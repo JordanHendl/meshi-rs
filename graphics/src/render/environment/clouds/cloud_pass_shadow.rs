@@ -20,6 +20,8 @@ const SHADOW_WORKGROUP_SIZE: u32 = 8;
 #[derive(Clone, Copy, Default)]
 pub struct CloudShadowParams {
     pub shadow_resolution: u32,
+    pub cascade_count: u32,
+    pub _padding_0: [u32; 2],
     pub base_noise_size: [u32; 3],
     pub detail_noise_size: [u32; 3],
     pub weather_map_size: u32,
@@ -33,12 +35,14 @@ pub struct CloudShadowParams {
     pub coverage_power: f32,
     pub sun_direction: [f32; 3],
     pub shadow_strength: f32,
-    pub shadow_extent: f32,
+    pub cascade_extents: [f32; 4],
+    pub cascade_splits: [f32; 4],
 }
 
 pub struct CloudShadowPass {
     pub shadow_buffer: Handle<dashi::Buffer>,
     pub shadow_resolution: u32,
+    pub shadow_cascade_count: u32,
     params: StagedBuffer,
     pipeline: Option<bento::builder::CSO>,
     sampler: Handle<Sampler>,
@@ -51,6 +55,7 @@ impl CloudShadowPass {
         state: &mut BindlessState,
         assets: &CloudAssets,
         shadow_resolution: u32,
+        cascade_count: u32,
         timer_index: u32,
     ) -> Self {
         let params = StagedBuffer::new(
@@ -64,10 +69,11 @@ impl CloudShadowPass {
             },
         );
 
+        let cascade_count = cascade_count.max(1);
         let shadow_buffer = ctx
             .make_buffer(&BufferInfo {
                 debug_name: "[CLOUD] Shadow Buffer",
-                byte_size: shadow_resolution * shadow_resolution * 4,
+                byte_size: shadow_resolution * shadow_resolution * 4 * cascade_count,
                 visibility: MemoryVisibility::Gpu,
                 usage: BufferUsage::STORAGE,
                 initial_data: None,
@@ -112,6 +118,7 @@ impl CloudShadowPass {
         Self {
             shadow_buffer,
             shadow_resolution,
+            shadow_cascade_count: cascade_count,
             params,
             pipeline,
             sampler,
@@ -125,8 +132,10 @@ impl CloudShadowPass {
         sun_direction: Vec3,
         time: f32,
     ) {
+        self.shadow_cascade_count = settings.shadow_cascade_count.max(1);
         let params = &mut self.params.as_slice_mut::<CloudShadowParams>()[0];
         params.shadow_resolution = self.shadow_resolution;
+        params.cascade_count = self.shadow_cascade_count;
         params.base_noise_size = [
             settings.base_noise_dims.x,
             settings.base_noise_dims.y,
@@ -147,7 +156,8 @@ impl CloudShadowPass {
         params.coverage_power = settings.coverage_power;
         params.sun_direction = [sun_direction.x, sun_direction.y, sun_direction.z];
         params.shadow_strength = settings.shadow_strength;
-        params.shadow_extent = settings.shadow_extent;
+        params.cascade_extents = settings.shadow_cascade_extents;
+        params.cascade_splits = settings.shadow_cascade_splits;
     }
 
     pub fn record(&mut self) -> CommandStream<Executable> {
@@ -156,6 +166,7 @@ impl CloudShadowPass {
         };
 
         let shadow_resolution = self.shadow_resolution;
+        let cascade_count = self.shadow_cascade_count.max(1);
         CommandStream::new()
             .begin()
             .combine(self.params.sync_up())
@@ -164,7 +175,7 @@ impl CloudShadowPass {
             .dispatch(&Dispatch {
                 x: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
                 y: (shadow_resolution + SHADOW_WORKGROUP_SIZE - 1) / SHADOW_WORKGROUP_SIZE,
-                z: 1,
+                z: cascade_count,
                 pipeline: pipeline.handle,
                 bind_tables: pipeline.tables(),
                 dynamic_buffers: Default::default(),

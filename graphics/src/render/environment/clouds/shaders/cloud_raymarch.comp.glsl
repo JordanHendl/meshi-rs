@@ -22,6 +22,9 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uint weather_map_size;
     uint frame_index;
     uint shadow_resolution;
+    uint shadow_cascade_count;
+    float shadow_cascade_splits[4];
+    float shadow_cascade_extents[4];
     uint camera_index;
     uvec3 _padding;
     float cloud_base;
@@ -128,12 +131,25 @@ float phase_hg(float cos_theta, float g) {
     return (1.0 - g2) / max(4.0 * 3.14159265 * denom, 1e-3);
 }
 
-float sample_shadow(vec3 world_pos, float shadow_extent, uint shadow_res) {
+uint select_shadow_cascade(float view_depth) {
+    uint count = max(params.shadow_cascade_count, 1u);
+    for (uint i = 0u; i < count; ++i) {
+        if (view_depth <= params.shadow_cascade_splits[i]) {
+            return i;
+        }
+    }
+    return count - 1u;
+}
+
+float sample_shadow(vec3 world_pos, float view_depth, uint shadow_res) {
+    uint cascade_index = select_shadow_cascade(view_depth);
+    float shadow_extent = params.shadow_cascade_extents[cascade_index];
     vec2 uv = (world_pos.xz / shadow_extent) * 0.5 + 0.5;
     uv = clamp(uv, vec2(0.0), vec2(1.0));
     uvec2 coord = uvec2(uv * float(shadow_res));
     coord = min(coord, uvec2(shadow_res - 1));
-    uint idx = coord.y * shadow_res + coord.x;
+    uint cascade_offset = cascade_index * shadow_res * shadow_res;
+    uint idx = cascade_offset + coord.y * shadow_res + coord.x;
     return cloud_shadow_buffer.values[idx];
 }
 
@@ -285,7 +301,8 @@ void main() {
                     float light_trans = 1.0;
                     vec3 sun_dir = normalize(params.sun_direction);
                     if (params.use_shadow_map == 1u && light_type == LIGHT_TYPE_DIRECTIONAL && dot(light_dir, sun_dir) > 0.95) {
-                        light_trans = sample_shadow(sample_pos, params.shadow_extent, params.shadow_resolution) * params.shadow_strength;
+                        float view_depth = -(view * vec4(sample_pos, 1.0)).z;
+                        light_trans = sample_shadow(sample_pos, view_depth, params.shadow_resolution) * params.shadow_strength;
                     } else {
                         light_trans = light_march(sample_pos, light_dir, max_dist, params.light_step_count, sigma_t, params.shadow_strength);
                     }
