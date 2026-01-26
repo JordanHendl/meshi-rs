@@ -1877,7 +1877,7 @@ impl DebugGui {
                         349,
                         "Debug View",
                         0.0,
-                        10.0,
+                        23.0,
                         self.slider_values.cloud_debug_view,
                     ),
                     Slider::new(
@@ -2019,7 +2019,7 @@ impl DebugGui {
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
-    match value.round().clamp(0.0, 10.0) as u32 {
+    match value.round().clamp(0.0, 23.0) as u32 {
         1 => CloudDebugView::WeatherMap,
         2 => CloudDebugView::ShadowMap,
         3 => CloudDebugView::Transmittance,
@@ -2030,6 +2030,14 @@ fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
         8 => CloudDebugView::LayerB,
         9 => CloudDebugView::SingleScatter,
         10 => CloudDebugView::MultiScatter,
+        11 => CloudDebugView::ShadowCascade0,
+        12 => CloudDebugView::ShadowCascade1,
+        13 => CloudDebugView::ShadowCascade2,
+        14 => CloudDebugView::ShadowCascade3,
+        20 => CloudDebugView::OpaqueShadowCascade0,
+        21 => CloudDebugView::OpaqueShadowCascade1,
+        22 => CloudDebugView::OpaqueShadowCascade2,
+        23 => CloudDebugView::OpaqueShadowCascade3,
         _ => CloudDebugView::None,
     }
 }
@@ -2047,6 +2055,14 @@ fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
         CloudDebugView::LayerB => "Layer B",
         CloudDebugView::SingleScatter => "Single Scatter",
         CloudDebugView::MultiScatter => "Multi Scatter",
+        CloudDebugView::ShadowCascade0 => "Cloud Shadow Cascade 0",
+        CloudDebugView::ShadowCascade1 => "Cloud Shadow Cascade 1",
+        CloudDebugView::ShadowCascade2 => "Cloud Shadow Cascade 2",
+        CloudDebugView::ShadowCascade3 => "Cloud Shadow Cascade 3",
+        CloudDebugView::OpaqueShadowCascade0 => "Opaque Shadow Cascade 0",
+        CloudDebugView::OpaqueShadowCascade1 => "Opaque Shadow Cascade 1",
+        CloudDebugView::OpaqueShadowCascade2 => "Opaque Shadow Cascade 2",
+        CloudDebugView::OpaqueShadowCascade3 => "Opaque Shadow Cascade 3",
     }
 }
 

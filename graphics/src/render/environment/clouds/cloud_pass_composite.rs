@@ -30,6 +30,9 @@ pub struct CloudCompositeParams {
     pub atmosphere_view_extinction: f32,
     pub atmosphere_haze_strength: f32,
     pub atmosphere_haze_color: [f32; 4],
+    pub shadow_cascade_count: u32,
+    pub shadow_cascade_resolutions: [u32; 4],
+    pub shadow_cascade_offsets: [u32; 4],
 }
 
 pub struct CloudCompositePass {
@@ -246,6 +249,9 @@ impl CloudCompositePass {
         atmosphere_view_extinction: f32,
         atmosphere_haze_strength: f32,
         atmosphere_haze_color: [f32; 4],
+        shadow_cascade_count: u32,
+        shadow_cascade_resolutions: [u32; 4],
+        shadow_cascade_offsets: [u32; 4],
     ) {
         let params = &mut self.params.as_slice_mut::<CloudCompositeParams>()[0];
         *params = CloudCompositeParams {
@@ -262,6 +268,9 @@ impl CloudCompositePass {
             atmosphere_view_extinction,
             atmosphere_haze_strength,
             atmosphere_haze_color,
+            shadow_cascade_count,
+            shadow_cascade_resolutions,
+            shadow_cascade_offsets,
         };
     }
 

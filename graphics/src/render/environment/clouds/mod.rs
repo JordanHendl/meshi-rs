@@ -218,6 +218,11 @@ impl CloudRenderer {
             running_offset = running_offset.saturating_add(resolution.saturating_mul(resolution));
             max_shadow_resolution = max_shadow_resolution.max(resolution);
         }
+        let shadow_cascade_splits =
+            self.settings
+                .shadow
+                .cascades
+                .compute_splits(camera_data.near, camera_data.far);
         let mut shadow_cascade_strengths = [0.0f32; 4];
         for cascade_index in 0..4 {
             shadow_cascade_strengths[cascade_index] = self.settings.shadow.strength
@@ -261,7 +266,7 @@ impl CloudRenderer {
             shadow_extent: self.settings.shadow.extent,
             shadow_cascade_count: self.settings.shadow.cascades.cascade_count,
             shadow_split_lambda: self.settings.shadow.cascades.split_lambda,
-            shadow_cascade_splits: self.settings.shadow.cascades.cascade_splits,
+            shadow_cascade_splits,
             shadow_cascade_extents: self.settings.shadow.cascades.cascade_extents,
             shadow_cascade_resolutions: self.settings.shadow.cascades.cascade_resolutions,
             shadow_cascade_offsets,
@@ -317,6 +322,9 @@ impl CloudRenderer {
                 self.settings.atmosphere_haze_color.z,
                 1.0,
             ],
+            self.settings.shadow.cascades.cascade_count,
+            self.settings.shadow.cascades.cascade_resolutions,
+            shadow_cascade_offsets,
         );
 
         self.timings.shadow_ms = _ctx

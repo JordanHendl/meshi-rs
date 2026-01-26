@@ -6,7 +6,7 @@ struct DeferredCombineInfo {
   uint shadow_texture_id;
   uint shadow_cascade_count;
   uint shadow_resolution;
-  uint _padding;
+  uint debug_view;
 };
 
 struct ShadowCascadeInfo {
@@ -24,6 +24,10 @@ static const uint LIGHT_TYPE_DIRECTIONAL = 0;
 static const uint LIGHT_TYPE_POINT = 1;
 static const uint LIGHT_TYPE_SPOT = 2;
 static const uint LIGHT_TYPE_AREA_RECT = 3;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_0 = 20u;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_1 = 21u;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_2 = 22u;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_3 = 23u;
 
 struct Camera {
   column_major float4x4 world_from_camera;
@@ -131,6 +135,18 @@ float4x4 view_from_camera(Camera camera) {
   return inverse(camera.world_from_camera);
 }
 
+float sample_shadow_debug(uint shadow_id, float2 uv, uint cascade_index, uint cascade_count) {
+  uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
+  uint grid_y = (cascade_count + grid_x - 1u) / grid_x;
+  uint tile_x = cascade_index % grid_x;
+  uint tile_y = cascade_index / grid_x;
+  float2 atlas_uv = (float2(tile_x, tile_y) + uv) / float2(grid_x, grid_y);
+  float2 atlas_size = float2(per_obj.shadow_resolution * grid_x, per_obj.shadow_resolution * grid_y);
+  float2 atlas_pos = atlas_uv * atlas_size;
+  int2 coord = int2(clamp(atlas_pos, float2(0.0, 0.0), atlas_size - 1.0));
+  return meshi_bindless_textures[shadow_id].Load(coord, 0).x;
+}
+
 uint select_cascade(float view_depth, float4 splits, uint cascade_count) {
   uint idx = 0;
   if (cascade_count > 1 && view_depth > splits.x) {
@@ -187,6 +203,15 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
 [shader("fragment")]
 FSOutput main(FSInput input) {
   FSOutput output;
+  uint debug_view = per_obj.debug_view;
+  if (debug_view >= DEBUG_VIEW_OPAQUE_SHADOW_0 && debug_view <= DEBUG_VIEW_OPAQUE_SHADOW_3) {
+    uint cascade_count = max(per_obj.shadow_cascade_count, 1u);
+    uint cascade_index = min(debug_view - DEBUG_VIEW_OPAQUE_SHADOW_0, cascade_count - 1u);
+    float shadow_depth = sample_shadow_debug(per_obj.shadow_texture_id, input.tex_coords, cascade_index, cascade_count);
+    output.color = float4(shadow_depth, shadow_depth, shadow_depth, 1.0);
+    return output;
+  }
+
   uint position_id = per_obj.position_texture_id;
   uint albedo_id = per_obj.albedo_texture_id;
   uint normal_id = per_obj.normal_texture_id;

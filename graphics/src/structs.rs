@@ -253,6 +253,14 @@ pub enum CloudDebugView {
     LayerB = 8,
     SingleScatter = 9,
     MultiScatter = 10,
+    ShadowCascade0 = 11,
+    ShadowCascade1 = 12,
+    ShadowCascade2 = 13,
+    ShadowCascade3 = 14,
+    OpaqueShadowCascade0 = 20,
+    OpaqueShadowCascade1 = 21,
+    OpaqueShadowCascade2 = 22,
+    OpaqueShadowCascade3 = 23,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -275,6 +283,29 @@ impl Default for ShadowCascadeSettings {
             cascade_resolutions: [256; 4],
             cascade_strengths: [1.0; 4],
         }
+    }
+}
+
+impl ShadowCascadeSettings {
+    pub fn compute_splits(&self, near: f32, far: f32) -> [f32; 4] {
+        let mut splits = [far; 4];
+        let count = self.cascade_count.clamp(1, 4) as usize;
+        if count == 0 {
+            return splits;
+        }
+
+        let safe_near = near.max(0.01);
+        let safe_far = far.max(safe_near + 0.01);
+        let lambda = self.split_lambda.clamp(0.0, 1.0);
+
+        for cascade_index in 0..count {
+            let p = (cascade_index + 1) as f32 / count as f32;
+            let log = safe_near * (safe_far / safe_near).powf(p);
+            let uniform = safe_near + (safe_far - safe_near) * p;
+            splits[cascade_index] = log * lambda + uniform * (1.0 - lambda);
+        }
+
+        splits
     }
 }
 

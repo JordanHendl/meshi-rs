@@ -38,7 +38,8 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 
 ### CloudShadowMap2D
 * **Format**: storage buffer of `float` (transmittance).
-* **Resolution**: `CloudShadowSettings.resolution` (default 256).
+* **Resolution**: `CloudShadowSettings.resolution` (default 256) per cascade, with cascade-specific overrides via `ShadowCascadeSettings.cascade_resolutions`.
+* **Layout**: cascades are packed linearly into the buffer using per-cascade offsets/resolutions computed on the CPU each frame.
 
 ### Cloud Raymarch Outputs
 * **CloudColor**: storage buffer of `vec4` (RGB + padding).
@@ -59,6 +60,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
   * `CloudShadowMap2D` transmittance buffer (`float`).
 * **Notes**:
   * Shadow map is centered around the camera with a stable world-space extent.
+  * Cascades use the same split computation as the opaque shadow system (log/linear blend via `split_lambda`).
   * The shader marches a fixed number of steps (12) from the top of the cloud slab to the base to estimate transmittance along the sun direction.
 
 ### Pass B – Cloud Ray March (Low-Res)
@@ -111,9 +113,9 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 * **Multi-scatter**: `multi_scatter_strength`, `multi_scatter_respects_shadow`.
 * **Resolution**: `low_res_scale` (1/2 or 1/4).
 * **Atmosphere**: `atmosphere_view_strength`, `atmosphere_view_extinction`, `atmosphere_light_transmittance`, `atmosphere_haze_strength`, `atmosphere_haze_color`.
-* **Shadow**: `shadow.enabled`, `shadow.resolution`, `shadow.extent`, `shadow.strength`.
+* **Shadow**: `shadow.enabled`, `shadow.resolution`, `shadow.extent`, `shadow.strength`, `shadow.cascades.cascade_count`, `shadow.cascades.split_lambda`, `shadow.cascades.cascade_extents`, `shadow.cascades.cascade_resolutions`, `shadow.cascades.cascade_strengths`.
 * **Temporal**: `temporal.blend_factor`, `temporal.clamp_strength`, `temporal.depth_sigma`.
-* **Debug**: `debug_view` for weather map, shadow map, transmittance, step heatmap, temporal weight, stats, and single vs. multi scatter.
+* **Debug**: `debug_view` for weather map, shadow map, per-cascade shadow buffers, transmittance, step heatmap, temporal weight, stats, and single vs. multi scatter (plus opaque shadow cascades).
 * **Budget**: `performance_budget_ms` (recorded in stats overlay, not enforced).
 
 ## Debug Views
@@ -121,7 +123,7 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 `CloudDebugView` supports the following visualization modes:
 
 1. **WeatherMap** – full-screen weather map.
-2. **ShadowMap** – cloud shadow transmittance.
+2. **ShadowMap** – cloud shadow transmittance (cascade 0).
 3. **Transmittance** – low-res cloud transmittance.
 4. **StepHeatmap** – normalized step usage.
 5. **TemporalWeight** – history weight/disocclusion visualization.
@@ -130,6 +132,8 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 8. **LayerB** – isolate layer B.
 9. **SingleScatter** – disable multi-scatter gain.
 10. **MultiScatter** – visualize the multi-scatter boost alone.
+11. **Cloud Shadow Cascade 0-3** – view packed cloud shadow cascades individually.
+12. **Opaque Shadow Cascade 0-3** – view the deferred opaque shadow atlas per cascade.
 
 ## Determinism
 

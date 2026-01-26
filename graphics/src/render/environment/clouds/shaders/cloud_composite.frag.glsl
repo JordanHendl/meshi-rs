@@ -5,6 +5,16 @@
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 frag_color;
 
+const uint DEBUG_VIEW_WEATHER = 1u;
+const uint DEBUG_VIEW_SHADOW = 2u;
+const uint DEBUG_VIEW_TRANS = 3u;
+const uint DEBUG_VIEW_STEP = 4u;
+const uint DEBUG_VIEW_WEIGHT = 5u;
+const uint DEBUG_VIEW_CLOUD_SHADOW_CASCADE_0 = 11u;
+const uint DEBUG_VIEW_CLOUD_SHADOW_CASCADE_1 = 12u;
+const uint DEBUG_VIEW_CLOUD_SHADOW_CASCADE_2 = 13u;
+const uint DEBUG_VIEW_CLOUD_SHADOW_CASCADE_3 = 14u;
+
 layout(set = 0, binding = 0, scalar) uniform CloudCompositeParams {
     uvec2 output_resolution;
     uvec2 low_resolution;
@@ -19,6 +29,9 @@ layout(set = 0, binding = 0, scalar) uniform CloudCompositeParams {
     float atmosphere_view_extinction;
     float atmosphere_haze_strength;
     vec4 atmosphere_haze_color;
+    uint shadow_cascade_count;
+    uint shadow_cascade_resolutions[4];
+    uint shadow_cascade_offsets[4];
 } params;
 
 layout(set = 1, binding = 0) buffer CloudColorA { vec4 values[]; } cloud_color_a;
@@ -176,30 +189,40 @@ void main() {
         color = vec4(0.0);
     }
 
-    if (params.debug_view == 1u) {
+    if (params.debug_view == DEBUG_VIEW_WEATHER) {
         vec4 weather = texture(sampler2D(cloud_weather_map, cloud_sampler), fract(v_uv));
         frag_color = vec4(weather.rgb, 1.0);
         return;
     }
-    if (params.debug_view == 2u) {
-        vec2 uv = v_uv;
-        uint shadow_res = uint(params.shadow_resolution);
-        uvec2 coord = uvec2(uv * float(shadow_res));
+    if (params.debug_view == DEBUG_VIEW_SHADOW
+        || (params.debug_view >= DEBUG_VIEW_CLOUD_SHADOW_CASCADE_0
+            && params.debug_view <= DEBUG_VIEW_CLOUD_SHADOW_CASCADE_3)) {
+        uint cascade_index = 0u;
+        if (params.debug_view >= DEBUG_VIEW_CLOUD_SHADOW_CASCADE_0) {
+            cascade_index = params.debug_view - DEBUG_VIEW_CLOUD_SHADOW_CASCADE_0;
+        }
+        cascade_index = min(cascade_index, max(params.shadow_cascade_count, 1u) - 1u);
+        uint shadow_res = params.shadow_cascade_resolutions[cascade_index];
+        if (shadow_res == 0u) {
+            shadow_res = uint(params.shadow_resolution);
+        }
+        shadow_res = max(shadow_res, 1u);
+        uvec2 coord = uvec2(v_uv * float(shadow_res));
         coord = min(coord, uvec2(shadow_res - 1));
-        uint idx = coord.y * shadow_res + coord.x;
+        uint idx = params.shadow_cascade_offsets[cascade_index] + coord.y * shadow_res + coord.x;
         float shadow = cloud_shadow.values[idx];
         frag_color = vec4(vec3(shadow), 1.0);
         return;
     }
-    if (params.debug_view == 3u) {
+    if (params.debug_view == DEBUG_VIEW_TRANS) {
         frag_color = vec4(vec3(trans), 1.0);
         return;
     }
-    if (params.debug_view == 4u) {
+    if (params.debug_view == DEBUG_VIEW_STEP) {
         frag_color = vec4(steps, 0.0, 1.0 - steps, 1.0);
         return;
     }
-    if (params.debug_view == 5u) {
+    if (params.debug_view == DEBUG_VIEW_WEIGHT) {
         float weight_v = clamp(weight * params.history_weight_scale, 0.0, 1.0);
         frag_color = vec4(weight_v, 1.0 - weight_v, 0.0, 1.0);
         return;

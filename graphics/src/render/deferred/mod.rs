@@ -221,32 +221,6 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
-    fn compute_shadow_cascade_splits(
-        near: f32,
-        far: f32,
-        cascade_count: u32,
-        split_lambda: f32,
-    ) -> [f32; 4] {
-        let mut splits = [far; 4];
-        let count = cascade_count.clamp(1, 4) as usize;
-        if count == 0 {
-            return splits;
-        }
-
-        let safe_near = near.max(0.01);
-        let safe_far = far.max(safe_near + 0.01);
-        let lambda = split_lambda.clamp(0.0, 1.0);
-
-        for cascade_index in 0..count {
-            let p = (cascade_index + 1) as f32 / count as f32;
-            let log = safe_near * (safe_far / safe_near).powf(p);
-            let uniform = safe_near + (safe_far - safe_near) * p;
-            splits[cascade_index] = log * lambda + uniform * (1.0 - lambda);
-        }
-
-        splits
-    }
-
     fn compute_frustum_corners(camera: &Camera, split_near: f32, split_far: f32) -> [Vec3; 8] {
         let aspect = if camera.viewport.y.abs() > f32::EPSILON {
             camera.viewport.x / camera.viewport.y
@@ -282,12 +256,7 @@ impl DeferredRenderer {
     fn compute_shadow_cascade_data(&self, camera: &Camera) -> ShadowCascadeData {
         let cascades = self.shadow.cascades();
         let cascade_count = cascades.cascade_count.clamp(1, 4);
-        let splits = Self::compute_shadow_cascade_splits(
-            camera.near,
-            camera.far,
-            cascade_count,
-            cascades.split_lambda,
-        );
+        let splits = cascades.compute_splits(camera.near, camera.far);
 
         let light_dir = self
             .subrender
@@ -1826,7 +1795,7 @@ impl DeferredRenderer {
                         shadow: u32,
                         shadow_cascade_count: u32,
                         shadow_resolution: u32,
-                        _padding: u32,
+                        debug_view: u32,
                     }
 
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
@@ -1837,7 +1806,7 @@ impl DeferredRenderer {
                     per_obj.shadow = shadow_map.bindless_id.unwrap() as u32;
                     per_obj.shadow_cascade_count = cascade_data.count;
                     per_obj.shadow_resolution = shadow_resolution;
-                    per_obj._padding = 0;
+                    per_obj.debug_view = self.subrender.clouds.settings().debug_view as u32;
 
                     cmd = cmd
                         .combine(self.shadow_cascade_buffer.sync_up())
