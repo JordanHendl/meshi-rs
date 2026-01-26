@@ -54,6 +54,7 @@ pub fn init(
         sample_count: None,
         skybox_cubemap_entry: Some(DEFAULT_CUBEMAP_ENTRY.to_string()),
         debug_mode: false,
+        shadow_cascades: Default::default(),
     })
     .unwrap();
 

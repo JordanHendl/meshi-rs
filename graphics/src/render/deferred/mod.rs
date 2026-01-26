@@ -431,7 +431,10 @@ impl DeferredRenderer {
             state.as_mut(),
             &proc.draw_builder,
             &data.dynamic,
-            ShadowPassInfo::default(),
+            ShadowPassInfo {
+                cascades: info.shadow_cascades,
+                ..Default::default()
+            },
         );
 
         let exec = DeferredExecution { cull_queue };

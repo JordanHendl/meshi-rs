@@ -120,6 +120,7 @@ impl RenderEngine {
                 ..Default::default()
             },
             sample_count,
+            shadow_cascades: info.shadow_cascades,
         };
 
         let renderer_select = info.renderer;

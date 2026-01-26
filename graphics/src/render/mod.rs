@@ -10,8 +10,8 @@ pub mod text;
 
 use crate::gui::GuiFrame;
 use crate::{
-    AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo, TextInfo,
-    TextObject,
+    AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
+    ShadowCascadeSettings, TextInfo, TextObject,
 };
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{types::Camera, types::Material, BindlessState};
@@ -24,6 +24,7 @@ pub struct RendererInfo {
     pub headless: bool,
     pub initial_viewport: Viewport,
     pub sample_count: SampleCount,
+    pub shadow_cascades: ShadowCascadeSettings,
 }
 
 pub struct ViewOutput {

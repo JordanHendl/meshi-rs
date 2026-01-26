@@ -91,6 +91,7 @@ impl TerrainEditorApp {
             sample_count: None,
             skybox_cubemap_entry: None,
             debug_mode: false,
+            shadow_cascades: Default::default(),
         })
         .expect("Failed to initialize render engine");
 

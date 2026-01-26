@@ -70,6 +70,8 @@ struct DebugSliderValues {
     cloud_shadow_resolution: f32,
     cloud_shadow_extent: f32,
     cloud_shadow_strength: f32,
+    cloud_shadow_cascade_count: f32,
+    cloud_shadow_split_lambda: f32,
     cloud_temporal_blend_factor: f32,
     cloud_temporal_clamp_strength: f32,
     cloud_temporal_depth_sigma: f32,
@@ -170,6 +172,8 @@ impl DebugGui {
                 cloud_shadow_resolution: 256.0,
                 cloud_shadow_extent: 50000.0,
                 cloud_shadow_strength: 1.0,
+                cloud_shadow_cascade_count: 1.0,
+                cloud_shadow_split_lambda: 0.5,
                 cloud_temporal_blend_factor: 0.9,
                 cloud_temporal_clamp_strength: 0.7,
                 cloud_temporal_depth_sigma: 15.0,
@@ -309,6 +313,10 @@ impl DebugGui {
                     self.slider_values.cloud_shadow_resolution = clouds.shadow.resolution as f32;
                     self.slider_values.cloud_shadow_extent = clouds.shadow.extent;
                     self.slider_values.cloud_shadow_strength = clouds.shadow.strength;
+                    self.slider_values.cloud_shadow_cascade_count =
+                        clouds.shadow.cascades.cascade_count as f32;
+                    self.slider_values.cloud_shadow_split_lambda =
+                        clouds.shadow.cascades.split_lambda;
                     self.slider_values.cloud_temporal_blend_factor = clouds.temporal.blend_factor;
                     self.slider_values.cloud_temporal_clamp_strength = clouds.temporal.clamp_strength;
                     self.slider_values.cloud_temporal_depth_sigma = clouds.temporal.depth_sigma;
@@ -506,6 +514,8 @@ impl DebugGui {
                     323 => self.slider_values.cloud_shadow_resolution = value,
                     324 => self.slider_values.cloud_shadow_extent = value,
                     325 => self.slider_values.cloud_shadow_strength = value,
+                    332 => self.slider_values.cloud_shadow_cascade_count = value,
+                    333 => self.slider_values.cloud_shadow_split_lambda = value,
                     326 => self.slider_values.cloud_temporal_blend_factor = value,
                     327 => self.slider_values.cloud_temporal_clamp_strength = value,
                     328 => self.slider_values.cloud_temporal_depth_sigma = value,
@@ -737,6 +747,18 @@ impl DebugGui {
                 let new_shadow_strength = self.slider_values.cloud_shadow_strength.clamp(0.0, 2.0);
                 if (clouds.shadow.strength - new_shadow_strength).abs() > f32::EPSILON {
                     clouds.shadow.strength = new_shadow_strength;
+                    cloud_dirty = true;
+                }
+                let new_cascade_count =
+                    self.slider_values.cloud_shadow_cascade_count.clamp(1.0, 4.0).round() as u32;
+                if clouds.shadow.cascades.cascade_count != new_cascade_count {
+                    clouds.shadow.cascades.cascade_count = new_cascade_count;
+                    cloud_dirty = true;
+                }
+                let new_split_lambda =
+                    self.slider_values.cloud_shadow_split_lambda.clamp(0.0, 1.0);
+                if (clouds.shadow.cascades.split_lambda - new_split_lambda).abs() > f32::EPSILON {
+                    clouds.shadow.cascades.split_lambda = new_split_lambda;
                     cloud_dirty = true;
                 }
                 let new_temporal_blend = self.slider_values.cloud_temporal_blend_factor.clamp(0.0, 1.0);
@@ -1269,6 +1291,20 @@ impl DebugGui {
                         0.0,
                         2.0,
                         self.slider_values.cloud_shadow_strength,
+                    ),
+                    Slider::new(
+                        332,
+                        "Shadow Cascades",
+                        1.0,
+                        4.0,
+                        self.slider_values.cloud_shadow_cascade_count,
+                    ),
+                    Slider::new(
+                        333,
+                        "Shadow Split Lambda",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_shadow_split_lambda,
                     ),
                     Slider::new(
                         326,

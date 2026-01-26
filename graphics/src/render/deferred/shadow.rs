@@ -10,10 +10,12 @@ use furikake::PSOBuilderFurikakeExt;
 use furikake::types::Camera;
 
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use crate::ShadowCascadeSettings;
 
 pub struct ShadowPassInfo {
     pub resolution: u32,
     pub sample_count: SampleCount,
+    pub cascades: ShadowCascadeSettings,
 }
 
 impl Default for ShadowPassInfo {
@@ -21,6 +23,7 @@ impl Default for ShadowPassInfo {
         Self {
             resolution: 2048,
             sample_count: SampleCount::S1,
+            cascades: ShadowCascadeSettings::default(),
         }
     }
 }
@@ -29,6 +32,7 @@ pub struct ShadowPass {
     pipeline: PSO,
     resolution: u32,
     sample_count: SampleCount,
+    cascades: ShadowCascadeSettings,
 }
 
 impl ShadowPass {
@@ -110,6 +114,7 @@ impl ShadowPass {
             pipeline: pso,
             resolution: info.resolution,
             sample_count: info.sample_count,
+            cascades: info.cascades,
         }
     }
 

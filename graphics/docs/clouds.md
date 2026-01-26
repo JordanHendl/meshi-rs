@@ -1,6 +1,18 @@
 # Volumetric Cloud Pipeline
 
-This document describes the Nubis-inspired volumetric cloud pipeline implemented in the renderer. It covers the data formats, pass IO, and tuning knobs exposed by `CloudSettings`.
+This document describes the Nubis-inspired volumetric cloud pipeline implemented in the renderer. It covers the data formats, pass IO, tuning knobs exposed by `CloudSettings`, and how the implementation maps onto the "Nubis" style of cloud rendering (including what is present or missing).
+
+## High-Level Overview
+
+The cloud system is a single-layer, view-ray-marched volume with optional shadow prepass and temporal reuse:
+
+1. **Weather-driven density field** – a 2D weather map provides coverage/type/thickness. This drives a layered density function that combines base and detail noise.
+2. **Low-res raymarch** – the camera frustum is intersected against a fixed-height cloud slab (`base_altitude` → `top_altitude`). Density is sampled along view rays and integrated with Beer–Lambert extinction.
+3. **Lighting and shadows** – lighting uses a Henyey–Greenstein phase function with either a directional sun or scene lights. A separate shadow pass generates a top-down transmittance map to accelerate sun lighting.
+4. **Temporal reprojection** – history buffers (color/transmittance/depth/weight) are reprojected and clamped to stabilize noise/jitter.
+5. **Depth-aware upsample + composite** – low-res clouds are upsampled against scene depth, then blended into the scene color.
+
+The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise stack, but it is intentionally simplified to keep the runtime cost small and predictable.
 
 ## Data Formats
 
@@ -47,6 +59,7 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
   * `CloudShadowMap2D` transmittance buffer (`float`).
 * **Notes**:
   * Shadow map is centered around the camera with a stable world-space extent.
+  * The shader marches a fixed number of steps (12) from the top of the cloud slab to the base to estimate transmittance along the sun direction.
 
 ### Pass B – Cloud Ray March (Low-Res)
 * **Inputs**:
@@ -64,6 +77,8 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 * **Notes**:
   * Uses exponential transmittance integration per step.
   * Early-out when `transmittance < epsilon`.
+  * Blue-noise jitter offsets the starting point along the ray to reduce banding.
+  * The raymarch operates on a fixed-height slab; there is no horizon intersection with a curved atmosphere.
 
 ### Pass C – Temporal Reprojection
 * **Inputs**:
@@ -74,6 +89,7 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
   * Updated history buffers for color, transmittance, depth, and weight.
 * **Notes**:
   * Includes history clamping and depth-based disocclusion damping.
+  * Reprojection uses the previous view-projection matrix and reconstructs world position from the cloud depth buffer.
 
 ### Pass D – Upsample + Composite
 * **Inputs**:
@@ -84,6 +100,7 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 * **Notes**:
   * Depth-aware upsample prevents bleeding onto near geometry.
   * Debug views are selectable through `CloudDebugView`.
+  * The composite shader produces premultiplied cloud color with alpha = `1 - transmittance`.
 
 ## Tuning Knobs (`CloudSettings`)
 
@@ -114,3 +131,77 @@ This document describes the Nubis-inspired volumetric cloud pipeline implemented
 * Noise textures are generated deterministically from fixed seeds.
 * Blue-noise jitter uses the frame index as a stable seed per frame.
 * With fixed inputs (camera, sun, weather), the output is deterministic aside from temporal jitter.
+
+## What Happens Inside the Raymarch (Detailed)
+
+The raymarch shader performs the following steps per pixel:
+
+1. **Frustum ray setup** – the pixel's NDC is unprojected to a world-space ray. The ray is intersected against the cloud slab defined by `cloud_base`/`cloud_top`. The first sample is jittered with blue noise.  
+2. **Weather sampling** – the weather map is sampled at `world.xz` with wind/time offsets to drive large-scale variation:
+   * **Coverage**: `weather.r` raised to `coverage_power` controls overall occupancy.
+   * **Type**: `weather.g` biases the vertical response and detail influence.
+   * **Thickness**: `weather.b` attenuates density as the ray approaches the top of the layer.
+3. **Density shaping** – a base noise sample defines macro structure and a detail noise sample modulates it:
+   * Base noise is sampled in 3D (atlas) and optionally displaced with curl noise (`curl_strength`).
+   * Detail noise is sampled at a higher frequency.
+   * Density = `(base_noise * coverage - (1 - thickness) * (1 - height_frac))`, then modulated by detail and type.
+4. **Single scattering + extinction** – for each step:
+   * Extinction uses Beer–Lambert: `step_trans = exp(-sigma_t * step_size)`.
+   * A Henyey–Greenstein phase function (`phase_g`) modulates anisotropy.
+   * Lighting uses either the directional sun (if no explicit scene lights) or the engine's light list.
+5. **Shadowing** – sun lighting can sample the shadow buffer (if enabled), otherwise a mini light march is performed along the light direction.
+6. **Accumulation** – scattered radiance is accumulated with the current transmittance and the transmittance is updated for the next step.
+7. **Depth output** – the shader stores a weighted average depth along the ray so reprojection can reconstruct world positions.
+
+These steps follow the typical Nubis-style split between large-scale weather control and high-frequency noise detail, but avoid complex multiple scattering or physically-based sky coupling.
+
+## Temporal Reprojection and Stability (Detailed)
+
+The temporal pass reconstructs world-space positions for the current low-res cloud pixel using the stored cloud depth. That world position is projected into the previous frame to fetch a history sample. The pass then:
+
+* **Clamps** the history color to the current 3×3 neighborhood min/max (to reduce ghosting).
+* **Depth-weights** the history using an exponential falloff (`depth_sigma`) so disocclusions blend toward current data.
+* **Blends** color, transmittance, depth, and history weight using `blend_factor`.
+
+This scheme keeps low-res jittered marching stable in motion, while still respecting sudden density changes from weather, wind, or camera movement.
+
+## Composite and Debug Output (Detailed)
+
+The composite shader:
+
+* Bilinearly upsamples the low-res cloud buffers.
+* Compares cloud depth against the scene depth; if the cloud depth is behind geometry beyond `depth_sigma`, the cloud contribution is suppressed.
+* Outputs premultiplied cloud color with alpha equal to `1 - transmittance`.
+* Supports debug views for weather, shadow, transmittance, step usage, and temporal weight.
+
+## Relation to the Nubis-Style Cloud Pipeline
+
+The implementation mirrors Nubis-inspired techniques in several key ways:
+
+* **Weather map driving macrostructure** – the 2D weather map provides large-scale control over coverage and cloud type, similar to Nubis' low-frequency control texture.
+* **Two-tier noise stack** – base 3D noise defines the overall mass while a higher-frequency detail noise adds erosion-like breakup.
+* **Height-based shaping** – density is reduced near the cloud top and modulated by thickness, echoing Nubis' height gradient and vertical profile shaping.
+* **Phase-based single scattering** – a Henyey–Greenstein phase function drives directional light response, matching the typical Nubis single-scatter approximation.
+* **Temporal reuse + low-res march** – Nubis-style implementations rely on low-res raymarching with temporal accumulation to keep costs low; this renderer does the same.
+
+## What's Present vs. Missing (Compared to a Full Nubis Stack)
+
+**Present (implemented in this renderer):**
+
+* Single-layer cloud slab with configurable base/top altitude.
+* Weather-driven coverage/type/thickness.
+* Base + detail 3D noise, plus optional curl noise distortion.
+* Directional sun lighting with either shadow map sampling or short light marches.
+* Temporal reprojection with clamping and depth-based rejection.
+* Debug views that expose intermediate buffers.
+
+**Missing / Simplified compared to a full Nubis pipeline:**
+
+* **No multi-layer cloud system** – Nubis often blends multiple cloud types (e.g., cumulus + cirrus). This renderer is a single slab.
+* **No explicit erosion/ambient occlusion maps** – Nubis frequently uses erosion or curl noise textures to carve edges; here, erosion is approximated via detail noise.
+* **No multiple scattering approximation** – lighting is single-scatter only; there is no volumetric multiple-scattering or energy-conserving compensation.
+* **No atmospheric coupling** – the cloud lighting does not integrate atmospheric transmittance or aerial perspective.
+* **Simplified shadowing** – the shadow pass uses a fixed step count and does not incorporate multi-scattering or penumbra widening.
+* **No weather evolution model** – weather changes are driven only by wind/time offsets, not by a simulation or evolving 3D weather volume.
+
+These tradeoffs keep the implementation fast and deterministic, while still achieving the recognizable Nubis-style look: large-scale coverage control with layered noise detail and temporal stability.
