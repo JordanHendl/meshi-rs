@@ -294,46 +294,7 @@ void main() {
         waves_far.yz * (w_far / (2.0 * patch_far));
     float velocity = waves_near.w * w_near + waves_mid.w * w_mid + waves_far.w * w_far;
     vec2 wind_dir = safe_normalize(params.wind_dir);
-    vec2 gerstner_dirs[4] = vec2[](
-        wind_dir,
-        safe_normalize(wind_dir + vec2(0.3, 0.7)),
-        safe_normalize(wind_dir + vec2(-0.6, 0.2)),
-        safe_normalize(vec2(-wind_dir.y, wind_dir.x))
-    );
-    float base_wavelength = max(params.wind_speed * 25.0, 12.0);
-    float gerstner_wavelengths[4] = float[](
-        base_wavelength,
-        base_wavelength * 0.65,
-        base_wavelength * 1.4,
-        base_wavelength * 0.9
-    );
-    float gerstner_steepness[4] = float[](
-        0.55,
-        0.4,
-        0.3,
-        0.35
-    );
-    float gerstner_amplitude = max(params.wave_amplitude, 0.0) * max(params.gerstner_amplitude, 0.0);
-    float gravity = 9.81;
-    float two_pi = 6.28318530718;
-    vec2 gerstner_offset = vec2(0.0);
-    for (int i = 0; i < 4; ++i) {
-        float wavelength = max(gerstner_wavelengths[i], 0.5);
-        float k = two_pi / wavelength;
-        float omega = sqrt(gravity * k);
-        float phase_offset = float(i) * 1.618;
-        float phase = k * dot(gerstner_dirs[i], wave_world) + params.time * omega + phase_offset;
-        float sin_p = sin(phase);
-        float cos_p = cos(phase);
-        float amplitude = gerstner_amplitude / float(i + 1);
-        float steepness = clamp(gerstner_steepness[i], 0.0, 1.0);
-        height += amplitude * sin_p;
-        gradient_world += amplitude * k * cos_p * gerstner_dirs[i];
-        velocity += amplitude * cos_p * omega;
-        gerstner_offset += gerstner_dirs[i] * (steepness * amplitude * cos_p);
-    }
-
-    vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15) + gerstner_offset;
+    vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
     vec4 position = vec4(world.x + choppy_offset.x, height, world.y + choppy_offset.y, 1.0);
     vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
     mat4 view = inverse(camera_view());

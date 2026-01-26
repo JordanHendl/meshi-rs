@@ -324,14 +324,8 @@ struct OceanSpectrumParams {
     wave_amplitude: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    capillary_strength: f32,
     patch_size: f32,
-    fetch_length: f32,
-    swell_dir: Vec2,
     spectrum_scale: f32,
-    swell_strength: f32,
-    depth_meters: f32,
-    depth_damping: f32,
 }
 
 #[repr(C)]
@@ -1211,11 +1205,6 @@ impl OceanRenderer {
                 .get(cascade_index)
                 .copied()
                 .unwrap_or(1.0);
-            let swell_strength = self
-                .cascade_swell_strengths
-                .get(cascade_index)
-                .copied()
-                .unwrap_or(0.0);
             *spectrum_params = OceanSpectrumParams {
                 fft_size: cascade.fft_size,
                 time,
@@ -1223,14 +1212,8 @@ impl OceanRenderer {
                 wave_amplitude: self.wave_amplitude,
                 wind_dir: self.wind_dir,
                 wind_speed: self.wind_speed,
-                capillary_strength: self.capillary_strength,
                 patch_size: cascade.patch_size,
-                fetch_length: self.fetch_length,
-                swell_dir: self.swell_dir,
                 spectrum_scale,
-                swell_strength,
-                depth_meters: self.depth_meters,
-                depth_damping: self.depth_damping,
             };
 
             stream = stream
