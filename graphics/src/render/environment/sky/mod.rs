@@ -68,20 +68,18 @@ impl Default for SkyboxInfo {
 
 impl Default for SkyboxFrameSettings {
     fn default() -> Self {
-        let mut settings = Self {
+        Self {
             cubemap: None,
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
-        };
-        settings.register_debug();
-        settings
+        }
     }
 }
 
 impl Default for SkyFrameSettings {
     fn default() -> Self {
-        let mut settings = Self {
+        Self {
             enabled: false,
             sun_direction: Some(Vec3::Y),
             sun_color: Vec3::ONE,
@@ -94,9 +92,7 @@ impl Default for SkyFrameSettings {
             time_of_day: None,
             latitude_degrees: None,
             longitude_degrees: None,
-        };
-        settings.register_debug();
-        settings
+        }
     }
 }
 
@@ -527,6 +523,41 @@ impl SkyRenderer {
         self.enabled = settings.enabled;
         self.sky_settings = settings;
         self.cubemap_dirty = true;
+    }
+
+    pub fn register_debug(&mut self) {
+        unsafe {
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Skybox Intensity", 0.2, 2.0, 0.0),
+                &mut self.skybox_intensity as *mut f32,
+                "Skybox Intensity",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
+                &mut self.sky_settings.sun_intensity as *mut f32,
+                "Sun Intensity",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
+                &mut self.sky_settings.sun_angular_radius as *mut f32,
+                "Sun Angular Radius",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.moon_intensity as *mut f32,
+                "Moon Intensity",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
+                &mut self.sky_settings.moon_angular_radius as *mut f32,
+                "Moon Angular Radius",
+            );
+        }
     }
 
     pub fn sun_direction(&self) -> Vec3 {

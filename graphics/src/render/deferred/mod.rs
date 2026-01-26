@@ -1019,6 +1019,8 @@ impl DeferredRenderer {
         db.import_furikake_state(self.state.as_mut());
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.subrender.environment.initialize_database(db);
+        self.subrender.environment.register_debug();
+        self.subrender.clouds.register_debug();
         self.text.initialize_database(db);
     }
 

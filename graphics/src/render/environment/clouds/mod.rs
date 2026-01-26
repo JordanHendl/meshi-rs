@@ -52,7 +52,7 @@ pub struct CloudRenderer {
     weather_map_configured: bool,
 }
 
-pub fn register_cloud_debug(settings: &mut CloudSettings) {
+pub fn register_debug(settings: &mut CloudSettings) {
     settings.debug_enabled = settings.enabled as u32 as f32;
     settings.debug_step_count = settings.step_count as f32;
     settings.debug_light_step_count = settings.light_step_count as f32;
@@ -459,6 +459,10 @@ impl CloudRenderer {
 
     pub fn set_settings(&mut self, settings: CloudSettings) {
         self.settings = settings;
+    }
+
+    pub fn register_debug(&mut self) {
+        register_debug(&mut self.settings);
     }
 
     pub fn timings(&self) -> CloudTimingResult {

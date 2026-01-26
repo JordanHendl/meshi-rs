@@ -121,7 +121,7 @@ pub struct OceanFrameSettings {
 
 impl Default for OceanFrameSettings {
     fn default() -> Self {
-        let mut settings = Self {
+        Self {
             enabled: false,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
@@ -154,9 +154,7 @@ impl Default for OceanFrameSettings {
             ssr_max_distance: 120.0,
             ssr_thickness: 1.2,
             ssr_steps: 24,
-        };
-        settings.register_debug();
-        settings
+        }
     }
 }
 
@@ -966,6 +964,161 @@ impl OceanRenderer {
         self.ssr_max_distance = settings.ssr_max_distance;
         self.ssr_thickness = settings.ssr_thickness;
         self.ssr_steps = settings.ssr_steps;
+    }
+
+    pub fn register_debug(&mut self) {
+        unsafe {
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Wind Speed", 0.1, 20.0, 0.0),
+                &mut self.wind_speed as *mut f32,
+                "Wind Speed",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Fetch Length", 10.0, 200000.0, 0.0),
+                &mut self.fetch_length as *mut f32,
+                "Fetch Length",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Swell Dir X", -1.0, 1.0, 0.0),
+                &mut self.swell_dir.x as *mut f32,
+                "Swell Dir X",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Swell Dir Y", -1.0, 1.0, 0.0),
+                &mut self.swell_dir.y as *mut f32,
+                "Swell Dir Y",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Current X", -5.0, 5.0, 0.0),
+                &mut self.current.x as *mut f32,
+                "Current X",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Current Y", -5.0, 5.0, 0.0),
+                &mut self.current.y as *mut f32,
+                "Current Y",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Wave Amplitude", 0.1, 10.0, 0.0),
+                &mut self.wave_amplitude as *mut f32,
+                "Wave Amplitude",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Gerstner Amplitude", 0.0, 1.0, 0.0),
+                &mut self.gerstner_amplitude as *mut f32,
+                "Gerstner Amplitude",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Spectrum Near", 0.0, 2.0, 0.0),
+                &mut self.cascade_spectrum_scales[0] as *mut f32,
+                "Cascade Spectrum Near",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Spectrum Mid", 0.0, 2.0, 0.0),
+                &mut self.cascade_spectrum_scales[1] as *mut f32,
+                "Cascade Spectrum Mid",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Spectrum Far", 0.0, 2.0, 0.0),
+                &mut self.cascade_spectrum_scales[2] as *mut f32,
+                "Cascade Spectrum Far",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Swell Near", 0.0, 1.0, 0.0),
+                &mut self.cascade_swell_strengths[0] as *mut f32,
+                "Cascade Swell Near",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Swell Mid", 0.0, 1.0, 0.0),
+                &mut self.cascade_swell_strengths[1] as *mut f32,
+                "Cascade Swell Mid",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Cascade Swell Far", 0.0, 1.0, 0.0),
+                &mut self.cascade_swell_strengths[2] as *mut f32,
+                "Cascade Swell Far",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Depth Meters", 0.0, 5000.0, 0.0),
+                &mut self.depth_meters as *mut f32,
+                "Depth Meters",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Depth Damping", 0.0, 1.0, 0.0),
+                &mut self.depth_damping as *mut f32,
+                "Depth Damping",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Fresnel Bias", 0.0, 0.2, 0.0),
+                &mut self.fresnel_bias as *mut f32,
+                "Fresnel Bias",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Fresnel Strength", 0.0, 1.5, 0.0),
+                &mut self.fresnel_strength as *mut f32,
+                "Fresnel Strength",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Foam Strength", 0.0, 4.0, 0.0),
+                &mut self.foam_strength as *mut f32,
+                "Foam Strength",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Foam Threshold", 0.0, 1.0, 0.0),
+                &mut self.foam_threshold as *mut f32,
+                "Foam Threshold",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Foam Advection", 0.0, 2.0, 0.0),
+                &mut self.foam_advection_strength as *mut f32,
+                "Foam Advection",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Foam Decay", 0.0, 1.0, 0.0),
+                &mut self.foam_decay_rate as *mut f32,
+                "Foam Decay",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Foam Noise Scale", 0.01, 1.0, 0.0),
+                &mut self.foam_noise_scale as *mut f32,
+                "Foam Noise Scale",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Capillary Strength", 0.0, 2.0, 0.0),
+                &mut self.capillary_strength as *mut f32,
+                "Capillary Strength",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Time Scale", 0.1, 4.0, 0.0),
+                &mut self.time_scale as *mut f32,
+                "Time Scale",
+            );
+        }
     }
 
     pub fn set_environment_map(&mut self, view: ImageView) {

@@ -187,6 +187,11 @@ impl EnvironmentRenderer {
         self.terrain.initialize_database(db);
     }
 
+    pub fn register_debug(&mut self) {
+        self.sky.register_debug();
+        self.ocean.register_debug();
+    }
+
     pub fn set_terrain_render_objects(
         &mut self,
         objects: &[terrain::TerrainRenderObject],

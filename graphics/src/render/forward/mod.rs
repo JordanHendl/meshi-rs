@@ -248,6 +248,7 @@ impl ForwardRenderer {
         db.import_dashi_context(&mut self.ctx);
         db.import_furikake_state(&mut self.state);
         self.alloc.set_bindless_registry(self.state.as_mut());
+        self.environment.register_debug();
 
         let materials = db.enumerate_materials();
 
