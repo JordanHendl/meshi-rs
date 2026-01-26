@@ -69,12 +69,6 @@ pub fn register_debug(settings: &mut CloudSettings) {
     unsafe {
         debug_register(
             PageType::Clouds,
-            Slider::new(0, "Enabled", 0.0, 1.0, 0.0),
-            &mut settings.debug_enabled as *mut f32,
-            "Enabled",
-        );
-        debug_register(
-            PageType::Clouds,
             Slider::new(0, "Layer A Base Alt", 0.0, 3000.0, 0.0),
             &mut settings.layer_a.base_altitude as *mut f32,
             "Layer A Base Alt",

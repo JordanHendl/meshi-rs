@@ -4,8 +4,10 @@ use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::gui::{
-    GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, Slider, SliderColors,
-    SliderLayout, SliderMetrics, SliderRenderOptions, SliderState,
+    GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
+    RadialButtonColors, RadialButtonLayout, RadialButtonMetrics, RadialButtonRenderOptions,
+    RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
+    SliderState,
 };
 use crate::render::environment::ocean::OceanFrameSettings;
 use crate::render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
@@ -156,7 +158,6 @@ struct DebugSliderValues {
     ocean_foam_noise_scale: f32,
     ocean_capillary_strength: f32,
     ocean_time_scale: f32,
-    cloud_enabled: f32,
     cloud_layer_a_base_altitude: f32,
     cloud_layer_a_top_altitude: f32,
     cloud_layer_a_density_scale: f32,
@@ -209,6 +210,13 @@ struct DebugSliderValues {
     cloud_performance_budget_ms: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DebugToggleValues {
+    sky_enabled: bool,
+    ocean_enabled: bool,
+    cloud_enabled: bool,
+}
+
 pub struct DebugGuiBindings {
     pub debug_mode: *mut bool,
     pub skybox_settings: *mut SkyboxFrameSettings,
@@ -235,12 +243,15 @@ pub struct DebugGui {
     debug_graphics_tab: DebugGraphicsTab,
     debug_slider_state: SliderState,
     debug_slider_layout: SliderLayout,
+    debug_toggle_state: RadialButtonState,
+    debug_toggle_layout: RadialButtonLayout,
     debug_panel_position: Vec2,
     drag_target: Option<DragTarget>,
     drag_offset: Vec2,
     scroll_offset: f32,
     scroll_delta: f32,
     slider_values: DebugSliderValues,
+    toggle_values: DebugToggleValues,
 }
 
 impl DebugGui {
@@ -255,6 +266,8 @@ impl DebugGui {
             debug_graphics_tab: DebugGraphicsTab::Sky,
             debug_slider_state: SliderState::default(),
             debug_slider_layout: SliderLayout::default(),
+            debug_toggle_state: RadialButtonState::default(),
+            debug_toggle_layout: RadialButtonLayout::default(),
             debug_panel_position: vec2(560.0, 60.0),
             drag_target: None,
             drag_offset: Vec2::ZERO,
@@ -291,7 +304,6 @@ impl DebugGui {
                 ocean_foam_noise_scale: 0.2,
                 ocean_capillary_strength: 1.0,
                 ocean_time_scale: 1.0,
-                cloud_enabled: 1.0,
                 cloud_layer_a_base_altitude: 300.0,
                 cloud_layer_a_top_altitude: 400.0,
                 cloud_layer_a_density_scale: 0.5,
@@ -342,6 +354,11 @@ impl DebugGui {
                 cloud_temporal_history_weight_scale: 1.0,
                 cloud_debug_view: 0.0,
                 cloud_performance_budget_ms: 4.0,
+            },
+            toggle_values: DebugToggleValues {
+                sky_enabled: false,
+                ocean_enabled: false,
+                cloud_enabled: true,
             },
         }
     }
@@ -470,7 +487,6 @@ impl DebugGui {
                     self.slider_values.ocean_time_scale = ocean.time_scale;
                 }
                 if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                    self.slider_values.cloud_enabled = clouds.debug_enabled;
                     self.slider_values.cloud_layer_a_base_altitude = clouds.layer_a.base_altitude;
                     self.slider_values.cloud_layer_a_top_altitude = clouds.layer_a.top_altitude;
                     self.slider_values.cloud_layer_a_density_scale = clouds.layer_a.density_scale;
@@ -537,6 +553,20 @@ impl DebugGui {
                     clouds.debug_shadow_cascade_count =
                         clouds.shadow.cascades.cascade_count as f32;
                     clouds.debug_view_value = clouds.debug_view as u32 as f32;
+                }
+            }
+        }
+
+        if self.debug_toggle_state.active.is_none() {
+            unsafe {
+                if let Some(sky) = bindings.sky_settings.as_ref() {
+                    self.toggle_values.sky_enabled = sky.enabled;
+                }
+                if let Some(ocean) = bindings.ocean_settings.as_ref() {
+                    self.toggle_values.ocean_enabled = ocean.enabled;
+                }
+                if let Some(clouds) = bindings.cloud_settings.as_ref() {
+                    self.toggle_values.cloud_enabled = clouds.enabled;
                 }
             }
         }
@@ -623,6 +653,8 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_tab = *tab;
                     self.debug_slider_state.active = None;
+                    self.debug_toggle_state = RadialButtonState::default();
+                    self.debug_toggle_layout = RadialButtonLayout::default();
                     self.scroll_offset = 0.0;
                 }
             }
@@ -651,6 +683,8 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_graphics_tab = *tab;
                     self.debug_slider_state.active = None;
+                    self.debug_toggle_state = RadialButtonState::default();
+                    self.debug_toggle_layout = RadialButtonLayout::default();
                     self.scroll_offset = 0.0;
                 }
             }
@@ -663,14 +697,38 @@ impl DebugGui {
         });
         self.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
 
+        let hovered_toggle = self
+            .debug_toggle_layout
+            .items
+            .iter()
+            .find(|item| {
+                item.enabled
+                    && (point_in_menu_rect(self.cursor, item.item_rect)
+                        || point_in_menu_rect(self.cursor, item.button_rect))
+            });
+        self.debug_toggle_state.hovered = hovered_toggle.map(|item| item.id);
+
         if self.mouse_pressed {
             if let Some(item) = hovered_debug_slider {
                 self.debug_slider_state.active = Some(item.id);
+            }
+            if let Some(item) = hovered_toggle {
+                self.debug_toggle_state.active = Some(item.id);
+                match item.id {
+                    6101 => self.toggle_values.sky_enabled = true,
+                    6102 => self.toggle_values.sky_enabled = false,
+                    6201 => self.toggle_values.ocean_enabled = true,
+                    6202 => self.toggle_values.ocean_enabled = false,
+                    6301 => self.toggle_values.cloud_enabled = true,
+                    6302 => self.toggle_values.cloud_enabled = false,
+                    _ => {}
+                }
             }
         }
 
         if !self.mouse_down {
             self.debug_slider_state.active = None;
+            self.debug_toggle_state.active = None;
         }
 
         if let Some(active_id) = self.debug_slider_state.active {
@@ -714,7 +772,6 @@ impl DebugGui {
                     223 => self.slider_values.ocean_foam_noise_scale = value,
                     224 => self.slider_values.ocean_capillary_strength = value,
                     225 => self.slider_values.ocean_time_scale = value,
-                    300 => self.slider_values.cloud_enabled = value,
                     301 => self.slider_values.cloud_layer_a_base_altitude = value,
                     302 => self.slider_values.cloud_layer_a_top_altitude = value,
                     303 => self.slider_values.cloud_layer_a_density_scale = value,
@@ -804,6 +861,10 @@ impl DebugGui {
                 }
             }
             if let Some(sky) = bindings.sky_settings.as_mut() {
+                if sky.enabled != self.toggle_values.sky_enabled {
+                    sky.enabled = self.toggle_values.sky_enabled;
+                    sky_dirty = true;
+                }
                 let new_value = self.slider_values.sun_intensity.clamp(0.1, 5.0);
                 if (sky.sun_intensity - new_value).abs() > f32::EPSILON {
                     sky.sun_intensity = new_value;
@@ -826,6 +887,10 @@ impl DebugGui {
                 }
             }
             if let Some(ocean) = bindings.ocean_settings.as_mut() {
+                if ocean.enabled != self.toggle_values.ocean_enabled {
+                    ocean.enabled = self.toggle_values.ocean_enabled;
+                    ocean_dirty = true;
+                }
                 let new_value = self.slider_values.ocean_wind_speed.clamp(0.1, 20.0);
                 if (ocean.wind_speed - new_value).abs() > f32::EPSILON {
                     ocean.wind_speed = new_value;
@@ -953,9 +1018,8 @@ impl DebugGui {
                 }
             }
             if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                let new_enabled = clouds.debug_enabled >= 0.5;
-                if clouds.enabled != new_enabled {
-                    clouds.enabled = new_enabled;
+                if clouds.enabled != self.toggle_values.cloud_enabled {
+                    clouds.enabled = self.toggle_values.cloud_enabled;
                     cloud_dirty = true;
                 }
                 clouds.debug_enabled = clouds.enabled as u32 as f32;
@@ -1405,8 +1469,47 @@ impl DebugGui {
                 scale: if index == 0 { 0.9 } else { 0.85 },
             });
         }
-        let slider_start_y =
+        let toggle_start_y =
             text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
+        let mut slider_start_y = toggle_start_y;
+
+        let mut debug_toggle_layout = RadialButtonLayout::default();
+        if self.debug_tab == DebugTab::Graphics {
+            let (toggle_label, toggle_enabled, on_id, off_id) = match self.debug_graphics_tab {
+                DebugGraphicsTab::Sky => ("Sky", self.toggle_values.sky_enabled, 6101, 6102),
+                DebugGraphicsTab::Ocean => ("Ocean", self.toggle_values.ocean_enabled, 6201, 6202),
+                DebugGraphicsTab::Clouds => ("Clouds", self.toggle_values.cloud_enabled, 6301, 6302),
+            };
+            let toggle_buttons = vec![
+                RadialButton::new(on_id, format!("{toggle_label} On"), toggle_enabled),
+                RadialButton::new(off_id, format!("{toggle_label} Off"), !toggle_enabled),
+            ];
+            let toggle_metrics = RadialButtonMetrics {
+                item_height: (22.0 * ui_scale).clamp(18.0, 28.0),
+                item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
+                padding: [12.0 * ui_scale, 6.0 * ui_scale],
+                button_size: [16.0 * ui_scale, 16.0 * ui_scale],
+                indicator_size: [8.0 * ui_scale, 8.0 * ui_scale],
+                label_gap: 10.0 * ui_scale,
+                char_width: 7.2 * ui_scale,
+                font_scale: 0.85 * ui_scale,
+                text_offset: [0.0, 6.0 * ui_scale],
+            };
+            let toggle_height = toggle_metrics.padding[1] * 2.0
+                + toggle_buttons.len() as f32 * toggle_metrics.item_height
+                + toggle_buttons.len().saturating_sub(1) as f32 * toggle_metrics.item_gap;
+            let toggle_options = RadialButtonRenderOptions {
+                viewport: [viewport.x, viewport.y],
+                position: [debug_panel_position.x, toggle_start_y],
+                size: [debug_panel_size.x, toggle_height],
+                layer: GuiLayer::Overlay,
+                metrics: toggle_metrics,
+                colors: RadialButtonColors::default(),
+                state: self.debug_toggle_state,
+            };
+            debug_toggle_layout = gui.submit_radial_buttons(&toggle_buttons, &toggle_options);
+            slider_start_y = toggle_start_y + toggle_height + 8.0 * ui_scale;
+        }
 
         let mut debug_slider_layout = SliderLayout::default();
         let page_type = if self.debug_tab == DebugTab::Graphics {
@@ -1549,6 +1652,7 @@ impl DebugGui {
         });
 
         self.debug_slider_layout = debug_slider_layout;
+        self.debug_toggle_layout = debug_toggle_layout;
         self.mouse_pressed = false;
 
         DebugGuiOutput {
@@ -1566,6 +1670,8 @@ impl DebugGui {
         self.drag_target = None;
         self.debug_slider_state = SliderState::default();
         self.debug_slider_layout = SliderLayout::default();
+        self.debug_toggle_state = RadialButtonState::default();
+        self.debug_toggle_layout = RadialButtonLayout::default();
         self.scroll_offset = 0.0;
         self.scroll_delta = 0.0;
     }

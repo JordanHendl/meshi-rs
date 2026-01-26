@@ -549,6 +549,108 @@ impl GuiContext {
         layout
     }
 
+    pub fn submit_radial_buttons(
+        &mut self,
+        buttons: &[RadialButton],
+        options: &RadialButtonRenderOptions,
+    ) -> RadialButtonLayout {
+        let metrics = &options.metrics;
+        let colors = &options.colors;
+        let position = options.position;
+        let viewport = options.viewport;
+
+        let mut layout = RadialButtonLayout::default();
+
+        for (index, button) in buttons.iter().enumerate() {
+            let item_y = position[1]
+                + metrics.padding[1]
+                + index as f32 * (metrics.item_height + metrics.item_gap);
+            let item_rect = MenuRect::from_position_size(
+                [position[0] + metrics.padding[0], item_y],
+                [
+                    (options.size[0] - metrics.padding[0] * 2.0).max(0.0),
+                    metrics.item_height,
+                ],
+            );
+            let button_pos = [
+                item_rect.min[0],
+                item_rect.min[1] + (metrics.item_height - metrics.button_size[1]) * 0.5,
+            ];
+            let button_rect = MenuRect::from_position_size(button_pos, metrics.button_size);
+
+            let is_hovered = options.state.hovered == Some(button.id);
+            let is_active = options.state.active == Some(button.id);
+            let enabled = button.enabled;
+
+            let button_color = if !enabled {
+                colors.disabled
+            } else if button.selected {
+                if is_active {
+                    colors.button_active
+                } else if is_hovered {
+                    colors.button_selected_hover
+                } else {
+                    colors.button_selected
+                }
+            } else if is_active {
+                colors.button_active
+            } else if is_hovered {
+                colors.button_hover
+            } else {
+                colors.button
+            };
+
+            self.submit_draw(GuiDraw::new(
+                options.layer,
+                None,
+                quad_from_pixels(
+                    [button_rect.min[0], button_rect.min[1]],
+                    metrics.button_size,
+                    button_color,
+                    viewport,
+                ),
+            ));
+
+            if button.selected {
+                let indicator_pos = [
+                    button_pos[0] + (metrics.button_size[0] - metrics.indicator_size[0]) * 0.5,
+                    button_pos[1] + (metrics.button_size[1] - metrics.indicator_size[1]) * 0.5,
+                ];
+                let indicator_color = if enabled {
+                    colors.indicator
+                } else {
+                    colors.disabled
+                };
+                self.submit_draw(GuiDraw::new(
+                    options.layer,
+                    None,
+                    quad_from_pixels(indicator_pos, metrics.indicator_size, indicator_color, viewport),
+                ));
+            }
+
+            let label_pos = [
+                button_pos[0] + metrics.button_size[0] + metrics.label_gap,
+                item_rect.min[1] + metrics.text_offset[1],
+            ];
+            self.submit_text(GuiTextDraw {
+                text: button.label.clone(),
+                position: label_pos,
+                color: if enabled { colors.label } else { colors.disabled },
+                scale: metrics.font_scale,
+            });
+
+            layout.items.push(RadialButtonItemLayout {
+                id: button.id,
+                item_rect,
+                button_rect,
+                selected: button.selected,
+                enabled,
+            });
+        }
+
+        layout
+    }
+
     pub fn submit_panel(
         &mut self,
         panel: &Panel,
@@ -2312,6 +2414,112 @@ pub struct SliderItemLayout {
     pub value: f32,
     pub min: f32,
     pub max: f32,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RadialButton {
+    pub id: u32,
+    pub label: String,
+    pub selected: bool,
+    pub enabled: bool,
+}
+
+impl RadialButton {
+    pub fn new(id: u32, label: impl Into<String>, selected: bool) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            selected,
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RadialButtonRenderOptions {
+    pub viewport: [f32; 2],
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub layer: GuiLayer,
+    pub metrics: RadialButtonMetrics,
+    pub colors: RadialButtonColors,
+    pub state: RadialButtonState,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RadialButtonState {
+    pub hovered: Option<u32>,
+    pub active: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RadialButtonMetrics {
+    pub item_height: f32,
+    pub item_gap: f32,
+    pub padding: [f32; 2],
+    pub button_size: [f32; 2],
+    pub indicator_size: [f32; 2],
+    pub label_gap: f32,
+    pub char_width: f32,
+    pub font_scale: f32,
+    pub text_offset: [f32; 2],
+}
+
+impl Default for RadialButtonMetrics {
+    fn default() -> Self {
+        Self {
+            item_height: 24.0,
+            item_gap: 8.0,
+            padding: [12.0, 8.0],
+            button_size: [16.0, 16.0],
+            indicator_size: [8.0, 8.0],
+            label_gap: 10.0,
+            char_width: 7.2,
+            font_scale: 0.9,
+            text_offset: [0.0, 6.0],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RadialButtonColors {
+    pub button: [f32; 4],
+    pub button_hover: [f32; 4],
+    pub button_active: [f32; 4],
+    pub button_selected: [f32; 4],
+    pub button_selected_hover: [f32; 4],
+    pub indicator: [f32; 4],
+    pub label: [f32; 4],
+    pub disabled: [f32; 4],
+}
+
+impl Default for RadialButtonColors {
+    fn default() -> Self {
+        Self {
+            button: [0.18, 0.2, 0.26, 0.9],
+            button_hover: [0.22, 0.26, 0.34, 0.95],
+            button_active: [0.3, 0.36, 0.46, 0.95],
+            button_selected: [0.24, 0.28, 0.38, 0.98],
+            button_selected_hover: [0.3, 0.36, 0.48, 1.0],
+            indicator: [0.85, 0.9, 1.0, 1.0],
+            label: [0.9, 0.93, 0.98, 1.0],
+            disabled: [0.4, 0.42, 0.46, 0.6],
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct RadialButtonLayout {
+    pub items: Vec<RadialButtonItemLayout>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RadialButtonItemLayout {
+    pub id: u32,
+    pub item_rect: MenuRect,
+    pub button_rect: MenuRect,
+    pub selected: bool,
     pub enabled: bool,
 }
 

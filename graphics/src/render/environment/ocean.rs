@@ -14,8 +14,8 @@ use furikake::types::Camera;
 use glam::{Vec2, Vec3, Vec4};
 use tracing::warn;
 
-use crate::gui::debug::{debug_register, PageType};
 use crate::gui::Slider;
+use crate::gui::debug::{PageType, debug_register};
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -483,10 +483,7 @@ fn create_scene_color_fallback(
     }
 }
 
-fn create_scene_depth_fallback(
-    ctx: &mut Context,
-    sample_count: dashi::SampleCount,
-) -> ImageView {
+fn create_scene_depth_fallback(ctx: &mut Context, sample_count: dashi::SampleCount) -> ImageView {
     let info = ImageInfo {
         debug_name: "[MESHI GFX OCEAN] Scene Depth Fallback",
         dim: [1, 1, 1],
@@ -770,9 +767,8 @@ impl OceanRenderer {
             });
         }
 
-        let cascades: [OceanCascade; 3] = cascades
-            .try_into()
-            .expect("Expected three ocean cascades");
+        let cascades: [OceanCascade; 3] =
+            cascades.try_into().expect("Expected three ocean cascades");
 
         let shaders = compile_ocean_shaders();
         let environment_sampler = ctx
@@ -797,11 +793,9 @@ impl OceanRenderer {
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
             .set_attachment_format(0, info.color_format)
-            .add_reserved_table_variables(state).unwrap()
-            .add_table_variable_with_resources(
-                "ocean_waves",
-                wave_resources,
-            )
+            .add_reserved_table_variables(state)
+            .unwrap()
+            .add_table_variable_with_resources("ocean_waves", wave_resources)
             .add_table_variable_with_resources(
                 "params",
                 vec![dashi::IndexedResource {
@@ -846,7 +840,8 @@ impl OceanRenderer {
             );
 
         pso_builder = pso_builder
-            .add_reserved_table_variables(state).unwrap()
+            .add_reserved_table_variables(state)
+            .unwrap()
             .add_reserved_table_variable(state, "meshi_bindless_cameras")
             .unwrap()
             .add_reserved_table_variable(state, "meshi_bindless_lights")
@@ -974,6 +969,19 @@ impl OceanRenderer {
                 &mut self.wind_speed as *mut f32,
                 "Wind Speed",
             );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Wind Dir X", -1.0, 1.0, 0.0),
+                &mut self.wind_dir.x as *mut f32,
+                "Wind Dir X",
+            );
+            debug_register(
+                PageType::Ocean,
+                Slider::new(0, "Wind Dir Y", -1.0, 1.0, 0.0),
+                &mut self.wind_dir.y as *mut f32,
+                "Wind Dir Y",
+            );
+
             debug_register(
                 PageType::Ocean,
                 Slider::new(0, "Fetch Length", 10.0, 200000.0, 0.0),
@@ -1138,11 +1146,7 @@ impl OceanRenderer {
         );
     }
 
-    pub fn set_scene_textures(
-        &mut self,
-        color: Option<ImageView>,
-        depth: Option<ImageView>,
-    ) {
+    pub fn set_scene_textures(&mut self, color: Option<ImageView>, depth: Option<ImageView>) {
         let color_view = color.unwrap_or(self.scene_color_fallback);
         let depth_view = depth.unwrap_or(self.scene_depth_fallback);
         self.pipeline.update_table(
@@ -1245,9 +1249,7 @@ impl OceanRenderer {
             let log_n = cascade.fft_size.trailing_zeros();
             let mut current_is_ping = true;
 
-            let mut fft_alloc = dynamic
-                .bump()
-                .expect("Failed to allocate ocean FFT params");
+            let mut fft_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
             let fft_params = &mut fft_alloc.slice::<OceanFftParams>()[0];
             *fft_params = OceanFftParams {
                 fft_size: cascade.fft_size,
@@ -1272,9 +1274,7 @@ impl OceanRenderer {
                 .unbind_pipeline();
 
             for stage in 0..log_n {
-                let mut pass_alloc = dynamic
-                    .bump()
-                    .expect("Failed to allocate ocean FFT params");
+                let mut pass_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
                 let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
                 *pass_params = OceanFftParams {
                     fft_size: cascade.fft_size,
@@ -1309,9 +1309,7 @@ impl OceanRenderer {
                 current_is_ping = !current_is_ping;
             }
 
-            let mut bitrev_alloc = dynamic
-                .bump()
-                .expect("Failed to allocate ocean FFT params");
+            let mut bitrev_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
             let bitrev_params = &mut bitrev_alloc.slice::<OceanFftParams>()[0];
             *bitrev_params = OceanFftParams {
                 fft_size: cascade.fft_size,
@@ -1346,9 +1344,7 @@ impl OceanRenderer {
             current_is_ping = !current_is_ping;
 
             for stage in 0..log_n {
-                let mut pass_alloc = dynamic
-                    .bump()
-                    .expect("Failed to allocate ocean FFT params");
+                let mut pass_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
                 let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
                 *pass_params = OceanFftParams {
                     fft_size: cascade.fft_size,
