@@ -257,6 +257,11 @@ pub struct CloudShadowSettings {
     pub resolution: u32,
     pub extent: f32,
     pub strength: f32,
+    pub cascade_count: u32,
+    pub split_lambda: f32,
+    pub cascade_splits: [f32; 4],
+    pub cascade_extents: [f32; 4],
+    pub cascade_resolutions: [u32; 4],
 }
 
 impl Default for CloudShadowSettings {
@@ -266,6 +271,11 @@ impl Default for CloudShadowSettings {
             resolution: 256,
             extent: 50000.0,
             strength: 1.0,
+            cascade_count: 1,
+            split_lambda: 0.5,
+            cascade_splits: [0.25, 0.5, 0.75, 1.0],
+            cascade_extents: [50000.0; 4],
+            cascade_resolutions: [256; 4],
         }
     }
 }
