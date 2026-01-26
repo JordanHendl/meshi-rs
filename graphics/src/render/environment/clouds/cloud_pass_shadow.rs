@@ -22,6 +22,8 @@ pub struct CloudShadowParams {
     pub shadow_resolution: u32,
     pub cascade_count: u32,
     pub _padding_0: [u32; 2],
+    pub cascade_resolutions: [u32; 4],
+    pub cascade_offsets: [u32; 4],
     pub base_noise_size: [u32; 3],
     pub detail_noise_size: [u32; 3],
     pub weather_map_size: u32,
@@ -56,6 +58,7 @@ impl CloudShadowPass {
         assets: &CloudAssets,
         shadow_resolution: u32,
         cascade_count: u32,
+        cascade_resolutions: [u32; 4],
         timer_index: u32,
     ) -> Self {
         let params = StagedBuffer::new(
@@ -70,10 +73,24 @@ impl CloudShadowPass {
         );
 
         let cascade_count = cascade_count.max(1);
+        let mut shadow_resolution = shadow_resolution.max(1);
+        let mut total_pixels = 0u32;
+        for cascade_index in 0..cascade_count.min(4) {
+            let mut res = cascade_resolutions[cascade_index as usize];
+            if res == 0 {
+                res = shadow_resolution;
+            }
+            res = res.max(1);
+            shadow_resolution = shadow_resolution.max(res);
+            total_pixels = total_pixels.saturating_add(res.saturating_mul(res));
+        }
+        if total_pixels == 0 {
+            total_pixels = shadow_resolution.saturating_mul(shadow_resolution);
+        }
         let shadow_buffer = ctx
             .make_buffer(&BufferInfo {
                 debug_name: "[CLOUD] Shadow Buffer",
-                byte_size: shadow_resolution * shadow_resolution * 4 * cascade_count,
+                byte_size: total_pixels.saturating_mul(4),
                 visibility: MemoryVisibility::Gpu,
                 usage: BufferUsage::STORAGE,
                 initial_data: None,
@@ -133,9 +150,18 @@ impl CloudShadowPass {
         time: f32,
     ) {
         self.shadow_cascade_count = settings.shadow_cascade_count.max(1);
+        let mut max_resolution = self.shadow_resolution.max(1);
+        for cascade_index in 0..self.shadow_cascade_count.min(4) {
+            max_resolution = max_resolution.max(
+                settings.shadow_cascade_resolutions[cascade_index as usize].max(1),
+            );
+        }
+        self.shadow_resolution = max_resolution;
         let params = &mut self.params.as_slice_mut::<CloudShadowParams>()[0];
         params.shadow_resolution = self.shadow_resolution;
         params.cascade_count = self.shadow_cascade_count;
+        params.cascade_resolutions = settings.shadow_cascade_resolutions;
+        params.cascade_offsets = settings.shadow_cascade_offsets;
         params.base_noise_size = [
             settings.base_noise_dims.x,
             settings.base_noise_dims.y,

@@ -25,6 +25,9 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uint shadow_cascade_count;
     float shadow_cascade_splits[4];
     float shadow_cascade_extents[4];
+    uint shadow_cascade_resolutions[4];
+    uint shadow_cascade_offsets[4];
+    float shadow_cascade_strengths[4];
     uint camera_index;
     uvec3 _padding;
     float cloud_base;
@@ -141,15 +144,19 @@ uint select_shadow_cascade(float view_depth) {
     return count - 1u;
 }
 
-float sample_shadow(vec3 world_pos, float view_depth, uint shadow_res) {
+float sample_shadow(vec3 world_pos, float view_depth) {
     uint cascade_index = select_shadow_cascade(view_depth);
     float shadow_extent = params.shadow_cascade_extents[cascade_index];
+    uint cascade_resolution = params.shadow_cascade_resolutions[cascade_index];
+    if (cascade_resolution == 0u) {
+        cascade_resolution = params.shadow_resolution;
+    }
     vec2 uv = (world_pos.xz / shadow_extent) * 0.5 + 0.5;
     uv = clamp(uv, vec2(0.0), vec2(1.0));
-    uvec2 coord = uvec2(uv * float(shadow_res));
-    coord = min(coord, uvec2(shadow_res - 1));
-    uint cascade_offset = cascade_index * shadow_res * shadow_res;
-    uint idx = cascade_offset + coord.y * shadow_res + coord.x;
+    uvec2 coord = uvec2(uv * float(cascade_resolution));
+    coord = min(coord, uvec2(cascade_resolution - 1));
+    uint cascade_offset = params.shadow_cascade_offsets[cascade_index];
+    uint idx = cascade_offset + coord.y * cascade_resolution + coord.x;
     return cloud_shadow_buffer.values[idx];
 }
 
@@ -302,7 +309,9 @@ void main() {
                     vec3 sun_dir = normalize(params.sun_direction);
                     if (params.use_shadow_map == 1u && light_type == LIGHT_TYPE_DIRECTIONAL && dot(light_dir, sun_dir) > 0.95) {
                         float view_depth = -(view * vec4(sample_pos, 1.0)).z;
-                        light_trans = sample_shadow(sample_pos, view_depth, params.shadow_resolution) * params.shadow_strength;
+                        uint cascade_index = select_shadow_cascade(view_depth);
+                        float cascade_strength = params.shadow_cascade_strengths[cascade_index];
+                        light_trans = sample_shadow(sample_pos, view_depth) * cascade_strength;
                     } else {
                         light_trans = light_march(sample_pos, light_dir, max_dist, params.light_step_count, sigma_t, params.shadow_strength);
                     }

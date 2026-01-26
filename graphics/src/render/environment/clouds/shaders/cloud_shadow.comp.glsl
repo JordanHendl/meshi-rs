@@ -19,6 +19,8 @@ layout(set = 0, binding = 0, scalar) uniform CloudShadowParams {
     uint shadow_resolution;
     uint cascade_count;
     uvec2 _padding_0;
+    uint cascade_resolutions[4];
+    uint cascade_offsets[4];
     uvec3 base_noise_size;
     uvec3 detail_noise_size;
     uint weather_map_size;
@@ -78,16 +80,20 @@ float sample_weather(vec2 uv) {
 void main() {
     uint cascade_index = gl_GlobalInvocationID.z;
     uvec2 gid = gl_GlobalInvocationID.xy;
-    if (gid.x >= params.shadow_resolution || gid.y >= params.shadow_resolution) {
+    if (cascade_index >= params.cascade_count) {
         return;
     }
-    if (cascade_index >= params.cascade_count) {
+    uint cascade_resolution = params.cascade_resolutions[cascade_index];
+    if (cascade_resolution == 0u) {
+        cascade_resolution = params.shadow_resolution;
+    }
+    if (gid.x >= cascade_resolution || gid.y >= cascade_resolution) {
         return;
     }
 
     Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
     vec3 camera_position = camera.world_from_camera[3].xyz;
-    vec2 uv = (vec2(gid) + 0.5) / float(params.shadow_resolution);
+    vec2 uv = (vec2(gid) + 0.5) / float(cascade_resolution);
     float cascade_extent = params.cascade_extents[cascade_index];
     vec2 centered = (uv * 2.0 - 1.0) * cascade_extent;
     vec3 origin = camera_position + vec3(centered.x, params.cloud_top, centered.y);
@@ -117,7 +123,7 @@ void main() {
         }
     }
 
-    uint cascade_offset = cascade_index * params.shadow_resolution * params.shadow_resolution;
-    uint idx = cascade_offset + gid.y * params.shadow_resolution + gid.x;
+    uint cascade_offset = params.cascade_offsets[cascade_index];
+    uint idx = cascade_offset + gid.y * cascade_resolution + gid.x;
     cloud_shadow_buffer.values[idx] = clamp(transmittance, 0.0, 1.0);
 }

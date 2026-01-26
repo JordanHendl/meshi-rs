@@ -71,6 +71,7 @@ impl CloudRenderer {
             &assets,
             settings.shadow.resolution,
             settings.shadow.cascades.cascade_count,
+            settings.shadow.cascades.cascade_resolutions,
             TIMER_SHADOW,
         );
         let raymarch_pass = CloudRaymarchPass::new(
@@ -201,9 +202,31 @@ impl CloudRenderer {
 
         self.time += delta_time;
 
+        let cascade_count = self.settings.shadow.cascades.cascade_count.max(1);
+        let mut shadow_cascade_offsets = [0u32; 4];
+        let base_shadow_resolution = self.settings.shadow.resolution.max(1);
+        let mut max_shadow_resolution = base_shadow_resolution;
+        let mut running_offset = 0u32;
+        for cascade_index in 0..cascade_count.min(4) {
+            let mut resolution =
+                self.settings.shadow.cascades.cascade_resolutions[cascade_index as usize];
+            if resolution == 0 {
+                resolution = base_shadow_resolution;
+            }
+            resolution = resolution.max(1);
+            shadow_cascade_offsets[cascade_index as usize] = running_offset;
+            running_offset = running_offset.saturating_add(resolution.saturating_mul(resolution));
+            max_shadow_resolution = max_shadow_resolution.max(resolution);
+        }
+        let mut shadow_cascade_strengths = [0.0f32; 4];
+        for cascade_index in 0..4 {
+            shadow_cascade_strengths[cascade_index] = self.settings.shadow.strength
+                * self.settings.shadow.cascades.cascade_strengths[cascade_index];
+        }
+
         let sampling = CloudSamplingSettings {
             output_resolution: self.low_resolution,
-            shadow_resolution: self.shadow_pass.shadow_resolution,
+            shadow_resolution: max_shadow_resolution,
             base_noise_dims: self.assets.base_noise_dims,
             detail_noise_dims: self.assets.detail_noise_dims,
             weather_map_size: self.assets.weather_map_size,
@@ -227,6 +250,8 @@ impl CloudRenderer {
             shadow_cascade_splits: self.settings.shadow.cascades.cascade_splits,
             shadow_cascade_extents: self.settings.shadow.cascades.cascade_extents,
             shadow_cascade_resolutions: self.settings.shadow.cascades.cascade_resolutions,
+            shadow_cascade_offsets,
+            shadow_cascade_strengths,
             epsilon: self.settings.epsilon,
             frame_index: self.frame_index,
             time: self.time,

@@ -258,6 +258,7 @@ pub struct ShadowCascadeSettings {
     pub cascade_splits: [f32; 4],
     pub cascade_extents: [f32; 4],
     pub cascade_resolutions: [u32; 4],
+    pub cascade_strengths: [f32; 4],
 }
 
 impl Default for ShadowCascadeSettings {
@@ -268,6 +269,7 @@ impl Default for ShadowCascadeSettings {
             cascade_splits: [0.25, 0.5, 0.75, 1.0],
             cascade_extents: [50000.0; 4],
             cascade_resolutions: [256; 4],
+            cascade_strengths: [1.0; 4],
         }
     }
 }
