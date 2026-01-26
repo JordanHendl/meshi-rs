@@ -479,6 +479,16 @@ impl SkyRenderer {
         self.cubemap_dirty = true;
     }
 
+    pub fn sun_direction(&self) -> Vec3 {
+        resolve_celestial_direction(
+            self.sky_settings.sun_direction,
+            self.sky_settings.time_of_day,
+            self.sky_settings.latitude_degrees,
+            self.sky_settings.longitude_degrees,
+            false,
+        )
+    }
+
     pub fn environment_cubemap_view(&self) -> ImageView {
         if self.use_procedural_cubemap {
             self.procedural_cubemap

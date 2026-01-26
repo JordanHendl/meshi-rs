@@ -15,6 +15,7 @@ use crate::{
     BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
@@ -39,6 +40,7 @@ use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use resource_pool::resource_list::ResourceList;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
+use tare::utils::StagedBuffer;
 use tracing::{info, warn};
 
 mod shadow;
@@ -61,6 +63,19 @@ const BIN_PRE_Z: u32 = 0;
 const BIN_GBUFFER_OPAQUE: u32 = 1;
 const BIN_SHADOW: u32 = 2;
 const BIN_TRANSPARENT: u32 = 3;
+
+struct ShadowCascadeData {
+    count: u32,
+    splits: [f32; 4],
+    matrices: [Mat4; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct ShadowCascadeInfo {
+    splits: [f32; 4],
+    matrices: [Mat4; 4],
+}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -156,6 +171,7 @@ pub struct DeferredRenderer {
     text: TextRenderer,
     gui: GuiRenderer,
     shadow: ShadowPass,
+    shadow_cascade_buffer: StagedBuffer,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
 }
@@ -205,6 +221,145 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
+    fn compute_shadow_cascade_splits(
+        near: f32,
+        far: f32,
+        cascade_count: u32,
+        split_lambda: f32,
+    ) -> [f32; 4] {
+        let mut splits = [far; 4];
+        let count = cascade_count.clamp(1, 4) as usize;
+        if count == 0 {
+            return splits;
+        }
+
+        let safe_near = near.max(0.01);
+        let safe_far = far.max(safe_near + 0.01);
+        let lambda = split_lambda.clamp(0.0, 1.0);
+
+        for cascade_index in 0..count {
+            let p = (cascade_index + 1) as f32 / count as f32;
+            let log = safe_near * (safe_far / safe_near).powf(p);
+            let uniform = safe_near + (safe_far - safe_near) * p;
+            splits[cascade_index] = log * lambda + uniform * (1.0 - lambda);
+        }
+
+        splits
+    }
+
+    fn compute_frustum_corners(camera: &Camera, split_near: f32, split_far: f32) -> [Vec3; 8] {
+        let aspect = if camera.viewport.y.abs() > f32::EPSILON {
+            camera.viewport.x / camera.viewport.y
+        } else {
+            1.0
+        };
+        let fov_y = camera.fov_y_radians.max(0.001);
+        let tan_fov = (fov_y * 0.5).tan();
+        let near_height = split_near * tan_fov;
+        let near_width = near_height * aspect;
+        let far_height = split_far * tan_fov;
+        let far_width = far_height * aspect;
+
+        let view_corners = [
+            Vec3::new(-near_width, -near_height, -split_near),
+            Vec3::new(near_width, -near_height, -split_near),
+            Vec3::new(near_width, near_height, -split_near),
+            Vec3::new(-near_width, near_height, -split_near),
+            Vec3::new(-far_width, -far_height, -split_far),
+            Vec3::new(far_width, -far_height, -split_far),
+            Vec3::new(far_width, far_height, -split_far),
+            Vec3::new(-far_width, far_height, -split_far),
+        ];
+
+        let mut corners = [Vec3::ZERO; 8];
+        for (idx, corner) in view_corners.iter().enumerate() {
+            corners[idx] = camera.world_from_camera.transform_point3(*corner);
+        }
+
+        corners
+    }
+
+    fn compute_shadow_cascade_data(&self, camera: &Camera) -> ShadowCascadeData {
+        let cascades = self.shadow.cascades();
+        let cascade_count = cascades.cascade_count.clamp(1, 4);
+        let splits = Self::compute_shadow_cascade_splits(
+            camera.near,
+            camera.far,
+            cascade_count,
+            cascades.split_lambda,
+        );
+
+        let light_dir = self
+            .subrender
+            .environment
+            .sun_direction()
+            .normalize_or_zero();
+        let light_dir = if light_dir.length_squared() > 0.0 {
+            -light_dir
+        } else {
+            Vec3::Y
+        };
+
+        let mut matrices = [Mat4::IDENTITY; 4];
+        for cascade_index in 0..cascade_count as usize {
+            let split_near = if cascade_index == 0 {
+                camera.near
+            } else {
+                splits[cascade_index - 1]
+            };
+            let split_far = splits[cascade_index];
+
+            let corners = Self::compute_frustum_corners(camera, split_near, split_far);
+            let mut center = Vec3::ZERO;
+            for corner in corners.iter() {
+                center += *corner;
+            }
+            center /= corners.len() as f32;
+
+            let up = if light_dir.abs().dot(Vec3::Y) > 0.9 {
+                Vec3::X
+            } else {
+                Vec3::Y
+            };
+            let eye = center - light_dir;
+            let light_view = Mat4::look_at_rh(eye, center, up);
+
+            let mut min = Vec3::splat(f32::MAX);
+            let mut max = Vec3::splat(f32::MIN);
+            for corner in corners.iter() {
+                let light_space = light_view.transform_point3(*corner);
+                min = min.min(light_space);
+                max = max.max(light_space);
+            }
+
+            let extent = cascades.cascade_extents[cascade_index].max(0.01);
+            let center_xy = Vec2::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5);
+            let half_xy = Vec2::new(
+                ((max.x - min.x) * 0.5).max(extent),
+                ((max.y - min.y) * 0.5).max(extent),
+            );
+            min.x = center_xy.x - half_xy.x;
+            max.x = center_xy.x + half_xy.x;
+            min.y = center_xy.y - half_xy.y;
+            max.y = center_xy.y + half_xy.y;
+
+            let mut min_z = min.z;
+            let mut max_z = max.z;
+            if (max_z - min_z).abs() < 0.001 {
+                max_z = min_z + 0.001;
+            }
+
+            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, min_z, max_z);
+            matrices[cascade_index] = light_proj * light_view;
+        }
+
+        ShadowCascadeData {
+            count: cascade_count,
+            splits,
+            matrices,
+        }
+    }
+
     pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
@@ -266,6 +421,18 @@ impl DeferredRenderer {
             })
             .expect("Unable to create dynamic allocator!");
 
+        let initial_shadow_cascade = [ShadowCascadeInfo::default()];
+        let shadow_cascade_buffer = StagedBuffer::new(
+            ctx.as_mut(),
+            BufferInfo {
+                debug_name: "[MESHI DEFERRED] Shadow Cascade Info",
+                byte_size: std::mem::size_of::<ShadowCascadeInfo>() as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: unsafe { Some(&initial_shadow_cascade.align_to::<u8>().1) },
+            },
+        );
+
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
@@ -315,11 +482,37 @@ impl DeferredRenderer {
 
         let skinning = SkinningDispatcher::new(ctx.as_mut(), state.as_ref());
 
-        let shaders = miso::stddeferred_combine(&[]);
+        let compiler = Compiler::new().expect("Failed to create shader compiler");
+        let base_request = Request {
+            name: Some("meshi_deferred_combine".to_string()),
+            lang: ShaderLang::Slang,
+            optimization: OptimizationLevel::Performance,
+            debug_symbols: true,
+            defines: Default::default(),
+            ..Default::default()
+        };
+        let vertex = compiler
+            .compile(
+                include_str!("shaders/deferred_combine_vert.slang").as_bytes(),
+                &Request {
+                    stage: ShaderType::Vertex,
+                    ..base_request.clone()
+                },
+            )
+            .expect("Failed to compile deferred combine vertex shader");
+        let fragment = compiler
+            .compile(
+                include_str!("shaders/deferred_combine_frag.slang").as_bytes(),
+                &Request {
+                    stage: ShaderType::Fragment,
+                    ..base_request
+                },
+            )
+            .expect("Failed to compile deferred combine fragment shader");
         let mut psostate = PSOBuilder::new()
             .set_debug_name("[MESHI] Deferred Combine")
-            .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
+            .vertex_compiled(Some(vertex))
+            .fragment_compiled(Some(fragment))
             .set_attachment_format(0, Format::BGRA8)
             .set_details(GraphicsPipelineDetails {
                 color_blend_states: vec![Default::default(); 1],
@@ -330,6 +523,13 @@ impl DeferredRenderer {
                 "per_obj_ssbo",
                 vec![IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "shadow_cascade_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::StorageBuffer(shadow_cascade_buffer.device()),
                     slot: 0,
                 }],
             );
@@ -462,6 +662,7 @@ impl DeferredRenderer {
             text,
             gui,
             shadow,
+            shadow_cascade_buffer,
             depth,
             cloud_overlay,
         }
@@ -1353,24 +1554,47 @@ impl DeferredRenderer {
             });
 
             let shadow_resolution = self.shadow.resolution();
+            let camera_data = match self
+                .state
+                .reserved::<ReservedBindlessCamera>("meshi_bindless_cameras")
+            {
+                Ok(cameras) => *cameras.camera(*camera),
+                Err(_) => {
+                    warn!("Deferred renderer failed to access bindless cameras for shadows");
+                    Camera::default()
+                }
+            };
+            let cascade_data = self.compute_shadow_cascade_data(&camera_data);
+            let cascade_count = cascade_data.count.max(1);
+            let grid_x = if cascade_count > 1 { 2 } else { 1 };
+            let grid_y = if cascade_count > 2 { 2 } else { 1 };
+            {
+                let cascade_info = &mut self
+                    .shadow_cascade_buffer
+                    .as_slice_mut::<ShadowCascadeInfo>()[0];
+                cascade_info.splits = cascade_data.splits;
+                cascade_info.matrices = cascade_data.matrices;
+            }
+            let shadow_atlas_width = shadow_resolution * grid_x;
+            let shadow_atlas_height = shadow_resolution * grid_y;
             let shadow_viewport = Viewport {
                 area: FRect2D {
                     x: 0.0,
                     y: 0.0,
-                    w: shadow_resolution as f32,
-                    h: shadow_resolution as f32,
+                    w: shadow_atlas_width as f32,
+                    h: shadow_atlas_height as f32,
                 },
                 scissor: Rect2D {
                     x: 0,
                     y: 0,
-                    w: shadow_resolution,
-                    h: shadow_resolution,
+                    w: shadow_atlas_width,
+                    h: shadow_atlas_height,
                 },
                 ..Default::default()
             };
             let shadow_map = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Shadow Map {view_idx}"),
-                dim: [shadow_resolution, shadow_resolution, 1],
+                dim: [shadow_atlas_width, shadow_atlas_height, 1],
                 layers: 1,
                 format: Format::D24S8,
                 mip_levels: 1,
@@ -1462,14 +1686,36 @@ impl DeferredRenderer {
                         return cmd;
                     };
 
-                    cmd.combine(self.shadow.record(
-                        &shadow_viewport,
-                        &mut self.data.dynamic,
-                        camera_handle,
-                        indices_handle,
-                        self.proc.draw_builder.draw_list(),
-                        self.proc.draw_builder.draw_count(),
-                    ))
+                    let cascade_count = cascade_data.count.max(1);
+                    for cascade_index in 0..cascade_count as usize {
+                        let tile_x = (cascade_index as u32) % grid_x;
+                        let tile_y = (cascade_index as u32) / grid_x;
+                        let cascade_viewport = Viewport {
+                            area: FRect2D {
+                                x: (tile_x * shadow_resolution) as f32,
+                                y: (tile_y * shadow_resolution) as f32,
+                                w: shadow_resolution as f32,
+                                h: shadow_resolution as f32,
+                            },
+                            scissor: Rect2D {
+                                x: tile_x * shadow_resolution,
+                                y: tile_y * shadow_resolution,
+                                w: shadow_resolution,
+                                h: shadow_resolution,
+                            },
+                            ..Default::default()
+                        };
+                        cmd = cmd.combine(self.shadow.record(
+                            &cascade_viewport,
+                            &mut self.data.dynamic,
+                            cascade_data.matrices[cascade_index],
+                            indices_handle,
+                            self.proc.draw_builder.draw_list(),
+                            self.proc.draw_builder.draw_count(),
+                        ));
+                    }
+
+                    cmd
                 },
             );
 
@@ -1571,6 +1817,10 @@ impl DeferredRenderer {
                         diff: u32,
                         norm: u32,
                         mat: u32,
+                        shadow: u32,
+                        shadow_cascade_count: u32,
+                        shadow_resolution: u32,
+                        _padding: u32,
                     }
 
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
@@ -1578,8 +1828,13 @@ impl DeferredRenderer {
                     per_obj.diff = diffuse.bindless_id.unwrap() as u32;
                     per_obj.norm = normal.bindless_id.unwrap() as u32;
                     per_obj.mat = material_code.bindless_id.unwrap() as u32;
+                    per_obj.shadow = shadow_map.bindless_id.unwrap() as u32;
+                    per_obj.shadow_cascade_count = cascade_data.count;
+                    per_obj.shadow_resolution = shadow_resolution;
+                    per_obj._padding = 0;
 
                     cmd = cmd
+                        .combine(self.shadow_cascade_buffer.sync_up())
                         .bind_graphics_pipeline(self.psos.combine_pso.handle)
                         .update_viewport(&self.data.viewport)
                         .draw(&Draw {

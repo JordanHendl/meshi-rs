@@ -7,10 +7,9 @@ use dashi::{
     IndexedResource, SampleCount, ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
-use furikake::types::Camera;
 
-use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::ShadowCascadeSettings;
+use crate::render::gpu_draw_builder::GPUDrawBuilder;
 
 pub struct ShadowPassInfo {
     pub resolution: u32,
@@ -126,6 +125,10 @@ impl ShadowPass {
         self.sample_count
     }
 
+    pub fn cascades(&self) -> ShadowCascadeSettings {
+        self.cascades
+    }
+
     pub fn depth_clear_value(&self) -> ClearValue {
         ClearValue::DepthStencil {
             depth: 1.0,
@@ -137,20 +140,20 @@ impl ShadowPass {
         &self,
         viewport: &Viewport,
         dynamic: &mut dashi::DynamicAllocator,
-        camera: Handle<Camera>,
+        light_view_proj: glam::Mat4,
         indices_handle: Handle<dashi::Buffer>,
         draw_list: Handle<dashi::Buffer>,
         draw_count: u32,
     ) -> CommandStream<PendingGraphics> {
         #[repr(C)]
         struct PerSceneData {
-            camera: Handle<Camera>,
+            light_view_proj: glam::Mat4,
         }
 
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate shadow pass dynamic buffer");
-        alloc.slice::<PerSceneData>()[0].camera = camera;
+        alloc.slice::<PerSceneData>()[0].light_view_proj = light_view_proj;
 
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.pipeline.handle)

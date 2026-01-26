@@ -8,6 +8,7 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, SampleCount, Viewport,
 };
 use furikake::{BindlessState, types::Camera};
+use glam::Vec3;
 use noren::DB;
 
 use ocean::OceanRenderer;
@@ -132,6 +133,10 @@ impl EnvironmentRenderer {
 
     pub fn update_sky(&mut self, settings: sky::SkyFrameSettings) {
         self.sky.update_sky(settings);
+    }
+
+    pub fn sun_direction(&self) -> Vec3 {
+        self.sky.sun_direction()
     }
 
     pub fn prepare_sky_cubemap(
