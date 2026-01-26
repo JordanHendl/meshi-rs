@@ -6,6 +6,7 @@ use meshi_graphics::gui::{GuiContext, GuiFrame};
 pub trait EditorRenderBackend {
     fn name(&self) -> &'static str;
     fn render_frame(&mut self, ui: &mut EditorUi, project_manager: &ProjectManager);
+    fn take_gui_frame(&mut self) -> Option<GuiFrame>;
 }
 
 pub fn select_render_backend() -> Box<dyn EditorRenderBackend> {
@@ -35,6 +36,10 @@ impl EditorRenderBackend for MeshiGuiBackend {
         ui.build_meshi(&mut self.gui, project_manager);
         self.last_frame = Some(self.gui.build_frame());
     }
+
+    fn take_gui_frame(&mut self) -> Option<GuiFrame> {
+        self.last_frame.take()
+    }
 }
 
 #[derive(Default)]
@@ -60,6 +65,10 @@ impl EditorRenderBackend for EguiBackend {
             ui.build_egui(ctx, project_manager);
         }));
     }
+
+    fn take_gui_frame(&mut self) -> Option<GuiFrame> {
+        None
+    }
 }
 
 #[derive(Default)]
@@ -75,5 +84,9 @@ impl EditorRenderBackend for QtBackend {
     fn render_frame(&mut self, ui: &mut EditorUi, project_manager: &ProjectManager) {
         self.last_frame = self.last_frame.wrapping_add(1);
         ui.build_qt_placeholder(project_manager, self.last_frame);
+    }
+
+    fn take_gui_frame(&mut self) -> Option<GuiFrame> {
+        None
     }
 }

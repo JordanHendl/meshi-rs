@@ -221,6 +221,10 @@ impl EditorUi {
         self.viewport
     }
 
+    pub fn set_viewport(&mut self, size: [f32; 2]) {
+        self.viewport = size;
+    }
+
     fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {
         let recent_entries = project_manager.recent_projects_with_status();
         let recent_menu_items = if recent_entries.is_empty() {

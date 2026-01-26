@@ -9,22 +9,46 @@ fn main() {
 
 mod editor {
     use crate::{
-        project::ProjectManager, render_backend::select_render_backend, runtime::RuntimeBridge,
+        project::ProjectManager,
+        runtime::RuntimeBridge,
         ui::EditorUi,
     };
+    use eframe::{Frame, NativeOptions};
+    use egui::Context;
 
     pub fn run() {
-        // TODO: initialize Meshi engine via the plugin entry point.
-        let mut ui = EditorUi::new();
-        let mut runtime = RuntimeBridge::new();
-        let mut render_backend = select_render_backend();
         let project_manager = ProjectManager::load_or_create(ProjectManager::default_config_path());
+        let app = EditorApp::new(project_manager);
+        let options = NativeOptions::default();
 
-        // Placeholder frame loop.
-        loop {
-            render_backend.render_frame(&mut ui, &project_manager);
-            // TODO: submit GUI frame to Meshi render engine, egui, or Qt bridge.
-            runtime.tick();
+        eframe::run_native(
+            "Meshi Editor",
+            options,
+            Box::new(|_cc| Ok(Box::new(app))),
+        )
+        .expect("Failed to start editor window");
+    }
+
+    struct EditorApp {
+        ui: EditorUi,
+        project_manager: ProjectManager,
+        runtime: RuntimeBridge,
+    }
+
+    impl EditorApp {
+        fn new(project_manager: ProjectManager) -> Self {
+            Self {
+                ui: EditorUi::new(),
+                project_manager,
+                runtime: RuntimeBridge::new(),
+            }
+        }
+    }
+
+    impl eframe::App for EditorApp {
+        fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+            self.ui.build_egui(ctx, &self.project_manager);
+            self.runtime.tick();
         }
     }
 }
