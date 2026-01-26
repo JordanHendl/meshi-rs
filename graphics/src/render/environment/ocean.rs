@@ -38,9 +38,9 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             patch_size: 200.0,
-            vertex_resolution: 128,
+            vertex_resolution: 256,
             cascade_fft_sizes: [256, 128, 64],
-            cascade_patch_scales: [0.5, 1.0, 4.0],
+            cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
             max_tile_radius: 8,
             far_tile_radius: 8,
