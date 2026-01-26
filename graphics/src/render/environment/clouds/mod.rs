@@ -1,22 +1,27 @@
 pub mod cloud_assets;
-pub mod cloud_pass_shadow;
-pub mod cloud_pass_raymarch;
-pub mod cloud_pass_temporal;
 pub mod cloud_pass_composite;
+pub mod cloud_pass_raymarch;
+pub mod cloud_pass_shadow;
+pub mod cloud_pass_temporal;
 
+use crate::gui::Slider;
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial,
+    debug_register_slider,
+};
+use crate::structs::{CloudResolutionScale, CloudSettings};
 use cloud_assets::{CloudAssets, CloudNoiseSizes};
 use cloud_pass_composite::CloudCompositePass;
 use cloud_pass_raymarch::{CloudLayerSampling, CloudRaymarchPass, CloudSamplingSettings};
 use cloud_pass_shadow::CloudShadowPass;
 use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
-use crate::structs::{CloudResolutionScale, CloudSettings};
-use crate::gui::debug::{debug_register, PageType};
-use crate::gui::Slider;
 use dashi::cmd::Executable;
 use dashi::driver::command::BlitImage;
-use dashi::{CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport};
-use furikake::reservations::bindless_camera::ReservedBindlessCamera;
+use dashi::{
+    CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport,
+};
 use furikake::BindlessState;
+use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use glam::Mat4;
 use tracing::warn;
 
@@ -53,19 +58,6 @@ pub struct CloudRenderer {
 }
 
 pub fn register_debug(settings: &mut CloudSettings) {
-    settings.debug_enabled = settings.enabled as u32 as f32;
-    settings.debug_step_count = settings.step_count as f32;
-    settings.debug_light_step_count = settings.light_step_count as f32;
-    settings.debug_low_res_scale = if settings.low_res_scale == CloudResolutionScale::Half {
-        0.0
-    } else {
-        1.0
-    };
-    settings.debug_multi_scatter_shadowed = settings.multi_scatter_respects_shadow as u32 as f32;
-    settings.debug_shadow_enabled = settings.shadow.enabled as u32 as f32;
-    settings.debug_shadow_resolution = settings.shadow.resolution as f32;
-    settings.debug_shadow_cascade_count = settings.shadow.cascades.cascade_count as f32;
-    settings.debug_view_value = settings.debug_view as u32 as f32;
     unsafe {
         debug_register(
             PageType::Clouds,
@@ -151,16 +143,16 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.layer_b.wind_speed as *mut f32,
             "Layer B Wind Speed",
         );
-        debug_register(
+        debug_register_slider(
             PageType::Clouds,
             Slider::new(0, "Step Count", 8.0, 256.0, 0.0),
-            &mut settings.debug_step_count as *mut f32,
+            DebugRegistryValue::U32(&mut settings.step_count as *mut u32),
             "Step Count",
         );
-        debug_register(
+        debug_register_slider(
             PageType::Clouds,
             Slider::new(0, "Light Step Count", 4.0, 128.0, 0.0),
-            &mut settings.debug_light_step_count as *mut f32,
+            DebugRegistryValue::U32(&mut settings.light_step_count as *mut u32),
             "Light Step Count",
         );
         debug_register(
@@ -169,11 +161,20 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.phase_g as *mut f32,
             "Phase G",
         );
-        debug_register(
+        debug_register_radial(
             PageType::Clouds,
-            Slider::new(0, "Low Res Scale", 0.0, 1.0, 0.0),
-            &mut settings.debug_low_res_scale as *mut f32,
             "Low Res Scale",
+            DebugRegistryValue::CloudResolutionScale(&mut settings.low_res_scale),
+            &[
+                DebugRadialOption {
+                    label: "Half",
+                    value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "Quarter",
+                    value: 1.0,
+                },
+            ],
         );
         debug_register(
             PageType::Clouds,
@@ -211,11 +212,20 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.multi_scatter_strength as *mut f32,
             "Multi Scatter Strength",
         );
-        debug_register(
+        debug_register_radial(
             PageType::Clouds,
-            Slider::new(0, "Multi Scatter Shadowed", 0.0, 1.0, 0.0),
-            &mut settings.debug_multi_scatter_shadowed as *mut f32,
             "Multi Scatter Shadowed",
+            DebugRegistryValue::Bool(&mut settings.multi_scatter_respects_shadow),
+            &[
+                DebugRadialOption {
+                    label: "Off",
+                    value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "On",
+                    value: 1.0,
+                },
+            ],
         );
         debug_register(
             PageType::Clouds,
@@ -295,16 +305,25 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.atmosphere_haze_color.z as *mut f32,
             "Atmos Haze B",
         );
-        debug_register(
+        debug_register_radial(
             PageType::Clouds,
-            Slider::new(0, "Shadow Enabled", 0.0, 1.0, 0.0),
-            &mut settings.debug_shadow_enabled as *mut f32,
             "Shadow Enabled",
+            DebugRegistryValue::Bool(&mut settings.shadow.enabled),
+            &[
+                DebugRadialOption {
+                    label: "Off",
+                    value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "On",
+                    value: 1.0,
+                },
+            ],
         );
-        debug_register(
+        debug_register_slider(
             PageType::Clouds,
             Slider::new(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
-            &mut settings.debug_shadow_resolution as *mut f32,
+            DebugRegistryValue::U32(&mut settings.shadow.resolution),
             "Shadow Resolution",
         );
         debug_register(
@@ -319,11 +338,28 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.shadow.strength as *mut f32,
             "Shadow Strength",
         );
-        debug_register(
+        debug_register_radial(
             PageType::Clouds,
-            Slider::new(0, "Shadow Cascades", 1.0, 4.0, 0.0),
-            &mut settings.debug_shadow_cascade_count as *mut f32,
             "Shadow Cascades",
+            DebugRegistryValue::U32(&mut settings.shadow.cascades.cascade_count),
+            &[
+                DebugRadialOption {
+                    label: "1",
+                    value: 1.0,
+                },
+                DebugRadialOption {
+                    label: "2",
+                    value: 2.0,
+                },
+                DebugRadialOption {
+                    label: "3",
+                    value: 3.0,
+                },
+                DebugRadialOption {
+                    label: "4",
+                    value: 4.0,
+                },
+            ],
         );
         debug_register(
             PageType::Clouds,
@@ -355,11 +391,88 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.temporal.history_weight_scale as *mut f32,
             "Temporal History Scale",
         );
-        debug_register(
+        debug_register_radial(
             PageType::Clouds,
-            Slider::new(0, "Debug View", 0.0, 23.0, 0.0),
-            &mut settings.debug_view_value as *mut f32,
             "Debug View",
+            DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
+            &[
+                DebugRadialOption {
+                    label: "None",
+                    value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "Weather Map",
+                    value: 1.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Map",
+                    value: 2.0,
+                },
+                DebugRadialOption {
+                    label: "Transmittance",
+                    value: 3.0,
+                },
+                DebugRadialOption {
+                    label: "Step Heatmap",
+                    value: 4.0,
+                },
+                DebugRadialOption {
+                    label: "Temporal Weight",
+                    value: 5.0,
+                },
+                DebugRadialOption {
+                    label: "Stats",
+                    value: 6.0,
+                },
+                DebugRadialOption {
+                    label: "Layer A",
+                    value: 7.0,
+                },
+                DebugRadialOption {
+                    label: "Layer B",
+                    value: 8.0,
+                },
+                DebugRadialOption {
+                    label: "Single Scatter",
+                    value: 9.0,
+                },
+                DebugRadialOption {
+                    label: "Multi Scatter",
+                    value: 10.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Cascade 0",
+                    value: 11.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Cascade 1",
+                    value: 12.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Cascade 2",
+                    value: 13.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Cascade 3",
+                    value: 14.0,
+                },
+                DebugRadialOption {
+                    label: "Opaque Cascade 0",
+                    value: 20.0,
+                },
+                DebugRadialOption {
+                    label: "Opaque Cascade 1",
+                    value: 21.0,
+                },
+                DebugRadialOption {
+                    label: "Opaque Cascade 2",
+                    value: 22.0,
+                },
+                DebugRadialOption {
+                    label: "Opaque Cascade 3",
+                    value: 23.0,
+                },
+            ],
         );
         debug_register(
             PageType::Clouds,
@@ -542,11 +655,11 @@ impl CloudRenderer {
             running_offset = running_offset.saturating_add(resolution.saturating_mul(resolution));
             max_shadow_resolution = max_shadow_resolution.max(resolution);
         }
-        let shadow_cascade_splits =
-            self.settings
-                .shadow
-                .cascades
-                .compute_splits(camera_data.near, camera_data.far);
+        let shadow_cascade_splits = self
+            .settings
+            .shadow
+            .cascades
+            .compute_splits(camera_data.near, camera_data.far);
         let mut shadow_cascade_strengths = [0.0f32; 4];
         for cascade_index in 0..4 {
             shadow_cascade_strengths[cascade_index] = self.settings.shadow.strength
@@ -607,7 +720,8 @@ impl CloudRenderer {
         };
 
         if self.settings.shadow.enabled {
-            self.shadow_pass.update_settings(sampling, sampling.sun_direction, sampling.time);
+            self.shadow_pass
+                .update_settings(sampling, sampling.sun_direction, sampling.time);
             cmd = cmd.combine(self.shadow_pass.record());
         }
 
@@ -620,8 +734,11 @@ impl CloudRenderer {
             depth_sigma: self.settings.temporal.depth_sigma,
         };
 
-        self.temporal_pass
-            .update_params(sampling, temporal_settings, self.prev_view_proj.to_cols_array_2d());
+        self.temporal_pass.update_params(
+            sampling,
+            temporal_settings,
+            self.prev_view_proj.to_cols_array_2d(),
+        );
         cmd = cmd.combine(self.temporal_pass.record());
 
         self.prev_view_proj = view_proj;

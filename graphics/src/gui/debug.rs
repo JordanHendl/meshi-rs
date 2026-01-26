@@ -1,7 +1,7 @@
 use glam::{Vec2, Vec3, Vec4, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
@@ -37,15 +37,111 @@ pub enum PageType {
 }
 
 #[derive(Clone)]
+pub struct DebugRadialOption {
+    pub label: &'static str,
+    pub value: f32,
+}
+
+#[derive(Clone)]
+struct DebugRegistryRadialOption {
+    id: u32,
+    label: String,
+    value: f32,
+}
+
+#[derive(Clone)]
+enum DebugRegistryControl {
+    Slider {
+        min: f32,
+        max: f32,
+        enabled: bool,
+        show_value: bool,
+    },
+    Radial {
+        options: Vec<DebugRegistryRadialOption>,
+    },
+}
+
+#[derive(Clone)]
+pub enum DebugRegistryValue {
+    Float(*mut f32),
+    U32(*mut u32),
+    Bool(*mut bool),
+    CloudResolutionScale(*mut CloudResolutionScale),
+    CloudDebugView(*mut CloudDebugView),
+}
+
+impl DebugRegistryValue {
+    fn matches(&self, other: &DebugRegistryValue) -> bool {
+        match (self, other) {
+            (DebugRegistryValue::Float(lhs), DebugRegistryValue::Float(rhs)) => lhs == rhs,
+            (DebugRegistryValue::U32(lhs), DebugRegistryValue::U32(rhs)) => lhs == rhs,
+            (DebugRegistryValue::Bool(lhs), DebugRegistryValue::Bool(rhs)) => lhs == rhs,
+            (
+                DebugRegistryValue::CloudResolutionScale(lhs),
+                DebugRegistryValue::CloudResolutionScale(rhs),
+            ) => lhs == rhs,
+            (DebugRegistryValue::CloudDebugView(lhs), DebugRegistryValue::CloudDebugView(rhs)) => {
+                lhs == rhs
+            }
+            _ => false,
+        }
+    }
+
+    unsafe fn get(&self) -> f32 {
+        match self {
+            DebugRegistryValue::Float(ptr) => ptr.as_ref().copied().unwrap_or(0.0),
+            DebugRegistryValue::U32(ptr) => ptr.as_ref().copied().unwrap_or(0) as f32,
+            DebugRegistryValue::Bool(ptr) => ptr.as_ref().copied().unwrap_or(false) as u32 as f32,
+            DebugRegistryValue::CloudResolutionScale(ptr) => ptr
+                .as_ref()
+                .map(|value| cloud_resolution_scale_value(*value))
+                .unwrap_or(0.0),
+            DebugRegistryValue::CloudDebugView(ptr) => ptr
+                .as_ref()
+                .map(|value| *value as u32 as f32)
+                .unwrap_or(0.0),
+        }
+    }
+
+    unsafe fn set(&self, value: f32) {
+        match self {
+            DebugRegistryValue::Float(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = value;
+                }
+            }
+            DebugRegistryValue::U32(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = value.round().max(0.0) as u32;
+                }
+            }
+            DebugRegistryValue::Bool(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = value >= 0.5;
+                }
+            }
+            DebugRegistryValue::CloudResolutionScale(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = cloud_resolution_scale_from_value(value);
+                }
+            }
+            DebugRegistryValue::CloudDebugView(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = cloud_debug_view_from_value(value);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 struct DebugRegistryItem {
     id: u32,
     page: PageType,
     label: String,
-    min: f32,
-    max: f32,
-    enabled: bool,
-    show_value: bool,
-    value_ptr: *mut f32,
+    control: DebugRegistryControl,
+    value: DebugRegistryValue,
 }
 
 unsafe impl Send for DebugRegistryItem {}
@@ -58,15 +154,27 @@ pub unsafe fn debug_register(
     value_ptr: *mut f32,
     label: &str,
 ) -> u32 {
+    debug_register_slider(page, slider, DebugRegistryValue::Float(value_ptr), label)
+}
+
+pub unsafe fn debug_register_slider(
+    page: PageType,
+    slider: Slider,
+    value: DebugRegistryValue,
+    label: &str,
+) -> u32 {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
-    if let Some(entry) = registry.iter_mut().find(|entry| {
-        entry.page == page && entry.value_ptr == value_ptr && entry.label == label
-    }) {
-        entry.min = slider.min;
-        entry.max = slider.max;
-        entry.enabled = slider.enabled;
-        entry.show_value = slider.show_value;
+    if let Some(entry) = registry
+        .iter_mut()
+        .find(|entry| entry.page == page && entry.value.matches(&value) && entry.label == label)
+    {
+        entry.control = DebugRegistryControl::Slider {
+            min: slider.min,
+            max: slider.max,
+            enabled: slider.enabled,
+            show_value: slider.show_value,
+        };
         return entry.id;
     }
     let id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -74,13 +182,83 @@ pub unsafe fn debug_register(
         id,
         page,
         label: label.to_string(),
-        min: slider.min,
-        max: slider.max,
-        enabled: slider.enabled,
-        show_value: slider.show_value,
-        value_ptr,
+        control: DebugRegistryControl::Slider {
+            min: slider.min,
+            max: slider.max,
+            enabled: slider.enabled,
+            show_value: slider.show_value,
+        },
+        value,
     });
     id
+}
+
+pub unsafe fn debug_register_radial(
+    page: PageType,
+    label: &str,
+    value: DebugRegistryValue,
+    options: &[DebugRadialOption],
+) -> u32 {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    if let Some(entry) = registry
+        .iter_mut()
+        .find(|entry| entry.page == page && entry.value.matches(&value) && entry.label == label)
+    {
+        let DebugRegistryControl::Radial { options: existing } = &mut entry.control else {
+            entry.control = DebugRegistryControl::Radial {
+                options: Vec::new(),
+            };
+            if let DebugRegistryControl::Radial { options: existing } = &mut entry.control {
+                *existing = build_radial_options(options);
+            }
+            return entry.id;
+        };
+
+        if existing.len() == options.len() {
+            for (stored, incoming) in existing.iter_mut().zip(options.iter()) {
+                stored.label = incoming.label.to_string();
+                stored.value = incoming.value;
+            }
+        } else {
+            *existing = build_radial_options(options);
+        }
+        return entry.id;
+    }
+
+    let base_id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1 + options.len() as u32, Ordering::Relaxed);
+    let radial_options = options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| DebugRegistryRadialOption {
+            id: base_id + 1 + index as u32,
+            label: option.label.to_string(),
+            value: option.value,
+        })
+        .collect();
+    registry.push(DebugRegistryItem {
+        id: base_id,
+        page,
+        label: label.to_string(),
+        control: DebugRegistryControl::Radial {
+            options: radial_options,
+        },
+        value,
+    });
+    base_id
+}
+
+fn build_radial_options(options: &[DebugRadialOption]) -> Vec<DebugRegistryRadialOption> {
+    let base_id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1 + options.len() as u32, Ordering::Relaxed);
+    options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| DebugRegistryRadialOption {
+            id: base_id + 1 + index as u32,
+            label: option.label.to_string(),
+            value: option.value,
+        })
+        .collect()
 }
 
 unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
@@ -89,21 +267,46 @@ unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
     registry
         .iter()
         .filter(|entry| entry.page == page)
-        .map(|entry| {
-            let value = if entry.value_ptr.is_null() {
-                0.0
-            } else {
-                *entry.value_ptr
-            };
-            Slider {
+        .filter_map(|entry| match &entry.control {
+            DebugRegistryControl::Slider {
+                min,
+                max,
+                enabled,
+                show_value,
+            } => Some(Slider {
                 id: entry.id,
                 label: entry.label.clone(),
-                value,
-                min: entry.min,
-                max: entry.max,
-                enabled: entry.enabled,
-                show_value: entry.show_value,
-            }
+                value: unsafe { entry.value.get() },
+                min: *min,
+                max: *max,
+                enabled: *enabled,
+                show_value: *show_value,
+            }),
+            DebugRegistryControl::Radial { .. } => None,
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct DebugRegistryRadialGroup {
+    label: String,
+    options: Vec<DebugRegistryRadialOption>,
+    value: f32,
+}
+
+unsafe fn debug_registry_radials(page: PageType) -> Vec<DebugRegistryRadialGroup> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    registry
+        .iter()
+        .filter(|entry| entry.page == page)
+        .filter_map(|entry| match &entry.control {
+            DebugRegistryControl::Radial { options } => Some(DebugRegistryRadialGroup {
+                label: entry.label.clone(),
+                options: options.clone(),
+                value: unsafe { entry.value.get() },
+            }),
+            DebugRegistryControl::Slider { .. } => None,
         })
         .collect()
 }
@@ -112,11 +315,32 @@ unsafe fn debug_registry_update_value(id: u32, value: f32) -> bool {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
     if let Some(entry) = registry.iter_mut().find(|entry| entry.id == id) {
-        if !entry.value_ptr.is_null() {
-            let clamped = value.clamp(entry.min, entry.max);
-            *entry.value_ptr = clamped;
+        let (min, max) = match &entry.control {
+            DebugRegistryControl::Slider { min, max, .. } => (*min, *max),
+            DebugRegistryControl::Radial { .. } => return false,
+        };
+        let clamped = value.clamp(min, max);
+        unsafe {
+            entry.value.set(clamped);
         }
         return true;
+    }
+    false
+}
+
+unsafe fn debug_registry_update_radial(id: u32) -> bool {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    for entry in registry.iter_mut() {
+        let DebugRegistryControl::Radial { options } = &entry.control else {
+            continue;
+        };
+        if let Some(option) = options.iter().find(|option| option.id == id) {
+            unsafe {
+                entry.value.set(option.value);
+            }
+            return true;
+        }
     }
     false
 }
@@ -158,56 +382,6 @@ struct DebugSliderValues {
     ocean_foam_noise_scale: f32,
     ocean_capillary_strength: f32,
     ocean_time_scale: f32,
-    cloud_layer_a_base_altitude: f32,
-    cloud_layer_a_top_altitude: f32,
-    cloud_layer_a_density_scale: f32,
-    cloud_layer_a_noise_scale: f32,
-    cloud_layer_a_wind_x: f32,
-    cloud_layer_a_wind_y: f32,
-    cloud_layer_a_wind_speed: f32,
-    cloud_layer_b_base_altitude: f32,
-    cloud_layer_b_top_altitude: f32,
-    cloud_layer_b_density_scale: f32,
-    cloud_layer_b_noise_scale: f32,
-    cloud_layer_b_wind_x: f32,
-    cloud_layer_b_wind_y: f32,
-    cloud_layer_b_wind_speed: f32,
-    cloud_light_step_count: f32,
-    cloud_coverage_power: f32,
-    cloud_detail_strength: f32,
-    cloud_curl_strength: f32,
-    cloud_jitter_strength: f32,
-    cloud_epsilon: f32,
-    cloud_low_res_scale: f32,
-    cloud_phase_g: f32,
-    cloud_multi_scatter_strength: f32,
-    cloud_multi_scatter_shadowed: f32,
-    cloud_step_count: f32,
-    cloud_sun_radiance_r: f32,
-    cloud_sun_radiance_g: f32,
-    cloud_sun_radiance_b: f32,
-    cloud_sun_direction_x: f32,
-    cloud_sun_direction_y: f32,
-    cloud_sun_direction_z: f32,
-    cloud_atmosphere_view_strength: f32,
-    cloud_atmosphere_view_extinction: f32,
-    cloud_atmosphere_light_transmittance: f32,
-    cloud_atmosphere_haze_strength: f32,
-    cloud_atmosphere_haze_r: f32,
-    cloud_atmosphere_haze_g: f32,
-    cloud_atmosphere_haze_b: f32,
-    cloud_shadow_enabled: f32,
-    cloud_shadow_resolution: f32,
-    cloud_shadow_extent: f32,
-    cloud_shadow_strength: f32,
-    cloud_shadow_cascade_count: f32,
-    cloud_shadow_split_lambda: f32,
-    cloud_temporal_blend_factor: f32,
-    cloud_temporal_clamp_strength: f32,
-    cloud_temporal_depth_sigma: f32,
-    cloud_temporal_history_weight_scale: f32,
-    cloud_debug_view: f32,
-    cloud_performance_budget_ms: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -245,6 +419,8 @@ pub struct DebugGui {
     debug_slider_layout: SliderLayout,
     debug_toggle_state: RadialButtonState,
     debug_toggle_layout: RadialButtonLayout,
+    debug_param_radial_state: RadialButtonState,
+    debug_param_radial_layouts: Vec<RadialButtonLayout>,
     debug_panel_position: Vec2,
     drag_target: Option<DragTarget>,
     drag_offset: Vec2,
@@ -268,6 +444,8 @@ impl DebugGui {
             debug_slider_layout: SliderLayout::default(),
             debug_toggle_state: RadialButtonState::default(),
             debug_toggle_layout: RadialButtonLayout::default(),
+            debug_param_radial_state: RadialButtonState::default(),
+            debug_param_radial_layouts: Vec::new(),
             debug_panel_position: vec2(560.0, 60.0),
             drag_target: None,
             drag_offset: Vec2::ZERO,
@@ -304,56 +482,6 @@ impl DebugGui {
                 ocean_foam_noise_scale: 0.2,
                 ocean_capillary_strength: 1.0,
                 ocean_time_scale: 1.0,
-                cloud_layer_a_base_altitude: 300.0,
-                cloud_layer_a_top_altitude: 400.0,
-                cloud_layer_a_density_scale: 0.5,
-                cloud_layer_a_noise_scale: 1.0,
-                cloud_layer_a_wind_x: 1.0,
-                cloud_layer_a_wind_y: 0.0,
-                cloud_layer_a_wind_speed: 0.2,
-                cloud_layer_b_base_altitude: 650.0,
-                cloud_layer_b_top_altitude: 900.0,
-                cloud_layer_b_density_scale: 0.22,
-                cloud_layer_b_noise_scale: 0.7,
-                cloud_layer_b_wind_x: -0.4,
-                cloud_layer_b_wind_y: 0.2,
-                cloud_layer_b_wind_speed: 0.35,
-                cloud_light_step_count: 12.0,
-                cloud_coverage_power: 1.2,
-                cloud_detail_strength: 0.6,
-                cloud_curl_strength: 0.0,
-                cloud_jitter_strength: 1.0,
-                cloud_epsilon: 0.01,
-                cloud_low_res_scale: 1.0,
-                cloud_phase_g: 0.6,
-                cloud_multi_scatter_strength: 0.35,
-                cloud_multi_scatter_shadowed: 1.0,
-                cloud_step_count: 64.0,
-                cloud_sun_radiance_r: 1.0,
-                cloud_sun_radiance_g: 1.0,
-                cloud_sun_radiance_b: 1.0,
-                cloud_sun_direction_x: 0.0,
-                cloud_sun_direction_y: -1.0,
-                cloud_sun_direction_z: 0.0,
-                cloud_atmosphere_view_strength: 0.6,
-                cloud_atmosphere_view_extinction: 0.00025,
-                cloud_atmosphere_light_transmittance: 0.9,
-                cloud_atmosphere_haze_strength: 0.35,
-                cloud_atmosphere_haze_r: 0.62,
-                cloud_atmosphere_haze_g: 0.72,
-                cloud_atmosphere_haze_b: 0.85,
-                cloud_shadow_enabled: 0.0,
-                cloud_shadow_resolution: 128.0,
-                cloud_shadow_extent: 50000.0,
-                cloud_shadow_strength: 1.0,
-                cloud_shadow_cascade_count: 1.0,
-                cloud_shadow_split_lambda: 0.5,
-                cloud_temporal_blend_factor: 0.95,
-                cloud_temporal_clamp_strength: 0.7,
-                cloud_temporal_depth_sigma: 15.0,
-                cloud_temporal_history_weight_scale: 1.0,
-                cloud_debug_view: 0.0,
-                cloud_performance_budget_ms: 4.0,
             },
             toggle_values: DebugToggleValues {
                 sky_enabled: false,
@@ -468,12 +596,9 @@ impl DebugGui {
                         ocean.cascade_spectrum_scales[1];
                     self.slider_values.ocean_cascade_spectrum_far =
                         ocean.cascade_spectrum_scales[2];
-                    self.slider_values.ocean_cascade_swell_near =
-                        ocean.cascade_swell_strengths[0];
-                    self.slider_values.ocean_cascade_swell_mid =
-                        ocean.cascade_swell_strengths[1];
-                    self.slider_values.ocean_cascade_swell_far =
-                        ocean.cascade_swell_strengths[2];
+                    self.slider_values.ocean_cascade_swell_near = ocean.cascade_swell_strengths[0];
+                    self.slider_values.ocean_cascade_swell_mid = ocean.cascade_swell_strengths[1];
+                    self.slider_values.ocean_cascade_swell_far = ocean.cascade_swell_strengths[2];
                     self.slider_values.ocean_depth_meters = ocean.depth_meters;
                     self.slider_values.ocean_depth_damping = ocean.depth_damping;
                     self.slider_values.ocean_fresnel_bias = ocean.fresnel_bias;
@@ -485,74 +610,6 @@ impl DebugGui {
                     self.slider_values.ocean_foam_noise_scale = ocean.foam_noise_scale;
                     self.slider_values.ocean_capillary_strength = ocean.capillary_strength;
                     self.slider_values.ocean_time_scale = ocean.time_scale;
-                }
-                if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                    self.slider_values.cloud_layer_a_base_altitude = clouds.layer_a.base_altitude;
-                    self.slider_values.cloud_layer_a_top_altitude = clouds.layer_a.top_altitude;
-                    self.slider_values.cloud_layer_a_density_scale = clouds.layer_a.density_scale;
-                    self.slider_values.cloud_layer_a_noise_scale = clouds.layer_a.noise_scale;
-                    self.slider_values.cloud_layer_a_wind_x = clouds.layer_a.wind.x;
-                    self.slider_values.cloud_layer_a_wind_y = clouds.layer_a.wind.y;
-                    self.slider_values.cloud_layer_a_wind_speed = clouds.layer_a.wind_speed;
-                    self.slider_values.cloud_layer_b_base_altitude = clouds.layer_b.base_altitude;
-                    self.slider_values.cloud_layer_b_top_altitude = clouds.layer_b.top_altitude;
-                    self.slider_values.cloud_layer_b_density_scale = clouds.layer_b.density_scale;
-                    self.slider_values.cloud_layer_b_noise_scale = clouds.layer_b.noise_scale;
-                    self.slider_values.cloud_layer_b_wind_x = clouds.layer_b.wind.x;
-                    self.slider_values.cloud_layer_b_wind_y = clouds.layer_b.wind.y;
-                    self.slider_values.cloud_layer_b_wind_speed = clouds.layer_b.wind_speed;
-                    self.slider_values.cloud_light_step_count = clouds.debug_light_step_count;
-                    self.slider_values.cloud_coverage_power = clouds.coverage_power;
-                    self.slider_values.cloud_detail_strength = clouds.detail_strength;
-                    self.slider_values.cloud_curl_strength = clouds.curl_strength;
-                    self.slider_values.cloud_jitter_strength = clouds.jitter_strength;
-                    self.slider_values.cloud_epsilon = clouds.epsilon;
-                    self.slider_values.cloud_low_res_scale = clouds.debug_low_res_scale;
-                    self.slider_values.cloud_phase_g = clouds.phase_g;
-                    self.slider_values.cloud_multi_scatter_strength = clouds.multi_scatter_strength;
-                    self.slider_values.cloud_multi_scatter_shadowed = clouds.debug_multi_scatter_shadowed;
-                    self.slider_values.cloud_step_count = clouds.debug_step_count;
-                    self.slider_values.cloud_sun_radiance_r = clouds.sun_radiance.x;
-                    self.slider_values.cloud_sun_radiance_g = clouds.sun_radiance.y;
-                    self.slider_values.cloud_sun_radiance_b = clouds.sun_radiance.z;
-                    self.slider_values.cloud_sun_direction_x = clouds.sun_direction.x;
-                    self.slider_values.cloud_sun_direction_y = clouds.sun_direction.y;
-                    self.slider_values.cloud_sun_direction_z = clouds.sun_direction.z;
-                    self.slider_values.cloud_atmosphere_view_strength = clouds.atmosphere_view_strength;
-                    self.slider_values.cloud_atmosphere_view_extinction =
-                        clouds.atmosphere_view_extinction;
-                    self.slider_values.cloud_atmosphere_light_transmittance =
-                        clouds.atmosphere_light_transmittance;
-                    self.slider_values.cloud_atmosphere_haze_strength = clouds.atmosphere_haze_strength;
-                    self.slider_values.cloud_atmosphere_haze_r = clouds.atmosphere_haze_color.x;
-                    self.slider_values.cloud_atmosphere_haze_g = clouds.atmosphere_haze_color.y;
-                    self.slider_values.cloud_atmosphere_haze_b = clouds.atmosphere_haze_color.z;
-                    self.slider_values.cloud_shadow_enabled = clouds.debug_shadow_enabled;
-                    self.slider_values.cloud_shadow_resolution = clouds.debug_shadow_resolution;
-                    self.slider_values.cloud_shadow_extent = clouds.shadow.extent;
-                    self.slider_values.cloud_shadow_strength = clouds.shadow.strength;
-                    self.slider_values.cloud_shadow_cascade_count = clouds.debug_shadow_cascade_count;
-                    self.slider_values.cloud_shadow_split_lambda =
-                        clouds.shadow.cascades.split_lambda;
-                    self.slider_values.cloud_temporal_blend_factor = clouds.temporal.blend_factor;
-                    self.slider_values.cloud_temporal_clamp_strength = clouds.temporal.clamp_strength;
-                    self.slider_values.cloud_temporal_depth_sigma = clouds.temporal.depth_sigma;
-                    self.slider_values.cloud_temporal_history_weight_scale =
-                        clouds.temporal.history_weight_scale;
-                    self.slider_values.cloud_debug_view = clouds.debug_view_value;
-                    self.slider_values.cloud_performance_budget_ms = clouds.performance_budget_ms;
-
-                    clouds.debug_enabled = clouds.enabled as u32 as f32;
-                    clouds.debug_step_count = clouds.step_count as f32;
-                    clouds.debug_light_step_count = clouds.light_step_count as f32;
-                    clouds.debug_low_res_scale = cloud_resolution_scale_value(clouds.low_res_scale);
-                    clouds.debug_multi_scatter_shadowed =
-                        clouds.multi_scatter_respects_shadow as u32 as f32;
-                    clouds.debug_shadow_enabled = clouds.shadow.enabled as u32 as f32;
-                    clouds.debug_shadow_resolution = clouds.shadow.resolution as f32;
-                    clouds.debug_shadow_cascade_count =
-                        clouds.shadow.cascades.cascade_count as f32;
-                    clouds.debug_view_value = clouds.debug_view as u32 as f32;
                 }
             }
         }
@@ -583,7 +640,9 @@ impl DebugGui {
             (viewport.x - debug_panel_size.x - panel_margin).max(panel_margin),
             (viewport.y - debug_panel_size.y - panel_margin).max(panel_margin),
         );
-        self.debug_panel_position = self.debug_panel_position.clamp(panel_min_pos, panel_max_pos);
+        self.debug_panel_position = self
+            .debug_panel_position
+            .clamp(panel_min_pos, panel_max_pos);
         let debug_panel_position = self.debug_panel_position;
         let debug_title_bar_pos = debug_panel_position;
         let debug_title_bar_size = vec2(debug_panel_size.x, debug_title_bar_height);
@@ -606,10 +665,8 @@ impl DebugGui {
             close_button_pos.x - button_gap - reset_button_size.x,
             debug_taskbar_pos.y + 4.0 * ui_scale,
         );
-        let close_button_hovered =
-            point_in_rect(self.cursor, close_button_pos, close_button_size);
-        let reset_button_hovered =
-            point_in_rect(self.cursor, reset_button_pos, reset_button_size);
+        let close_button_hovered = point_in_rect(self.cursor, close_button_pos, close_button_size);
+        let reset_button_hovered = point_in_rect(self.cursor, reset_button_pos, reset_button_size);
         let mut close_requested = false;
 
         if self.mouse_pressed {
@@ -655,6 +712,8 @@ impl DebugGui {
                     self.debug_slider_state.active = None;
                     self.debug_toggle_state = RadialButtonState::default();
                     self.debug_toggle_layout = RadialButtonLayout::default();
+                    self.debug_param_radial_state = RadialButtonState::default();
+                    self.debug_param_radial_layouts.clear();
                     self.scroll_offset = 0.0;
                 }
             }
@@ -685,6 +744,8 @@ impl DebugGui {
                     self.debug_slider_state.active = None;
                     self.debug_toggle_state = RadialButtonState::default();
                     self.debug_toggle_layout = RadialButtonLayout::default();
+                    self.debug_param_radial_state = RadialButtonState::default();
+                    self.debug_param_radial_layouts.clear();
                     self.scroll_offset = 0.0;
                 }
             }
@@ -697,16 +758,23 @@ impl DebugGui {
         });
         self.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
 
-        let hovered_toggle = self
-            .debug_toggle_layout
-            .items
+        let hovered_toggle = self.debug_toggle_layout.items.iter().find(|item| {
+            item.enabled
+                && (point_in_menu_rect(self.cursor, item.item_rect)
+                    || point_in_menu_rect(self.cursor, item.button_rect))
+        });
+        self.debug_toggle_state.hovered = hovered_toggle.map(|item| item.id);
+
+        let hovered_param_radial = self
+            .debug_param_radial_layouts
             .iter()
+            .flat_map(|layout| layout.items.iter())
             .find(|item| {
                 item.enabled
                     && (point_in_menu_rect(self.cursor, item.item_rect)
                         || point_in_menu_rect(self.cursor, item.button_rect))
             });
-        self.debug_toggle_state.hovered = hovered_toggle.map(|item| item.id);
+        self.debug_param_radial_state.hovered = hovered_param_radial.map(|item| item.id);
 
         if self.mouse_pressed {
             if let Some(item) = hovered_debug_slider {
@@ -724,11 +792,18 @@ impl DebugGui {
                     _ => {}
                 }
             }
+            if let Some(item) = hovered_param_radial {
+                self.debug_param_radial_state.active = Some(item.id);
+                unsafe {
+                    debug_registry_update_radial(item.id);
+                }
+            }
         }
 
         if !self.mouse_down {
             self.debug_slider_state.active = None;
             self.debug_toggle_state.active = None;
+            self.debug_param_radial_state.active = None;
         }
 
         if let Some(active_id) = self.debug_slider_state.active {
@@ -772,56 +847,6 @@ impl DebugGui {
                     223 => self.slider_values.ocean_foam_noise_scale = value,
                     224 => self.slider_values.ocean_capillary_strength = value,
                     225 => self.slider_values.ocean_time_scale = value,
-                    301 => self.slider_values.cloud_layer_a_base_altitude = value,
-                    302 => self.slider_values.cloud_layer_a_top_altitude = value,
-                    303 => self.slider_values.cloud_layer_a_density_scale = value,
-                    304 => self.slider_values.cloud_layer_a_noise_scale = value,
-                    305 => self.slider_values.cloud_layer_a_wind_x = value,
-                    306 => self.slider_values.cloud_layer_a_wind_y = value,
-                    307 => self.slider_values.cloud_layer_a_wind_speed = value,
-                    308 => self.slider_values.cloud_layer_b_base_altitude = value,
-                    309 => self.slider_values.cloud_layer_b_top_altitude = value,
-                    310 => self.slider_values.cloud_layer_b_density_scale = value,
-                    311 => self.slider_values.cloud_layer_b_noise_scale = value,
-                    312 => self.slider_values.cloud_layer_b_wind_x = value,
-                    313 => self.slider_values.cloud_layer_b_wind_y = value,
-                    314 => self.slider_values.cloud_layer_b_wind_speed = value,
-                    315 => self.slider_values.cloud_step_count = value,
-                    316 => self.slider_values.cloud_light_step_count = value,
-                    317 => self.slider_values.cloud_phase_g = value,
-                    318 => self.slider_values.cloud_low_res_scale = value,
-                    319 => self.slider_values.cloud_coverage_power = value,
-                    320 => self.slider_values.cloud_detail_strength = value,
-                    321 => self.slider_values.cloud_curl_strength = value,
-                    322 => self.slider_values.cloud_jitter_strength = value,
-                    323 => self.slider_values.cloud_epsilon = value,
-                    324 => self.slider_values.cloud_multi_scatter_strength = value,
-                    325 => self.slider_values.cloud_multi_scatter_shadowed = value,
-                    326 => self.slider_values.cloud_sun_radiance_r = value,
-                    327 => self.slider_values.cloud_sun_radiance_g = value,
-                    328 => self.slider_values.cloud_sun_radiance_b = value,
-                    329 => self.slider_values.cloud_sun_direction_x = value,
-                    330 => self.slider_values.cloud_sun_direction_y = value,
-                    331 => self.slider_values.cloud_sun_direction_z = value,
-                    332 => self.slider_values.cloud_atmosphere_view_strength = value,
-                    333 => self.slider_values.cloud_atmosphere_view_extinction = value,
-                    334 => self.slider_values.cloud_atmosphere_light_transmittance = value,
-                    335 => self.slider_values.cloud_atmosphere_haze_strength = value,
-                    336 => self.slider_values.cloud_atmosphere_haze_r = value,
-                    337 => self.slider_values.cloud_atmosphere_haze_g = value,
-                    338 => self.slider_values.cloud_atmosphere_haze_b = value,
-                    339 => self.slider_values.cloud_shadow_enabled = value,
-                    340 => self.slider_values.cloud_shadow_resolution = value,
-                    341 => self.slider_values.cloud_shadow_extent = value,
-                    342 => self.slider_values.cloud_shadow_strength = value,
-                    343 => self.slider_values.cloud_shadow_cascade_count = value,
-                    344 => self.slider_values.cloud_shadow_split_lambda = value,
-                    345 => self.slider_values.cloud_temporal_blend_factor = value,
-                    346 => self.slider_values.cloud_temporal_clamp_strength = value,
-                    347 => self.slider_values.cloud_temporal_depth_sigma = value,
-                    348 => self.slider_values.cloud_temporal_history_weight_scale = value,
-                    349 => self.slider_values.cloud_debug_view = value,
-                    350 => self.slider_values.cloud_performance_budget_ms = value,
                     _ => handled = false,
                 }
                 if !handled {
@@ -931,17 +956,26 @@ impl DebugGui {
                     ocean.gerstner_amplitude = new_value;
                     ocean_dirty = true;
                 }
-                let new_value = self.slider_values.ocean_cascade_spectrum_near.clamp(0.0, 2.0);
+                let new_value = self
+                    .slider_values
+                    .ocean_cascade_spectrum_near
+                    .clamp(0.0, 2.0);
                 if (ocean.cascade_spectrum_scales[0] - new_value).abs() > f32::EPSILON {
                     ocean.cascade_spectrum_scales[0] = new_value;
                     ocean_dirty = true;
                 }
-                let new_value = self.slider_values.ocean_cascade_spectrum_mid.clamp(0.0, 2.0);
+                let new_value = self
+                    .slider_values
+                    .ocean_cascade_spectrum_mid
+                    .clamp(0.0, 2.0);
                 if (ocean.cascade_spectrum_scales[1] - new_value).abs() > f32::EPSILON {
                     ocean.cascade_spectrum_scales[1] = new_value;
                     ocean_dirty = true;
                 }
-                let new_value = self.slider_values.ocean_cascade_spectrum_far.clamp(0.0, 2.0);
+                let new_value = self
+                    .slider_values
+                    .ocean_cascade_spectrum_far
+                    .clamp(0.0, 2.0);
                 if (ocean.cascade_spectrum_scales[2] - new_value).abs() > f32::EPSILON {
                     ocean.cascade_spectrum_scales[2] = new_value;
                     ocean_dirty = true;
@@ -1020,264 +1054,6 @@ impl DebugGui {
             if let Some(clouds) = bindings.cloud_settings.as_mut() {
                 if clouds.enabled != self.toggle_values.cloud_enabled {
                     clouds.enabled = self.toggle_values.cloud_enabled;
-                    cloud_dirty = true;
-                }
-                clouds.debug_enabled = clouds.enabled as u32 as f32;
-                let new_value = self.slider_values.cloud_layer_a_base_altitude.clamp(0.0, 3000.0);
-                if (clouds.layer_a.base_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.layer_a.base_altitude = new_value;
-                    cloud_dirty = true;
-                }
-                let min_top = clouds.layer_a.base_altitude + 10.0;
-                let new_value = self
-                    .slider_values
-                    .cloud_layer_a_top_altitude
-                    .clamp(min_top, 6000.0);
-                if (clouds.layer_a.top_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.layer_a.top_altitude = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_a_density_scale.clamp(0.0, 2.0);
-                if (clouds.layer_a.density_scale - new_value).abs() > f32::EPSILON {
-                    clouds.layer_a.density_scale = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_a_noise_scale.clamp(0.1, 2.0);
-                if (clouds.layer_a.noise_scale - new_value).abs() > f32::EPSILON {
-                    clouds.layer_a.noise_scale = new_value;
-                    cloud_dirty = true;
-                }
-                let new_wind_x = self.slider_values.cloud_layer_a_wind_x.clamp(-5.0, 5.0);
-                let new_wind_y = self.slider_values.cloud_layer_a_wind_y.clamp(-5.0, 5.0);
-                if (clouds.layer_a.wind.x - new_wind_x).abs() > f32::EPSILON
-                    || (clouds.layer_a.wind.y - new_wind_y).abs() > f32::EPSILON
-                {
-                    clouds.layer_a.wind = Vec2::new(new_wind_x, new_wind_y);
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_a_wind_speed.clamp(0.0, 5.0);
-                if (clouds.layer_a.wind_speed - new_value).abs() > f32::EPSILON {
-                    clouds.layer_a.wind_speed = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_b_base_altitude.clamp(0.0, 12000.0);
-                if (clouds.layer_b.base_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.layer_b.base_altitude = new_value;
-                    cloud_dirty = true;
-                }
-                let min_top = clouds.layer_b.base_altitude + 10.0;
-                let new_value = self
-                    .slider_values
-                    .cloud_layer_b_top_altitude
-                    .clamp(min_top, 20000.0);
-                if (clouds.layer_b.top_altitude - new_value).abs() > f32::EPSILON {
-                    clouds.layer_b.top_altitude = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_b_density_scale.clamp(0.0, 2.0);
-                if (clouds.layer_b.density_scale - new_value).abs() > f32::EPSILON {
-                    clouds.layer_b.density_scale = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_b_noise_scale.clamp(0.1, 2.0);
-                if (clouds.layer_b.noise_scale - new_value).abs() > f32::EPSILON {
-                    clouds.layer_b.noise_scale = new_value;
-                    cloud_dirty = true;
-                }
-                let new_wind_x = self.slider_values.cloud_layer_b_wind_x.clamp(-5.0, 5.0);
-                let new_wind_y = self.slider_values.cloud_layer_b_wind_y.clamp(-5.0, 5.0);
-                if (clouds.layer_b.wind.x - new_wind_x).abs() > f32::EPSILON
-                    || (clouds.layer_b.wind.y - new_wind_y).abs() > f32::EPSILON
-                {
-                    clouds.layer_b.wind = Vec2::new(new_wind_x, new_wind_y);
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_layer_b_wind_speed.clamp(0.0, 5.0);
-                if (clouds.layer_b.wind_speed - new_value).abs() > f32::EPSILON {
-                    clouds.layer_b.wind_speed = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = clouds.debug_step_count.clamp(8.0, 256.0).round();
-                let new_steps = new_value as u32;
-                if clouds.step_count != new_steps {
-                    clouds.step_count = new_steps;
-                    cloud_dirty = true;
-                }
-                clouds.debug_step_count = clouds.step_count as f32;
-                let new_value =
-                    clouds.debug_light_step_count.clamp(4.0, 128.0).round();
-                let new_steps = new_value as u32;
-                if clouds.light_step_count != new_steps {
-                    clouds.light_step_count = new_steps;
-                    cloud_dirty = true;
-                }
-                clouds.debug_light_step_count = clouds.light_step_count as f32;
-                let new_value = self.slider_values.cloud_phase_g.clamp(-0.2, 0.9);
-                if (clouds.phase_g - new_value).abs() > f32::EPSILON {
-                    clouds.phase_g = new_value;
-                    cloud_dirty = true;
-                }
-                let new_scale = cloud_resolution_scale_from_value(clouds.debug_low_res_scale);
-                if clouds.low_res_scale != new_scale {
-                    clouds.low_res_scale = new_scale;
-                    cloud_dirty = true;
-                }
-                clouds.debug_low_res_scale = cloud_resolution_scale_value(clouds.low_res_scale);
-                let new_value = self.slider_values.cloud_coverage_power.clamp(0.1, 4.0);
-                if (clouds.coverage_power - new_value).abs() > f32::EPSILON {
-                    clouds.coverage_power = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_detail_strength.clamp(0.0, 2.0);
-                if (clouds.detail_strength - new_value).abs() > f32::EPSILON {
-                    clouds.detail_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_curl_strength.clamp(0.0, 2.0);
-                if (clouds.curl_strength - new_value).abs() > f32::EPSILON {
-                    clouds.curl_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_jitter_strength.clamp(0.0, 2.0);
-                if (clouds.jitter_strength - new_value).abs() > f32::EPSILON {
-                    clouds.jitter_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_epsilon.clamp(0.0001, 0.1);
-                if (clouds.epsilon - new_value).abs() > f32::EPSILON {
-                    clouds.epsilon = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_multi_scatter_strength.clamp(0.0, 2.0);
-                if (clouds.multi_scatter_strength - new_value).abs() > f32::EPSILON {
-                    clouds.multi_scatter_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = clouds.debug_multi_scatter_shadowed >= 0.5;
-                if clouds.multi_scatter_respects_shadow != new_value {
-                    clouds.multi_scatter_respects_shadow = new_value;
-                    cloud_dirty = true;
-                }
-                clouds.debug_multi_scatter_shadowed =
-                    clouds.multi_scatter_respects_shadow as u32 as f32;
-                let new_radiance = Vec3::new(
-                    self.slider_values.cloud_sun_radiance_r.clamp(0.0, 10.0),
-                    self.slider_values.cloud_sun_radiance_g.clamp(0.0, 10.0),
-                    self.slider_values.cloud_sun_radiance_b.clamp(0.0, 10.0),
-                );
-                if (clouds.sun_radiance - new_radiance).length_squared() > f32::EPSILON {
-                    clouds.sun_radiance = new_radiance;
-                    cloud_dirty = true;
-                }
-                let new_direction = Vec3::new(
-                    self.slider_values.cloud_sun_direction_x.clamp(-1.0, 1.0),
-                    self.slider_values.cloud_sun_direction_y.clamp(-1.0, 1.0),
-                    self.slider_values.cloud_sun_direction_z.clamp(-1.0, 1.0),
-                );
-                if (clouds.sun_direction - new_direction).length_squared() > f32::EPSILON {
-                    clouds.sun_direction = new_direction;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_atmosphere_view_strength.clamp(0.0, 1.0);
-                if (clouds.atmosphere_view_strength - new_value).abs() > f32::EPSILON {
-                    clouds.atmosphere_view_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value =
-                    self.slider_values.cloud_atmosphere_view_extinction.clamp(0.0, 0.005);
-                if (clouds.atmosphere_view_extinction - new_value).abs() > f32::EPSILON {
-                    clouds.atmosphere_view_extinction = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value =
-                    self.slider_values.cloud_atmosphere_light_transmittance.clamp(0.0, 1.0);
-                if (clouds.atmosphere_light_transmittance - new_value).abs() > f32::EPSILON {
-                    clouds.atmosphere_light_transmittance = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = self.slider_values.cloud_atmosphere_haze_strength.clamp(0.0, 1.0);
-                if (clouds.atmosphere_haze_strength - new_value).abs() > f32::EPSILON {
-                    clouds.atmosphere_haze_strength = new_value;
-                    cloud_dirty = true;
-                }
-                let new_value = Vec3::new(
-                    self.slider_values.cloud_atmosphere_haze_r.clamp(0.0, 1.5),
-                    self.slider_values.cloud_atmosphere_haze_g.clamp(0.0, 1.5),
-                    self.slider_values.cloud_atmosphere_haze_b.clamp(0.0, 1.5),
-                );
-                if (clouds.atmosphere_haze_color - new_value).length_squared() > f32::EPSILON {
-                    clouds.atmosphere_haze_color = new_value;
-                    cloud_dirty = true;
-                }
-                let new_shadow_enabled = clouds.debug_shadow_enabled >= 0.5;
-                if clouds.shadow.enabled != new_shadow_enabled {
-                    clouds.shadow.enabled = new_shadow_enabled;
-                    cloud_dirty = true;
-                }
-                clouds.debug_shadow_enabled = clouds.shadow.enabled as u32 as f32;
-                let new_shadow_resolution =
-                    clouds.debug_shadow_resolution.clamp(64.0, 2048.0).round() as u32;
-                if clouds.shadow.resolution != new_shadow_resolution {
-                    clouds.shadow.resolution = new_shadow_resolution;
-                    cloud_dirty = true;
-                }
-                clouds.debug_shadow_resolution = clouds.shadow.resolution as f32;
-                let new_shadow_extent = self.slider_values.cloud_shadow_extent.clamp(1000.0, 200000.0);
-                if (clouds.shadow.extent - new_shadow_extent).abs() > f32::EPSILON {
-                    clouds.shadow.extent = new_shadow_extent;
-                    cloud_dirty = true;
-                }
-                let new_shadow_strength = self.slider_values.cloud_shadow_strength.clamp(0.0, 2.0);
-                if (clouds.shadow.strength - new_shadow_strength).abs() > f32::EPSILON {
-                    clouds.shadow.strength = new_shadow_strength;
-                    cloud_dirty = true;
-                }
-                let new_cascade_count =
-                    clouds.debug_shadow_cascade_count.clamp(1.0, 4.0).round() as u32;
-                if clouds.shadow.cascades.cascade_count != new_cascade_count {
-                    clouds.shadow.cascades.cascade_count = new_cascade_count;
-                    cloud_dirty = true;
-                }
-                clouds.debug_shadow_cascade_count =
-                    clouds.shadow.cascades.cascade_count as f32;
-                let new_split_lambda =
-                    self.slider_values.cloud_shadow_split_lambda.clamp(0.0, 1.0);
-                if (clouds.shadow.cascades.split_lambda - new_split_lambda).abs() > f32::EPSILON {
-                    clouds.shadow.cascades.split_lambda = new_split_lambda;
-                    cloud_dirty = true;
-                }
-                let new_temporal_blend = self.slider_values.cloud_temporal_blend_factor.clamp(0.0, 1.0);
-                if (clouds.temporal.blend_factor - new_temporal_blend).abs() > f32::EPSILON {
-                    clouds.temporal.blend_factor = new_temporal_blend;
-                    cloud_dirty = true;
-                }
-                let new_temporal_clamp = self.slider_values.cloud_temporal_clamp_strength.clamp(0.0, 1.0);
-                if (clouds.temporal.clamp_strength - new_temporal_clamp).abs() > f32::EPSILON {
-                    clouds.temporal.clamp_strength = new_temporal_clamp;
-                    cloud_dirty = true;
-                }
-                let new_temporal_sigma = self.slider_values.cloud_temporal_depth_sigma.clamp(0.1, 100.0);
-                if (clouds.temporal.depth_sigma - new_temporal_sigma).abs() > f32::EPSILON {
-                    clouds.temporal.depth_sigma = new_temporal_sigma;
-                    cloud_dirty = true;
-                }
-                let new_temporal_history =
-                    self.slider_values.cloud_temporal_history_weight_scale.clamp(0.0, 4.0);
-                if (clouds.temporal.history_weight_scale - new_temporal_history).abs()
-                    > f32::EPSILON
-                {
-                    clouds.temporal.history_weight_scale = new_temporal_history;
-                    cloud_dirty = true;
-                }
-                let new_view = cloud_debug_view_from_value(clouds.debug_view_value);
-                if clouds.debug_view != new_view {
-                    clouds.debug_view = new_view;
-                    cloud_dirty = true;
-                }
-                clouds.debug_view_value = clouds.debug_view as u32 as f32;
-                let new_budget = self.slider_values.cloud_performance_budget_ms.clamp(0.1, 20.0);
-                if (clouds.performance_budget_ms - new_budget).abs() > f32::EPSILON {
-                    clouds.performance_budget_ms = new_budget;
                     cloud_dirty = true;
                 }
             }
@@ -1415,10 +1191,8 @@ impl DebugGui {
                     if let Some(sky) = unsafe { bindings.sky_settings.as_ref() } {
                         info_lines.push(format!("Sky enabled: {}", sky.enabled));
                         if let Some(dir) = sky.sun_direction {
-                            info_lines.push(format!(
-                                "Sun dir: {:.2}, {:.2}, {:.2}",
-                                dir.x, dir.y, dir.z
-                            ));
+                            info_lines
+                                .push(format!("Sun dir: {:.2}, {:.2}, {:.2}", dir.x, dir.y, dir.z));
                         }
                         if let Some(dir) = sky.moon_direction {
                             info_lines.push(format!(
@@ -1469,8 +1243,7 @@ impl DebugGui {
                 scale: if index == 0 { 0.9 } else { 0.85 },
             });
         }
-        let toggle_start_y =
-            text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
+        let toggle_start_y = text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
         let mut slider_start_y = toggle_start_y;
 
         let mut debug_toggle_layout = RadialButtonLayout::default();
@@ -1478,7 +1251,9 @@ impl DebugGui {
             let (toggle_label, toggle_enabled, on_id, off_id) = match self.debug_graphics_tab {
                 DebugGraphicsTab::Sky => ("Sky", self.toggle_values.sky_enabled, 6101, 6102),
                 DebugGraphicsTab::Ocean => ("Ocean", self.toggle_values.ocean_enabled, 6201, 6202),
-                DebugGraphicsTab::Clouds => ("Clouds", self.toggle_values.cloud_enabled, 6301, 6302),
+                DebugGraphicsTab::Clouds => {
+                    ("Clouds", self.toggle_values.cloud_enabled, 6301, 6302)
+                }
             };
             let toggle_buttons = vec![
                 RadialButton::new(on_id, format!("{toggle_label} On"), toggle_enabled),
@@ -1511,7 +1286,6 @@ impl DebugGui {
             slider_start_y = toggle_start_y + toggle_height + 8.0 * ui_scale;
         }
 
-        let mut debug_slider_layout = SliderLayout::default();
         let page_type = if self.debug_tab == DebugTab::Graphics {
             match self.debug_graphics_tab {
                 DebugGraphicsTab::Sky => PageType::Sky,
@@ -1525,8 +1299,59 @@ impl DebugGui {
                 DebugTab::Graphics => PageType::Sky,
             }
         };
+        let debug_radials = unsafe { debug_registry_radials(page_type) };
+        let mut debug_param_radial_layouts = Vec::new();
+        if !debug_radials.is_empty() {
+            let title_height = 18.0 * ui_scale;
+            let group_gap = 10.0 * ui_scale;
+            let radial_metrics = RadialButtonMetrics {
+                item_height: (20.0 * ui_scale).clamp(18.0, 26.0),
+                item_gap: (6.0 * ui_scale).clamp(4.0, 10.0),
+                padding: [12.0 * ui_scale, 6.0 * ui_scale],
+                button_size: [14.0 * ui_scale, 14.0 * ui_scale],
+                indicator_size: [7.0 * ui_scale, 7.0 * ui_scale],
+                label_gap: 10.0 * ui_scale,
+                char_width: 7.2 * ui_scale,
+                font_scale: 0.82 * ui_scale,
+                text_offset: [0.0, 6.0 * ui_scale],
+            };
+            for group in debug_radials {
+                gui.submit_text(GuiTextDraw {
+                    text: group.label.clone(),
+                    position: [text_start.x, slider_start_y],
+                    color: Vec4::new(0.8, 0.84, 0.92, 1.0).to_array(),
+                    scale: 0.82,
+                });
+                let current_value = group.value.round();
+                let buttons = group
+                    .options
+                    .iter()
+                    .map(|option| {
+                        let selected = option.value.round() == current_value;
+                        RadialButton::new(option.id, option.label.clone(), selected)
+                    })
+                    .collect::<Vec<_>>();
+                let options_height = radial_metrics.padding[1] * 2.0
+                    + buttons.len() as f32 * radial_metrics.item_height
+                    + buttons.len().saturating_sub(1) as f32 * radial_metrics.item_gap;
+                let radial_options = RadialButtonRenderOptions {
+                    viewport: [viewport.x, viewport.y],
+                    position: [debug_panel_position.x, slider_start_y + title_height],
+                    size: [debug_panel_size.x, options_height],
+                    layer: GuiLayer::Overlay,
+                    metrics: radial_metrics,
+                    colors: RadialButtonColors::default(),
+                    state: self.debug_param_radial_state,
+                };
+                let layout = gui.submit_radial_buttons(&buttons, &radial_options);
+                debug_param_radial_layouts.push(layout);
+                slider_start_y += title_height + options_height + group_gap;
+            }
+        }
+
+        let mut debug_slider_layout = SliderLayout::default();
         let mut debug_sliders = unsafe { debug_registry_sliders(page_type) };
-        if debug_sliders.is_empty() {
+        if debug_sliders.is_empty() && debug_param_radial_layouts.is_empty() {
             gui.submit_text(GuiTextDraw {
                 text: "No debug data available.".to_string(),
                 position: [text_start.x, slider_start_y],
@@ -1534,7 +1359,7 @@ impl DebugGui {
                 scale: 0.85,
             });
             self.scroll_delta = 0.0;
-        } else {
+        } else if !debug_sliders.is_empty() {
             let slider_area_height = (debug_panel_size.y
                 - (slider_start_y - debug_panel_position.y)
                 - 12.0 * ui_scale
@@ -1653,6 +1478,7 @@ impl DebugGui {
 
         self.debug_slider_layout = debug_slider_layout;
         self.debug_toggle_layout = debug_toggle_layout;
+        self.debug_param_radial_layouts = debug_param_radial_layouts;
         self.mouse_pressed = false;
 
         DebugGuiOutput {
@@ -1672,6 +1498,8 @@ impl DebugGui {
         self.debug_slider_layout = SliderLayout::default();
         self.debug_toggle_state = RadialButtonState::default();
         self.debug_toggle_layout = RadialButtonLayout::default();
+        self.debug_param_radial_state = RadialButtonState::default();
+        self.debug_param_radial_layouts.clear();
         self.scroll_offset = 0.0;
         self.scroll_delta = 0.0;
     }
