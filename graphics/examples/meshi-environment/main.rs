@@ -100,6 +100,10 @@ fn main() {
     setup.engine.set_cloud_settings(cloud_settings);
     setup.engine.set_ocean_settings(OceanFrameSettings {
         enabled: true,
+        wind_speed: 8.0,
+        wave_amplitude: 4.0,
+        gerstner_amplitude: 0.35,
+        cascade_spectrum_scales: [1.2, 1.0, 0.8],
         ..Default::default()
     });
 
