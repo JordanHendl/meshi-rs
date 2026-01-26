@@ -112,6 +112,12 @@ fn capi_headers_match_rust_exports() {
         .collect();
 
     assert!(
+        rust_exports.contains("meshi_plugin_get_api")
+            && header_exports.contains("meshi_plugin_get_api"),
+        "meshi_plugin_get_api must be exported by Rust and declared in headers"
+    );
+
+    assert!(
         missing_in_headers.is_empty() && extra_in_headers.is_empty(),
         "C headers do not match Rust exports.\nMissing in headers: {missing_in_headers:?}\nExtra in headers: {extra_in_headers:?}"
     );

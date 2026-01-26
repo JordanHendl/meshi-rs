@@ -10,6 +10,75 @@ extern "C" {
 
 typedef void (*MeshiEventCallback)(struct MeshiEvent*, void*);
 typedef void (*MeshiAudioFinishedCallback)(MeshiAudioSourceHandle, void*);
+typedef const struct MeshiPluginApi* (*MeshiPluginGetApiFn)(void);
+typedef void* (*MeshiSymbolLoader)(const char* name);
+
+#define MESHI_PLUGIN_GET_API_SYMBOL "meshi_plugin_get_api"
+#define MESHI_PLUGIN_LOAD_API(loader_fn) \
+    ((loader_fn) ? ((MeshiPluginGetApiFn)(loader_fn)(MESHI_PLUGIN_GET_API_SYMBOL)) : NULL)
+
+typedef struct MeshiPluginApi {
+    uint32_t abi_version;
+    struct MeshiEngine* (*make_engine)(const struct MeshiEngineInfo* info);
+    struct MeshiEngine* (*make_engine_headless)(const char* application_name, const char* application_location);
+    void (*destroy_engine)(struct MeshiEngine* engine);
+    void (*register_event_callback)(struct MeshiEngine* engine, void* user_data, MeshiEventCallback cb);
+    float (*update)(struct MeshiEngine* engine);
+    struct MeshiEngine* (*get_graphics_system)(struct MeshiEngine* engine);
+    struct MeshiAudioEngine* (*get_audio_system)(struct MeshiEngine* engine);
+    struct MeshiPhysicsSimulation* (*get_physics_system)(struct MeshiEngine* engine);
+    MeshiMeshObjectHandle (*gfx_create_mesh_object)(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
+    void (*gfx_release_render_object)(struct MeshiEngine* render, const MeshiMeshObjectHandle* h);
+    void (*gfx_set_transform)(struct MeshiEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
+    MeshiLightHandle (*gfx_create_light)(struct MeshiEngine* render, const MeshiLightInfo* info);
+    void (*gfx_release_light)(struct MeshiEngine* render, const MeshiLightHandle* h);
+    void (*gfx_set_light_transform)(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
+    void (*gfx_set_light_info)(struct MeshiEngine* render, MeshiLightHandle h, const MeshiLightInfo* info);
+    void (*gfx_set_camera_transform)(struct MeshiEngine* render, const MeshiMat4* transform);
+    MeshiCameraHandle (*gfx_register_camera)(struct MeshiEngine* render, const MeshiMat4* initial_transform);
+    void (*gfx_set_camera_projection)(struct MeshiEngine* render, const MeshiMat4* transform);
+    void (*gfx_capture_mouse)(struct MeshiEngine* render, int32_t value);
+    MeshiAudioSourceHandle (*audio_create_source)(struct MeshiAudioEngine* audio, const char* path);
+    void (*audio_destroy_source)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+    void (*audio_play)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+    void (*audio_pause)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+    void (*audio_stop)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+    MeshiPlaybackState (*audio_get_state)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h);
+    void (*audio_set_looping)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, int32_t looping);
+    void (*audio_set_volume)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float volume);
+    void (*audio_set_pitch)(struct MeshiAudioEngine* audio, MeshiAudioSourceHandle h, float pitch);
+    MeshiAudioSourceHandle (*audio_create_stream)(struct MeshiAudioEngine* audio, const char* path);
+    size_t (*audio_update_stream)(
+        struct MeshiAudioEngine* audio,
+        MeshiAudioSourceHandle h,
+        uint8_t* out_samples,
+        size_t max);
+    void (*audio_set_source_transform)(
+        struct MeshiAudioEngine* audio,
+        MeshiAudioSourceHandle h,
+        const MeshiMat4* transform,
+        MeshiVec3 velocity);
+    void (*audio_set_listener_transform)(
+        struct MeshiAudioEngine* audio,
+        const MeshiMat4* transform,
+        MeshiVec3 velocity);
+    void (*audio_set_bus_volume)(struct MeshiAudioEngine* audio, MeshiAudioBusHandle h, float volume);
+    void (*audio_register_finished_callback)(struct MeshiAudioEngine* audio, void* user_data, MeshiAudioFinishedCallback cb);
+    void (*physx_set_gravity)(struct MeshiPhysicsSimulation* physics, float gravity_mps);
+    MeshiMaterialHandle (*physx_create_material)(struct MeshiPhysicsSimulation* physics, const MeshiMaterialInfo* info);
+    void (*physx_release_material)(struct MeshiPhysicsSimulation* physics, const MeshiMaterialHandle* h);
+    MeshiRigidBodyHandle (*physx_create_rigid_body)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyInfo* info);
+    void (*physx_release_rigid_body)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h);
+    void (*physx_apply_force_to_rigid_body)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiForceApplyInfo* info);
+    int32_t (*physx_set_rigid_body_transform)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiActorStatus* info);
+    int32_t (*physx_get_rigid_body_status)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, MeshiActorStatus* out_status);
+    MeshiVec3 (*physx_get_rigid_body_velocity)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h);
+    int32_t (*physx_set_collision_shape)(struct MeshiPhysicsSimulation* physics, const MeshiRigidBodyHandle* h, const MeshiCollisionShape* shape);
+    size_t (*physx_get_contacts)(struct MeshiPhysicsSimulation* physics, MeshiContactInfo* out_contacts, size_t max);
+    MeshiCollisionShape (*physx_collision_shape_sphere)(float radius);
+    MeshiCollisionShape (*physx_collision_shape_box)(MeshiVec3 dimensions);
+    MeshiCollisionShape (*physx_collision_shape_capsule)(float half_height, float radius);
+} MeshiPluginApi;
 
 // Engine
 struct MeshiEngine* meshi_make_engine(const struct MeshiEngineInfo* info);
@@ -19,6 +88,7 @@ void meshi_register_event_callback(struct MeshiEngine* engine, void* user_data, 
 float meshi_update(struct MeshiEngine* engine);
 struct MeshiEngine* meshi_get_graphics_system(struct MeshiEngine* engine);
 struct MeshiAudioEngine* meshi_get_audio_system(struct MeshiEngine* engine);
+const struct MeshiPluginApi* meshi_plugin_get_api(void);
 
 // Audio
 MeshiAudioSourceHandle meshi_audio_create_source(struct MeshiAudioEngine* audio, const char* path);

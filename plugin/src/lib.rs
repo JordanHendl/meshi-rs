@@ -24,6 +24,136 @@ macro_rules! return_if_null {
     };
 }
 
+pub const MESHI_PLUGIN_ABI_VERSION: u32 = 1;
+
+#[repr(C)]
+pub struct MeshiPluginApi {
+    pub abi_version: u32,
+    pub make_engine: extern "C" fn(*const MeshiEngineInfo) -> *mut MeshiEngine,
+    pub make_engine_headless: extern "C" fn(*const c_char, *const c_char) -> *mut MeshiEngine,
+    pub destroy_engine: extern "C" fn(*mut MeshiEngine),
+    pub register_event_callback:
+        extern "C" fn(*mut MeshiEngine, *mut c_void, extern "C" fn(*mut event::Event, *mut c_void)),
+    pub update: extern "C" fn(*mut MeshiEngine) -> c_float,
+    pub get_graphics_system: extern "C" fn(*mut MeshiEngine) -> *mut MeshiEngine,
+    pub get_audio_system: extern "C" fn(*mut MeshiEngine) -> *mut AudioEngine,
+    pub get_physics_system: extern "C" fn(*mut MeshiEngine) -> *mut PhysicsSimulation,
+    pub gfx_create_mesh_object:
+        extern "C" fn(*mut MeshiEngine, *const MeshObjectInfo) -> Handle<RenderObject>,
+    pub gfx_release_render_object: extern "C" fn(*mut MeshiEngine, *const Handle<RenderObject>),
+    pub gfx_set_transform: extern "C" fn(*mut MeshiEngine, Handle<RenderObject>, *const Mat4),
+    pub gfx_create_light: extern "C" fn(*mut MeshiEngine, *const LightInfo) -> Handle<Light>,
+    pub gfx_release_light: extern "C" fn(*mut MeshiEngine, *const Handle<Light>),
+    pub gfx_set_light_transform: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const Mat4),
+    pub gfx_set_light_info: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const LightInfo),
+    pub gfx_set_camera_transform: extern "C" fn(*mut MeshiEngine, *const Mat4),
+    pub gfx_register_camera: extern "C" fn(*mut MeshiEngine, *const Mat4) -> Handle<Camera>,
+    pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, *const Mat4),
+    pub gfx_capture_mouse: extern "C" fn(*mut MeshiEngine, i32),
+    pub audio_create_source: extern "C" fn(*mut AudioEngine, *const c_char) -> Handle<AudioSource>,
+    pub audio_destroy_source: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
+    pub audio_play: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
+    pub audio_pause: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
+    pub audio_stop: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
+    pub audio_get_state: extern "C" fn(*mut AudioEngine, Handle<AudioSource>) -> PlaybackState,
+    pub audio_set_looping: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, i32),
+    pub audio_set_volume: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, c_float),
+    pub audio_set_pitch: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, c_float),
+    pub audio_set_source_transform:
+        extern "C" fn(*mut AudioEngine, Handle<AudioSource>, *const Mat4, Vec3),
+    pub audio_set_listener_transform: extern "C" fn(*mut AudioEngine, *const Mat4, Vec3),
+    pub audio_create_stream:
+        extern "C" fn(*mut AudioEngine, *const c_char) -> Handle<StreamingSource>,
+    pub audio_update_stream:
+        extern "C" fn(*mut AudioEngine, Handle<StreamingSource>, *mut u8, usize) -> usize,
+    pub audio_set_bus_volume: extern "C" fn(*mut AudioEngine, Handle<Bus>, c_float),
+    pub audio_register_finished_callback:
+        extern "C" fn(*mut AudioEngine, *mut c_void, FinishedCallback),
+    pub physx_set_gravity: extern "C" fn(*mut PhysicsSimulation, f32),
+    pub physx_create_material:
+        extern "C" fn(*mut PhysicsSimulation, *const meshi_physics::MaterialInfo)
+            -> Handle<meshi_physics::Material>,
+    pub physx_release_material:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::Material>),
+    pub physx_create_rigid_body:
+        extern "C" fn(*mut PhysicsSimulation, *const meshi_physics::RigidBodyInfo)
+            -> Handle<meshi_physics::RigidBody>,
+    pub physx_release_rigid_body:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>),
+    pub physx_apply_force_to_rigid_body:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const ForceApplyInfo),
+    pub physx_set_rigid_body_transform:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const meshi_physics::ActorStatus) -> i32,
+    pub physx_get_rigid_body_status:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *mut meshi_physics::ActorStatus) -> i32,
+    pub physx_get_rigid_body_velocity:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>) -> Vec3,
+    pub physx_set_collision_shape:
+        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const CollisionShape) -> i32,
+    pub physx_get_contacts:
+        extern "C" fn(*mut PhysicsSimulation, *mut ContactInfo, usize) -> usize,
+    pub physx_collision_shape_sphere: extern "C" fn(f32) -> CollisionShape,
+    pub physx_collision_shape_box: extern "C" fn(Vec3) -> CollisionShape,
+    pub physx_collision_shape_capsule: extern "C" fn(f32, f32) -> CollisionShape,
+}
+
+pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
+    abi_version: MESHI_PLUGIN_ABI_VERSION,
+    make_engine: meshi_make_engine,
+    make_engine_headless: meshi_make_engine_headless,
+    destroy_engine: meshi_destroy_engine,
+    register_event_callback: meshi_register_event_callback,
+    update: meshi_update,
+    get_graphics_system: meshi_get_graphics_system,
+    get_audio_system: meshi_get_audio_system,
+    get_physics_system: meshi_get_physics_system,
+    gfx_create_mesh_object: meshi_gfx_create_mesh_object,
+    gfx_release_render_object: meshi_gfx_release_render_object,
+    gfx_set_transform: meshi_gfx_set_transform,
+    gfx_create_light: meshi_gfx_create_light,
+    gfx_release_light: meshi_gfx_release_light,
+    gfx_set_light_transform: meshi_gfx_set_light_transform,
+    gfx_set_light_info: meshi_gfx_set_light_info,
+    gfx_set_camera_transform: meshi_gfx_set_camera_transform,
+    gfx_register_camera: meshi_gfx_register_camera,
+    gfx_set_camera_projection: meshi_gfx_set_camera_projection,
+    gfx_capture_mouse: meshi_gfx_capture_mouse,
+    audio_create_source: meshi_audio_create_source,
+    audio_destroy_source: meshi_audio_destroy_source,
+    audio_play: meshi_audio_play,
+    audio_pause: meshi_audio_pause,
+    audio_stop: meshi_audio_stop,
+    audio_get_state: meshi_audio_get_state,
+    audio_set_looping: meshi_audio_set_looping,
+    audio_set_volume: meshi_audio_set_volume,
+    audio_set_pitch: meshi_audio_set_pitch,
+    audio_set_source_transform: meshi_audio_set_source_transform,
+    audio_set_listener_transform: meshi_audio_set_listener_transform,
+    audio_create_stream: meshi_audio_create_stream,
+    audio_update_stream: meshi_audio_update_stream,
+    audio_set_bus_volume: meshi_audio_set_bus_volume,
+    audio_register_finished_callback: meshi_audio_register_finished_callback,
+    physx_set_gravity: meshi_physx_set_gravity,
+    physx_create_material: meshi_physx_create_material,
+    physx_release_material: meshi_physx_release_material,
+    physx_create_rigid_body: meshi_physx_create_rigid_body,
+    physx_release_rigid_body: meshi_physx_release_rigid_body,
+    physx_apply_force_to_rigid_body: meshi_physx_apply_force_to_rigid_body,
+    physx_set_rigid_body_transform: meshi_physx_set_rigid_body_transform,
+    physx_get_rigid_body_status: meshi_physx_get_rigid_body_status,
+    physx_get_rigid_body_velocity: meshi_physx_get_rigid_body_velocity,
+    physx_set_collision_shape: meshi_physx_set_collision_shape,
+    physx_get_contacts: meshi_physx_get_contacts,
+    physx_collision_shape_sphere: meshi_physx_collision_shape_sphere,
+    physx_collision_shape_box: meshi_physx_collision_shape_box,
+    physx_collision_shape_capsule: meshi_physx_collision_shape_capsule,
+};
+
+#[no_mangle]
+pub extern "C" fn meshi_plugin_get_api() -> *const MeshiPluginApi {
+    &MESHI_PLUGIN_API as *const MeshiPluginApi
+}
+
 #[repr(C)]
 /// Information used to create a [`MeshiEngine`].
 ///
