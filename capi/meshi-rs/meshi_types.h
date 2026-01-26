@@ -3,7 +3,7 @@
 #include <cstdint>
 
 struct MeshiHandle {
-    std::uint32_t index;
+    std::uint32_t slot;
     std::uint32_t generation;
 };
 
@@ -28,38 +28,62 @@ struct MeshiMat4 {
 };
 
 struct MeshiEngine;
-struct MeshiRenderEngine;
 struct MeshiAudioEngine;
 struct MeshiPhysicsSimulation;
-struct MeshiMeshObject;
-struct MeshiDirectionalLight;
 struct MeshiMaterial;
 struct MeshiRigidBody;
-
-enum class MeshiRenderBackend : std::uint32_t {
-    Canvas = 0,
-    Graph = 1,
-};
 
 struct MeshiEngineInfo {
     const char* application_name = nullptr;
     const char* application_location = nullptr;
-    std::int32_t headless;
-    MeshiRenderBackend render_backend;
+    std::int32_t headless = 0;
     const std::uint32_t* canvas_extent = nullptr;
     std::int32_t debug_mode = 0;
 };
 
-struct MeshiFFIMeshObjectInfo {
+struct MeshiMeshObjectInfo {
     const char* mesh = nullptr;
     const char* material = nullptr;
     MeshiMat4 transform;
 };
 
-struct MeshiDirectionalLightInfo {
-    MeshiVec4 direction;
-    MeshiVec4 color;
+enum class MeshiLightType : std::uint32_t {
+    Directional = 0,
+    Point = 1,
+    Spot = 2,
+    RectArea = 3,
+};
+
+enum class MeshiLightFlags : std::uint32_t {
+    None = 0,
+    CastsShadows = 1 << 0,
+    Volumetric = 1 << 1,
+};
+
+struct MeshiLightInfo {
+    MeshiLightType ty;
+    std::uint32_t flags;
+
     float intensity;
+    float range;
+
+    float color_r;
+    float color_g;
+    float color_b;
+
+    float pos_x;
+    float pos_y;
+    float pos_z;
+
+    float dir_x;
+    float dir_y;
+    float dir_z;
+
+    float spot_inner_angle_rad;
+    float spot_outer_angle_rad;
+
+    float rect_half_width;
+    float rect_half_height;
 };
 
 enum class MeshiEventType : std::uint32_t {
@@ -282,7 +306,7 @@ struct MeshiContactInfo {
 };
 
 using MeshiMeshObjectHandle = MeshiHandle;
-using MeshiDirectionalLightHandle = MeshiHandle;
+using MeshiLightHandle = MeshiHandle;
 using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;

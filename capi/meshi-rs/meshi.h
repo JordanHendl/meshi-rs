@@ -49,13 +49,13 @@ void meshi_audio_set_bus_volume(struct MeshiAudioEngine* audio, MeshiAudioBusHan
 void meshi_audio_register_finished_callback(struct MeshiAudioEngine* audio, void* user_data, MeshiAudioFinishedCallback cb);
 
 // Graphics
-MeshiMeshObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiFFIMeshObjectInfo* info);
+MeshiMeshObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
 void meshi_gfx_release_render_object(struct MeshiEngine* render, const MeshiMeshObjectHandle* h);
 void meshi_gfx_set_transform(struct MeshiEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
-MeshiDirectionalLightHandle meshi_gfx_create_light(struct MeshiEngine* render, const MeshiDirectionalLightInfo* info);
-void meshi_gfx_release_light(struct MeshiEngine* render, const MeshiDirectionalLightHandle* h);
-void meshi_gfx_set_light_transform(struct MeshiEngine* render, MeshiDirectionalLightHandle h, const MeshiMat4* transform);
-void meshi_gfx_set_light_info(struct MeshiEngine* render, MeshiDirectionalLightHandle h, const MeshiDirectionalLightInfo* info);
+MeshiLightHandle meshi_gfx_create_light(struct MeshiEngine* render, const MeshiLightInfo* info);
+void meshi_gfx_release_light(struct MeshiEngine* render, const MeshiLightHandle* h);
+void meshi_gfx_set_light_transform(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
+void meshi_gfx_set_light_info(struct MeshiEngine* render, MeshiLightHandle h, const MeshiLightInfo* info);
 void meshi_gfx_set_camera_transform(struct MeshiEngine* render, const MeshiMat4* transform);
 MeshiCameraHandle meshi_gfx_register_camera(struct MeshiEngine* render, const MeshiMat4* initial_transform);
 void meshi_gfx_set_camera_projection(struct MeshiEngine* render, const MeshiMat4* transform);
