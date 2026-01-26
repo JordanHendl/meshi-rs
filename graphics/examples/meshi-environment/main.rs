@@ -107,20 +107,9 @@ fn main() {
         ..Default::default()
     });
 
-    let terrain_objects = build_default_terrain_chunk().map(|artifact| {
-        let bounds_min = Vec3::from(artifact.bounds_min);
-        let bounds_max = Vec3::from(artifact.bounds_max);
-        let center = (bounds_min + bounds_max) * 0.5;
-        let offset = Vec3::new(-center.x, -bounds_min.y, -center.z);
-        vec![TerrainRenderObject {
-            key: "default-terrain".to_string(),
-            artifact,
-            transform: Mat4::from_translation(offset),
-        }]
-    });
-
-    if let Some(objects) = &terrain_objects {
-        setup.engine.set_terrain_render_objects(objects);
+    let terrain_objects = build_terrain_chunk_grid();
+    if !terrain_objects.is_empty() {
+        setup.engine.set_terrain_render_objects(&terrain_objects);
     }
 
     while data.running {
@@ -237,47 +226,100 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
         range: SubresourceRange::new(0, 1, 0, 1),
     }
 }
-fn build_default_terrain_chunk() -> Option<TerrainChunkArtifact> {
+
+fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
     let project_key = "default";
     let mut rdb = RDBFile::new();
     let settings = TerrainProjectSettings::default();
-    let generator = TerrainGeneratorDefinition::default();
-    let mutation_layer = TerrainMutationLayer::default();
+    let mut generator = TerrainGeneratorDefinition::default();
+    generator.amplitude = 2.0;
+    generator.frequency = 0.01;
+    let mutation_layer = TerrainMutationLayer::new("layer-1", "Layer 1", 0);
 
-    rdb.add(&project_settings_entry(project_key), &settings)
-        .ok()?;
-    rdb.add(
-        &generator_entry(project_key, settings.active_generator_version),
-        &generator,
-    )
-    .ok()?;
-    rdb.add(
-        &mutation_layer_entry(
-            project_key,
-            &mutation_layer.layer_id,
-            settings.active_mutation_version,
-        ),
-        &mutation_layer,
-    )
-    .ok()?;
-
-    let context = prepare_terrain_build_context(&mut rdb, project_key).ok()?;
-    let request = TerrainChunkBuildRequest {
-        chunk_coords: [0, 0],
-        lod: 0,
-    };
-    let outcome = build_terrain_chunk_with_context(
-        &mut rdb,
-        project_key,
-        &context,
-        request,
-        |_| {},
-        || false,
-    )
-    .ok()?;
-
-    match outcome.status {
-        TerrainChunkBuildStatus::Built => outcome.artifact,
-        _ => None,
+    if rdb
+        .add(&project_settings_entry(project_key), &settings)
+        .is_err()
+    {
+        return Vec::new();
     }
+    if rdb
+        .add(
+            &generator_entry(project_key, settings.active_generator_version),
+            &generator,
+        )
+        .is_err()
+    {
+        return Vec::new();
+    }
+    if rdb
+        .add(
+            &mutation_layer_entry(
+                project_key,
+                &mutation_layer.layer_id,
+                settings.active_mutation_version,
+            ),
+            &mutation_layer,
+        )
+        .is_err()
+    {
+        return Vec::new();
+    }
+
+    let context = match prepare_terrain_build_context(&mut rdb, project_key) {
+        Ok(context) => context,
+        Err(_) => return Vec::new(),
+    };
+
+    let grid_radius = 1;
+    let mut objects = Vec::new();
+    let chunk_stride = Vec2::new(
+        settings.tile_size * settings.tiles_per_chunk[0] as f32,
+        settings.tile_size * settings.tiles_per_chunk[1] as f32,
+    );
+    let terrain_rotation = Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+
+    for x in -grid_radius..=grid_radius {
+        for z in -grid_radius..=grid_radius {
+            let request = TerrainChunkBuildRequest {
+                chunk_coords: [x, z],
+                lod: 0,
+            };
+            let outcome = match build_terrain_chunk_with_context(
+                &mut rdb,
+                project_key,
+                &context,
+                request,
+                |_| {},
+                || false,
+            ) {
+                Ok(outcome) => outcome,
+                Err(_) => continue,
+            };
+
+            if !matches!(outcome.status, TerrainChunkBuildStatus::Built) {
+                continue;
+            }
+
+            let Some(artifact) = outcome.artifact else {
+                continue;
+            };
+
+            let bounds_min = Vec3::from(artifact.bounds_min);
+            let grid_origin = Vec3::new(
+                x as f32 * chunk_stride.x,
+                z as f32 * chunk_stride.y,
+                0.0,
+            );
+            let offset = Mat4::from_translation(grid_origin)
+                * terrain_rotation
+                * Mat4::from_translation(-bounds_min);
+            objects.push(TerrainRenderObject {
+                key: format!("terrain-{x}-{z}"),
+                artifact,
+                transform: offset,
+            });
+        }
+    }
+
+    objects
 }
