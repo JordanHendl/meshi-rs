@@ -100,11 +100,12 @@ void main() {
     vec2 swell_dir = normalize(params.swell_dir + vec2(0.0001, 0.0001));
     float wind_speed = max(params.wind_speed, 0.1);
     float amplitude = max(params.wave_amplitude, 0.0) * max(params.spectrum_scale, 0.0);
+    float amplitude_energy = amplitude * amplitude;
     float swell_strength = clamp(params.swell_strength, 0.0, 1.0);
     vec2 dominant_dir = normalize(mix(wind_dir, swell_dir, swell_strength));
 
-    float phillips = phillips_spectrum(k, dominant_dir, wind_speed, amplitude * 0.6);
-    float jonswap = jonswap_spectrum(k, dominant_dir, wind_speed, amplitude * 0.4, params.fetch_length);
+    float phillips = phillips_spectrum(k, dominant_dir, wind_speed, amplitude_energy * 0.6);
+    float jonswap = jonswap_spectrum(k, dominant_dir, wind_speed, amplitude_energy * 0.4, params.fetch_length);
     float spectrum = max(phillips + jonswap, 0.0);
     float depth = max(params.depth_meters, 0.0);
     if (depth > 0.0) {

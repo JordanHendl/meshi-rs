@@ -201,6 +201,21 @@ float light_march(vec3 origin, vec3 dir, float max_dist, uint steps, float sigma
     return trans;
 }
 
+float atmosphere_light_distance(vec3 sample_pos, vec3 light_dir, float max_dist, float light_type) {
+    if (light_type == LIGHT_TYPE_DIRECTIONAL) {
+        float denom = max(abs(light_dir.y), 0.05);
+        float height = max(sample_pos.y, 0.0);
+        return height / denom;
+    }
+    return max_dist;
+}
+
+float atmosphere_light_transmittance(vec3 sample_pos, vec3 light_dir, float max_dist, float light_type) {
+    float distance = atmosphere_light_distance(sample_pos, light_dir, max_dist, light_type);
+    float transmittance = exp(-params.atmosphere_view_extinction * distance);
+    return mix(1.0, transmittance, params.atmosphere_light_transmittance);
+}
+
 vec3 sample_environment(vec3 direction) {
     return texture(samplerCube(cloud_environment_map, cloud_environment_sampler), direction).rgb;
 }
@@ -331,7 +346,8 @@ LayerResult march_layer(
                 vec3 env_tint = sample_environment(sun_dir);
                 float phase = phase_hg(dot(ray_dir, sun_dir), params.phase_g);
                 float light_trans = light_march(sample_pos, sun_dir, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
-                vec3 base = params.sun_radiance * env_tint * phase * light_trans * params.atmosphere_light_transmittance;
+                float atmosphere_trans = atmosphere_light_transmittance(sample_pos, sun_dir, 5000.0, LIGHT_TYPE_DIRECTIONAL);
+                vec3 base = params.sun_radiance * env_tint * phase * light_trans * atmosphere_trans;
                 float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
                 float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
                 scatter_single += base;
@@ -362,7 +378,8 @@ LayerResult march_layer(
                     if (light_type == LIGHT_TYPE_DIRECTIONAL) {
                         light_color *= sample_environment(light_dir);
                     }
-                    vec3 base = light_color * phase * light_trans * attenuation * spot_factor * params.atmosphere_light_transmittance;
+                    float atmosphere_trans = atmosphere_light_transmittance(sample_pos, light_dir, max_dist, light_type);
+                    vec3 base = light_color * phase * light_trans * attenuation * spot_factor * atmosphere_trans;
                     float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
                     float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
                     scatter_single += base;

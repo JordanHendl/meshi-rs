@@ -151,9 +151,6 @@ fn main() {
                 moon_light_intensity: 0.4,
             });
 
-        cloud_settings.sun_direction = sun_dir;
-        cloud_settings.sun_radiance = Vec3::new(1.0, 0.95, 0.85);
-        setup.engine.set_cloud_settings(cloud_settings);
 
         setup.engine.set_text(
             data.environment_text,
