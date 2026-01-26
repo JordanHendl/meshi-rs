@@ -127,7 +127,7 @@ impl Default for OceanFrameSettings {
             current: Vec2::ZERO,
             wave_amplitude: 2.0,
             gerstner_amplitude: 0.12,
-            cascade_spectrum_scales: [1.0, 0.85, 0.65],
+            cascade_spectrum_scales: [400.0, 40.85, 4.65],
             cascade_swell_strengths: [0.35, 0.55, 0.75],
             depth_meters: 200.0,
             depth_damping: 0.3,
