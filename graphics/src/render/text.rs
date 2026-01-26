@@ -41,6 +41,15 @@ struct TextObjectData {
     dirty: bool,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct TextGlyphCacheKey {
+    text: String,
+    position: [u32; 2],
+    color: [u32; 4],
+    scale: u32,
+    font: String,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, Pod, Zeroable)]
 struct TextGlyph {
@@ -58,6 +67,8 @@ pub struct TextRenderer {
     draws: Vec<TextDraw>,
     frame_draws: Vec<TextDraw>,
     frame_dirty: bool,
+    glyph_cache: HashMap<TextGlyphCacheKey, Vec<TextGlyph>>,
+    cached_viewport: Option<(u32, u32)>,
     sdf_fonts: HashMap<String, DeviceSDFFont>,
     default_sdf_font: Option<String>,
     db: Option<NonNull<DB>>,
@@ -81,6 +92,8 @@ impl TextRenderer {
             draws: Vec::new(),
             frame_draws: Vec::new(),
             frame_dirty: false,
+            glyph_cache: HashMap::new(),
+            cached_viewport: None,
             sdf_fonts: HashMap::new(),
             default_sdf_font: None,
             db: None,
@@ -188,6 +201,10 @@ impl TextRenderer {
             .expect("Failed to build text pipeline")
     }
 
+    fn viewport_cache_key(viewport: &Viewport) -> (u32, u32) {
+        (viewport.area.w.to_bits(), viewport.area.h.to_bits())
+    }
+
     fn fetch_sdf_font(&mut self, entry: &str) -> Option<DeviceSDFFont> {
         if let Some(font) = self.sdf_fonts.get(entry) {
             return Some(font.clone());
@@ -213,97 +230,150 @@ impl TextRenderer {
         }
     }
 
-    fn build_text_glyphs(&mut self, draws: &[TextDraw], viewport: &Viewport) -> Vec<TextGlyph> {
+    fn build_glyphs_for_draw(
+        &mut self,
+        draw: &TextDraw,
+        viewport: &Viewport,
+    ) -> Option<Vec<TextGlyph>> {
+        let default_font = self.default_sdf_font.clone();
+        let font = match &draw.mode {
+            TextDrawMode::Sdf { font_entry, font } => font.clone().or_else(|| {
+                if font_entry.is_empty() {
+                    None
+                } else {
+                    self.fetch_sdf_font(font_entry)
+                }
+            }),
+            TextDrawMode::Plain => default_font.as_ref().and_then(|entry| {
+                if entry.is_empty() {
+                    None
+                } else {
+                    self.fetch_sdf_font(entry)
+                }
+            }),
+        };
+        let Some(font) = font else {
+            return None;
+        };
+        let Some(texture_id) = font.furikake_texture_id else {
+            warn!("SDF font '{}' is missing a bindless texture id.", font.name);
+            return None;
+        };
+
         let mut glyphs = Vec::new();
         let screen_w = viewport.area.w.max(1.0);
         let screen_h = viewport.area.h.max(1.0);
 
-        for draw in draws {
-            let default_font = self.default_sdf_font.clone();
-            let font = match &draw.mode {
-                TextDrawMode::Sdf { font_entry, font } => font.clone().or_else(|| {
-                    if font_entry.is_empty() {
-                        None
-                    } else {
-                        self.fetch_sdf_font(font_entry)
-                    }
-                }),
-                TextDrawMode::Plain => default_font.as_ref().and_then(|entry| {
-                    if entry.is_empty() {
-                        None
-                    } else {
-                        self.fetch_sdf_font(entry)
-                    }
-                }),
-            };
-            let Some(font) = font else {
+        let atlas_w = font.image.info.dim[0].max(1) as f32;
+        let atlas_h = font.image.info.dim[1].max(1) as f32;
+        let scale = draw.scale;
+        let mut pen_x = draw.position.x;
+        let mut baseline_y = draw.position.y + font.font.metrics.ascender * scale;
+
+        let glyph_map: HashMap<u32, _> = font
+            .font
+            .glyphs
+            .iter()
+            .map(|glyph| (glyph.unicode, glyph))
+            .collect();
+
+        for ch in draw.text.chars() {
+            if ch == '\n' {
+                pen_x = draw.position.x;
+                baseline_y += font.font.metrics.line_height * scale;
                 continue;
-            };
-            let Some(texture_id) = font.furikake_texture_id else {
-                warn!("SDF font '{}' is missing a bindless texture id.", font.name);
-                continue;
-            };
-
-            let atlas_w = font.image.info.dim[0].max(1) as f32;
-            let atlas_h = font.image.info.dim[1].max(1) as f32;
-            let scale = draw.scale;
-            let mut pen_x = draw.position.x;
-            let mut baseline_y = draw.position.y + font.font.metrics.ascender * scale;
-
-            let glyph_map: HashMap<u32, _> = font
-                .font
-                .glyphs
-                .iter()
-                .map(|glyph| (glyph.unicode, glyph))
-                .collect();
-
-            for ch in draw.text.chars() {
-                if ch == '\n' {
-                    pen_x = draw.position.x;
-                    baseline_y += font.font.metrics.line_height * scale;
-                    continue;
-                }
-
-                let Some(glyph) = glyph_map.get(&(ch as u32)) else {
-                    continue;
-                };
-
-                let Some(plane_bounds) = &glyph.plane_bounds else {
-                    pen_x += glyph.advance * scale;
-                    continue;
-                };
-                let Some(atlas_bounds) = &glyph.atlas_bounds else {
-                    pen_x += glyph.advance * scale;
-                    continue;
-                };
-
-                let x0 = pen_x + plane_bounds.left * scale;
-                let x1 = pen_x + plane_bounds.right * scale;
-                let y0 = baseline_y - plane_bounds.top * scale;
-                let y1 = baseline_y - plane_bounds.bottom * scale;
-
-                let ndc_x0 = (x0 / screen_w) * 2.0 - 1.0;
-                let ndc_x1 = (x1 / screen_w) * 2.0 - 1.0;
-                let ndc_y0 = 1.0 - (y0 / screen_h) * 2.0;
-                let ndc_y1 = 1.0 - (y1 / screen_h) * 2.0;
-
-                let uv_min = [atlas_bounds.left / atlas_w, atlas_bounds.bottom / atlas_h];
-                let uv_max = [atlas_bounds.right / atlas_w, atlas_bounds.top / atlas_h];
-
-                glyphs.push(TextGlyph {
-                    origin: [ndc_x0, ndc_y0],
-                    size: [ndc_x1 - ndc_x0, ndc_y1 - ndc_y0],
-                    uv_min,
-                    uv_max,
-                    color: draw.color.to_array(),
-                    texture_id: texture_id as u32,
-                    _padding: [0; 3],
-                });
-
-                pen_x += glyph.advance * scale;
             }
+
+            let Some(glyph) = glyph_map.get(&(ch as u32)) else {
+                continue;
+            };
+
+            let Some(plane_bounds) = &glyph.plane_bounds else {
+                pen_x += glyph.advance * scale;
+                continue;
+            };
+            let Some(atlas_bounds) = &glyph.atlas_bounds else {
+                pen_x += glyph.advance * scale;
+                continue;
+            };
+
+            let x0 = pen_x + plane_bounds.left * scale;
+            let x1 = pen_x + plane_bounds.right * scale;
+            let y0 = baseline_y - plane_bounds.top * scale;
+            let y1 = baseline_y - plane_bounds.bottom * scale;
+
+            let ndc_x0 = (x0 / screen_w) * 2.0 - 1.0;
+            let ndc_x1 = (x1 / screen_w) * 2.0 - 1.0;
+            let ndc_y0 = 1.0 - (y0 / screen_h) * 2.0;
+            let ndc_y1 = 1.0 - (y1 / screen_h) * 2.0;
+
+            let uv_min = [atlas_bounds.left / atlas_w, atlas_bounds.bottom / atlas_h];
+            let uv_max = [atlas_bounds.right / atlas_w, atlas_bounds.top / atlas_h];
+
+            glyphs.push(TextGlyph {
+                origin: [ndc_x0, ndc_y0],
+                size: [ndc_x1 - ndc_x0, ndc_y1 - ndc_y0],
+                uv_min,
+                uv_max,
+                color: draw.color.to_array(),
+                texture_id: texture_id as u32,
+                _padding: [0; 3],
+            });
+
+            pen_x += glyph.advance * scale;
         }
 
+        Some(glyphs)
+    }
+
+    fn build_text_glyphs(&mut self, draws: &[TextDraw], viewport: &Viewport) -> Vec<TextGlyph> {
+        let viewport_key = Self::viewport_cache_key(viewport);
+        if self.cached_viewport != Some(viewport_key) {
+            self.glyph_cache.clear();
+            self.cached_viewport = Some(viewport_key);
+        }
+
+        let mut glyphs = Vec::new();
+        let mut new_cache = HashMap::with_capacity(draws.len());
+
+        for draw in draws {
+            let default_font = self.default_sdf_font.clone();
+            let font_key = match &draw.mode {
+                TextDrawMode::Sdf { font_entry, .. } => font_entry.clone(),
+                TextDrawMode::Plain => default_font.unwrap_or_default(),
+            };
+
+            if font_key.is_empty() {
+                continue;
+            }
+
+            let cache_key = TextGlyphCacheKey {
+                text: draw.text.clone(),
+                position: [draw.position.x.to_bits(), draw.position.y.to_bits()],
+                color: [
+                    draw.color.x.to_bits(),
+                    draw.color.y.to_bits(),
+                    draw.color.z.to_bits(),
+                    draw.color.w.to_bits(),
+                ],
+                scale: draw.scale.to_bits(),
+                font: font_key,
+            };
+
+            if let Some(cached) = self.glyph_cache.remove(&cache_key) {
+                glyphs.extend_from_slice(&cached);
+                new_cache.insert(cache_key, cached);
+                continue;
+            }
+
+            let Some(built) = self.build_glyphs_for_draw(draw, viewport) else {
+                continue;
+            };
+            glyphs.extend_from_slice(&built);
+            new_cache.insert(cache_key, built);
+        }
+
+        self.glyph_cache = new_cache;
         glyphs
     }
 
