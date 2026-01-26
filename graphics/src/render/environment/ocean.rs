@@ -93,7 +93,7 @@ impl Default for OceanFrameSettings {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct OceanComputeParams {
+struct OceanSpectrumParams {
     fft_size: u32,
     time: f32,
     time_scale: f32,
@@ -101,6 +101,25 @@ struct OceanComputeParams {
     wind_dir: Vec2,
     wind_speed: f32,
     capillary_strength: f32,
+    patch_size: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OceanFftParams {
+    fft_size: u32,
+    stage: u32,
+    direction: u32,
+    bit_reverse: u32,
+    inverse: f32,
+    _padding: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OceanFinalizeParams {
+    fft_size: u32,
+    _padding: [u32; 3],
 }
 
 #[repr(C)]
@@ -132,7 +151,15 @@ struct OceanCascade {
     fft_size: u32,
     patch_size: f32,
     wave_buffer: Handle<Buffer>,
-    compute_pipeline: Option<bento::builder::CSO>,
+    spectrum_buffer: Handle<Buffer>,
+    ping_buffer: Handle<Buffer>,
+    pong_buffer: Handle<Buffer>,
+    spectrum_pipeline: Option<bento::builder::CSO>,
+    fft_spectrum_to_ping: Option<bento::builder::CSO>,
+    fft_ping_to_pong: Option<bento::builder::CSO>,
+    fft_pong_to_ping: Option<bento::builder::CSO>,
+    finalize_from_ping: Option<bento::builder::CSO>,
+    finalize_from_pong: Option<bento::builder::CSO>,
 }
 
 pub struct OceanRenderer {
@@ -217,14 +244,149 @@ impl OceanRenderer {
                     initial_data: None,
                 })
                 .expect("Failed to create ocean wave buffer");
+            let spectrum_buffer = ctx
+                .make_buffer(&BufferInfo {
+                    debug_name: "[MESHI GFX OCEAN] Spectrum Buffer",
+                    byte_size: fft_size * fft_size * 16,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                })
+                .expect("Failed to create ocean spectrum buffer");
+            let ping_buffer = ctx
+                .make_buffer(&BufferInfo {
+                    debug_name: "[MESHI GFX OCEAN] FFT Ping Buffer",
+                    byte_size: fft_size * fft_size * 16,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                })
+                .expect("Failed to create ocean FFT ping buffer");
+            let pong_buffer = ctx
+                .make_buffer(&BufferInfo {
+                    debug_name: "[MESHI GFX OCEAN] FFT Pong Buffer",
+                    byte_size: fft_size * fft_size * 16,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                })
+                .expect("Failed to create ocean FFT pong buffer");
 
-            let compute_pipeline = match CSOBuilder::new()
+            let spectrum_pipeline = match CSOBuilder::new()
                 .shader(Some(
-                    include_str!("shaders/environment_ocean.comp.glsl").as_bytes(),
+                    include_str!("shaders/environment_ocean_spectrum.comp.glsl").as_bytes(),
                 ))
-                .set_debug_name("[MESHI] Ocean Compute")
+                .set_debug_name("[MESHI] Ocean Spectrum")
                 .add_reserved_table_variables(state)
                 .unwrap()
+                .add_variable(
+                    "ocean_spectrum",
+                    ShaderResource::StorageBuffer(spectrum_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean spectrum pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            let fft_spectrum_to_ping = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean_fft.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean FFT Spectrum->Ping")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "spectrum_in",
+                    ShaderResource::StorageBuffer(spectrum_buffer.into()),
+                )
+                .add_variable(
+                    "spectrum_out",
+                    ShaderResource::StorageBuffer(ping_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean FFT spectrum pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            let fft_ping_to_pong = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean_fft.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean FFT Ping->Pong")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "spectrum_in",
+                    ShaderResource::StorageBuffer(ping_buffer.into()),
+                )
+                .add_variable(
+                    "spectrum_out",
+                    ShaderResource::StorageBuffer(pong_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean FFT ping pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            let fft_pong_to_ping = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean_fft.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean FFT Pong->Ping")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "spectrum_in",
+                    ShaderResource::StorageBuffer(pong_buffer.into()),
+                )
+                .add_variable(
+                    "spectrum_out",
+                    ShaderResource::StorageBuffer(ping_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean FFT pong pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            let finalize_from_ping = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean_finalize.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean FFT Finalize Ping")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "spectrum_spatial",
+                    ShaderResource::StorageBuffer(ping_buffer.into()),
+                )
                 .add_variable(
                     "ocean_waves",
                     ShaderResource::StorageBuffer(wave_buffer.into()),
@@ -235,7 +397,34 @@ impl OceanRenderer {
                 Ok(pipeline) => Some(pipeline),
                 Err(err) => {
                     warn!(
-                        "Ocean compute pipeline creation failed: {err}. Falling back to static waves."
+                        "Ocean FFT finalize pipeline creation failed: {err}. Falling back to static waves."
+                    );
+                    None
+                }
+            };
+
+            let finalize_from_pong = match CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_ocean_finalize.comp.glsl").as_bytes(),
+                ))
+                .set_debug_name("[MESHI] Ocean FFT Finalize Pong")
+                .add_reserved_table_variables(state)
+                .unwrap()
+                .add_variable(
+                    "spectrum_spatial",
+                    ShaderResource::StorageBuffer(pong_buffer.into()),
+                )
+                .add_variable(
+                    "ocean_waves",
+                    ShaderResource::StorageBuffer(wave_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .build(ctx)
+            {
+                Ok(pipeline) => Some(pipeline),
+                Err(err) => {
+                    warn!(
+                        "Ocean FFT finalize pipeline creation failed: {err}. Falling back to static waves."
                     );
                     None
                 }
@@ -245,7 +434,15 @@ impl OceanRenderer {
                 fft_size: *fft_size,
                 patch_size,
                 wave_buffer,
-                compute_pipeline,
+                spectrum_buffer,
+                ping_buffer,
+                pong_buffer,
+                spectrum_pipeline,
+                fft_spectrum_to_ping,
+                fft_ping_to_pong,
+                fft_pong_to_ping,
+                finalize_from_ping,
+                finalize_from_pong,
             });
         }
 
@@ -401,14 +598,30 @@ impl OceanRenderer {
 
         let mut stream = CommandStream::new().begin();
         for cascade in &self.cascades {
-            let Some(pipeline) = cascade.compute_pipeline.as_ref() else {
+            let Some(spectrum_pipeline) = cascade.spectrum_pipeline.as_ref() else {
                 continue;
             };
-            let mut alloc = dynamic
+            let Some(fft_spectrum_to_ping) = cascade.fft_spectrum_to_ping.as_ref() else {
+                continue;
+            };
+            let Some(fft_ping_to_pong) = cascade.fft_ping_to_pong.as_ref() else {
+                continue;
+            };
+            let Some(fft_pong_to_ping) = cascade.fft_pong_to_ping.as_ref() else {
+                continue;
+            };
+            let Some(finalize_from_ping) = cascade.finalize_from_ping.as_ref() else {
+                continue;
+            };
+            let Some(finalize_from_pong) = cascade.finalize_from_pong.as_ref() else {
+                continue;
+            };
+
+            let mut spectrum_alloc = dynamic
                 .bump()
-                .expect("Failed to allocate ocean compute params");
-            let params = &mut alloc.slice::<OceanComputeParams>()[0];
-            *params = OceanComputeParams {
+                .expect("Failed to allocate ocean spectrum params");
+            let spectrum_params = &mut spectrum_alloc.slice::<OceanSpectrumParams>()[0];
+            *spectrum_params = OceanSpectrumParams {
                 fft_size: cascade.fft_size,
                 time,
                 time_scale: self.time_scale,
@@ -416,17 +629,191 @@ impl OceanRenderer {
                 wind_dir: self.wind_dir,
                 wind_speed: self.wind_speed,
                 capillary_strength: self.capillary_strength,
+                patch_size: cascade.patch_size,
             };
 
             stream = stream
+                .prepare_buffer(cascade.spectrum_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(cascade.ping_buffer, UsageBits::COMPUTE_SHADER)
+                .dispatch(&Dispatch {
+                    x: (cascade.fft_size + 7) / 8,
+                    y: (cascade.fft_size + 7) / 8,
+                    z: 1,
+                    pipeline: spectrum_pipeline.handle,
+                    bind_tables: spectrum_pipeline.tables(),
+                    dynamic_buffers: [None, Some(spectrum_alloc), None, None],
+                })
+                .unbind_pipeline();
+
+            let log_n = cascade.fft_size.trailing_zeros();
+            let mut current_is_ping = true;
+
+            let mut fft_alloc = dynamic
+                .bump()
+                .expect("Failed to allocate ocean FFT params");
+            let fft_params = &mut fft_alloc.slice::<OceanFftParams>()[0];
+            *fft_params = OceanFftParams {
+                fft_size: cascade.fft_size,
+                stage: 0,
+                direction: 0,
+                bit_reverse: 1,
+                inverse: 1.0,
+                _padding: [0.0; 3],
+            };
+
+            stream = stream
+                .prepare_buffer(cascade.spectrum_buffer, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(cascade.ping_buffer, UsageBits::COMPUTE_SHADER)
+                .dispatch(&Dispatch {
+                    x: (cascade.fft_size + 7) / 8,
+                    y: (cascade.fft_size + 7) / 8,
+                    z: 1,
+                    pipeline: fft_spectrum_to_ping.handle,
+                    bind_tables: fft_spectrum_to_ping.tables(),
+                    dynamic_buffers: [None, Some(fft_alloc), None, None],
+                })
+                .unbind_pipeline();
+
+            for stage in 0..log_n {
+                let mut pass_alloc = dynamic
+                    .bump()
+                    .expect("Failed to allocate ocean FFT params");
+                let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
+                *pass_params = OceanFftParams {
+                    fft_size: cascade.fft_size,
+                    stage,
+                    direction: 0,
+                    bit_reverse: 0,
+                    inverse: 1.0,
+                    _padding: [0.0; 3],
+                };
+                let pipeline = if current_is_ping {
+                    fft_ping_to_pong
+                } else {
+                    fft_pong_to_ping
+                };
+                let (input, output) = if current_is_ping {
+                    (cascade.ping_buffer, cascade.pong_buffer)
+                } else {
+                    (cascade.pong_buffer, cascade.ping_buffer)
+                };
+                stream = stream
+                    .prepare_buffer(input, UsageBits::COMPUTE_SHADER)
+                    .prepare_buffer(output, UsageBits::COMPUTE_SHADER)
+                    .dispatch(&Dispatch {
+                        x: (cascade.fft_size + 7) / 8,
+                        y: (cascade.fft_size + 7) / 8,
+                        z: 1,
+                        pipeline: pipeline.handle,
+                        bind_tables: pipeline.tables(),
+                        dynamic_buffers: [None, Some(pass_alloc), None, None],
+                    })
+                    .unbind_pipeline();
+                current_is_ping = !current_is_ping;
+            }
+
+            let mut bitrev_alloc = dynamic
+                .bump()
+                .expect("Failed to allocate ocean FFT params");
+            let bitrev_params = &mut bitrev_alloc.slice::<OceanFftParams>()[0];
+            *bitrev_params = OceanFftParams {
+                fft_size: cascade.fft_size,
+                stage: 0,
+                direction: 1,
+                bit_reverse: 1,
+                inverse: 1.0,
+                _padding: [0.0; 3],
+            };
+            let bitrev_pipeline = if current_is_ping {
+                fft_ping_to_pong
+            } else {
+                fft_pong_to_ping
+            };
+            let (bitrev_input, bitrev_output) = if current_is_ping {
+                (cascade.ping_buffer, cascade.pong_buffer)
+            } else {
+                (cascade.pong_buffer, cascade.ping_buffer)
+            };
+            stream = stream
+                .prepare_buffer(bitrev_input, UsageBits::COMPUTE_SHADER)
+                .prepare_buffer(bitrev_output, UsageBits::COMPUTE_SHADER)
+                .dispatch(&Dispatch {
+                    x: (cascade.fft_size + 7) / 8,
+                    y: (cascade.fft_size + 7) / 8,
+                    z: 1,
+                    pipeline: bitrev_pipeline.handle,
+                    bind_tables: bitrev_pipeline.tables(),
+                    dynamic_buffers: [None, Some(bitrev_alloc), None, None],
+                })
+                .unbind_pipeline();
+            current_is_ping = !current_is_ping;
+
+            for stage in 0..log_n {
+                let mut pass_alloc = dynamic
+                    .bump()
+                    .expect("Failed to allocate ocean FFT params");
+                let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
+                *pass_params = OceanFftParams {
+                    fft_size: cascade.fft_size,
+                    stage,
+                    direction: 1,
+                    bit_reverse: 0,
+                    inverse: 1.0,
+                    _padding: [0.0; 3],
+                };
+                let pipeline = if current_is_ping {
+                    fft_ping_to_pong
+                } else {
+                    fft_pong_to_ping
+                };
+                let (input, output) = if current_is_ping {
+                    (cascade.ping_buffer, cascade.pong_buffer)
+                } else {
+                    (cascade.pong_buffer, cascade.ping_buffer)
+                };
+                stream = stream
+                    .prepare_buffer(input, UsageBits::COMPUTE_SHADER)
+                    .prepare_buffer(output, UsageBits::COMPUTE_SHADER)
+                    .dispatch(&Dispatch {
+                        x: (cascade.fft_size + 7) / 8,
+                        y: (cascade.fft_size + 7) / 8,
+                        z: 1,
+                        pipeline: pipeline.handle,
+                        bind_tables: pipeline.tables(),
+                        dynamic_buffers: [None, Some(pass_alloc), None, None],
+                    })
+                    .unbind_pipeline();
+                current_is_ping = !current_is_ping;
+            }
+
+            let mut finalize_alloc = dynamic
+                .bump()
+                .expect("Failed to allocate ocean finalize params");
+            let finalize_params = &mut finalize_alloc.slice::<OceanFinalizeParams>()[0];
+            *finalize_params = OceanFinalizeParams {
+                fft_size: cascade.fft_size,
+                _padding: [0; 3],
+            };
+            let finalize_pipeline = if current_is_ping {
+                finalize_from_ping
+            } else {
+                finalize_from_pong
+            };
+            let finalize_input = if current_is_ping {
+                cascade.ping_buffer
+            } else {
+                cascade.pong_buffer
+            };
+            stream = stream
+                .prepare_buffer(finalize_input, UsageBits::COMPUTE_SHADER)
                 .prepare_buffer(cascade.wave_buffer, UsageBits::COMPUTE_SHADER)
                 .dispatch(&Dispatch {
                     x: (cascade.fft_size + 7) / 8,
                     y: (cascade.fft_size + 7) / 8,
                     z: 1,
-                    pipeline: pipeline.handle,
-                    bind_tables: pipeline.tables(),
-                    dynamic_buffers: [None, Some(alloc), None, None],
+                    pipeline: finalize_pipeline.handle,
+                    bind_tables: finalize_pipeline.tables(),
+                    dynamic_buffers: [None, Some(finalize_alloc), None, None],
                 })
                 .unbind_pipeline();
         }
