@@ -568,6 +568,7 @@ fn main() {
             metrics: SliderMetrics::default(),
             colors: SliderColors::default(),
             state: data.slider_state,
+            clip_rect: None,
         };
 
         let hovered_slider = if slider_panel_layout.show_content() {

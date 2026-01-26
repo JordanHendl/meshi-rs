@@ -26,5 +26,5 @@ void main() {
         vec4(0.0)
     );
     vec3 blended = blend_terrain_layers(blend);
-    out_color = vec4(blended, 1.0);
+    out_color = vec4(1.0, 0.0, 0.0, 1.0);
 }

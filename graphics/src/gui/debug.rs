@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::gui::{
-    GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
+    GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
     RadialButtonColors, RadialButtonLayout, RadialButtonMetrics, RadialButtonRenderOptions,
     RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
     SliderState,
@@ -1061,13 +1061,19 @@ impl DebugGui {
 
         let mut gui = GuiContext::new();
         let panel_brightness = (self.slider_values.skybox_intensity / 1.0).clamp(0.5, 1.4);
+        let panel_color = Vec4::new(
+            0.08 * panel_brightness,
+            0.1 * panel_brightness,
+            0.14 * panel_brightness,
+            0.88,
+        );
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Overlay,
             None,
             quad_from_pixels(
                 debug_panel_position,
                 debug_panel_size,
-                Vec4::new(0.08, 0.1, 0.14, 0.88) * panel_brightness,
+                panel_color,
                 viewport,
             ),
         ));
@@ -1234,11 +1240,123 @@ impl DebugGui {
             }
         }
 
+        let page_type = if self.debug_tab == DebugTab::Graphics {
+            match self.debug_graphics_tab {
+                DebugGraphicsTab::Sky => PageType::Sky,
+                DebugGraphicsTab::Ocean => PageType::Ocean,
+                DebugGraphicsTab::Clouds => PageType::Clouds,
+            }
+        } else {
+            match self.debug_tab {
+                DebugTab::Physics => PageType::Physics,
+                DebugTab::Audio => PageType::Audio,
+                DebugTab::Graphics => PageType::Sky,
+            }
+        };
+        let debug_radials = unsafe { debug_registry_radials(page_type) };
+        let debug_sliders = unsafe { debug_registry_sliders(page_type) };
+        let content_top = text_start.y;
+        let content_bottom = debug_taskbar_pos.y - 8.0 * ui_scale;
+        let content_height = (content_bottom - content_top).max(0.0);
+        let scrollbar_width = (8.0 * ui_scale).clamp(6.0, 12.0);
+        let scrollbar_gap = 6.0 * ui_scale;
+        let content_width = (debug_panel_size.x - scrollbar_width - scrollbar_gap).max(0.0);
+        let content_clip_rect = GuiClipRect::from_position_size(
+            [debug_panel_position.x, content_top],
+            [content_width, content_height],
+        );
+        gui.submit_draw(GuiDraw::with_clip_rect(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(
+                vec2(debug_panel_position.x, content_top),
+                vec2(content_width, content_height),
+                panel_color,
+                viewport,
+            ),
+            content_clip_rect,
+        ));
         let line_height = 18.0 * ui_scale;
+        let toggle_metrics = RadialButtonMetrics {
+            item_height: (22.0 * ui_scale).clamp(18.0, 28.0),
+            item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
+            padding: [12.0 * ui_scale, 6.0 * ui_scale],
+            button_size: [16.0 * ui_scale, 16.0 * ui_scale],
+            indicator_size: [8.0 * ui_scale, 8.0 * ui_scale],
+            label_gap: 10.0 * ui_scale,
+            char_width: 7.2 * ui_scale,
+            font_scale: 0.85 * ui_scale,
+            text_offset: [0.0, 6.0 * ui_scale],
+        };
+        let radial_metrics = RadialButtonMetrics {
+            item_height: (20.0 * ui_scale).clamp(18.0, 26.0),
+            item_gap: (6.0 * ui_scale).clamp(4.0, 10.0),
+            padding: [12.0 * ui_scale, 6.0 * ui_scale],
+            button_size: [14.0 * ui_scale, 14.0 * ui_scale],
+            indicator_size: [7.0 * ui_scale, 7.0 * ui_scale],
+            label_gap: 10.0 * ui_scale,
+            char_width: 7.2 * ui_scale,
+            font_scale: 0.82 * ui_scale,
+            text_offset: [0.0, 6.0 * ui_scale],
+        };
+        let slider_metrics = SliderMetrics {
+            item_height: (26.0 * ui_scale).clamp(22.0, 32.0),
+            item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
+            ..SliderMetrics::default()
+        };
+        let mut content_height_total = info_lines.len() as f32 * line_height + 8.0 * ui_scale;
+        let mut toggle_height = 0.0;
+        if self.debug_tab == DebugTab::Graphics {
+            toggle_height = toggle_metrics.padding[1] * 2.0
+                + 2.0 * toggle_metrics.item_height
+                + toggle_metrics.item_gap;
+            content_height_total += toggle_height + 8.0 * ui_scale;
+        }
+        if !debug_radials.is_empty() {
+            let title_height = 18.0 * ui_scale;
+            let group_gap = 10.0 * ui_scale;
+            for group in &debug_radials {
+                let options_height = radial_metrics.padding[1] * 2.0
+                    + group.options.len() as f32 * radial_metrics.item_height
+                    + group.options.len().saturating_sub(1) as f32 * radial_metrics.item_gap;
+                content_height_total += title_height + options_height + group_gap;
+            }
+        }
+        let mut slider_total_height = 0.0;
+        if !debug_sliders.is_empty() {
+            slider_total_height = slider_metrics.padding[1] * 2.0
+                + debug_sliders.len() as f32 * slider_metrics.item_height
+                + debug_sliders.len().saturating_sub(1) as f32 * slider_metrics.item_gap;
+            content_height_total += slider_total_height;
+        } else if debug_radials.is_empty() {
+            content_height_total += line_height;
+        }
+        let max_scroll = (content_height_total - content_height).max(0.0);
+        if max_scroll <= 0.0 {
+            self.scroll_offset = 0.0;
+        } else {
+            self.scroll_offset = self.scroll_offset.clamp(0.0, max_scroll);
+        }
+        let content_area_hovered = point_in_rect(
+            self.cursor,
+            vec2(debug_panel_position.x, content_top),
+            vec2(debug_panel_size.x, content_height),
+        );
+        if content_area_hovered && self.scroll_delta.abs() > 0.0 && max_scroll > 0.0 {
+            self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0 * ui_scale)
+                .clamp(0.0, max_scroll);
+        }
+        self.scroll_delta = 0.0;
+        let content_scroll = -self.scroll_offset;
+
         for (index, line) in info_lines.iter().enumerate() {
+            let line_y = text_start.y + index as f32 * line_height + content_scroll;
+            if line_y + line_height < content_top || line_y > content_bottom {
+                continue;
+            }
             gui.submit_text(GuiTextDraw {
                 text: line.clone(),
-                position: [text_start.x, text_start.y + index as f32 * line_height],
+                position: [text_start.x, line_y],
                 color: Vec4::new(0.75, 0.8, 0.9, 1.0).to_array(),
                 scale: if index == 0 { 0.9 } else { 0.85 },
             });
@@ -1259,69 +1377,34 @@ impl DebugGui {
                 RadialButton::new(on_id, format!("{toggle_label} On"), toggle_enabled),
                 RadialButton::new(off_id, format!("{toggle_label} Off"), !toggle_enabled),
             ];
-            let toggle_metrics = RadialButtonMetrics {
-                item_height: (22.0 * ui_scale).clamp(18.0, 28.0),
-                item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
-                padding: [12.0 * ui_scale, 6.0 * ui_scale],
-                button_size: [16.0 * ui_scale, 16.0 * ui_scale],
-                indicator_size: [8.0 * ui_scale, 8.0 * ui_scale],
-                label_gap: 10.0 * ui_scale,
-                char_width: 7.2 * ui_scale,
-                font_scale: 0.85 * ui_scale,
-                text_offset: [0.0, 6.0 * ui_scale],
-            };
-            let toggle_height = toggle_metrics.padding[1] * 2.0
-                + toggle_buttons.len() as f32 * toggle_metrics.item_height
-                + toggle_buttons.len().saturating_sub(1) as f32 * toggle_metrics.item_gap;
             let toggle_options = RadialButtonRenderOptions {
                 viewport: [viewport.x, viewport.y],
-                position: [debug_panel_position.x, toggle_start_y],
-                size: [debug_panel_size.x, toggle_height],
+                position: [debug_panel_position.x, toggle_start_y + content_scroll],
+                size: [content_width, toggle_height],
                 layer: GuiLayer::Overlay,
                 metrics: toggle_metrics,
                 colors: RadialButtonColors::default(),
                 state: self.debug_toggle_state,
+                clip_rect: Some(content_clip_rect),
             };
             debug_toggle_layout = gui.submit_radial_buttons(&toggle_buttons, &toggle_options);
             slider_start_y = toggle_start_y + toggle_height + 8.0 * ui_scale;
         }
 
-        let page_type = if self.debug_tab == DebugTab::Graphics {
-            match self.debug_graphics_tab {
-                DebugGraphicsTab::Sky => PageType::Sky,
-                DebugGraphicsTab::Ocean => PageType::Ocean,
-                DebugGraphicsTab::Clouds => PageType::Clouds,
-            }
-        } else {
-            match self.debug_tab {
-                DebugTab::Physics => PageType::Physics,
-                DebugTab::Audio => PageType::Audio,
-                DebugTab::Graphics => PageType::Sky,
-            }
-        };
-        let debug_radials = unsafe { debug_registry_radials(page_type) };
         let mut debug_param_radial_layouts = Vec::new();
         if !debug_radials.is_empty() {
             let title_height = 18.0 * ui_scale;
             let group_gap = 10.0 * ui_scale;
-            let radial_metrics = RadialButtonMetrics {
-                item_height: (20.0 * ui_scale).clamp(18.0, 26.0),
-                item_gap: (6.0 * ui_scale).clamp(4.0, 10.0),
-                padding: [12.0 * ui_scale, 6.0 * ui_scale],
-                button_size: [14.0 * ui_scale, 14.0 * ui_scale],
-                indicator_size: [7.0 * ui_scale, 7.0 * ui_scale],
-                label_gap: 10.0 * ui_scale,
-                char_width: 7.2 * ui_scale,
-                font_scale: 0.82 * ui_scale,
-                text_offset: [0.0, 6.0 * ui_scale],
-            };
-            for group in debug_radials {
-                gui.submit_text(GuiTextDraw {
-                    text: group.label.clone(),
-                    position: [text_start.x, slider_start_y],
-                    color: Vec4::new(0.8, 0.84, 0.92, 1.0).to_array(),
-                    scale: 0.82,
-                });
+            for group in &debug_radials {
+                let title_y = slider_start_y + content_scroll;
+                if title_y + title_height >= content_top && title_y <= content_bottom {
+                    gui.submit_text(GuiTextDraw {
+                        text: group.label.clone(),
+                        position: [text_start.x, title_y],
+                        color: Vec4::new(0.8, 0.84, 0.92, 1.0).to_array(),
+                        scale: 0.82,
+                    });
+                }
                 let current_value = group.value.round();
                 let buttons = group
                     .options
@@ -1336,12 +1419,13 @@ impl DebugGui {
                     + buttons.len().saturating_sub(1) as f32 * radial_metrics.item_gap;
                 let radial_options = RadialButtonRenderOptions {
                     viewport: [viewport.x, viewport.y],
-                    position: [debug_panel_position.x, slider_start_y + title_height],
-                    size: [debug_panel_size.x, options_height],
+                    position: [debug_panel_position.x, slider_start_y + title_height + content_scroll],
+                    size: [content_width, options_height],
                     layer: GuiLayer::Overlay,
                     metrics: radial_metrics,
                     colors: RadialButtonColors::default(),
                     state: self.debug_param_radial_state,
+                    clip_rect: Some(content_clip_rect),
                 };
                 let layout = gui.submit_radial_buttons(&buttons, &radial_options);
                 debug_param_radial_layouts.push(layout);
@@ -1350,70 +1434,68 @@ impl DebugGui {
         }
 
         let mut debug_slider_layout = SliderLayout::default();
-        let mut debug_sliders = unsafe { debug_registry_sliders(page_type) };
-        if debug_sliders.is_empty() && debug_param_radial_layouts.is_empty() {
-            gui.submit_text(GuiTextDraw {
-                text: "No debug data available.".to_string(),
-                position: [text_start.x, slider_start_y],
-                color: Vec4::new(0.7, 0.75, 0.85, 1.0).to_array(),
-                scale: 0.85,
-            });
-            self.scroll_delta = 0.0;
+        if debug_sliders.is_empty() && debug_radials.is_empty() {
+            let empty_y = slider_start_y + content_scroll;
+            if empty_y + line_height >= content_top && empty_y <= content_bottom {
+                gui.submit_text(GuiTextDraw {
+                    text: "No debug data available.".to_string(),
+                    position: [text_start.x, empty_y],
+                    color: Vec4::new(0.7, 0.75, 0.85, 1.0).to_array(),
+                    scale: 0.85,
+                });
+            }
         } else if !debug_sliders.is_empty() {
-            let slider_area_height = (debug_panel_size.y
-                - (slider_start_y - debug_panel_position.y)
-                - 12.0 * ui_scale
-                - debug_taskbar_height)
-                .max(0.0);
             let debug_slider_options = SliderRenderOptions {
                 viewport: [viewport.x, viewport.y],
-                position: [debug_panel_position.x, slider_start_y],
-                size: [debug_panel_size.x, slider_area_height],
+                position: [debug_panel_position.x, slider_start_y + content_scroll],
+                size: [content_width, slider_total_height],
                 layer: GuiLayer::Overlay,
-                metrics: SliderMetrics {
-                    item_height: (26.0 * ui_scale).clamp(22.0, 32.0),
-                    item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
-                    ..SliderMetrics::default()
-                },
+                metrics: slider_metrics,
                 colors: SliderColors::default(),
                 state: self.debug_slider_state,
+                clip_rect: Some(content_clip_rect),
             };
-            let metrics = debug_slider_options.metrics;
-            let row_height = metrics.item_height + metrics.item_gap;
-            let total_items = debug_sliders.len();
-            let total_height = metrics.padding[1] * 2.0
-                + total_items as f32 * metrics.item_height
-                + total_items.saturating_sub(1) as f32 * metrics.item_gap;
-            let max_scroll = (total_height - slider_area_height).max(0.0);
-            let slider_area_pos = vec2(
-                debug_slider_options.position[0],
-                debug_slider_options.position[1],
+            debug_slider_layout = gui.submit_sliders(&debug_sliders, &debug_slider_options);
+        }
+
+        if max_scroll > 0.0 && content_height > 0.0 {
+            let track_pos = vec2(
+                debug_panel_position.x + content_width + scrollbar_gap,
+                content_top,
             );
-            let slider_area_hovered = point_in_rect(
-                self.cursor,
-                slider_area_pos,
-                vec2(debug_slider_options.size[0], slider_area_height),
-            );
-            if slider_area_hovered && self.scroll_delta.abs() > 0.0 {
-                self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0 * ui_scale)
-                    .clamp(0.0, max_scroll);
+            let track_size = vec2(scrollbar_width, content_height);
+            gui.submit_draw(GuiDraw::new(
+                GuiLayer::Overlay,
+                None,
+                quad_from_pixels(
+                    track_pos,
+                    track_size,
+                    Vec4::new(0.08, 0.1, 0.14, 0.8),
+                    viewport,
+                ),
+            ));
+            let mut thumb_height = (content_height / content_height_total) * content_height;
+            let min_thumb = 24.0 * ui_scale;
+            if thumb_height < min_thumb {
+                thumb_height = min_thumb.min(content_height);
             }
-            self.scroll_delta = 0.0;
-
-            let start_index = (self.scroll_offset / row_height).floor() as usize;
-            let offset_y = -(self.scroll_offset - start_index as f32 * row_height);
-            let visible_count =
-                ((slider_area_height - offset_y).max(0.0) / row_height).ceil() as usize + 1;
-            let end_index = (start_index + visible_count).min(total_items);
-            let visible_sliders = if start_index < end_index {
-                &debug_sliders[start_index..end_index]
+            let thumb_range = (content_height - thumb_height).max(0.0);
+            let thumb_offset = if max_scroll > 0.0 {
+                (self.scroll_offset / max_scroll) * thumb_range
             } else {
-                &debug_sliders[0..0]
+                0.0
             };
-
-            let mut scroll_options = debug_slider_options;
-            scroll_options.position[1] += offset_y;
-            debug_slider_layout = gui.submit_sliders(visible_sliders, &scroll_options);
+            let thumb_pos = vec2(track_pos.x, content_top + thumb_offset);
+            gui.submit_draw(GuiDraw::new(
+                GuiLayer::Overlay,
+                None,
+                quad_from_pixels(
+                    thumb_pos,
+                    vec2(scrollbar_width, thumb_height),
+                    Vec4::new(0.34, 0.42, 0.55, 0.9),
+                    viewport,
+                ),
+            ));
         }
 
         gui.submit_draw(GuiDraw::new(

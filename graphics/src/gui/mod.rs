@@ -392,6 +392,7 @@ impl GuiContext {
         let colors = &options.colors;
         let position = options.position;
         let viewport = options.viewport;
+        let clip_rect = options.clip_rect;
 
         let max_label_width = sliders
             .iter()
@@ -435,6 +436,11 @@ impl GuiContext {
                     metrics.item_height,
                 ],
             );
+            if let Some(clip) = clip_rect {
+                if item_rect.max[1] < clip.min[1] || item_rect.min[1] > clip.max[1] {
+                    continue;
+                }
+            }
 
             let clamped_value = if slider.max > slider.min {
                 slider.value.clamp(slider.min, slider.max)
@@ -483,39 +489,48 @@ impl GuiContext {
                 colors.knob
             };
 
-            self.submit_draw(GuiDraw::new(
-                options.layer,
-                None,
-                quad_from_pixels(
-                    [track_rect.min[0], track_rect.min[1]],
-                    [track_width, metrics.track_height],
-                    track_color,
-                    viewport,
-                ),
-            ));
+            let track_quad = quad_from_pixels(
+                [track_rect.min[0], track_rect.min[1]],
+                [track_width, metrics.track_height],
+                track_color,
+                viewport,
+            );
+            let track_draw = if let Some(clip) = clip_rect {
+                GuiDraw::with_clip_rect(options.layer, None, track_quad, clip)
+            } else {
+                GuiDraw::new(options.layer, None, track_quad)
+            };
+            self.submit_draw(track_draw);
 
-            self.submit_draw(GuiDraw::new(
-                options.layer,
-                None,
-                quad_from_pixels(
-                    [knob_rect.min[0], knob_rect.min[1]],
-                    [metrics.knob_width, metrics.knob_height],
-                    knob_color,
-                    viewport,
-                ),
-            ));
+            let knob_quad = quad_from_pixels(
+                [knob_rect.min[0], knob_rect.min[1]],
+                [metrics.knob_width, metrics.knob_height],
+                knob_color,
+                viewport,
+            );
+            let knob_draw = if let Some(clip) = clip_rect {
+                GuiDraw::with_clip_rect(options.layer, None, knob_quad, clip)
+            } else {
+                GuiDraw::new(options.layer, None, knob_quad)
+            };
+            self.submit_draw(knob_draw);
 
             let label_pos = [item_rect.min[0], item_rect.min[1] + metrics.text_offset[1]];
-            self.submit_text(GuiTextDraw {
-                text: slider.label.clone(),
-                position: label_pos,
-                color: if enabled {
-                    colors.label
-                } else {
-                    colors.disabled
-                },
-                scale: metrics.font_scale,
+            let label_in_clip = clip_rect.map_or(true, |clip| {
+                item_rect.min[1] >= clip.min[1] && item_rect.max[1] <= clip.max[1]
             });
+            if label_in_clip {
+                self.submit_text(GuiTextDraw {
+                    text: slider.label.clone(),
+                    position: label_pos,
+                    color: if enabled {
+                        colors.label
+                    } else {
+                        colors.disabled
+                    },
+                    scale: metrics.font_scale,
+                });
+            }
 
             if slider.show_value {
                 let value_text = formatted_values.get(index).cloned().unwrap_or_default();
@@ -523,16 +538,18 @@ impl GuiContext {
                     track_end_x + metrics.value_gap,
                     item_rect.min[1] + metrics.text_offset[1],
                 ];
-                self.submit_text(GuiTextDraw {
-                    text: value_text,
-                    position: value_pos,
-                    color: if enabled {
-                        colors.value
-                    } else {
-                        colors.disabled
-                    },
-                    scale: metrics.font_scale,
-                });
+                if label_in_clip {
+                    self.submit_text(GuiTextDraw {
+                        text: value_text,
+                        position: value_pos,
+                        color: if enabled {
+                            colors.value
+                        } else {
+                            colors.disabled
+                        },
+                        scale: metrics.font_scale,
+                    });
+                }
             }
 
             layout.items.push(SliderItemLayout {
@@ -558,6 +575,7 @@ impl GuiContext {
         let colors = &options.colors;
         let position = options.position;
         let viewport = options.viewport;
+        let clip_rect = options.clip_rect;
 
         let mut layout = RadialButtonLayout::default();
 
@@ -572,6 +590,11 @@ impl GuiContext {
                     metrics.item_height,
                 ],
             );
+            if let Some(clip) = clip_rect {
+                if item_rect.max[1] < clip.min[1] || item_rect.min[1] > clip.max[1] {
+                    continue;
+                }
+            }
             let button_pos = [
                 item_rect.min[0],
                 item_rect.min[1] + (metrics.item_height - metrics.button_size[1]) * 0.5,
@@ -600,16 +623,18 @@ impl GuiContext {
                 colors.button
             };
 
-            self.submit_draw(GuiDraw::new(
-                options.layer,
-                None,
-                quad_from_pixels(
-                    [button_rect.min[0], button_rect.min[1]],
-                    metrics.button_size,
-                    button_color,
-                    viewport,
-                ),
-            ));
+            let button_quad = quad_from_pixels(
+                [button_rect.min[0], button_rect.min[1]],
+                metrics.button_size,
+                button_color,
+                viewport,
+            );
+            let button_draw = if let Some(clip) = clip_rect {
+                GuiDraw::with_clip_rect(options.layer, None, button_quad, clip)
+            } else {
+                GuiDraw::new(options.layer, None, button_quad)
+            };
+            self.submit_draw(button_draw);
 
             if button.selected {
                 let indicator_pos = [
@@ -621,23 +646,31 @@ impl GuiContext {
                 } else {
                     colors.disabled
                 };
-                self.submit_draw(GuiDraw::new(
-                    options.layer,
-                    None,
-                    quad_from_pixels(indicator_pos, metrics.indicator_size, indicator_color, viewport),
-                ));
+                let indicator_quad =
+                    quad_from_pixels(indicator_pos, metrics.indicator_size, indicator_color, viewport);
+                let indicator_draw = if let Some(clip) = clip_rect {
+                    GuiDraw::with_clip_rect(options.layer, None, indicator_quad, clip)
+                } else {
+                    GuiDraw::new(options.layer, None, indicator_quad)
+                };
+                self.submit_draw(indicator_draw);
             }
 
             let label_pos = [
                 button_pos[0] + metrics.button_size[0] + metrics.label_gap,
                 item_rect.min[1] + metrics.text_offset[1],
             ];
-            self.submit_text(GuiTextDraw {
-                text: button.label.clone(),
-                position: label_pos,
-                color: if enabled { colors.label } else { colors.disabled },
-                scale: metrics.font_scale,
+            let label_in_clip = clip_rect.map_or(true, |clip| {
+                item_rect.min[1] >= clip.min[1] && item_rect.max[1] <= clip.max[1]
             });
+            if label_in_clip {
+                self.submit_text(GuiTextDraw {
+                    text: button.label.clone(),
+                    position: label_pos,
+                    color: if enabled { colors.label } else { colors.disabled },
+                    scale: metrics.font_scale,
+                });
+            }
 
             layout.items.push(RadialButtonItemLayout {
                 id: button.id,
@@ -2327,6 +2360,7 @@ pub struct SliderRenderOptions {
     pub metrics: SliderMetrics,
     pub colors: SliderColors,
     pub state: SliderState,
+    pub clip_rect: Option<GuiClipRect>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -2445,6 +2479,7 @@ pub struct RadialButtonRenderOptions {
     pub metrics: RadialButtonMetrics,
     pub colors: RadialButtonColors,
     pub state: RadialButtonState,
+    pub clip_rect: Option<GuiClipRect>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

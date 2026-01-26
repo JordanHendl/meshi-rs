@@ -426,6 +426,7 @@ impl TerrainEditorUi {
                     hovered: hovered_slider(&self.slider_layout, input.cursor),
                     active: self.active_slider,
                 },
+                clip_rect: None,
             };
 
             let sliders = [
