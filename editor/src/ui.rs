@@ -2,6 +2,7 @@ use meshi_graphics::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, Menu, MenuBar, MenuBarRenderOptions,
     MenuBarState, MenuColors, MenuItem, MenuLayoutMetrics,
 };
+use std::fmt::Write;
 
 use crate::project::ProjectManager;
 
@@ -43,7 +44,7 @@ impl EditorUi {
         }
     }
 
-    pub fn build(&mut self, gui: &mut GuiContext, project_manager: &ProjectManager) {
+    pub fn build_meshi(&mut self, gui: &mut GuiContext, project_manager: &ProjectManager) {
         self.refresh_file_menu(project_manager);
         self.refresh_build_menu();
         let metrics = MenuLayoutMetrics::default();
@@ -114,13 +115,110 @@ impl EditorUi {
         self.draw_panel(
             gui,
             &center_panel,
-            "Engine Preview (stub)",
+            "Engine Preview (Meshi GUI)",
             &[
                 "Runtime frame will render here",
                 "Use external IDE for C++ scripts",
                 "GUI shell ready for egui/Qt swap",
             ],
         );
+    }
+
+    pub fn build_egui(&mut self, ctx: &egui::Context, project_manager: &ProjectManager) {
+        self.refresh_file_menu(project_manager);
+        self.refresh_build_menu();
+
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                for menu in &self.menu_bar.menus {
+                    ui.menu_button(&menu.label, |ui| {
+                        self.draw_egui_menu_items(ui, &menu.items);
+                    });
+                }
+            });
+        });
+
+        egui::SidePanel::left("scene_panel")
+            .resizable(false)
+            .default_width(280.0)
+            .show(ctx, |ui| {
+                ui.heading("ECS / Scene");
+                ui.separator();
+                for line in [
+                    "Scene Hierarchy",
+                    "Entities & Components",
+                    "Systems",
+                ] {
+                    ui.label(line);
+                }
+            });
+
+        egui::SidePanel::right("inspector_panel")
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("Inspector");
+                ui.separator();
+                for line in [
+                    "Selection Parameters",
+                    "Transform",
+                    "Mesh / Material",
+                    "Script Bindings",
+                ] {
+                    ui.label(line);
+                }
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Engine Preview (egui)");
+            ui.separator();
+            for line in [
+                "Runtime frame will render here",
+                "Use external IDE for C++ scripts",
+                "egui backend active (no renderer wired yet)",
+            ] {
+                ui.label(line);
+            }
+        });
+    }
+
+    pub fn build_qt_placeholder(&mut self, project_manager: &ProjectManager, frame: usize) {
+        self.refresh_file_menu(project_manager);
+        self.refresh_build_menu();
+
+        let mut buffer = String::new();
+        let _ = write!(
+            &mut buffer,
+            "Qt backend placeholder tick {} (menus: {})",
+            frame,
+            self.menu_bar.menus.len()
+        );
+        let _ = buffer;
+    }
+
+    fn draw_egui_menu_items(&self, ui: &mut egui::Ui, items: &[MenuItem]) {
+        for item in items {
+            if item.is_separator {
+                ui.separator();
+                continue;
+            }
+
+            if let Some(submenu) = item.submenu.as_ref() {
+                ui.menu_button(&item.label, |ui| {
+                    self.draw_egui_menu_items(ui, submenu);
+                });
+                continue;
+            }
+
+            let response = ui.add_enabled(item.enabled, egui::Button::new(&item.label));
+            if response.clicked() {
+                ui.close_menu();
+            }
+        }
+    }
+
+    pub fn viewport(&self) -> [f32; 2] {
+        self.viewport
     }
 
     fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {

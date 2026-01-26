@@ -1,4 +1,5 @@
 mod project;
+mod render_backend;
 mod runtime;
 mod ui;
 
@@ -7,21 +8,22 @@ fn main() {
 }
 
 mod editor {
-    use crate::{project::ProjectManager, runtime::RuntimeBridge, ui::EditorUi};
-    use meshi_graphics::gui::GuiContext;
+    use crate::{
+        project::ProjectManager, render_backend::select_render_backend, runtime::RuntimeBridge,
+        ui::EditorUi,
+    };
 
     pub fn run() {
         // TODO: initialize Meshi engine via the plugin entry point.
-        let mut gui = GuiContext::new();
         let mut ui = EditorUi::new();
         let mut runtime = RuntimeBridge::new();
+        let mut render_backend = select_render_backend();
         let project_manager = ProjectManager::load_or_create(ProjectManager::default_config_path());
 
         // Placeholder frame loop.
-        for _frame in 0..1 {
-            ui.build(&mut gui, &project_manager);
-            let _frame = gui.build_frame();
-            // TODO: submit GUI frame to Meshi render engine.
+        loop {
+            render_backend.render_frame(&mut ui, &project_manager);
+            // TODO: submit GUI frame to Meshi render engine, egui, or Qt bridge.
             runtime.tick();
         }
     }
