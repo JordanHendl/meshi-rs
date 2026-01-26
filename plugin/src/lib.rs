@@ -36,8 +36,8 @@ pub struct MeshiPluginApi {
         extern "C" fn(*mut MeshiEngine, *mut c_void, extern "C" fn(*mut event::Event, *mut c_void)),
     pub update: extern "C" fn(*mut MeshiEngine) -> c_float,
     pub get_graphics_system: extern "C" fn(*mut MeshiEngine) -> *mut MeshiEngine,
-    pub get_audio_system: extern "C" fn(*mut MeshiEngine) -> *mut AudioEngine,
-    pub get_physics_system: extern "C" fn(*mut MeshiEngine) -> *mut PhysicsSimulation,
+    pub get_audio_system: extern "C" fn(*mut MeshiEngine) -> *mut MeshiEngine,
+    pub get_physics_system: extern "C" fn(*mut MeshiEngine) -> *mut MeshiEngine,
     pub gfx_create_mesh_object:
         extern "C" fn(*mut MeshiEngine, *const MeshObjectInfo) -> Handle<RenderObject>,
     pub gfx_release_render_object: extern "C" fn(*mut MeshiEngine, *const Handle<RenderObject>),
@@ -50,48 +50,49 @@ pub struct MeshiPluginApi {
     pub gfx_register_camera: extern "C" fn(*mut MeshiEngine, *const Mat4) -> Handle<Camera>,
     pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, *const Mat4),
     pub gfx_capture_mouse: extern "C" fn(*mut MeshiEngine, i32),
-    pub audio_create_source: extern "C" fn(*mut AudioEngine, *const c_char) -> Handle<AudioSource>,
-    pub audio_destroy_source: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
-    pub audio_play: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
-    pub audio_pause: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
-    pub audio_stop: extern "C" fn(*mut AudioEngine, Handle<AudioSource>),
-    pub audio_get_state: extern "C" fn(*mut AudioEngine, Handle<AudioSource>) -> PlaybackState,
-    pub audio_set_looping: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, i32),
-    pub audio_set_volume: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, c_float),
-    pub audio_set_pitch: extern "C" fn(*mut AudioEngine, Handle<AudioSource>, c_float),
+    pub audio_create_source:
+        extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<AudioSource>,
+    pub audio_destroy_source: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
+    pub audio_play: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
+    pub audio_pause: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
+    pub audio_stop: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
+    pub audio_get_state: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>) -> PlaybackState,
+    pub audio_set_looping: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>, i32),
+    pub audio_set_volume: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>, c_float),
+    pub audio_set_pitch: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>, c_float),
     pub audio_set_source_transform:
-        extern "C" fn(*mut AudioEngine, Handle<AudioSource>, *const Mat4, Vec3),
-    pub audio_set_listener_transform: extern "C" fn(*mut AudioEngine, *const Mat4, Vec3),
+        extern "C" fn(*mut MeshiEngine, Handle<AudioSource>, *const Mat4, Vec3),
+    pub audio_set_listener_transform: extern "C" fn(*mut MeshiEngine, *const Mat4, Vec3),
     pub audio_create_stream:
-        extern "C" fn(*mut AudioEngine, *const c_char) -> Handle<StreamingSource>,
+        extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<StreamingSource>,
     pub audio_update_stream:
-        extern "C" fn(*mut AudioEngine, Handle<StreamingSource>, *mut u8, usize) -> usize,
-    pub audio_set_bus_volume: extern "C" fn(*mut AudioEngine, Handle<Bus>, c_float),
+        extern "C" fn(*mut MeshiEngine, Handle<StreamingSource>, *mut u8, usize) -> usize,
+    pub audio_set_bus_volume: extern "C" fn(*mut MeshiEngine, Handle<Bus>, c_float),
     pub audio_register_finished_callback:
-        extern "C" fn(*mut AudioEngine, *mut c_void, FinishedCallback),
-    pub physx_set_gravity: extern "C" fn(*mut PhysicsSimulation, f32),
+        extern "C" fn(*mut MeshiEngine, *mut c_void, FinishedCallback),
+    pub physx_set_gravity: extern "C" fn(*mut MeshiEngine, f32),
     pub physx_create_material:
-        extern "C" fn(*mut PhysicsSimulation, *const meshi_physics::MaterialInfo)
+        extern "C" fn(*mut MeshiEngine, *const meshi_physics::MaterialInfo)
             -> Handle<meshi_physics::Material>,
     pub physx_release_material:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::Material>),
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::Material>),
     pub physx_create_rigid_body:
-        extern "C" fn(*mut PhysicsSimulation, *const meshi_physics::RigidBodyInfo)
+        extern "C" fn(*mut MeshiEngine, *const meshi_physics::RigidBodyInfo)
             -> Handle<meshi_physics::RigidBody>,
     pub physx_release_rigid_body:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>),
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>),
     pub physx_apply_force_to_rigid_body:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const ForceApplyInfo),
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const ForceApplyInfo),
     pub physx_set_rigid_body_transform:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const meshi_physics::ActorStatus) -> i32,
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const meshi_physics::ActorStatus) -> i32,
     pub physx_get_rigid_body_status:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *mut meshi_physics::ActorStatus) -> i32,
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *mut meshi_physics::ActorStatus) -> i32,
     pub physx_get_rigid_body_velocity:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>) -> Vec3,
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>) -> Vec3,
     pub physx_set_collision_shape:
-        extern "C" fn(*mut PhysicsSimulation, *const Handle<meshi_physics::RigidBody>, *const CollisionShape) -> i32,
+        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const CollisionShape) -> i32,
     pub physx_get_contacts:
-        extern "C" fn(*mut PhysicsSimulation, *mut ContactInfo, usize) -> usize,
+        extern "C" fn(*mut MeshiEngine, *mut ContactInfo, usize) -> usize,
     pub physx_collision_shape_sphere: extern "C" fn(f32) -> CollisionShape,
     pub physx_collision_shape_box: extern "C" fn(Vec3) -> CollisionShape,
     pub physx_collision_shape_capsule: extern "C" fn(f32, f32) -> CollisionShape,
@@ -612,77 +613,77 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut MeshiEngine, value: i32) 
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 ////////////////////////////////////////////
-/// Obtain a mutable pointer to the engine's audio system.
+/// Obtain a mutable pointer to the engine for audio operations.
 ///
 /// # Safety
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
-pub extern "C" fn meshi_get_audio_system(engine: *mut MeshiEngine) -> *mut AudioEngine {
+pub extern "C" fn meshi_get_audio_system(engine: *mut MeshiEngine) -> *mut MeshiEngine {
     if engine.is_null() {
         return std::ptr::null_mut();
     }
-    unsafe { &mut (*engine).audio }
+    engine
 }
 
 /// Create an audio source from a file path.
 #[no_mangle]
 pub extern "C" fn meshi_audio_create_source(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     path: *const c_char,
 ) -> Handle<AudioSource> {
-    if audio.is_null() || path.is_null() {
+    if engine.is_null() || path.is_null() {
         return Handle::default();
     }
     let p = unsafe { CStr::from_ptr(path) }.to_str().unwrap_or("");
-    unsafe { &mut *audio }.create_source(p)
+    unsafe { &mut (*engine).audio }.create_source(p)
 }
 
 /// Destroy an audio source and free its resources.
 #[no_mangle]
-pub extern "C" fn meshi_audio_destroy_source(audio: *mut AudioEngine, h: Handle<AudioSource>) {
-    if audio.is_null() {
+pub extern "C" fn meshi_audio_destroy_source(engine: *mut MeshiEngine, h: Handle<AudioSource>) {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.destroy_source(h);
+    unsafe { &mut (*engine).audio }.destroy_source(h);
 }
 
 /// Begin playback for an audio source.
 #[no_mangle]
-pub extern "C" fn meshi_audio_play(audio: *mut AudioEngine, h: Handle<AudioSource>) {
-    if audio.is_null() {
+pub extern "C" fn meshi_audio_play(engine: *mut MeshiEngine, h: Handle<AudioSource>) {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.play(h);
+    unsafe { &mut (*engine).audio }.play(h);
 }
 
 /// Pause playback for an audio source.
 #[no_mangle]
-pub extern "C" fn meshi_audio_pause(audio: *mut AudioEngine, h: Handle<AudioSource>) {
-    if audio.is_null() {
+pub extern "C" fn meshi_audio_pause(engine: *mut MeshiEngine, h: Handle<AudioSource>) {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.pause(h);
+    unsafe { &mut (*engine).audio }.pause(h);
 }
 
 /// Stop playback for an audio source.
 #[no_mangle]
-pub extern "C" fn meshi_audio_stop(audio: *mut AudioEngine, h: Handle<AudioSource>) {
-    if audio.is_null() {
+pub extern "C" fn meshi_audio_stop(engine: *mut MeshiEngine, h: Handle<AudioSource>) {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.stop(h);
+    unsafe { &mut (*engine).audio }.stop(h);
 }
 
 /// Get the current playback state of an audio source.
 #[no_mangle]
 pub extern "C" fn meshi_audio_get_state(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<AudioSource>,
 ) -> PlaybackState {
-    if audio.is_null() {
+    if engine.is_null() {
         return PlaybackState::Stopped;
     }
-    unsafe { &mut *audio }
+    unsafe { &mut (*engine).audio }
         .get_state(h)
         .unwrap_or(PlaybackState::Stopped)
 }
@@ -690,128 +691,128 @@ pub extern "C" fn meshi_audio_get_state(
 /// Set whether an audio source loops when played.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_looping(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<AudioSource>,
     looping: i32,
 ) {
-    if audio.is_null() {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_looping(h, looping != 0);
+    unsafe { &mut (*engine).audio }.set_looping(h, looping != 0);
 }
 
 /// Adjust the playback volume for an audio source.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_volume(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<AudioSource>,
     volume: c_float,
 ) {
-    if audio.is_null() {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_volume(h, volume as f32);
+    unsafe { &mut (*engine).audio }.set_volume(h, volume as f32);
 }
 
 /// Adjust the playback pitch for an audio source.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_pitch(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<AudioSource>,
     pitch: c_float,
 ) {
-    if audio.is_null() {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_pitch(h, pitch as f32);
+    unsafe { &mut (*engine).audio }.set_pitch(h, pitch as f32);
 }
 
 /// Set the transform and velocity of an audio source.
 ///
 /// # Safety
-/// `audio` and `transform` must be valid pointers.
+/// `engine` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_source_transform(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<AudioSource>,
     transform: *const Mat4,
     velocity: Vec3,
 ) {
-    if audio.is_null() || transform.is_null() {
+    if engine.is_null() || transform.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_source_transform(h, unsafe { &*transform }, velocity);
+    unsafe { &mut (*engine).audio }.set_source_transform(h, unsafe { &*transform }, velocity);
 }
 
 /// Set the listener transform and velocity for 3D audio calculations.
 ///
 /// # Safety
-/// `audio` and `transform` must be valid pointers.
+/// `engine` and `transform` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_listener_transform(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     transform: *const Mat4,
     velocity: Vec3,
 ) {
-    if audio.is_null() || transform.is_null() {
+    if engine.is_null() || transform.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_listener_transform(unsafe { &*transform }, velocity);
+    unsafe { &mut (*engine).audio }.set_listener_transform(unsafe { &*transform }, velocity);
 }
 
 /// Create a streaming audio source from a file path.
 #[no_mangle]
 pub extern "C" fn meshi_audio_create_stream(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     path: *const c_char,
 ) -> Handle<StreamingSource> {
-    if audio.is_null() || path.is_null() {
+    if engine.is_null() || path.is_null() {
         return Handle::default();
     }
     let p = unsafe { CStr::from_ptr(path) }.to_str().unwrap_or("");
-    unsafe { &mut *audio }.create_stream(p)
+    unsafe { &mut (*engine).audio }.create_stream(p)
 }
 
 /// Fill `out_samples` with data from the streaming source, returning the
 /// number of bytes written.
 #[no_mangle]
 pub extern "C" fn meshi_audio_update_stream(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<StreamingSource>,
     out_samples: *mut u8,
     max: usize,
 ) -> usize {
-    if audio.is_null() || out_samples.is_null() {
+    if engine.is_null() || out_samples.is_null() {
         return 0;
     }
     let slice = unsafe { std::slice::from_raw_parts_mut(out_samples, max) };
-    unsafe { &mut *audio }.update_stream(h, slice)
+    unsafe { &mut (*engine).audio }.update_stream(h, slice)
 }
 
 /// Set the volume for an audio bus.
 #[no_mangle]
 pub extern "C" fn meshi_audio_set_bus_volume(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     h: Handle<Bus>,
     volume: c_float,
 ) {
-    if audio.is_null() {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.set_bus_volume(h, volume as f32);
+    unsafe { &mut (*engine).audio }.set_bus_volume(h, volume as f32);
 }
 
 /// Register a callback invoked when a source finishes playback.
 #[no_mangle]
 pub extern "C" fn meshi_audio_register_finished_callback(
-    audio: *mut AudioEngine,
+    engine: *mut MeshiEngine,
     user_data: *mut c_void,
     cb: FinishedCallback,
 ) {
-    if audio.is_null() {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *audio }.register_finished_callback(cb, user_data);
+    unsafe { &mut (*engine).audio }.register_finished_callback(cb, user_data);
 }
 
 ////////////////////////////////////////////
@@ -820,109 +821,112 @@ pub extern "C" fn meshi_audio_register_finished_callback(
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 ////////////////////////////////////////////
-/// Access the internal physics simulation.
+/// Access the engine for physics operations.
 ///
 /// # Safety
 /// `engine` must be a valid engine pointer.
 #[no_mangle]
-pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut PhysicsSimulation {
+pub extern "C" fn meshi_get_physics_system(engine: *mut MeshiEngine) -> *mut MeshiEngine {
     if engine.is_null() {
         return std::ptr::null_mut();
     }
-    unsafe { (*engine).physics.as_mut() as *mut PhysicsSimulation }
+    engine
 }
 
 /// Set the gravitational acceleration for the physics simulation.
 ///
 /// # Safety
-/// `physics` must be a valid pointer. The gravity is expressed in meters per
+/// `engine` must be a valid pointer. The gravity is expressed in meters per
 /// second squared.
 #[no_mangle]
-pub extern "C" fn meshi_physx_set_gravity(physics: *mut PhysicsSimulation, gravity_mps: f32) {
-    if physics.is_null() {
+pub extern "C" fn meshi_physx_set_gravity(engine: *mut MeshiEngine, gravity_mps: f32) {
+    if engine.is_null() {
         return;
     }
-    unsafe { &mut *physics }.set_gravity(gravity_mps);
+    unsafe { &mut (*engine).physics }.set_gravity(gravity_mps);
 }
 
 /// Create a new material in the physics system.
 ///
 /// # Safety
-/// `physics` and `info` must be valid pointers.
+/// `engine` and `info` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_create_material(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     info: *const meshi_physics::MaterialInfo,
 ) -> Handle<meshi_physics::Material> {
-    if physics.is_null() || info.is_null() {
+    if engine.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *physics }.create_material(unsafe { &*info })
+    unsafe { &mut (*engine).physics }.create_material(unsafe { &*info })
 }
 
 /// Release a physics material handle.
 #[no_mangle]
 pub extern "C" fn meshi_physx_release_material(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::Material>,
 ) {
-    if physics.is_null() || h.is_null() {
+    if engine.is_null() || h.is_null() {
         return;
     }
-    unsafe { &mut *physics }.release_material(unsafe { *h });
+    unsafe { &mut (*engine).physics }.release_material(unsafe { *h });
 }
 
 /// Create a rigid body instance.
 #[no_mangle]
 pub extern "C" fn meshi_physx_create_rigid_body(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     info: *const meshi_physics::RigidBodyInfo,
 ) -> Handle<meshi_physics::RigidBody> {
-    if physics.is_null() || info.is_null() {
+    if engine.is_null() || info.is_null() {
         return Handle::default();
     }
-    unsafe { &mut *physics }.create_rigid_body(unsafe { &*info })
+    unsafe { &mut (*engine).physics }.create_rigid_body(unsafe { &*info })
 }
 
 /// Destroy a rigid body and free its resources.
 #[no_mangle]
 pub extern "C" fn meshi_physx_release_rigid_body(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
 ) {
-    if physics.is_null() || h.is_null() {
+    if engine.is_null() || h.is_null() {
         return;
     }
-    unsafe { &mut *physics }.release_rigid_body(unsafe { *h });
+    unsafe { &mut (*engine).physics }.release_rigid_body(unsafe { *h });
 }
 
 /// Apply a force to a rigid body.
 #[no_mangle]
 pub extern "C" fn meshi_physx_apply_force_to_rigid_body(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
     info: *const ForceApplyInfo,
 ) {
-    if physics.is_null() || h.is_null() || info.is_null() {
+    if engine.is_null() || h.is_null() || info.is_null() {
         return;
     }
-    let _ = unsafe { &mut *physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
+    let _ =
+        unsafe { &mut (*engine).physics }.apply_rigid_body_force(unsafe { *h }, unsafe { &*info });
 }
 
 /// Set the position and rotation of a rigid body.
 ///
 /// # Safety
-/// `physics`, `h`, and `info` must be valid, non-null pointers.
+/// `engine`, `h`, and `info` must be valid, non-null pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_set_rigid_body_transform(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
     info: *const meshi_physics::ActorStatus,
 ) -> i32 {
-    if physics.is_null() || h.is_null() || info.is_null() {
+    if engine.is_null() || h.is_null() || info.is_null() {
         return 0;
     }
-    if unsafe { &mut *physics }.set_rigid_body_transform(unsafe { *h }, unsafe { &*info }) {
+    if unsafe { &mut (*engine).physics }
+        .set_rigid_body_transform(unsafe { *h }, unsafe { &*info })
+    {
         1
     } else {
         0
@@ -932,19 +936,19 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
 /// Retrieve the current position and rotation of a rigid body.
 ///
 /// # Safety
-/// `physics`, `h`, and `out_status` must all be valid pointers. The function
+/// `engine`, `h`, and `out_status` must all be valid pointers. The function
 /// returns immediately and leaves `out_status` untouched if any pointer is
 /// null.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_status(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
     out_status: *mut meshi_physics::ActorStatus,
 ) -> i32 {
-    if physics.is_null() || h.is_null() || out_status.is_null() {
+    if engine.is_null() || h.is_null() || out_status.is_null() {
         return 0;
     }
-    if let Some(status) = unsafe { &*physics }.get_rigid_body_status(unsafe { *h }) {
+    if let Some(status) = unsafe { &(*engine).physics }.get_rigid_body_status(unsafe { *h }) {
         unsafe { *out_status = status };
         1
     } else {
@@ -958,17 +962,17 @@ pub extern "C" fn meshi_physx_get_rigid_body_status(
 /// a zero vector is returned.
 ///
 /// # Safety
-/// `physics` and `h` must be valid, non-null pointers.
+/// `engine` and `h` must be valid, non-null pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_rigid_body_velocity(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
 ) -> Vec3 {
-    if physics.is_null() || h.is_null() {
+    if engine.is_null() || h.is_null() {
         return Vec3::ZERO;
     }
 
-    unsafe { &*physics }
+    unsafe { &(*engine).physics }
         .get_rigid_body_velocity(unsafe { *h })
         .unwrap_or(Vec3::ZERO)
 }
@@ -976,17 +980,19 @@ pub extern "C" fn meshi_physx_get_rigid_body_velocity(
 /// Set the collision shape for a rigid body.
 ///
 /// # Safety
-/// `physics`, `h`, and `shape` must be valid pointers.
+/// `engine`, `h`, and `shape` must be valid pointers.
 #[no_mangle]
 pub extern "C" fn meshi_physx_set_collision_shape(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     h: *const Handle<meshi_physics::RigidBody>,
     shape: *const CollisionShape,
 ) -> i32 {
-    if physics.is_null() || h.is_null() || shape.is_null() {
+    if engine.is_null() || h.is_null() || shape.is_null() {
         return 0;
     }
-    if unsafe { &mut *physics }.set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape }) {
+    if unsafe { &mut (*engine).physics }
+        .set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape })
+    {
         1
     } else {
         0
@@ -997,18 +1003,18 @@ pub extern "C" fn meshi_physx_set_collision_shape(
 /// Returns the number of contacts written to `out_contacts`.
 ///
 /// # Safety
-/// `physics` and `out_contacts` must be valid pointers and `out_contacts`
+/// `engine` and `out_contacts` must be valid pointers and `out_contacts`
 /// must have space for at least `max` elements.
 #[no_mangle]
 pub extern "C" fn meshi_physx_get_contacts(
-    physics: *mut PhysicsSimulation,
+    engine: *mut MeshiEngine,
     out_contacts: *mut ContactInfo,
     max: usize,
 ) -> usize {
-    if physics.is_null() || out_contacts.is_null() {
+    if engine.is_null() || out_contacts.is_null() {
         return 0;
     }
-    let contacts = unsafe { &*physics }.get_contacts();
+    let contacts = unsafe { &(*engine).physics }.get_contacts();
     let count = contacts.len().min(max);
     unsafe {
         std::ptr::copy_nonoverlapping(contacts.as_ptr(), out_contacts, count);
@@ -1064,15 +1070,10 @@ mod tests {
             rotation: Quat::IDENTITY,
         };
 
-        assert_eq!(
-            meshi_physx_set_rigid_body_transform(&mut sim, &rb as *const _, &transform),
-            1
-        );
-        let mut out = ActorStatus::default();
-        assert_eq!(
-            meshi_physx_get_rigid_body_status(&mut sim, &rb as *const _, &mut out),
-            1
-        );
+        assert!(sim.set_rigid_body_transform(rb, &transform));
+        let out = sim
+            .get_rigid_body_status(rb)
+            .expect("missing rigid body status");
         assert_eq!(out.position, transform.position);
         assert_eq!(out.rotation, transform.rotation);
     }
