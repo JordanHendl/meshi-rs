@@ -243,9 +243,12 @@ impl EnvironmentRenderer {
         &mut self,
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
+        scene_color: Option<dashi::ImageView>,
+        scene_depth: Option<dashi::ImageView>,
     ) -> CommandStream<PendingGraphics> {
         self.ocean
             .set_environment_map(self.sky.environment_cubemap_view());
+        self.ocean.set_scene_textures(scene_color, scene_depth);
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
                 viewport,

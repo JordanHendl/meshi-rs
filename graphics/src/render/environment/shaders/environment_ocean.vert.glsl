@@ -111,6 +111,18 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float foam_noise_scale;
     vec2 current;
     float _padding1;
+    vec4 absorption_coeff;
+    vec4 shallow_color;
+    vec4 deep_color;
+    vec4 scattering_color;
+    float scattering_strength;
+    float turbidity_depth;
+    float refraction_strength;
+    float ssr_strength;
+    float ssr_max_distance;
+    float ssr_thickness;
+    uint ssr_steps;
+    float _padding2;
 } params;
 
 layout(set = 1, binding = 1) readonly buffer SceneCameras {

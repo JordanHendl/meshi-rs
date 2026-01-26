@@ -4,13 +4,14 @@ use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
-    ImageView, MemoryVisibility, Sampler, SamplerInfo, ShaderResource, UsageBits, Viewport,
+    AspectMask, Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format,
+    Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, Sampler, SamplerInfo,
+    ShaderResource, SubresourceRange, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use furikake::types::Camera;
-use glam::Vec2;
+use glam::{Vec2, Vec3, Vec4};
 use tracing::warn;
 
 #[derive(Clone, Copy)]
@@ -91,6 +92,28 @@ pub struct OceanFrameSettings {
     pub capillary_strength: f32,
     /// Time multiplier for wave evolution; values above 1.0 speed up the animation.
     pub time_scale: f32,
+    /// Beer-Lambert absorption coefficients (per meter) for RGB channels.
+    pub absorption_coeff: Vec3,
+    /// Shallow-water tint used for depth-based turbidity ramps.
+    pub shallow_color: Vec3,
+    /// Deep-water tint used for depth-based turbidity ramps.
+    pub deep_color: Vec3,
+    /// Single-scatter tint color for volumetric approximation.
+    pub scattering_color: Vec3,
+    /// Strength of the volumetric single-scatter approximation.
+    pub scattering_strength: f32,
+    /// Depth range (meters) used for shallow-water color ramps.
+    pub turbidity_depth: f32,
+    /// Screen-space refraction distortion strength.
+    pub refraction_strength: f32,
+    /// Screen-space reflection blend strength.
+    pub ssr_strength: f32,
+    /// Maximum ray distance (meters) for SSR.
+    pub ssr_max_distance: f32,
+    /// Depth thickness tolerance for SSR hits (meters).
+    pub ssr_thickness: f32,
+    /// Max number of SSR raymarch steps.
+    pub ssr_steps: u32,
 }
 
 impl Default for OceanFrameSettings {
@@ -117,6 +140,17 @@ impl Default for OceanFrameSettings {
             foam_noise_scale: 0.2,
             capillary_strength: 1.0,
             time_scale: 1.0,
+            absorption_coeff: Vec3::new(0.18, 0.07, 0.03),
+            shallow_color: Vec3::new(0.05, 0.35, 0.5),
+            deep_color: Vec3::new(0.0, 0.08, 0.2),
+            scattering_color: Vec3::new(0.15, 0.45, 0.55),
+            scattering_strength: 0.06,
+            turbidity_depth: 8.0,
+            refraction_strength: 0.02,
+            ssr_strength: 0.7,
+            ssr_max_distance: 120.0,
+            ssr_thickness: 1.2,
+            ssr_steps: 24,
         }
     }
 }
@@ -184,6 +218,18 @@ struct OceanDrawParams {
     foam_noise_scale: f32,
     current: Vec2,
     _padding1: f32,
+    absorption_coeff: Vec4,
+    shallow_color: Vec4,
+    deep_color: Vec4,
+    scattering_color: Vec4,
+    scattering_strength: f32,
+    turbidity_depth: f32,
+    refraction_strength: f32,
+    ssr_strength: f32,
+    ssr_max_distance: f32,
+    ssr_thickness: f32,
+    ssr_steps: u32,
+    _padding2: f32,
 }
 
 #[derive(Debug)]
@@ -230,9 +276,77 @@ pub struct OceanRenderer {
     cascade_swell_strengths: [f32; 3],
     depth_meters: f32,
     depth_damping: f32,
+    absorption_coeff: Vec3,
+    shallow_color: Vec3,
+    deep_color: Vec3,
+    scattering_color: Vec3,
+    scattering_strength: f32,
+    turbidity_depth: f32,
+    refraction_strength: f32,
+    ssr_strength: f32,
+    ssr_max_distance: f32,
+    ssr_thickness: f32,
+    ssr_steps: u32,
     use_depth: bool,
     environment_sampler: Handle<Sampler>,
+    scene_sampler: Handle<Sampler>,
+    scene_color_fallback: ImageView,
+    scene_depth_fallback: ImageView,
     enabled: bool,
+}
+
+fn create_scene_color_fallback(
+    ctx: &mut Context,
+    format: Format,
+    sample_count: dashi::SampleCount,
+) -> ImageView {
+    let data = vec![0u8, 0, 0, 255];
+    let info = ImageInfo {
+        debug_name: "[MESHI GFX OCEAN] Scene Color Fallback",
+        dim: [1, 1, 1],
+        layers: 1,
+        format,
+        mip_levels: 1,
+        samples: sample_count,
+        initial_data: Some(&data),
+        ..Default::default()
+    };
+    let image = ctx
+        .make_image(&info)
+        .expect("Failed to create ocean scene color fallback image");
+
+    ImageView {
+        img: image,
+        aspect: AspectMask::Color,
+        view_type: ImageViewType::Type2D,
+        range: SubresourceRange::new(0, 1, 0, 1),
+    }
+}
+
+fn create_scene_depth_fallback(
+    ctx: &mut Context,
+    sample_count: dashi::SampleCount,
+) -> ImageView {
+    let info = ImageInfo {
+        debug_name: "[MESHI GFX OCEAN] Scene Depth Fallback",
+        dim: [1, 1, 1],
+        layers: 1,
+        format: Format::D24S8,
+        mip_levels: 1,
+        samples: sample_count,
+        initial_data: None,
+        ..Default::default()
+    };
+    let image = ctx
+        .make_image(&info)
+        .expect("Failed to create ocean scene depth fallback image");
+
+    ImageView {
+        img: image,
+        aspect: AspectMask::Depth,
+        view_type: ImageViewType::Type2D,
+        range: SubresourceRange::new(0, 1, 0, 1),
+    }
 }
 
 fn compile_ocean_shaders() -> [bento::CompilationResult; 2] {
@@ -504,6 +618,12 @@ impl OceanRenderer {
         let environment_sampler = ctx
             .make_sampler(&SamplerInfo::default())
             .expect("Failed to create ocean environment sampler");
+        let scene_sampler = ctx
+            .make_sampler(&SamplerInfo::default())
+            .expect("Failed to create ocean scene sampler");
+        let scene_color_fallback =
+            create_scene_color_fallback(ctx, info.color_format, info.sample_count);
+        let scene_depth_fallback = create_scene_depth_fallback(ctx, info.sample_count);
         let wave_resources = cascades
             .iter()
             .enumerate()
@@ -540,6 +660,27 @@ impl OceanRenderer {
                 "ocean_env_sampler",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Sampler(environment_sampler),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_scene_color",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(scene_color_fallback),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_scene_depth",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(scene_depth_fallback),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_scene_sampler",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Sampler(scene_sampler),
                     slot: 0,
                 }],
             );
@@ -610,8 +751,22 @@ impl OceanRenderer {
             cascade_swell_strengths: default_frame.cascade_swell_strengths,
             depth_meters: default_frame.depth_meters,
             depth_damping: default_frame.depth_damping,
+            absorption_coeff: default_frame.absorption_coeff,
+            shallow_color: default_frame.shallow_color,
+            deep_color: default_frame.deep_color,
+            scattering_color: default_frame.scattering_color,
+            scattering_strength: default_frame.scattering_strength,
+            turbidity_depth: default_frame.turbidity_depth,
+            refraction_strength: default_frame.refraction_strength,
+            ssr_strength: default_frame.ssr_strength,
+            ssr_max_distance: default_frame.ssr_max_distance,
+            ssr_thickness: default_frame.ssr_thickness,
+            ssr_steps: default_frame.ssr_steps,
             use_depth: info.use_depth,
             environment_sampler,
+            scene_sampler,
+            scene_color_fallback,
+            scene_depth_fallback,
             enabled: default_frame.enabled,
         }
     }
@@ -638,6 +793,17 @@ impl OceanRenderer {
         self.foam_noise_scale = settings.foam_noise_scale;
         self.capillary_strength = settings.capillary_strength;
         self.time_scale = settings.time_scale;
+        self.absorption_coeff = settings.absorption_coeff;
+        self.shallow_color = settings.shallow_color;
+        self.deep_color = settings.deep_color;
+        self.scattering_color = settings.scattering_color;
+        self.scattering_strength = settings.scattering_strength;
+        self.turbidity_depth = settings.turbidity_depth;
+        self.refraction_strength = settings.refraction_strength;
+        self.ssr_strength = settings.ssr_strength;
+        self.ssr_max_distance = settings.ssr_max_distance;
+        self.ssr_thickness = settings.ssr_thickness;
+        self.ssr_steps = settings.ssr_steps;
     }
 
     pub fn set_environment_map(&mut self, view: ImageView) {
@@ -652,6 +818,36 @@ impl OceanRenderer {
             "ocean_env_sampler",
             dashi::IndexedResource {
                 resource: ShaderResource::Sampler(self.environment_sampler),
+                slot: 0,
+            },
+        );
+    }
+
+    pub fn set_scene_textures(
+        &mut self,
+        color: Option<ImageView>,
+        depth: Option<ImageView>,
+    ) {
+        let color_view = color.unwrap_or(self.scene_color_fallback);
+        let depth_view = depth.unwrap_or(self.scene_depth_fallback);
+        self.pipeline.update_table(
+            "ocean_scene_color",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(color_view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "ocean_scene_depth",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(depth_view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "ocean_scene_sampler",
+            dashi::IndexedResource {
+                resource: ShaderResource::Sampler(self.scene_sampler),
                 slot: 0,
             },
         );
@@ -959,6 +1155,33 @@ impl OceanRenderer {
             foam_noise_scale: self.foam_noise_scale,
             current: self.current,
             _padding1: 0.0,
+            absorption_coeff: Vec4::new(
+                self.absorption_coeff.x,
+                self.absorption_coeff.y,
+                self.absorption_coeff.z,
+                0.0,
+            ),
+            shallow_color: Vec4::new(
+                self.shallow_color.x,
+                self.shallow_color.y,
+                self.shallow_color.z,
+                0.0,
+            ),
+            deep_color: Vec4::new(self.deep_color.x, self.deep_color.y, self.deep_color.z, 0.0),
+            scattering_color: Vec4::new(
+                self.scattering_color.x,
+                self.scattering_color.y,
+                self.scattering_color.z,
+                0.0,
+            ),
+            scattering_strength: self.scattering_strength,
+            turbidity_depth: self.turbidity_depth,
+            refraction_strength: self.refraction_strength,
+            ssr_strength: self.ssr_strength,
+            ssr_max_distance: self.ssr_max_distance,
+            ssr_thickness: self.ssr_thickness,
+            ssr_steps: self.ssr_steps,
+            _padding2: 0.0,
         };
 
         let grid_resolution = self.vertex_resolution.max(2);

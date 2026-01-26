@@ -18,6 +18,7 @@ use furikake::{types::Camera, types::Material, BindlessState};
 use glam::Mat4;
 use meshi_utils::MeshiError;
 use noren::DB;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub struct RendererInfo {
@@ -34,7 +35,9 @@ pub struct ViewOutput {
 }
 
 pub struct FrameTimer {
-    total: Duration,
+    rolling_total: Duration,
+    window: VecDeque<Duration>,
+    window_size: usize,
     frames: u64,
     report_every: u64,
     last_frame: Option<Instant>,
@@ -43,7 +46,9 @@ pub struct FrameTimer {
 impl FrameTimer {
     pub fn new(report_every: u64) -> Self {
         Self {
-            total: Duration::ZERO,
+            rolling_total: Duration::ZERO,
+            window: VecDeque::new(),
+            window_size: 60,
             frames: 0,
             report_every,
             last_frame: None,
@@ -64,7 +69,13 @@ impl FrameTimer {
     }
 
     pub fn record_duration(&mut self, duration: Duration) -> Option<(f64, u64)> {
-        self.total += duration;
+        self.rolling_total += duration;
+        self.window.push_back(duration);
+        if self.window.len() > self.window_size {
+            if let Some(removed) = self.window.pop_front() {
+                self.rolling_total = self.rolling_total.saturating_sub(removed);
+            }
+        }
         self.frames += 1;
 
         if self.report_every > 0 && self.frames % self.report_every == 0 {
@@ -76,10 +87,10 @@ impl FrameTimer {
     }
 
     pub fn average_ms(&self) -> Option<f64> {
-        if self.frames == 0 {
+        if self.window.is_empty() {
             None
         } else {
-            Some(self.total.as_secs_f64() * 1000.0 / self.frames as f64)
+            Some(self.rolling_total.as_secs_f64() * 1000.0 / self.window.len() as f64)
         }
     }
 }

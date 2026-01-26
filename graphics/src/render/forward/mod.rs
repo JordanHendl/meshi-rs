@@ -623,7 +623,14 @@ impl ForwardRenderer {
                         stencil: 0,
                     }),
                 },
-                |mut cmd| cmd.combine(self.environment.render(&self.viewport, camera_handle)),
+                |mut cmd| {
+                    cmd.combine(self.environment.render(
+                        &self.viewport,
+                        camera_handle,
+                        None,
+                        None,
+                    ))
+                },
             );
 
             let mut gui_attachments: [Option<ImageView>; 8] = [None; 8];

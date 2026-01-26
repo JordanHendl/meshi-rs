@@ -20,7 +20,7 @@ use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
-use driver::command::{Draw, DrawIndexedIndirect};
+use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::reservations::ReservedBinding;
@@ -1552,6 +1552,12 @@ impl DeferredRenderer {
                 samples: self.sample_count,
                 ..default_framebuffer_info
             });
+            let scene_color = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Scene Color View {view_idx}"),
+                format: Format::BGRA8,
+                samples: self.sample_count,
+                ..default_framebuffer_info
+            });
 
             let shadow_resolution = self.shadow.resolution();
             let camera_data = match self
@@ -1850,6 +1856,33 @@ impl DeferredRenderer {
                 },
             );
 
+            let scene_color_view = scene_color.view;
+            let final_combine_view = final_combine.view;
+            let scene_width = self.data.viewport.area.w as u32;
+            let scene_height = self.data.viewport.area.h as u32;
+            self.graph.add_compute_pass(move |mut cmd| {
+                cmd = cmd.blit_images(&BlitImage {
+                    src: final_combine_view.img,
+                    dst: scene_color_view.img,
+                    src_range: SubresourceRange::new(0, 1, 0, 1),
+                    dst_range: SubresourceRange::new(0, 1, 0, 1),
+                    filter: Filter::Linear,
+                    src_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: scene_width,
+                        h: scene_height,
+                    },
+                    dst_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: scene_width,
+                        h: scene_height,
+                    },
+                });
+                cmd.end()
+            });
+
             let overlay_text =
                 if self.subrender.clouds.settings().debug_view == CloudDebugView::Stats {
                     self.subrender.clouds.timing_overlay_text()
@@ -1910,7 +1943,12 @@ impl DeferredRenderer {
                     cmd = cmd.combine(
                         self.subrender
                             .environment
-                            .render(&self.data.viewport, camera_handle),
+                            .render(
+                                &self.data.viewport,
+                                camera_handle,
+                                Some(scene_color.view),
+                                Some(depth),
+                            ),
                     );
                     cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 

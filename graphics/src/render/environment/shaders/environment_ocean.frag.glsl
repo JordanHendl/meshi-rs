@@ -34,7 +34,34 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float foam_noise_scale;
     vec2 current;
     float _padding1;
+    vec4 absorption_coeff;
+    vec4 shallow_color;
+    vec4 deep_color;
+    vec4 scattering_color;
+    float scattering_strength;
+    float turbidity_depth;
+    float refraction_strength;
+    float ssr_strength;
+    float ssr_max_distance;
+    float ssr_thickness;
+    uint ssr_steps;
+    float _padding2;
 } params;
+
+struct Camera {
+    mat4 world_from_camera;
+    mat4 projection;
+    vec2 viewport;
+    float near;
+    float far;
+    float fov_y_radians;
+    uint projection_kind;
+    float _padding;
+};
+
+layout(set = 1, binding = 1) readonly buffer SceneCameras {
+  Camera cameras[];
+} meshi_bindless_cameras;
 
 struct Light {
     vec4 position_type;
@@ -50,6 +77,9 @@ layout(set = 1, binding = 2) readonly buffer SceneLights {
 
 layout(set = 1, binding = 3) uniform textureCube ocean_env_map;
 layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
+layout(set = 1, binding = 5) uniform texture2D ocean_scene_color;
+layout(set = 1, binding = 6) uniform texture2D ocean_scene_depth;
+layout(set = 1, binding = 7) uniform sampler ocean_scene_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 const float PI = 3.14159265359;
@@ -108,6 +138,68 @@ float geometry_smith(vec3 n, vec3 v, vec3 l, float roughness) {
     return ggx_v * ggx_l;
 }
 
+float linearize_depth(float depth, float near_plane, float far_plane) {
+    float z = depth * 2.0 - 1.0;
+    return (2.0 * near_plane * far_plane) / max(far_plane + near_plane - z * (far_plane - near_plane), 1e-4);
+}
+
+vec3 sample_scene_color(vec2 uv) {
+    return texture(sampler2D(ocean_scene_color, ocean_scene_sampler), uv).rgb;
+}
+
+float sample_scene_depth(vec2 uv, float near_plane, float far_plane) {
+    float depth = texture(sampler2D(ocean_scene_depth, ocean_scene_sampler), uv).r;
+    return linearize_depth(depth, near_plane, far_plane);
+}
+
+vec2 compute_screen_uv(Camera cam, vec3 world_pos, out vec3 view_pos, out vec3 view_normal, vec3 normal) {
+    mat4 view = inverse(cam.world_from_camera);
+    mat4 proj = cam.projection;
+    view_pos = (view * vec4(world_pos, 1.0)).xyz;
+    view_normal = normalize((view * vec4(normal, 0.0)).xyz);
+    vec4 clip = proj * vec4(view_pos, 1.0);
+    clip.y = -clip.y;
+    vec2 ndc = clip.xy / max(clip.w, 1e-4);
+    return ndc * 0.5 + 0.5;
+}
+
+vec3 compute_ssr(Camera cam, vec3 view_pos, vec3 view_normal, vec3 view_dir, out float hit) {
+    hit = 0.0;
+    float max_distance = max(params.ssr_max_distance, 0.0);
+    if (params.ssr_strength <= 0.001 || max_distance <= 0.0) {
+        return vec3(0.0);
+    }
+    mat4 proj = cam.projection;
+    vec3 reflect_dir = normalize(reflect(-view_dir, view_normal));
+    int max_steps = int(clamp(float(params.ssr_steps), 4.0, 64.0));
+    float step_size = max_distance / float(max_steps);
+    vec3 ray_pos = view_pos + view_normal * 0.15;
+    vec3 color = vec3(0.0);
+    for (int i = 0; i < 64; ++i) {
+        if (i >= max_steps) {
+            break;
+        }
+        ray_pos += reflect_dir * step_size;
+        vec4 clip = proj * vec4(ray_pos, 1.0);
+        if (clip.w <= 0.0) {
+            break;
+        }
+        clip.y = -clip.y;
+        vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            break;
+        }
+        float scene_depth = sample_scene_depth(uv, cam.near, cam.far);
+        float ray_depth = -ray_pos.z;
+        if (abs(ray_depth - scene_depth) <= max(params.ssr_thickness, 0.1)) {
+            color = sample_scene_color(uv);
+            hit = 1.0;
+            break;
+        }
+    }
+    return color;
+}
+
 vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float roughness, vec3 f0) {
     if (meshi_bindless_lights.lights.length() == 0) {
         return base_color * 0.1;
@@ -159,8 +251,8 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
 }
 
 void main() {
+    Camera cam = meshi_bindless_cameras.cameras[params.camera_index];
     float shade = 0.4 + 0.6 * v_uv.y;
-    vec3 base_color = vec3(0.0, 0.3, 0.6) * shade;
 
     vec3 n = normalize(v_normal);
     vec3 v = normalize(v_view_dir);
@@ -188,15 +280,45 @@ void main() {
     vec3 f0 = vec3(fresnel_bias);
     vec3 fresnel = fresnel_schlick(ndotv, f0);
 
+    vec3 view_pos;
+    vec3 view_normal;
+    vec2 screen_uv = compute_screen_uv(cam, v_world_pos, view_pos, view_normal, n);
+    screen_uv = clamp(screen_uv, vec2(0.0), vec2(1.0));
+    float view_depth = -view_pos.z;
+    float scene_depth = sample_scene_depth(screen_uv, cam.near, cam.far);
+    float thickness = max(scene_depth - view_depth, 0.0);
+    float turbidity_depth = max(params.turbidity_depth, 0.1);
+    float depth_factor = clamp(thickness / turbidity_depth, 0.0, 1.0);
+    vec3 turbidity_color = mix(params.shallow_color.xyz, params.deep_color.xyz, depth_factor);
+    vec3 base_color = turbidity_color * shade;
+
+    float refraction_scale = params.refraction_strength * (0.35 + 0.65 * (1.0 - ndotv));
+    vec2 refract_offset = view_normal.xy * refraction_scale;
+    vec2 refract_uv = clamp(screen_uv + refract_offset, vec2(0.0), vec2(1.0));
+    vec3 scene_color = sample_scene_color(refract_uv);
+    vec3 absorption = exp(-params.absorption_coeff.xyz * thickness);
+    vec3 refracted = scene_color * absorption + turbidity_color * (1.0 - absorption);
+    vec3 scatter = params.scattering_color.xyz * (1.0 - exp(-params.scattering_strength * thickness));
+    refracted += scatter;
+
+    vec3 view_dir = normalize(-view_pos);
+    float ssr_hit = 0.0;
+    vec3 ssr_color = compute_ssr(cam, view_pos, view_normal, view_dir, ssr_hit);
+
     vec3 reflection_dir = normalize(reflect(-v, n));
     vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
-    vec3 specular_ibl = env_color * mix(fresnel, vec3(1.0), roughness * 0.2);
+    vec3 reflection_color = mix(env_color, ssr_color, ssr_hit * clamp(params.ssr_strength, 0.0, 1.0));
+    vec3 specular_ibl = reflection_color * mix(fresnel, vec3(1.0), roughness * 0.2);
     vec3 diffuse_ibl = base_color * (1.0 - fresnel) * 0.08;
 
-    vec3 color = apply_light(base_color, n, v, v_world_pos, roughness, f0);
-    color += (diffuse_ibl + specular_ibl) * fresnel_strength;
+    vec3 surface = apply_light(base_color, n, v, v_world_pos, roughness, f0);
+    surface += diffuse_ibl * fresnel_strength;
+    surface += specular_ibl * fresnel_strength;
+    float reflect_factor = clamp(fresnel_strength * fresnel.r, 0.0, 1.0);
+    vec3 color = mix(refracted, surface, reflect_factor);
     color += foam_color;
-    float transparency = mix(0.25, 0.85, fresnel_strength * ndotv) + foam_mask * 0.15;
+    float depth_opacity = clamp(thickness / turbidity_depth, 0.0, 1.0);
+    float transparency = mix(0.2, 0.85, reflect_factor) + depth_opacity * 0.2 + foam_mask * 0.15;
     float alpha = clamp(transparency, 0.1, 0.98);
 
     out_color = vec4(color, alpha);
