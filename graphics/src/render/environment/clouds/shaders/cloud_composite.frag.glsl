@@ -1,10 +1,11 @@
 #version 450
 #extension GL_EXT_samplerless_texture_functions : enable
+#extension GL_EXT_scalar_block_layout : enable
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 frag_color;
 
-layout(set = 0, binding = 0) uniform CloudCompositeParams {
+layout(set = 0, binding = 0, scalar) uniform CloudCompositeParams {
     uvec2 output_resolution;
     uvec2 low_resolution;
     float camera_near;
@@ -14,6 +15,10 @@ layout(set = 0, binding = 0) uniform CloudCompositeParams {
     float history_weight_scale;
     float shadow_resolution;
     uint history_index;
+    float atmosphere_view_strength;
+    float atmosphere_view_extinction;
+    float atmosphere_haze_strength;
+    vec4 atmosphere_haze_color;
 } params;
 
 layout(set = 1, binding = 0) buffer CloudColorA { vec4 values[]; } cloud_color_a;
@@ -200,6 +205,13 @@ void main() {
         return;
     }
 
-    float alpha = 1.0 - trans;
+    float view_trans = 1.0;
+    if (depth > 0.0) {
+        view_trans = exp(-params.atmosphere_view_extinction * depth);
+    }
+    view_trans = mix(1.0, view_trans, params.atmosphere_view_strength);
+    vec3 haze = params.atmosphere_haze_color.rgb * params.atmosphere_haze_strength;
+    color.rgb = color.rgb * view_trans + haze * (1.0 - view_trans);
+    float alpha = (1.0 - trans) * view_trans;
     frag_color = vec4(color.rgb * alpha, alpha);
 }

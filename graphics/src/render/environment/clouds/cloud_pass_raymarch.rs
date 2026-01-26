@@ -51,6 +51,8 @@ pub struct CloudRaymarchParams {
 
     pub light_step_count: u32,
     pub phase_g: f32,
+    pub multi_scatter_strength: f32,
+    pub multi_scatter_respects_shadow: u32,
     pub sun_radiance: [f32; 3],
     pub shadow_strength: f32,
 
@@ -65,6 +67,9 @@ pub struct CloudRaymarchParams {
     pub sun_direction: [f32; 3],
     pub use_shadow_map: u32,
     pub shadow_extent: f32,
+    pub atmosphere_view_strength: f32,
+    pub atmosphere_view_extinction: f32,
+    pub atmosphere_light_transmittance: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -79,6 +84,8 @@ pub struct CloudSamplingSettings {
     pub step_count: u32,
     pub light_step_count: u32,
     pub phase_g: f32,
+    pub multi_scatter_strength: f32,
+    pub multi_scatter_respects_shadow: bool,
     pub sun_radiance: Vec3,
     pub sun_direction: Vec3,
     pub coverage_power: f32,
@@ -100,6 +107,9 @@ pub struct CloudSamplingSettings {
     pub use_shadow_map: bool,
     pub camera_index: u32,
     pub debug_view: u32,
+    pub atmosphere_view_strength: f32,
+    pub atmosphere_view_extinction: f32,
+    pub atmosphere_light_transmittance: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -306,6 +316,8 @@ impl CloudRaymarchPass {
             step_count: settings.step_count,
             light_step_count: settings.light_step_count,
             phase_g: settings.phase_g,
+            multi_scatter_strength: settings.multi_scatter_strength,
+            multi_scatter_respects_shadow: settings.multi_scatter_respects_shadow as u32,
             sun_radiance: [
                 settings.sun_radiance.x,
                 settings.sun_radiance.y,
@@ -325,6 +337,9 @@ impl CloudRaymarchPass {
             ],
             use_shadow_map: settings.use_shadow_map as u32,
             shadow_extent: settings.shadow_extent,
+            atmosphere_view_strength: settings.atmosphere_view_strength,
+            atmosphere_view_extinction: settings.atmosphere_view_extinction,
+            atmosphere_light_transmittance: settings.atmosphere_light_transmittance,
             ..Default::default()
         };
     }

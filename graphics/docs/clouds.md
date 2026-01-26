@@ -108,10 +108,12 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 * **Layer B**: `layer_b.base_altitude`, `layer_b.top_altitude`, `layer_b.density_scale`, `layer_b.noise_scale`, `layer_b.wind`, `layer_b.wind_speed`.
 * **Raymarch Steps**: `step_count`, `light_step_count`.
 * **Phase**: `phase_g` (Henyey–Greenstein).
+* **Multi-scatter**: `multi_scatter_strength`, `multi_scatter_respects_shadow`.
 * **Resolution**: `low_res_scale` (1/2 or 1/4).
+* **Atmosphere**: `atmosphere_view_strength`, `atmosphere_view_extinction`, `atmosphere_light_transmittance`, `atmosphere_haze_strength`, `atmosphere_haze_color`.
 * **Shadow**: `shadow.enabled`, `shadow.resolution`, `shadow.extent`, `shadow.strength`.
 * **Temporal**: `temporal.blend_factor`, `temporal.clamp_strength`, `temporal.depth_sigma`.
-* **Debug**: `debug_view` for weather map, shadow map, transmittance, step heatmap, temporal weight, and stats.
+* **Debug**: `debug_view` for weather map, shadow map, transmittance, step heatmap, temporal weight, stats, and single vs. multi scatter.
 * **Budget**: `performance_budget_ms` (recorded in stats overlay, not enforced).
 
 ## Debug Views
@@ -126,6 +128,8 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 6. **Stats** – enable the cloud performance timing overlay.
 7. **LayerA** – isolate layer A.
 8. **LayerB** – isolate layer B.
+9. **SingleScatter** – disable multi-scatter gain.
+10. **MultiScatter** – visualize the multi-scatter boost alone.
 
 ## Determinism
 
@@ -150,11 +154,13 @@ The raymarch shader performs the following steps per pixel:
    * Extinction uses Beer–Lambert: `step_trans = exp(-sigma_t * step_size)`.
    * A Henyey–Greenstein phase function (`phase_g`) modulates anisotropy.
    * Lighting uses either the directional sun (if no explicit scene lights) or the engine's light list.
+   * A multi-scattering gain term (`multi_scatter_strength`) boosts energy based on local extinction, optionally gated by shadowing.
+   * Light contributions are attenuated by a coarse atmospheric transmittance factor.
 5. **Shadowing** – sun lighting can sample the shadow buffer (if enabled), otherwise a mini light march is performed along the light direction.
 6. **Accumulation** – scattered radiance is accumulated with the current transmittance and the transmittance is updated for the next step.
 7. **Depth output** – the shader stores a weighted average depth along the ray so reprojection can reconstruct world positions.
 
-These steps follow the typical Nubis-style split between large-scale weather control and high-frequency noise detail, but avoid complex multiple scattering or physically-based sky coupling.
+These steps follow the typical Nubis-style split between large-scale weather control and high-frequency noise detail, while adding a cheap multi-scatter boost and coarse atmospheric coupling.
 
 ## Temporal Reprojection and Stability (Detailed)
 
@@ -173,7 +179,8 @@ The composite shader:
 * Bilinearly upsamples the low-res cloud buffers.
 * Compares cloud depth against the scene depth; if the cloud depth is behind geometry beyond `depth_sigma`, the cloud contribution is suppressed.
 * Outputs premultiplied cloud color with alpha equal to `1 - transmittance`.
-* Supports debug views for weather, shadow, transmittance, step usage, and temporal weight.
+* Applies a view-space aerial perspective term that fades clouds toward a configurable haze color.
+* Supports debug views for weather, shadow, transmittance, step usage, temporal weight, and single vs. multi-scatter comparison.
 
 ## Relation to the Nubis-Style Cloud Pipeline
 
@@ -193,6 +200,8 @@ The implementation mirrors Nubis-inspired techniques in several key ways:
 * Weather-driven coverage/type/thickness.
 * Base + detail 3D noise, plus optional curl noise distortion.
 * Directional sun lighting with either shadow map sampling or short light marches.
+* Single-scatter lighting with an optional multi-scatter gain term.
+* Atmospheric transmittance/haze coupling in lighting and composite.
 * Temporal reprojection with clamping and depth-based rejection.
 * Debug views that expose intermediate buffers.
 
@@ -200,8 +209,8 @@ The implementation mirrors Nubis-inspired techniques in several key ways:
 
 * **No curved atmosphere intersection** – slabs are flat, so horizon curvature is not modeled.
 * **No explicit erosion/ambient occlusion maps** – Nubis frequently uses erosion or curl noise textures to carve edges; here, erosion is approximated via detail noise.
-* **No multiple scattering approximation** – lighting is single-scatter only; there is no volumetric multiple-scattering or energy-conserving compensation.
-* **No atmospheric coupling** – the cloud lighting does not integrate atmospheric transmittance or aerial perspective.
+* **No energy-conserving multiple scattering** – the multi-scatter term is a heuristic gain rather than a physical integration.
+* **Simplified atmospheric coupling** – uses coarse transmittance/haze parameters instead of full LUT-based sky coupling.
 * **Simplified shadowing** – the shadow pass uses a fixed step count and does not incorporate multi-scattering or penumbra widening.
 * **No weather evolution model** – weather changes are driven only by wind/time offsets, not by a simulation or evolving 3D weather volume.
 

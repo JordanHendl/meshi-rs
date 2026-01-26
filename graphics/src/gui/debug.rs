@@ -83,6 +83,8 @@ struct DebugSliderValues {
     cloud_epsilon: f32,
     cloud_low_res_scale: f32,
     cloud_phase_g: f32,
+    cloud_multi_scatter_strength: f32,
+    cloud_multi_scatter_shadowed: f32,
     cloud_step_count: f32,
     cloud_sun_radiance_r: f32,
     cloud_sun_radiance_g: f32,
@@ -90,6 +92,13 @@ struct DebugSliderValues {
     cloud_sun_direction_x: f32,
     cloud_sun_direction_y: f32,
     cloud_sun_direction_z: f32,
+    cloud_atmosphere_view_strength: f32,
+    cloud_atmosphere_view_extinction: f32,
+    cloud_atmosphere_light_transmittance: f32,
+    cloud_atmosphere_haze_strength: f32,
+    cloud_atmosphere_haze_r: f32,
+    cloud_atmosphere_haze_g: f32,
+    cloud_atmosphere_haze_b: f32,
     cloud_shadow_enabled: f32,
     cloud_shadow_resolution: f32,
     cloud_shadow_extent: f32,
@@ -209,6 +218,8 @@ impl DebugGui {
                 cloud_epsilon: 0.01,
                 cloud_low_res_scale: 0.0,
                 cloud_phase_g: 0.6,
+                cloud_multi_scatter_strength: 0.35,
+                cloud_multi_scatter_shadowed: 1.0,
                 cloud_step_count: 96.0,
                 cloud_sun_radiance_r: 1.0,
                 cloud_sun_radiance_g: 1.0,
@@ -216,6 +227,13 @@ impl DebugGui {
                 cloud_sun_direction_x: 0.0,
                 cloud_sun_direction_y: -1.0,
                 cloud_sun_direction_z: 0.0,
+                cloud_atmosphere_view_strength: 0.6,
+                cloud_atmosphere_view_extinction: 0.00025,
+                cloud_atmosphere_light_transmittance: 0.9,
+                cloud_atmosphere_haze_strength: 0.35,
+                cloud_atmosphere_haze_r: 0.62,
+                cloud_atmosphere_haze_g: 0.72,
+                cloud_atmosphere_haze_b: 0.85,
                 cloud_shadow_enabled: 0.0,
                 cloud_shadow_resolution: 256.0,
                 cloud_shadow_extent: 50000.0,
@@ -380,6 +398,9 @@ impl DebugGui {
                     self.slider_values.cloud_low_res_scale =
                         cloud_resolution_scale_value(clouds.low_res_scale);
                     self.slider_values.cloud_phase_g = clouds.phase_g;
+                    self.slider_values.cloud_multi_scatter_strength = clouds.multi_scatter_strength;
+                    self.slider_values.cloud_multi_scatter_shadowed =
+                        clouds.multi_scatter_respects_shadow as u32 as f32;
                     self.slider_values.cloud_step_count = clouds.step_count as f32;
                     self.slider_values.cloud_sun_radiance_r = clouds.sun_radiance.x;
                     self.slider_values.cloud_sun_radiance_g = clouds.sun_radiance.y;
@@ -387,6 +408,15 @@ impl DebugGui {
                     self.slider_values.cloud_sun_direction_x = clouds.sun_direction.x;
                     self.slider_values.cloud_sun_direction_y = clouds.sun_direction.y;
                     self.slider_values.cloud_sun_direction_z = clouds.sun_direction.z;
+                    self.slider_values.cloud_atmosphere_view_strength = clouds.atmosphere_view_strength;
+                    self.slider_values.cloud_atmosphere_view_extinction =
+                        clouds.atmosphere_view_extinction;
+                    self.slider_values.cloud_atmosphere_light_transmittance =
+                        clouds.atmosphere_light_transmittance;
+                    self.slider_values.cloud_atmosphere_haze_strength = clouds.atmosphere_haze_strength;
+                    self.slider_values.cloud_atmosphere_haze_r = clouds.atmosphere_haze_color.x;
+                    self.slider_values.cloud_atmosphere_haze_g = clouds.atmosphere_haze_color.y;
+                    self.slider_values.cloud_atmosphere_haze_b = clouds.atmosphere_haze_color.z;
                     self.slider_values.cloud_shadow_enabled = clouds.shadow.enabled as u32 as f32;
                     self.slider_values.cloud_shadow_resolution = clouds.shadow.resolution as f32;
                     self.slider_values.cloud_shadow_extent = clouds.shadow.extent;
@@ -606,24 +636,33 @@ impl DebugGui {
                     321 => self.slider_values.cloud_curl_strength = value,
                     322 => self.slider_values.cloud_jitter_strength = value,
                     323 => self.slider_values.cloud_epsilon = value,
-                    324 => self.slider_values.cloud_sun_radiance_r = value,
-                    325 => self.slider_values.cloud_sun_radiance_g = value,
-                    326 => self.slider_values.cloud_sun_radiance_b = value,
-                    327 => self.slider_values.cloud_sun_direction_x = value,
-                    328 => self.slider_values.cloud_sun_direction_y = value,
-                    329 => self.slider_values.cloud_sun_direction_z = value,
-                    330 => self.slider_values.cloud_shadow_enabled = value,
-                    331 => self.slider_values.cloud_shadow_resolution = value,
-                    332 => self.slider_values.cloud_shadow_extent = value,
-                    333 => self.slider_values.cloud_shadow_strength = value,
-                    334 => self.slider_values.cloud_shadow_cascade_count = value,
-                    335 => self.slider_values.cloud_shadow_split_lambda = value,
-                    336 => self.slider_values.cloud_temporal_blend_factor = value,
-                    337 => self.slider_values.cloud_temporal_clamp_strength = value,
-                    338 => self.slider_values.cloud_temporal_depth_sigma = value,
-                    339 => self.slider_values.cloud_temporal_history_weight_scale = value,
-                    340 => self.slider_values.cloud_debug_view = value,
-                    341 => self.slider_values.cloud_performance_budget_ms = value,
+                    324 => self.slider_values.cloud_multi_scatter_strength = value,
+                    325 => self.slider_values.cloud_multi_scatter_shadowed = value,
+                    326 => self.slider_values.cloud_sun_radiance_r = value,
+                    327 => self.slider_values.cloud_sun_radiance_g = value,
+                    328 => self.slider_values.cloud_sun_radiance_b = value,
+                    329 => self.slider_values.cloud_sun_direction_x = value,
+                    330 => self.slider_values.cloud_sun_direction_y = value,
+                    331 => self.slider_values.cloud_sun_direction_z = value,
+                    332 => self.slider_values.cloud_atmosphere_view_strength = value,
+                    333 => self.slider_values.cloud_atmosphere_view_extinction = value,
+                    334 => self.slider_values.cloud_atmosphere_light_transmittance = value,
+                    335 => self.slider_values.cloud_atmosphere_haze_strength = value,
+                    336 => self.slider_values.cloud_atmosphere_haze_r = value,
+                    337 => self.slider_values.cloud_atmosphere_haze_g = value,
+                    338 => self.slider_values.cloud_atmosphere_haze_b = value,
+                    339 => self.slider_values.cloud_shadow_enabled = value,
+                    340 => self.slider_values.cloud_shadow_resolution = value,
+                    341 => self.slider_values.cloud_shadow_extent = value,
+                    342 => self.slider_values.cloud_shadow_strength = value,
+                    343 => self.slider_values.cloud_shadow_cascade_count = value,
+                    344 => self.slider_values.cloud_shadow_split_lambda = value,
+                    345 => self.slider_values.cloud_temporal_blend_factor = value,
+                    346 => self.slider_values.cloud_temporal_clamp_strength = value,
+                    347 => self.slider_values.cloud_temporal_depth_sigma = value,
+                    348 => self.slider_values.cloud_temporal_history_weight_scale = value,
+                    349 => self.slider_values.cloud_debug_view = value,
+                    350 => self.slider_values.cloud_performance_budget_ms = value,
                     _ => {}
                 }
             }
@@ -934,6 +973,16 @@ impl DebugGui {
                     clouds.epsilon = new_value;
                     cloud_dirty = true;
                 }
+                let new_value = self.slider_values.cloud_multi_scatter_strength.clamp(0.0, 2.0);
+                if (clouds.multi_scatter_strength - new_value).abs() > f32::EPSILON {
+                    clouds.multi_scatter_strength = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_multi_scatter_shadowed >= 0.5;
+                if clouds.multi_scatter_respects_shadow != new_value {
+                    clouds.multi_scatter_respects_shadow = new_value;
+                    cloud_dirty = true;
+                }
                 let new_radiance = Vec3::new(
                     self.slider_values.cloud_sun_radiance_r.clamp(0.0, 10.0),
                     self.slider_values.cloud_sun_radiance_g.clamp(0.0, 10.0),
@@ -950,6 +999,37 @@ impl DebugGui {
                 );
                 if (clouds.sun_direction - new_direction).length_squared() > f32::EPSILON {
                     clouds.sun_direction = new_direction;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_atmosphere_view_strength.clamp(0.0, 1.0);
+                if (clouds.atmosphere_view_strength - new_value).abs() > f32::EPSILON {
+                    clouds.atmosphere_view_strength = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value =
+                    self.slider_values.cloud_atmosphere_view_extinction.clamp(0.0, 0.005);
+                if (clouds.atmosphere_view_extinction - new_value).abs() > f32::EPSILON {
+                    clouds.atmosphere_view_extinction = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value =
+                    self.slider_values.cloud_atmosphere_light_transmittance.clamp(0.0, 1.0);
+                if (clouds.atmosphere_light_transmittance - new_value).abs() > f32::EPSILON {
+                    clouds.atmosphere_light_transmittance = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = self.slider_values.cloud_atmosphere_haze_strength.clamp(0.0, 1.0);
+                if (clouds.atmosphere_haze_strength - new_value).abs() > f32::EPSILON {
+                    clouds.atmosphere_haze_strength = new_value;
+                    cloud_dirty = true;
+                }
+                let new_value = Vec3::new(
+                    self.slider_values.cloud_atmosphere_haze_r.clamp(0.0, 1.5),
+                    self.slider_values.cloud_atmosphere_haze_g.clamp(0.0, 1.5),
+                    self.slider_values.cloud_atmosphere_haze_b.clamp(0.0, 1.5),
+                );
+                if (clouds.atmosphere_haze_color - new_value).length_squared() > f32::EPSILON {
+                    clouds.atmosphere_haze_color = new_value;
                     cloud_dirty = true;
                 }
                 let new_shadow_enabled = self.slider_values.cloud_shadow_enabled >= 0.5;
@@ -1620,125 +1700,188 @@ impl DebugGui {
                     ),
                     Slider::new(
                         324,
+                        "Multi Scatter Strength",
+                        0.0,
+                        2.0,
+                        self.slider_values.cloud_multi_scatter_strength,
+                    ),
+                    Slider::new(
+                        325,
+                        "Multi Scatter Shadowed",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_multi_scatter_shadowed,
+                    ),
+                    Slider::new(
+                        326,
                         "Sun Radiance R",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_r,
                     ),
                     Slider::new(
-                        325,
+                        327,
                         "Sun Radiance G",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_g,
                     ),
                     Slider::new(
-                        326,
+                        328,
                         "Sun Radiance B",
                         0.0,
                         10.0,
                         self.slider_values.cloud_sun_radiance_b,
                     ),
                     Slider::new(
-                        327,
+                        329,
                         "Sun Dir X",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_x,
                     ),
                     Slider::new(
-                        328,
+                        330,
                         "Sun Dir Y",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_y,
                     ),
                     Slider::new(
-                        329,
+                        331,
                         "Sun Dir Z",
                         -1.0,
                         1.0,
                         self.slider_values.cloud_sun_direction_z,
                     ),
                     Slider::new(
-                        330,
+                        332,
+                        "Atmos View Strength",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_atmosphere_view_strength,
+                    ),
+                    Slider::new(
+                        333,
+                        "Atmos View Extinction",
+                        0.0,
+                        0.005,
+                        self.slider_values.cloud_atmosphere_view_extinction,
+                    ),
+                    Slider::new(
+                        334,
+                        "Atmos Light Trans",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_atmosphere_light_transmittance,
+                    ),
+                    Slider::new(
+                        335,
+                        "Atmos Haze Strength",
+                        0.0,
+                        1.0,
+                        self.slider_values.cloud_atmosphere_haze_strength,
+                    ),
+                    Slider::new(
+                        336,
+                        "Atmos Haze R",
+                        0.0,
+                        1.5,
+                        self.slider_values.cloud_atmosphere_haze_r,
+                    ),
+                    Slider::new(
+                        337,
+                        "Atmos Haze G",
+                        0.0,
+                        1.5,
+                        self.slider_values.cloud_atmosphere_haze_g,
+                    ),
+                    Slider::new(
+                        338,
+                        "Atmos Haze B",
+                        0.0,
+                        1.5,
+                        self.slider_values.cloud_atmosphere_haze_b,
+                    ),
+                    Slider::new(
+                        339,
                         "Shadow Enabled",
                         0.0,
                         1.0,
                         self.slider_values.cloud_shadow_enabled,
                     ),
                     Slider::new(
-                        331,
+                        340,
                         "Shadow Resolution",
                         64.0,
                         2048.0,
                         self.slider_values.cloud_shadow_resolution,
                     ),
                     Slider::new(
-                        332,
+                        341,
                         "Shadow Extent",
                         1000.0,
                         200000.0,
                         self.slider_values.cloud_shadow_extent,
                     ),
                     Slider::new(
-                        333,
+                        342,
                         "Shadow Strength",
                         0.0,
                         2.0,
                         self.slider_values.cloud_shadow_strength,
                     ),
                     Slider::new(
-                        334,
+                        343,
                         "Shadow Cascades",
                         1.0,
                         4.0,
                         self.slider_values.cloud_shadow_cascade_count,
                     ),
                     Slider::new(
-                        335,
+                        344,
                         "Shadow Split Lambda",
                         0.0,
                         1.0,
                         self.slider_values.cloud_shadow_split_lambda,
                     ),
                     Slider::new(
-                        336,
+                        345,
                         "Temporal Blend",
                         0.0,
                         1.0,
                         self.slider_values.cloud_temporal_blend_factor,
                     ),
                     Slider::new(
-                        337,
+                        346,
                         "Temporal Clamp",
                         0.0,
                         1.0,
                         self.slider_values.cloud_temporal_clamp_strength,
                     ),
                     Slider::new(
-                        338,
+                        347,
                         "Temporal Depth Sigma",
                         0.1,
                         100.0,
                         self.slider_values.cloud_temporal_depth_sigma,
                     ),
                     Slider::new(
-                        339,
+                        348,
                         "Temporal History Scale",
                         0.0,
                         4.0,
                         self.slider_values.cloud_temporal_history_weight_scale,
                     ),
                     Slider::new(
-                        340,
+                        349,
                         "Debug View",
                         0.0,
-                        8.0,
+                        10.0,
                         self.slider_values.cloud_debug_view,
                     ),
                     Slider::new(
-                        341,
+                        350,
                         "Budget (ms)",
                         0.1,
                         20.0,
@@ -1876,7 +2019,7 @@ impl DebugGui {
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
-    match value.round().clamp(0.0, 8.0) as u32 {
+    match value.round().clamp(0.0, 10.0) as u32 {
         1 => CloudDebugView::WeatherMap,
         2 => CloudDebugView::ShadowMap,
         3 => CloudDebugView::Transmittance,
@@ -1885,6 +2028,8 @@ fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
         6 => CloudDebugView::Stats,
         7 => CloudDebugView::LayerA,
         8 => CloudDebugView::LayerB,
+        9 => CloudDebugView::SingleScatter,
+        10 => CloudDebugView::MultiScatter,
         _ => CloudDebugView::None,
     }
 }
@@ -1900,6 +2045,8 @@ fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
         CloudDebugView::Stats => "Stats",
         CloudDebugView::LayerA => "Layer A",
         CloudDebugView::LayerB => "Layer B",
+        CloudDebugView::SingleScatter => "Single Scatter",
+        CloudDebugView::MultiScatter => "Multi Scatter",
     }
 }
 

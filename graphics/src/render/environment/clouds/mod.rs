@@ -249,6 +249,8 @@ impl CloudRenderer {
             step_count: self.settings.step_count,
             light_step_count: self.settings.light_step_count,
             phase_g: self.settings.phase_g,
+            multi_scatter_strength: self.settings.multi_scatter_strength,
+            multi_scatter_respects_shadow: self.settings.multi_scatter_respects_shadow,
             sun_radiance: self.settings.sun_radiance,
             sun_direction: self.settings.sun_direction.normalize_or_zero(),
             coverage_power: self.settings.coverage_power,
@@ -270,6 +272,9 @@ impl CloudRenderer {
             use_shadow_map: self.settings.shadow.enabled,
             camera_index,
             debug_view: self.settings.debug_view as u32,
+            atmosphere_view_strength: self.settings.atmosphere_view_strength,
+            atmosphere_view_extinction: self.settings.atmosphere_view_extinction,
+            atmosphere_light_transmittance: self.settings.atmosphere_light_transmittance,
         };
 
         if self.settings.shadow.enabled {
@@ -303,6 +308,15 @@ impl CloudRenderer {
             self.settings.temporal.history_weight_scale,
             self.shadow_pass.shadow_resolution,
             self.temporal_pass.history_index() as u32,
+            self.settings.atmosphere_view_strength,
+            self.settings.atmosphere_view_extinction,
+            self.settings.atmosphere_haze_strength,
+            [
+                self.settings.atmosphere_haze_color.x,
+                self.settings.atmosphere_haze_color.y,
+                self.settings.atmosphere_haze_color.z,
+                1.0,
+            ],
         );
 
         self.timings.shadow_ms = _ctx

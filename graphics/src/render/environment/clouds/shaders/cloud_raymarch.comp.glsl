@@ -45,6 +45,8 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     uint step_count;
     uint light_step_count;
     float phase_g;
+    float multi_scatter_strength;
+    uint multi_scatter_respects_shadow;
     vec3 sun_radiance;
     float shadow_strength;
     float time;
@@ -56,6 +58,9 @@ layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
     vec3 sun_direction;
     uint use_shadow_map;
     float shadow_extent;
+    float atmosphere_view_strength;
+    float atmosphere_view_extinction;
+    float atmosphere_light_transmittance;
 } params;
 
 layout(set = 0, binding = 1) uniform texture2D cloud_weather_map;
@@ -312,14 +317,25 @@ LayerResult march_layer(
         if (density > 0.001) {
             float sigma_t = density * density_scale;
             float step_trans = exp(-sigma_t * step_size);
-            vec3 scatter = vec3(0.0);
+            vec3 scatter_single = vec3(0.0);
+            vec3 scatter_multi = vec3(0.0);
             int light_count = meshi_bindless_lights.lights.length();
+            float multi_strength = params.multi_scatter_strength;
+            bool show_single = params.debug_view == 9u;
+            bool show_multi = params.debug_view == 10u;
+            if (show_single) {
+                multi_strength = 0.0;
+            }
             if (light_count == 0) {
                 vec3 sun_dir = normalize(params.sun_direction);
                 vec3 env_tint = sample_environment(sun_dir);
                 float phase = phase_hg(dot(ray_dir, sun_dir), params.phase_g);
                 float light_trans = light_march(sample_pos, sun_dir, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
-                scatter = params.sun_radiance * env_tint * phase * light_trans;
+                vec3 base = params.sun_radiance * env_tint * phase * light_trans * params.atmosphere_light_transmittance;
+                float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
+                float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
+                scatter_single += base;
+                scatter_multi += base * (multi_gain - 1.0);
             } else {
                 for (int light_index = 0; light_index < light_count; ++light_index) {
                     Light light = meshi_bindless_lights.lights[light_index];
@@ -346,8 +362,16 @@ LayerResult march_layer(
                     if (light_type == LIGHT_TYPE_DIRECTIONAL) {
                         light_color *= sample_environment(light_dir);
                     }
-                    scatter += light_color * phase * light_trans * attenuation * spot_factor;
+                    vec3 base = light_color * phase * light_trans * attenuation * spot_factor * params.atmosphere_light_transmittance;
+                    float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
+                    float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
+                    scatter_single += base;
+                    scatter_multi += base * (multi_gain - 1.0);
                 }
+            }
+            vec3 scatter = scatter_single + scatter_multi;
+            if (show_multi) {
+                scatter = scatter_multi;
             }
             color += transmittance * scatter * (1.0 - step_trans);
             transmittance *= step_trans;
