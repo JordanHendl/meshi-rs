@@ -1352,6 +1352,7 @@ impl OceanRenderer {
         let max_tile_count = self.max_tile_radius.max(1) * 2 + 1;
         let instance_count = max_tile_count * max_tile_count;
 
+        // TODO: Evaluate meshlet-based culling/LOD once mesh/cluster rendering is available.
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.pipeline.handle)
             .update_viewport(viewport)
