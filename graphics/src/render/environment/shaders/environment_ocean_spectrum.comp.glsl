@@ -15,6 +15,12 @@ layout(set = 1, binding = 0) readonly buffer OceanSpectrumParams {
     float wind_speed;
     float capillary_strength;
     float patch_size;
+    float fetch_length;
+    vec2 swell_dir;
+    float spectrum_scale;
+    float swell_strength;
+    float depth_meters;
+    float depth_damping;
 } params;
 
 float hash11(float n) {
@@ -51,7 +57,7 @@ float phillips_spectrum(vec2 k, vec2 wind_dir, float wind_speed, float amplitude
     return amplitude * phillips;
 }
 
-float jonswap_spectrum(vec2 k, vec2 wind_dir, float wind_speed, float amplitude) {
+float jonswap_spectrum(vec2 k, vec2 wind_dir, float wind_speed, float amplitude, float fetch_length) {
     float k_len = length(k);
     if (k_len < 0.0001) {
         return 0.0;
@@ -59,6 +65,11 @@ float jonswap_spectrum(vec2 k, vec2 wind_dir, float wind_speed, float amplitude)
     float g = 9.81;
     float omega = sqrt(g * k_len);
     float omega_p = max(0.855 * g / max(wind_speed, 0.1), 0.1);
+    if (fetch_length > 1.0) {
+        float denom = max(wind_speed * fetch_length, 0.1);
+        float omega_fetch = 22.0 * pow((g * g) / denom, 0.3333333);
+        omega_p = max(omega_fetch, 0.05);
+    }
     float sigma = omega <= omega_p ? 0.07 : 0.09;
     float gamma = 3.3;
     float alpha = 0.0081;
@@ -84,13 +95,24 @@ void main() {
     float patch_size = max(params.patch_size, 0.01);
     float k_scale = 6.28318530718 / patch_size;
     vec2 k = grid * k_scale;
+    float k_len = length(k);
     vec2 wind_dir = normalize(params.wind_dir + vec2(0.0001, 0.0001));
+    vec2 swell_dir = normalize(params.swell_dir + vec2(0.0001, 0.0001));
     float wind_speed = max(params.wind_speed, 0.1);
-    float amplitude = max(params.wave_amplitude, 0.0);
+    float amplitude = max(params.wave_amplitude, 0.0) * max(params.spectrum_scale, 0.0);
+    float swell_strength = clamp(params.swell_strength, 0.0, 1.0);
+    vec2 dominant_dir = normalize(mix(wind_dir, swell_dir, swell_strength));
 
-    float phillips = phillips_spectrum(k, wind_dir, wind_speed, amplitude * 0.6);
-    float jonswap = jonswap_spectrum(k, wind_dir, wind_speed, amplitude * 0.4);
+    float phillips = phillips_spectrum(k, dominant_dir, wind_speed, amplitude * 0.6);
+    float jonswap = jonswap_spectrum(k, dominant_dir, wind_speed, amplitude * 0.4, params.fetch_length);
     float spectrum = max(phillips + jonswap, 0.0);
+    float depth = max(params.depth_meters, 0.0);
+    if (depth > 0.0) {
+        float depth_term = tanh(k_len * max(depth, 0.01));
+        float damping = clamp(params.depth_damping, 0.0, 1.0);
+        float depth_atten = mix(1.0, depth_term, damping);
+        spectrum *= depth_atten;
+    }
 
     vec2 seed = vec2(float(x), float(y));
     vec2 gaussian = gaussian_random(seed);
@@ -101,7 +123,6 @@ void main() {
     vec2 h0_neg = gaussian_neg * h0_scale;
 
     float g = 9.81;
-    float k_len = length(k);
     float capillary = max(params.capillary_strength, 0.0) * 0.000074;
     float omega = sqrt(g * k_len + capillary * k_len * k_len * k_len);
     float time = params.time * params.time_scale;

@@ -36,12 +36,28 @@ struct DebugSliderValues {
     moon_intensity: f32,
     moon_angular_radius: f32,
     ocean_wind_speed: f32,
+    ocean_fetch_length: f32,
+    ocean_swell_dir_x: f32,
+    ocean_swell_dir_y: f32,
+    ocean_current_x: f32,
+    ocean_current_y: f32,
     ocean_wave_amplitude: f32,
     ocean_gerstner_amplitude: f32,
+    ocean_cascade_spectrum_near: f32,
+    ocean_cascade_spectrum_mid: f32,
+    ocean_cascade_spectrum_far: f32,
+    ocean_cascade_swell_near: f32,
+    ocean_cascade_swell_mid: f32,
+    ocean_cascade_swell_far: f32,
+    ocean_depth_meters: f32,
+    ocean_depth_damping: f32,
     ocean_fresnel_bias: f32,
     ocean_fresnel_strength: f32,
     ocean_foam_strength: f32,
     ocean_foam_threshold: f32,
+    ocean_foam_advection: f32,
+    ocean_foam_decay: f32,
+    ocean_foam_noise_scale: f32,
     ocean_capillary_strength: f32,
     ocean_time_scale: f32,
     cloud_enabled: f32,
@@ -146,12 +162,28 @@ impl DebugGui {
                 moon_intensity: 0.1,
                 moon_angular_radius: 0.0045,
                 ocean_wind_speed: 2.0,
+                ocean_fetch_length: 5000.0,
+                ocean_swell_dir_x: 0.8,
+                ocean_swell_dir_y: 0.1,
+                ocean_current_x: 0.0,
+                ocean_current_y: 0.0,
                 ocean_wave_amplitude: 2.0,
                 ocean_gerstner_amplitude: 0.12,
+                ocean_cascade_spectrum_near: 1.0,
+                ocean_cascade_spectrum_mid: 0.85,
+                ocean_cascade_spectrum_far: 0.65,
+                ocean_cascade_swell_near: 0.35,
+                ocean_cascade_swell_mid: 0.55,
+                ocean_cascade_swell_far: 0.75,
+                ocean_depth_meters: 200.0,
+                ocean_depth_damping: 0.3,
                 ocean_fresnel_bias: 0.02,
                 ocean_fresnel_strength: 0.85,
                 ocean_foam_strength: 1.0,
                 ocean_foam_threshold: 0.55,
+                ocean_foam_advection: 0.25,
+                ocean_foam_decay: 0.08,
+                ocean_foam_noise_scale: 0.2,
                 ocean_capillary_strength: 1.0,
                 ocean_time_scale: 1.0,
                 cloud_enabled: 1.0,
@@ -292,12 +324,34 @@ impl DebugGui {
                 }
                 if let Some(ocean) = bindings.ocean_settings.as_ref() {
                     self.slider_values.ocean_wind_speed = ocean.wind_speed;
+                    self.slider_values.ocean_fetch_length = ocean.fetch_length;
+                    self.slider_values.ocean_swell_dir_x = ocean.swell_dir.x;
+                    self.slider_values.ocean_swell_dir_y = ocean.swell_dir.y;
+                    self.slider_values.ocean_current_x = ocean.current.x;
+                    self.slider_values.ocean_current_y = ocean.current.y;
                     self.slider_values.ocean_wave_amplitude = ocean.wave_amplitude;
                     self.slider_values.ocean_gerstner_amplitude = ocean.gerstner_amplitude;
+                    self.slider_values.ocean_cascade_spectrum_near =
+                        ocean.cascade_spectrum_scales[0];
+                    self.slider_values.ocean_cascade_spectrum_mid =
+                        ocean.cascade_spectrum_scales[1];
+                    self.slider_values.ocean_cascade_spectrum_far =
+                        ocean.cascade_spectrum_scales[2];
+                    self.slider_values.ocean_cascade_swell_near =
+                        ocean.cascade_swell_strengths[0];
+                    self.slider_values.ocean_cascade_swell_mid =
+                        ocean.cascade_swell_strengths[1];
+                    self.slider_values.ocean_cascade_swell_far =
+                        ocean.cascade_swell_strengths[2];
+                    self.slider_values.ocean_depth_meters = ocean.depth_meters;
+                    self.slider_values.ocean_depth_damping = ocean.depth_damping;
                     self.slider_values.ocean_fresnel_bias = ocean.fresnel_bias;
                     self.slider_values.ocean_fresnel_strength = ocean.fresnel_strength;
                     self.slider_values.ocean_foam_strength = ocean.foam_strength;
                     self.slider_values.ocean_foam_threshold = ocean.foam_threshold;
+                    self.slider_values.ocean_foam_advection = ocean.foam_advection_strength;
+                    self.slider_values.ocean_foam_decay = ocean.foam_decay_rate;
+                    self.slider_values.ocean_foam_noise_scale = ocean.foam_noise_scale;
                     self.slider_values.ocean_capillary_strength = ocean.capillary_strength;
                     self.slider_values.ocean_time_scale = ocean.time_scale;
                 }
@@ -504,14 +558,30 @@ impl DebugGui {
                     104 => self.slider_values.moon_intensity = value,
                     105 => self.slider_values.moon_angular_radius = value,
                     201 => self.slider_values.ocean_wind_speed = value,
-                    202 => self.slider_values.ocean_wave_amplitude = value,
-                    203 => self.slider_values.ocean_gerstner_amplitude = value,
-                    204 => self.slider_values.ocean_fresnel_bias = value,
-                    205 => self.slider_values.ocean_fresnel_strength = value,
-                    206 => self.slider_values.ocean_foam_strength = value,
-                    207 => self.slider_values.ocean_foam_threshold = value,
-                    208 => self.slider_values.ocean_capillary_strength = value,
-                    209 => self.slider_values.ocean_time_scale = value,
+                    202 => self.slider_values.ocean_fetch_length = value,
+                    203 => self.slider_values.ocean_swell_dir_x = value,
+                    204 => self.slider_values.ocean_swell_dir_y = value,
+                    205 => self.slider_values.ocean_current_x = value,
+                    206 => self.slider_values.ocean_current_y = value,
+                    207 => self.slider_values.ocean_wave_amplitude = value,
+                    208 => self.slider_values.ocean_gerstner_amplitude = value,
+                    209 => self.slider_values.ocean_cascade_spectrum_near = value,
+                    210 => self.slider_values.ocean_cascade_spectrum_mid = value,
+                    211 => self.slider_values.ocean_cascade_spectrum_far = value,
+                    212 => self.slider_values.ocean_cascade_swell_near = value,
+                    213 => self.slider_values.ocean_cascade_swell_mid = value,
+                    214 => self.slider_values.ocean_cascade_swell_far = value,
+                    215 => self.slider_values.ocean_depth_meters = value,
+                    216 => self.slider_values.ocean_depth_damping = value,
+                    217 => self.slider_values.ocean_fresnel_bias = value,
+                    218 => self.slider_values.ocean_fresnel_strength = value,
+                    219 => self.slider_values.ocean_foam_strength = value,
+                    220 => self.slider_values.ocean_foam_threshold = value,
+                    221 => self.slider_values.ocean_foam_advection = value,
+                    222 => self.slider_values.ocean_foam_decay = value,
+                    223 => self.slider_values.ocean_foam_noise_scale = value,
+                    224 => self.slider_values.ocean_capillary_strength = value,
+                    225 => self.slider_values.ocean_time_scale = value,
                     300 => self.slider_values.cloud_enabled = value,
                     301 => self.slider_values.cloud_layer_a_base_altitude = value,
                     302 => self.slider_values.cloud_layer_a_top_altitude = value,
@@ -615,6 +685,31 @@ impl DebugGui {
                     ocean.wind_speed = new_value;
                     ocean_dirty = true;
                 }
+                let new_value = self.slider_values.ocean_fetch_length.clamp(10.0, 200000.0);
+                if (ocean.fetch_length - new_value).abs() > f32::EPSILON {
+                    ocean.fetch_length = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_swell_dir_x.clamp(-1.0, 1.0);
+                if (ocean.swell_dir.x - new_value).abs() > f32::EPSILON {
+                    ocean.swell_dir.x = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_swell_dir_y.clamp(-1.0, 1.0);
+                if (ocean.swell_dir.y - new_value).abs() > f32::EPSILON {
+                    ocean.swell_dir.y = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_current_x.clamp(-5.0, 5.0);
+                if (ocean.current.x - new_value).abs() > f32::EPSILON {
+                    ocean.current.x = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_current_y.clamp(-5.0, 5.0);
+                if (ocean.current.y - new_value).abs() > f32::EPSILON {
+                    ocean.current.y = new_value;
+                    ocean_dirty = true;
+                }
                 let new_value = self.slider_values.ocean_wave_amplitude.clamp(0.1, 10.0);
                 if (ocean.wave_amplitude - new_value).abs() > f32::EPSILON {
                     ocean.wave_amplitude = new_value;
@@ -623,6 +718,46 @@ impl DebugGui {
                 let new_value = self.slider_values.ocean_gerstner_amplitude.clamp(0.0, 1.0);
                 if (ocean.gerstner_amplitude - new_value).abs() > f32::EPSILON {
                     ocean.gerstner_amplitude = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_spectrum_near.clamp(0.0, 2.0);
+                if (ocean.cascade_spectrum_scales[0] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_spectrum_scales[0] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_spectrum_mid.clamp(0.0, 2.0);
+                if (ocean.cascade_spectrum_scales[1] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_spectrum_scales[1] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_spectrum_far.clamp(0.0, 2.0);
+                if (ocean.cascade_spectrum_scales[2] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_spectrum_scales[2] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_swell_near.clamp(0.0, 1.0);
+                if (ocean.cascade_swell_strengths[0] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_swell_strengths[0] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_swell_mid.clamp(0.0, 1.0);
+                if (ocean.cascade_swell_strengths[1] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_swell_strengths[1] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_cascade_swell_far.clamp(0.0, 1.0);
+                if (ocean.cascade_swell_strengths[2] - new_value).abs() > f32::EPSILON {
+                    ocean.cascade_swell_strengths[2] = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_depth_meters.clamp(0.0, 5000.0);
+                if (ocean.depth_meters - new_value).abs() > f32::EPSILON {
+                    ocean.depth_meters = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_depth_damping.clamp(0.0, 1.0);
+                if (ocean.depth_damping - new_value).abs() > f32::EPSILON {
+                    ocean.depth_damping = new_value;
                     ocean_dirty = true;
                 }
                 let new_value = self.slider_values.ocean_fresnel_bias.clamp(0.0, 0.2);
@@ -643,6 +778,21 @@ impl DebugGui {
                 let new_value = self.slider_values.ocean_foam_threshold.clamp(0.0, 1.0);
                 if (ocean.foam_threshold - new_value).abs() > f32::EPSILON {
                     ocean.foam_threshold = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_foam_advection.clamp(0.0, 2.0);
+                if (ocean.foam_advection_strength - new_value).abs() > f32::EPSILON {
+                    ocean.foam_advection_strength = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_foam_decay.clamp(0.0, 1.0);
+                if (ocean.foam_decay_rate - new_value).abs() > f32::EPSILON {
+                    ocean.foam_decay_rate = new_value;
+                    ocean_dirty = true;
+                }
+                let new_value = self.slider_values.ocean_foam_noise_scale.clamp(0.01, 1.0);
+                if (ocean.foam_noise_scale - new_value).abs() > f32::EPSILON {
+                    ocean.foam_noise_scale = new_value;
                     ocean_dirty = true;
                 }
                 let new_value = self.slider_values.ocean_capillary_strength.clamp(0.0, 2.0);
@@ -1132,55 +1282,167 @@ impl DebugGui {
                     ),
                     Slider::new(
                         202,
+                        "Fetch Length",
+                        10.0,
+                        200000.0,
+                        self.slider_values.ocean_fetch_length,
+                    ),
+                    Slider::new(
+                        203,
+                        "Swell Dir X",
+                        -1.0,
+                        1.0,
+                        self.slider_values.ocean_swell_dir_x,
+                    ),
+                    Slider::new(
+                        204,
+                        "Swell Dir Y",
+                        -1.0,
+                        1.0,
+                        self.slider_values.ocean_swell_dir_y,
+                    ),
+                    Slider::new(
+                        205,
+                        "Current X",
+                        -5.0,
+                        5.0,
+                        self.slider_values.ocean_current_x,
+                    ),
+                    Slider::new(
+                        206,
+                        "Current Y",
+                        -5.0,
+                        5.0,
+                        self.slider_values.ocean_current_y,
+                    ),
+                    Slider::new(
+                        207,
                         "Wave Amplitude",
                         0.1,
                         10.0,
                         self.slider_values.ocean_wave_amplitude,
                     ),
                     Slider::new(
-                        203,
+                        208,
                         "Gerstner Amplitude",
                         0.0,
                         1.0,
                         self.slider_values.ocean_gerstner_amplitude,
                     ),
                     Slider::new(
-                        204,
+                        209,
+                        "Cascade Spectrum Near",
+                        0.0,
+                        2.0,
+                        self.slider_values.ocean_cascade_spectrum_near,
+                    ),
+                    Slider::new(
+                        210,
+                        "Cascade Spectrum Mid",
+                        0.0,
+                        2.0,
+                        self.slider_values.ocean_cascade_spectrum_mid,
+                    ),
+                    Slider::new(
+                        211,
+                        "Cascade Spectrum Far",
+                        0.0,
+                        2.0,
+                        self.slider_values.ocean_cascade_spectrum_far,
+                    ),
+                    Slider::new(
+                        212,
+                        "Cascade Swell Near",
+                        0.0,
+                        1.0,
+                        self.slider_values.ocean_cascade_swell_near,
+                    ),
+                    Slider::new(
+                        213,
+                        "Cascade Swell Mid",
+                        0.0,
+                        1.0,
+                        self.slider_values.ocean_cascade_swell_mid,
+                    ),
+                    Slider::new(
+                        214,
+                        "Cascade Swell Far",
+                        0.0,
+                        1.0,
+                        self.slider_values.ocean_cascade_swell_far,
+                    ),
+                    Slider::new(
+                        215,
+                        "Depth Meters",
+                        0.0,
+                        5000.0,
+                        self.slider_values.ocean_depth_meters,
+                    ),
+                    Slider::new(
+                        216,
+                        "Depth Damping",
+                        0.0,
+                        1.0,
+                        self.slider_values.ocean_depth_damping,
+                    ),
+                    Slider::new(
+                        217,
                         "Fresnel Bias",
                         0.0,
                         0.2,
                         self.slider_values.ocean_fresnel_bias,
                     ),
                     Slider::new(
-                        205,
+                        218,
                         "Fresnel Strength",
                         0.0,
                         1.5,
                         self.slider_values.ocean_fresnel_strength,
                     ),
                     Slider::new(
-                        206,
+                        219,
                         "Foam Strength",
                         0.0,
                         4.0,
                         self.slider_values.ocean_foam_strength,
                     ),
                     Slider::new(
-                        207,
+                        220,
                         "Foam Threshold",
                         0.0,
                         1.0,
                         self.slider_values.ocean_foam_threshold,
                     ),
                     Slider::new(
-                        208,
+                        221,
+                        "Foam Advection",
+                        0.0,
+                        2.0,
+                        self.slider_values.ocean_foam_advection,
+                    ),
+                    Slider::new(
+                        222,
+                        "Foam Decay",
+                        0.0,
+                        1.0,
+                        self.slider_values.ocean_foam_decay,
+                    ),
+                    Slider::new(
+                        223,
+                        "Foam Noise Scale",
+                        0.01,
+                        1.0,
+                        self.slider_values.ocean_foam_noise_scale,
+                    ),
+                    Slider::new(
+                        224,
                         "Capillary Strength",
                         0.0,
                         2.0,
                         self.slider_values.ocean_capillary_strength,
                     ),
                     Slider::new(
-                        209,
+                        225,
                         "Time Scale",
                         0.1,
                         4.0,

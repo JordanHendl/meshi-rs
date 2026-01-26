@@ -55,10 +55,24 @@ pub struct OceanFrameSettings {
     pub wind_dir: Vec2,
     /// Wind speed in meters per second; higher values create taller, faster waves.
     pub wind_speed: f32,
+    /// Fetch length in meters for spectral peak tuning.
+    pub fetch_length: f32,
+    /// Swell direction to bias long-wavelength waves.
+    pub swell_dir: Vec2,
+    /// Surface current velocity in meters per second.
+    pub current: Vec2,
     /// Scales overall wave height, slope, and velocity (1.0 = default).
     pub wave_amplitude: f32,
     /// Multiplier for Gerstner wave amplitude relative to `wave_amplitude`.
     pub gerstner_amplitude: f32,
+    /// Per-cascade spectrum amplitude multipliers for near, mid, and far cascades.
+    pub cascade_spectrum_scales: [f32; 3],
+    /// Per-cascade swell blend factors for near, mid, and far cascades.
+    pub cascade_swell_strengths: [f32; 3],
+    /// Water depth in meters used for shallow-water damping.
+    pub depth_meters: f32,
+    /// Blend factor for depth-dependent damping (0 = off, 1 = full).
+    pub depth_damping: f32,
     /// Base reflectance for the Fresnel term.
     pub fresnel_bias: f32,
     /// Scales Fresnel reflectance contribution when blending reflections.
@@ -67,6 +81,12 @@ pub struct OceanFrameSettings {
     pub foam_strength: f32,
     /// Foam threshold for the breaking/curvature mask.
     pub foam_threshold: f32,
+    /// Scales foam texture advection speed.
+    pub foam_advection_strength: f32,
+    /// Foam decay rate (higher values fade foam faster).
+    pub foam_decay_rate: f32,
+    /// Foam texture scale for procedural noise.
+    pub foam_noise_scale: f32,
     /// Scales high-frequency capillary detail (1.0 = default).
     pub capillary_strength: f32,
     /// Time multiplier for wave evolution; values above 1.0 speed up the animation.
@@ -79,12 +99,22 @@ impl Default for OceanFrameSettings {
             enabled: false,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
+            fetch_length: 5000.0,
+            swell_dir: Vec2::new(0.8, 0.1),
+            current: Vec2::ZERO,
             wave_amplitude: 2.0,
             gerstner_amplitude: 0.12,
+            cascade_spectrum_scales: [1.0, 0.85, 0.65],
+            cascade_swell_strengths: [0.35, 0.55, 0.75],
+            depth_meters: 200.0,
+            depth_damping: 0.3,
             fresnel_bias: 0.02,
             fresnel_strength: 0.85,
             foam_strength: 1.0,
             foam_threshold: 0.55,
+            foam_advection_strength: 0.25,
+            foam_decay_rate: 0.08,
+            foam_noise_scale: 0.2,
             capillary_strength: 1.0,
             time_scale: 1.0,
         }
@@ -102,6 +132,12 @@ struct OceanSpectrumParams {
     wind_speed: f32,
     capillary_strength: f32,
     patch_size: f32,
+    fetch_length: f32,
+    swell_dir: Vec2,
+    spectrum_scale: f32,
+    swell_strength: f32,
+    depth_meters: f32,
+    depth_damping: f32,
 }
 
 #[repr(C)]
@@ -143,6 +179,10 @@ struct OceanDrawParams {
     fresnel_strength: f32,
     foam_strength: f32,
     foam_threshold: f32,
+    foam_advection_strength: f32,
+    foam_decay_rate: f32,
+    foam_noise_scale: f32,
+    current: Vec2,
     _padding1: f32,
 }
 
@@ -178,8 +218,18 @@ pub struct OceanRenderer {
     fresnel_strength: f32,
     foam_strength: f32,
     foam_threshold: f32,
+    foam_advection_strength: f32,
+    foam_decay_rate: f32,
+    foam_noise_scale: f32,
     capillary_strength: f32,
     time_scale: f32,
+    fetch_length: f32,
+    swell_dir: Vec2,
+    current: Vec2,
+    cascade_spectrum_scales: [f32; 3],
+    cascade_swell_strengths: [f32; 3],
+    depth_meters: f32,
+    depth_damping: f32,
     use_depth: bool,
     environment_sampler: Handle<Sampler>,
     enabled: bool,
@@ -548,8 +598,18 @@ impl OceanRenderer {
             fresnel_strength: default_frame.fresnel_strength,
             foam_strength: default_frame.foam_strength,
             foam_threshold: default_frame.foam_threshold,
+            foam_advection_strength: default_frame.foam_advection_strength,
+            foam_decay_rate: default_frame.foam_decay_rate,
+            foam_noise_scale: default_frame.foam_noise_scale,
             capillary_strength: default_frame.capillary_strength,
             time_scale: default_frame.time_scale,
+            fetch_length: default_frame.fetch_length,
+            swell_dir: default_frame.swell_dir,
+            current: default_frame.current,
+            cascade_spectrum_scales: default_frame.cascade_spectrum_scales,
+            cascade_swell_strengths: default_frame.cascade_swell_strengths,
+            depth_meters: default_frame.depth_meters,
+            depth_damping: default_frame.depth_damping,
             use_depth: info.use_depth,
             environment_sampler,
             enabled: default_frame.enabled,
@@ -560,12 +620,22 @@ impl OceanRenderer {
         self.enabled = settings.enabled;
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
+        self.fetch_length = settings.fetch_length;
+        self.swell_dir = settings.swell_dir;
+        self.current = settings.current;
         self.wave_amplitude = settings.wave_amplitude;
         self.gerstner_amplitude = settings.gerstner_amplitude;
+        self.cascade_spectrum_scales = settings.cascade_spectrum_scales;
+        self.cascade_swell_strengths = settings.cascade_swell_strengths;
+        self.depth_meters = settings.depth_meters;
+        self.depth_damping = settings.depth_damping;
         self.fresnel_bias = settings.fresnel_bias;
         self.fresnel_strength = settings.fresnel_strength;
         self.foam_strength = settings.foam_strength;
         self.foam_threshold = settings.foam_threshold;
+        self.foam_advection_strength = settings.foam_advection_strength;
+        self.foam_decay_rate = settings.foam_decay_rate;
+        self.foam_noise_scale = settings.foam_noise_scale;
         self.capillary_strength = settings.capillary_strength;
         self.time_scale = settings.time_scale;
     }
@@ -597,7 +667,7 @@ impl OceanRenderer {
         }
 
         let mut stream = CommandStream::new().begin();
-        for cascade in &self.cascades {
+        for (cascade_index, cascade) in self.cascades.iter().enumerate() {
             let Some(spectrum_pipeline) = cascade.spectrum_pipeline.as_ref() else {
                 continue;
             };
@@ -621,6 +691,16 @@ impl OceanRenderer {
                 .bump()
                 .expect("Failed to allocate ocean spectrum params");
             let spectrum_params = &mut spectrum_alloc.slice::<OceanSpectrumParams>()[0];
+            let spectrum_scale = self
+                .cascade_spectrum_scales
+                .get(cascade_index)
+                .copied()
+                .unwrap_or(1.0);
+            let swell_strength = self
+                .cascade_swell_strengths
+                .get(cascade_index)
+                .copied()
+                .unwrap_or(0.0);
             *spectrum_params = OceanSpectrumParams {
                 fft_size: cascade.fft_size,
                 time,
@@ -630,6 +710,12 @@ impl OceanRenderer {
                 wind_speed: self.wind_speed,
                 capillary_strength: self.capillary_strength,
                 patch_size: cascade.patch_size,
+                fetch_length: self.fetch_length,
+                swell_dir: self.swell_dir,
+                spectrum_scale,
+                swell_strength,
+                depth_meters: self.depth_meters,
+                depth_damping: self.depth_damping,
             };
 
             stream = stream
@@ -868,6 +954,10 @@ impl OceanRenderer {
             fresnel_strength: self.fresnel_strength,
             foam_strength: self.foam_strength,
             foam_threshold: self.foam_threshold,
+            foam_advection_strength: self.foam_advection_strength,
+            foam_decay_rate: self.foam_decay_rate,
+            foam_noise_scale: self.foam_noise_scale,
+            current: self.current,
             _padding1: 0.0,
         };
 

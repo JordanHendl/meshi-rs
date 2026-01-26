@@ -106,6 +106,10 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float fresnel_strength;
     float foam_strength;
     float foam_threshold;
+    float foam_advection_strength;
+    float foam_decay_rate;
+    float foam_noise_scale;
+    vec2 current;
     float _padding1;
 } params;
 
@@ -118,6 +122,7 @@ layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec3 v_view_dir;
 layout(location = 3) out vec3 v_world_pos;
 layout(location = 4) out float v_velocity;
+layout(location = 5) out vec2 v_flow;
 
 vec2 camera_position() {
   Camera c = meshi_bindless_cameras.cameras[params.camera_index];
@@ -261,6 +266,7 @@ void main() {
     vec2 uv = quad_origin + vertex_uv(local_vertex) * quad_size;
     vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
     vec2 world = local + snapped_origin + tile_offset;
+    vec2 wave_world = world + params.current * params.time;
     float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
     float w_far = smoothstep(mid_range, far_range, distance);
     float w_mid = clamp(1.0 - w_near - w_far, 0.0, 1.0);
@@ -275,9 +281,9 @@ void main() {
     float patch_near = max(params.cascade_patch_sizes.x, 0.001);
     float patch_mid = max(params.cascade_patch_sizes.y, 0.001);
     float patch_far = max(params.cascade_patch_sizes.z, 0.001);
-    vec4 waves_near = sample_waves(world / (patch_near * 2.0) + vec2(0.5), 0u, fft_near);
-    vec4 waves_mid = sample_waves(world / (patch_mid * 2.0) + vec2(0.5), 1u, fft_mid);
-    vec4 waves_far = sample_waves(world / (patch_far * 2.0) + vec2(0.5), 2u, fft_far);
+    vec4 waves_near = sample_waves(wave_world / (patch_near * 2.0) + vec2(0.5), 0u, fft_near);
+    vec4 waves_mid = sample_waves(wave_world / (patch_mid * 2.0) + vec2(0.5), 1u, fft_mid);
+    vec4 waves_far = sample_waves(wave_world / (patch_far * 2.0) + vec2(0.5), 2u, fft_far);
     float height = waves_near.x * w_near + waves_mid.x * w_mid + waves_far.x * w_far;
     vec2 gradient_world =
         waves_near.yz * (w_near / (2.0 * patch_near)) +
@@ -313,7 +319,7 @@ void main() {
         float k = two_pi / wavelength;
         float omega = sqrt(gravity * k);
         float phase_offset = float(i) * 1.618;
-        float phase = k * dot(gerstner_dirs[i], world) + params.time * omega + phase_offset;
+        float phase = k * dot(gerstner_dirs[i], wave_world) + params.time * omega + phase_offset;
         float sin_p = sin(phase);
         float cos_p = cos(phase);
         float amplitude = gerstner_amplitude / float(i + 1);
@@ -336,4 +342,5 @@ void main() {
     v_view_dir = camera_position_world() - position.xyz;
     v_world_pos = position.xyz;
     v_velocity = velocity;
+    v_flow = params.current + wind_dir * params.wind_speed * 0.08 - gradient_world * 0.5;
 }

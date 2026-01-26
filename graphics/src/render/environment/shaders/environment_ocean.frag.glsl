@@ -7,6 +7,7 @@ layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec3 v_view_dir;
 layout(location = 3) in vec3 v_world_pos;
 layout(location = 4) in float v_velocity;
+layout(location = 5) in vec2 v_flow;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 1, binding = 0) readonly buffer OceanParams {
@@ -28,6 +29,10 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float fresnel_strength;
     float foam_strength;
     float foam_threshold;
+    float foam_advection_strength;
+    float foam_decay_rate;
+    float foam_noise_scale;
+    vec2 current;
     float _padding1;
 } params;
 
@@ -48,6 +53,32 @@ layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 const float PI = 3.14159265359;
+
+float hash21(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+float fbm(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    for (int i = 0; i < 3; ++i) {
+        value += amplitude * noise(p);
+        p *= 2.02;
+        amplitude *= 0.5;
+    }
+    return value;
+}
 
 vec3 fresnel_schlick(float cos_theta, vec3 f0) {
     return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
@@ -138,12 +169,17 @@ void main() {
     float fresnel_strength = max(params.fresnel_strength, 0.0);
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
-    float velocity = abs(v_velocity);
-    float curvature = length(fwidth(n));
-    float breaking = velocity * 0.35 + slope * 1.2;
     float foam_threshold = clamp(params.foam_threshold, 0.0, 1.0);
-    float foam_upper = min(1.0, foam_threshold + 0.4);
-    float foam_mask = smoothstep(foam_threshold, foam_upper, breaking + curvature * 0.4);
+    float foam_upper = min(1.0, foam_threshold + 0.2);
+    float cresting = smoothstep(foam_threshold, foam_upper, slope);
+    float foam_scale = max(params.foam_noise_scale, 0.001);
+    float velocity_scale = 1.0 + abs(v_velocity) * 0.05;
+    float advection = params.foam_advection_strength * velocity_scale * params.time;
+    vec2 foam_uv = v_world_pos.xz * foam_scale + v_flow * advection;
+    float foam_tex = fbm(foam_uv * 2.0);
+    float foam_age = fract(params.time * max(params.foam_decay_rate, 0.0) + foam_tex);
+    float foam_decay = smoothstep(1.0, 0.0, foam_age);
+    float foam_mask = cresting * foam_tex * foam_decay;
     float foam_strength = max(params.foam_strength, 0.0);
     foam_mask *= foam_strength;
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
