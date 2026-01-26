@@ -95,6 +95,7 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     uint camera_index;
     uint base_tile_radius;
     uint max_tile_radius;
+    uint far_tile_radius;
     float tile_height_step;
     float time;
     vec2 wind_dir;
@@ -126,6 +127,10 @@ vec2 camera_position() {
 vec3 camera_position_world() {
     Camera c = meshi_bindless_cameras.cameras[params.camera_index];
     return camera_position(c);
+}
+
+float camera_far_plane() {
+    return meshi_bindless_cameras.cameras[params.camera_index].far;
 }
 
 mat4 camera_view() {
@@ -188,12 +193,19 @@ void main() {
     vec2 base_quad_size = vec2(grid_scale);
     uint base_radius = max(params.base_tile_radius, 1);
     uint max_radius = max(params.max_tile_radius, base_radius);
+    uint far_radius_cap = max(params.far_tile_radius, base_radius);
+    float base_patch_size = max(params.cascade_patch_sizes.y, 0.001);
+    float tile_size = max(base_patch_size * 2.0, 0.001);
     float height_step = max(params.tile_height_step, 0.001);
     float camera_height = abs(camera_position_world().y);
     float extra_radius_f = floor(camera_height / height_step);
     float max_extra = float(max_radius - base_radius);
     uint extra_radius = uint(clamp(extra_radius_f, 0.0, max_extra));
-    uint tile_radius = base_radius + extra_radius;
+    uint height_radius = base_radius + extra_radius;
+    float far_plane = max(camera_far_plane(), 0.0);
+    float far_radius_f = ceil(far_plane / tile_size);
+    uint far_radius = uint(clamp(far_radius_f, float(base_radius), float(far_radius_cap)));
+    uint tile_radius = min(max(height_radius, far_radius), max_radius);
     uint tile_count = tile_radius * 2 + 1;
     if (gl_InstanceIndex >= tile_count * tile_count) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -209,8 +221,6 @@ void main() {
     uint tile_y = gl_InstanceIndex / tile_count;
     vec2 tile_grid = vec2(tile_count);
     vec2 tile_center = (tile_grid - 1.0) * 0.5;
-    float base_patch_size = max(params.cascade_patch_sizes.y, 0.001);
-    float tile_size = max(base_patch_size * 2.0, 0.001);
     vec2 tile_offset = (vec2(tile_x, tile_y) - tile_center) * tile_size;
     vec2 snapped_origin = camera_position();
     vec2 quad_center_uv = base_quad_origin + base_quad_size * 0.5;
@@ -222,7 +232,11 @@ void main() {
     float mid_range = params.cascade_blend_ranges.y;
     float far_range = params.cascade_blend_ranges.z;
     uint lod_step = 1;
-    if (distance > mid_range) {
+    if (distance > far_range * 2.0) {
+        lod_step = 16;
+    } else if (distance > far_range) {
+        lod_step = 8;
+    } else if (distance > mid_range) {
         lod_step = 4;
     } else if (distance > near_range) {
         lod_step = 2;

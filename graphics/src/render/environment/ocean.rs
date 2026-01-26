@@ -27,6 +27,8 @@ pub struct OceanInfo {
     pub base_tile_radius: u32,
     /// Maximum tile radius for far-field coverage.
     pub max_tile_radius: u32,
+    /// Maximum tile radius used when matching the camera far plane.
+    pub far_tile_radius: u32,
     /// Camera-height step (meters) before expanding tiles.
     pub tile_height_step: f32,
 }
@@ -39,7 +41,8 @@ impl Default for OceanInfo {
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.5, 1.0, 4.0],
             base_tile_radius: 1,
-            max_tile_radius: 3,
+            max_tile_radius: 8,
+            far_tile_radius: 8,
             tile_height_step: 1.0,
         }
     }
@@ -110,6 +113,7 @@ struct OceanDrawParams {
     camera_index: u32,
     base_tile_radius: u32,
     max_tile_radius: u32,
+    far_tile_radius: u32,
     tile_height_step: f32,
     time: f32,
     wind_dir: Vec2,
@@ -137,6 +141,7 @@ pub struct OceanRenderer {
     vertex_resolution: u32,
     base_tile_radius: u32,
     max_tile_radius: u32,
+    far_tile_radius: u32,
     tile_height_step: f32,
     wind_dir: Vec2,
     wind_speed: f32,
@@ -329,12 +334,14 @@ impl OceanRenderer {
         let default_frame = OceanFrameSettings::default();
         let base_tile_radius = ocean_info.base_tile_radius.max(1);
         let max_tile_radius = ocean_info.max_tile_radius.max(base_tile_radius);
+        let far_tile_radius = ocean_info.far_tile_radius.max(base_tile_radius);
         Self {
             pipeline,
             cascades,
             vertex_resolution: ocean_info.vertex_resolution,
             base_tile_radius,
             max_tile_radius,
+            far_tile_radius,
             tile_height_step: ocean_info.tile_height_step.max(1.0),
             wind_dir: default_frame.wind_dir,
             wind_speed: default_frame.wind_speed,
@@ -463,6 +470,7 @@ impl OceanRenderer {
             camera_index: camera.slot as u32,
             base_tile_radius: self.base_tile_radius,
             max_tile_radius: self.max_tile_radius,
+            far_tile_radius: self.far_tile_radius,
             tile_height_step: self.tile_height_step,
             time,
             wind_dir: self.wind_dir,

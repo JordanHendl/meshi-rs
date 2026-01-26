@@ -17,6 +17,7 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     uint camera_index;
     uint base_tile_radius;
     uint max_tile_radius;
+    uint far_tile_radius;
     float tile_height_step;
     float time;
     vec2 wind_dir;
