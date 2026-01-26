@@ -25,6 +25,10 @@ impl EditorUi {
                         items: Vec::new(),
                     },
                     Menu {
+                        label: "Build".to_string(),
+                        items: Vec::new(),
+                    },
+                    Menu {
                         label: "View".to_string(),
                         items: Vec::new(),
                     },
@@ -41,6 +45,7 @@ impl EditorUi {
 
     pub fn build(&mut self, gui: &mut GuiContext, project_manager: &ProjectManager) {
         self.refresh_file_menu(project_manager);
+        self.refresh_build_menu();
         let metrics = MenuLayoutMetrics::default();
         let _menu_layout = self.menu_bar.submit_to_draw_list(
             gui,
@@ -54,26 +59,68 @@ impl EditorUi {
             },
         );
 
-        let panel_position = [0.0, metrics.bar_height];
-        let panel_size = [600.0, 320.0];
+        let content_origin = [0.0, metrics.bar_height];
+        let content_size = [
+            self.viewport[0],
+            self.viewport[1] - metrics.bar_height,
+        ];
 
-        gui.submit_draw(GuiDraw::new(
-            GuiLayer::Overlay,
-            None,
-            quad_from_pixels(
-                panel_position,
-                panel_size,
-                [0.08, 0.09, 0.1, 0.92],
-                self.viewport,
-            ),
-        ));
+        let gutter = 12.0;
+        let left_width = 280.0;
+        let right_width = 320.0;
+        let center_width = content_size[0] - left_width - right_width - gutter * 2.0;
+        let center_height = content_size[1] - gutter * 2.0;
 
-        gui.submit_text(GuiTextDraw {
-            text: "Editor UI scaffolding".to_string(),
-            position: [16.0, panel_position[1] + 24.0],
-            color: [0.9, 0.92, 0.96, 1.0],
-            scale: 1.0,
-        });
+        let left_panel = PanelLayout {
+            position: [content_origin[0], content_origin[1]],
+            size: [left_width, content_size[1]],
+        };
+        let right_panel = PanelLayout {
+            position: [
+                content_origin[0] + left_width + gutter + center_width + gutter,
+                content_origin[1],
+            ],
+            size: [right_width, content_size[1]],
+        };
+        let center_panel = PanelLayout {
+            position: [
+                content_origin[0] + left_width + gutter,
+                content_origin[1] + gutter,
+            ],
+            size: [center_width, center_height],
+        };
+
+        self.draw_panel(
+            gui,
+            &left_panel,
+            "ECS / Scene",
+            &[
+                "Scene Hierarchy",
+                "Entities & Components",
+                "Systems",
+            ],
+        );
+        self.draw_panel(
+            gui,
+            &right_panel,
+            "Inspector",
+            &[
+                "Selection Parameters",
+                "Transform",
+                "Mesh / Material",
+                "Script Bindings",
+            ],
+        );
+        self.draw_panel(
+            gui,
+            &center_panel,
+            "Engine Preview (stub)",
+            &[
+                "Runtime frame will render here",
+                "Use external IDE for C++ scripts",
+                "GUI shell ready for egui/Qt swap",
+            ],
+        );
     }
 
     fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {
@@ -96,6 +143,8 @@ impl EditorUi {
         let file_items = vec![
             MenuItem::new("New Project"),
             MenuItem::new("Open Project"),
+            MenuItem::new("Open Workspace"),
+            MenuItem::new("Save All"),
             MenuItem::separator(),
             MenuItem::new("Recent Projects").with_submenu(recent_menu_items),
         ];
@@ -109,6 +158,80 @@ impl EditorUi {
             file_menu.items = file_items;
         }
     }
+
+    fn refresh_build_menu(&mut self) {
+        let build_items = vec![
+            MenuItem::new("Build Project"),
+            MenuItem::new("Build & Run"),
+            MenuItem::new("Rebuild All"),
+            MenuItem::separator(),
+            MenuItem::new("Generate C++ Bindings"),
+        ];
+
+        if let Some(build_menu) = self
+            .menu_bar
+            .menus
+            .iter_mut()
+            .find(|menu| menu.label == "Build")
+        {
+            build_menu.items = build_items;
+        }
+    }
+
+    fn draw_panel(
+        &self,
+        gui: &mut GuiContext,
+        layout: &PanelLayout,
+        title: &str,
+        lines: &[&str],
+    ) {
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(
+                layout.position,
+                layout.size,
+                [0.08, 0.09, 0.12, 0.95],
+                self.viewport,
+            ),
+        ));
+
+        let header_height = 32.0;
+        gui.submit_draw(GuiDraw::new(
+            GuiLayer::Overlay,
+            None,
+            quad_from_pixels(
+                layout.position,
+                [layout.size[0], header_height],
+                [0.12, 0.13, 0.16, 0.95],
+                self.viewport,
+            ),
+        ));
+
+        gui.submit_text(GuiTextDraw {
+            text: title.to_string(),
+            position: [layout.position[0] + 12.0, layout.position[1] + 20.0],
+            color: [0.92, 0.94, 0.98, 1.0],
+            scale: 1.0,
+        });
+
+        for (index, line) in lines.iter().enumerate() {
+            gui.submit_text(GuiTextDraw {
+                text: line.to_string(),
+                position: [
+                    layout.position[0] + 16.0,
+                    layout.position[1] + header_height + 28.0 + index as f32 * 22.0,
+                ],
+                color: [0.78, 0.8, 0.86, 1.0],
+                scale: 0.9,
+            });
+        }
+    }
+}
+
+struct PanelLayout {
+    position: [f32; 2],
+    size: [f32; 2],
 }
 
 fn quad_from_pixels(
