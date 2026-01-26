@@ -1803,6 +1803,10 @@ impl Renderer for DeferredRenderer {
         DeferredRenderer::object_transform(self, handle)
     }
 
+    fn release_object(&mut self, handle: Handle<RenderObject>) {
+        DeferredRenderer::release_object(self, handle);
+    }
+
     fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
         DeferredRenderer::register_text(self, info)
     }

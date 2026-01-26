@@ -742,6 +742,10 @@ impl Renderer for ForwardRenderer {
         ForwardRenderer::object_transform(self, handle)
     }
 
+    fn release_object(&mut self, handle: Handle<RenderObject>) {
+        ForwardRenderer::release_object(self, handle);
+    }
+
     fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
         ForwardRenderer::register_text(self, info)
     }

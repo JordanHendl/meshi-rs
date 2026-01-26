@@ -53,6 +53,7 @@ pub struct MeshiEngine {
     database: Box<noren::DB>,
     audio: AudioEngine,
     frame_timer: Timer,
+    primary_camera: Option<Handle<Camera>>,
 }
 
 impl MeshiEngine {
@@ -115,6 +116,7 @@ impl MeshiEngine {
             audio,
             frame_timer: Timer::new(),
             name: appname.to_string(),
+            primary_camera: None,
         }))
     }
 
@@ -331,8 +333,6 @@ pub extern "C" fn meshi_gfx_set_transform(
     engine
         .render
         .set_object_transform(h, unsafe { &*transform });
-    //unsafe { &mut *render }.set_object_transform(h, unsafe { &*transform });
-    todo!()
 }
 
 /// Create a directional light for the scene.
@@ -349,10 +349,7 @@ pub extern "C" fn meshi_gfx_create_light(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    engine.render.register_light(unsafe { &*info });
-
-    //unsafe { &mut *render }.register_light(unsafe { &*info })
-    todo!()
+    engine.render.register_light(unsafe { &*info })
 }
 
 #[no_mangle]
@@ -360,8 +357,9 @@ pub extern "C" fn meshi_gfx_release_light(render: *mut MeshiEngine, h: *const Ha
     if render.is_null() || h.is_null() {
         return;
     }
-    //unsafe { &mut *render }.release_light(unsafe { *h });
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.render.release_light(unsafe { *h });
 }
 
 /// Update the transform for a directional light.
@@ -377,8 +375,11 @@ pub extern "C" fn meshi_gfx_set_light_transform(
     if render.is_null() || transform.is_null() {
         return;
     }
-    //unsafe { &mut *render }.set_light_transform(h, unsafe { &*transform });
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine
+        .render
+        .set_light_transform(h, unsafe { &*transform });
 }
 
 /// Update the properties for a directional light.
@@ -394,7 +395,9 @@ pub extern "C" fn meshi_gfx_set_light_info(
     if render.is_null() || info.is_null() {
         return;
     }
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.render.set_light_info(h, unsafe { &*info });
 }
 
 /// Set the world-to-camera transform used for rendering.
@@ -406,7 +409,14 @@ pub extern "C" fn meshi_gfx_set_camera_transform(render: *mut MeshiEngine, trans
     if render.is_null() || transform.is_null() {
         return;
     }
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let Some(camera) = engine.primary_camera else {
+        return;
+    };
+    engine
+        .render
+        .set_camera_transform(camera, unsafe { &*transform });
 }
 
 /// Set the projection matrix used for rendering.
@@ -419,10 +429,15 @@ pub extern "C" fn meshi_gfx_register_camera(
     initial_transform: *const Mat4,
 ) -> Handle<Camera> {
     if render.is_null() || initial_transform.is_null() {
-        todo!()
+        return Handle::default();
     }
 
-    todo!()
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let handle = engine
+        .render
+        .register_camera(unsafe { &*initial_transform });
+    engine.primary_camera = Some(handle);
+    handle
 }
 
 /// Set the projection matrix used for rendering.
@@ -437,7 +452,14 @@ pub extern "C" fn meshi_gfx_set_camera_projection(
     if render.is_null() || transform.is_null() {
         return;
     }
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let Some(camera) = engine.primary_camera else {
+        return;
+    };
+    engine
+        .render
+        .set_camera_projection(camera, unsafe { &*transform });
 }
 
 /// Enable or disable mouse capture for the renderer window.
@@ -449,7 +471,9 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut MeshiEngine, value: i32) 
     if render.is_null() {
         return;
     }
-    todo!()
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.render.set_capture_mouse(value != 0);
 }
 
 ////////////////////////////////////////////

@@ -293,7 +293,31 @@ impl RenderEngine {
     }
 
     pub fn set_light_transform(&mut self, handle: Handle<Light>, transform: &Mat4) {
-        todo!()
+        if !handle.valid() {
+            return;
+        }
+
+        let (_, rotation, translation) = transform.to_scale_rotation_translation();
+        let mut direction = rotation * Vec3::NEG_Z;
+        if direction.length_squared() > 0.0 {
+            direction = direction.normalize();
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_lights",
+                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                    let light = lights.light_mut(handle);
+                    light.position_type.x = translation.x;
+                    light.position_type.y = translation.y;
+                    light.position_type.z = translation.z;
+                    light.direction_range.x = direction.x;
+                    light.direction_range.y = direction.y;
+                    light.direction_range.z = direction.z;
+                },
+            )
+            .unwrap();
     }
 
     pub fn set_light_info(&mut self, handle: Handle<Light>, info: &LightInfo) {
@@ -312,7 +336,19 @@ impl RenderEngine {
     }
 
     pub fn release_light(&mut self, handle: Handle<Light>) {
-        todo!() //self.lights.release(handle);
+        if !handle.valid() {
+            return;
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_lights",
+                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                    lights.remove_light(handle);
+                },
+            )
+            .unwrap();
     }
 
     pub fn register_object(
@@ -371,7 +407,7 @@ impl RenderEngine {
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
-        todo!()
+        self.renderer.release_object(handle);
     }
 
     pub fn release_text(&mut self, handle: Handle<TextObject>) {
@@ -794,6 +830,23 @@ impl RenderEngine {
                 |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
                     let c = a.camera_mut(camera);
                     c.set_transform(*transform);
+                },
+            )
+            .unwrap();
+    }
+
+    pub fn set_camera_projection(&mut self, camera: Handle<Camera>, projection: &Mat4) {
+        if !camera.valid() {
+            return;
+        }
+
+        self.renderer
+            .state()
+            .reserved_mut(
+                "meshi_bindless_cameras",
+                |a: &mut furikake::reservations::bindless_camera::ReservedBindlessCamera| {
+                    let c = a.camera_mut(camera);
+                    c.projection = *projection;
                 },
             )
             .unwrap();

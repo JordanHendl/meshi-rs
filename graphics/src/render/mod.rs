@@ -111,6 +111,7 @@ pub trait Renderer {
     );
     fn set_object_transform(&mut self, handle: Handle<RenderObject>, transform: &Mat4);
     fn object_transform(&self, handle: Handle<RenderObject>) -> Mat4;
+    fn release_object(&mut self, handle: Handle<RenderObject>);
     fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject>;
     fn release_text(&mut self, handle: Handle<TextObject>);
     fn set_text(&mut self, handle: Handle<TextObject>, text: &str);
