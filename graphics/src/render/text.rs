@@ -67,6 +67,9 @@ pub struct TextRenderer {
     draws: Vec<TextDraw>,
     frame_draws: Vec<TextDraw>,
     frame_dirty: bool,
+    object_list_dirty: bool,
+    cached_object_handles: Vec<Handle<TextObjectData>>,
+    cached_object_draws: Vec<TextDraw>,
     glyph_cache: HashMap<TextGlyphCacheKey, Vec<TextGlyph>>,
     cached_viewport: Option<(u32, u32)>,
     sdf_fonts: HashMap<String, DeviceSDFFont>,
@@ -92,6 +95,9 @@ impl TextRenderer {
             draws: Vec::new(),
             frame_draws: Vec::new(),
             frame_dirty: false,
+            object_list_dirty: false,
+            cached_object_handles: Vec::new(),
+            cached_object_draws: Vec::new(),
             glyph_cache: HashMap::new(),
             cached_viewport: None,
             sdf_fonts: HashMap::new(),
@@ -441,6 +447,7 @@ impl TextRenderer {
             info: info.clone(),
             dirty: true,
         });
+        self.object_list_dirty = true;
         to_handle(h)
     }
 
@@ -454,6 +461,7 @@ impl TextRenderer {
         }
 
         self.objects.release(from_handle(handle));
+        self.object_list_dirty = true;
     }
 
     pub fn set_text(&mut self, handle: Handle<TextObject>, text: &str) {
@@ -468,6 +476,9 @@ impl TextRenderer {
         }
 
         let obj = self.objects.get_ref_mut(from_handle(handle));
+        if obj.info.text == text {
+            return;
+        }
         obj.info.text.clear();
         obj.info.text.push_str(text);
         obj.dirty = true;
@@ -494,35 +505,67 @@ impl TextRenderer {
         self.frame_dirty = true;
     }
 
+    fn build_draw_from_info(&mut self, info: &TextInfo) -> TextDraw {
+        let mode = match &info.render_mode {
+            TextRenderMode::Plain => TextDrawMode::Plain,
+            TextRenderMode::Sdf { font } => TextDrawMode::Sdf {
+                font_entry: font.clone(),
+                font: self.fetch_sdf_font(font),
+            },
+        };
+
+        TextDraw {
+            text: info.text.clone(),
+            position: info.position,
+            color: info.color,
+            scale: info.scale,
+            mode,
+        }
+    }
+
     pub fn build_draws(&mut self) {
-        self.draws.clear();
-
+        let s: &mut Self = unsafe{(&mut *(self as *mut Self))};
         let handles: Vec<_> = self.objects.entries.clone();
-        for handle in handles {
-            let info = {
-                let obj = self.objects.get_ref_mut(handle);
-                obj.dirty = false;
-                obj.info.clone()
-            };
-            let mode = match &info.render_mode {
-                TextRenderMode::Plain => TextDrawMode::Plain,
-                TextRenderMode::Sdf { font } => TextDrawMode::Sdf {
-                    font_entry: font.clone(),
-                    font: self.fetch_sdf_font(font),
-                },
-            };
+        let handles_changed = self.cached_object_handles.len() != handles.len()
+            || self
+                .cached_object_handles
+                .iter()
+                .zip(handles.iter())
+                .any(|(cached, current)| cached.slot != current.slot || cached.generation != current.generation);
 
-            self.draws.push(TextDraw {
-                text: info.text,
-                position: info.position,
-                color: info.color,
-                scale: info.scale,
-                mode,
-            });
+        if self.object_list_dirty || handles_changed {
+            self.cached_object_draws.clear();
+            self.cached_object_draws.reserve(handles.len());
+
+            for handle in &handles {
+                let info = {
+                    let obj = self.objects.get_ref_mut(*handle);
+                    obj.dirty = false;
+                    obj.info.clone()
+                };
+                self.cached_object_draws
+                    .push(Self::build_draw_from_info(s, &info));
+            }
+
+            self.cached_object_handles = handles;
+        } else {
+            for (idx, handle) in handles.iter().enumerate() {
+                if self.objects.get_ref(*handle).dirty {
+                    let info = {
+                        let obj = self.objects.get_ref_mut(*handle);
+                        obj.dirty = false;
+                        obj.info.clone()
+                    };
+                    self.cached_object_draws[idx] = self.build_draw_from_info(&info);
+                }
+            }
         }
 
+        self.draws.clear();
+        self.draws.extend(self.cached_object_draws.iter().cloned());
         self.draws.extend(self.frame_draws.clone());
         self.frame_dirty = false;
+        self.object_list_dirty = false;
     }
 
     pub fn emit_draws(&mut self) -> &[TextDraw] {
@@ -531,7 +574,8 @@ impl TextRenderer {
             .entries
             .iter()
             .any(|h| self.objects.get_ref(*h).dirty)
-            || self.frame_dirty;
+            || self.frame_dirty
+            || self.object_list_dirty;
 
         if needs_rebuild {
             self.build_draws();
