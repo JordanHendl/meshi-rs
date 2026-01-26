@@ -236,6 +236,28 @@ impl TextRenderer {
         }
     }
 
+    fn get_loaded_sdf_font(&self, entry: &str) -> Option<DeviceSDFFont> {
+        self.sdf_fonts.get(entry).cloned()
+    }
+
+    fn preload_font_for_info(&mut self, info: &TextInfo) {
+        let s: &mut Self = unsafe{(&mut *(self as *mut Self))};
+        match &info.render_mode {
+            TextRenderMode::Sdf { font } => {
+                if !font.is_empty() {
+                    self.fetch_sdf_font(font);
+                }
+            }
+            TextRenderMode::Plain => {
+                if let Some(default_font) = s.default_sdf_font.as_ref() {
+                    if !default_font.is_empty() {
+                        self.fetch_sdf_font(default_font);
+                    }
+                }
+            }
+        }
+    }
+
     fn build_glyphs_for_draw(
         &mut self,
         draw: &TextDraw,
@@ -247,14 +269,14 @@ impl TextRenderer {
                 if font_entry.is_empty() {
                     None
                 } else {
-                    self.fetch_sdf_font(font_entry)
+                    self.get_loaded_sdf_font(font_entry)
                 }
             }),
             TextDrawMode::Plain => default_font.as_ref().and_then(|entry| {
                 if entry.is_empty() {
                     None
                 } else {
-                    self.fetch_sdf_font(entry)
+                    self.get_loaded_sdf_font(entry)
                 }
             }),
         };
@@ -443,6 +465,7 @@ impl TextRenderer {
     }
 
     pub fn register_text(&mut self, info: &TextInfo) -> Handle<TextObject> {
+        self.preload_font_for_info(info);
         let h = self.objects.push(TextObjectData {
             info: info.clone(),
             dirty: true,
@@ -510,7 +533,7 @@ impl TextRenderer {
             TextRenderMode::Plain => TextDrawMode::Plain,
             TextRenderMode::Sdf { font } => TextDrawMode::Sdf {
                 font_entry: font.clone(),
-                font: self.fetch_sdf_font(font),
+                font: self.get_loaded_sdf_font(font),
             },
         };
 
