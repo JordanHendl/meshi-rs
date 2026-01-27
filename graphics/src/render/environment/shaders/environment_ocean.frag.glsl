@@ -45,7 +45,7 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float ssr_max_distance;
     float ssr_thickness;
     uint ssr_steps;
-    float _padding2;
+    float debug_view;
 } params;
 
 struct Camera {
@@ -259,6 +259,7 @@ void main() {
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
     float fresnel_bias = clamp(params.fresnel_bias, 0.0, 1.0);
     float fresnel_strength = max(params.fresnel_strength, 0.0);
+    int debug_view = int(params.debug_view + 0.5);
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
     float foam_threshold = clamp(params.foam_threshold, 0.0, 1.0);
@@ -275,6 +276,28 @@ void main() {
     float foam_strength = max(params.foam_strength, 0.0);
     foam_mask *= foam_strength;
     vec3 foam_color = vec3(0.9, 0.95, 1.0) * foam_mask;
+
+    if (debug_view == 1) {
+        out_color = vec4(n * 0.5 + 0.5, 1.0);
+        return;
+    }
+    if (debug_view == 2) {
+        float height_scale = max(params.wave_amplitude, 0.1);
+        float height = v_world_pos.y / height_scale;
+        float height_norm = clamp(height * 0.5 + 0.5, 0.0, 1.0);
+        vec3 height_color = mix(vec3(0.02, 0.2, 0.55), vec3(0.9, 0.4, 0.15), height_norm);
+        out_color = vec4(height_color, 1.0);
+        return;
+    }
+    if (debug_view == 3) {
+        out_color = vec4(vec3(foam_mask), 1.0);
+        return;
+    }
+    if (debug_view == 4) {
+        float velocity = clamp(abs(v_velocity) / max(params.wave_amplitude, 0.1), 0.0, 1.0);
+        out_color = vec4(vec3(velocity), 1.0);
+        return;
+    }
 
     float roughness = clamp(0.02 + slope * 0.35 + foam_mask * 0.2, 0.02, 0.8);
     vec3 f0 = vec3(fresnel_bias);

@@ -15,7 +15,7 @@ use glam::{Vec2, Vec3, Vec4};
 use tracing::warn;
 
 use crate::gui::Slider;
-use crate::gui::debug::{PageType, debug_register};
+use crate::gui::debug::{DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial};
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -49,6 +49,21 @@ impl Default for OceanInfo {
             far_tile_radius: 8,
             tile_height_step: 1.0,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OceanDebugView {
+    None = 0,
+    Normals = 1,
+    WaveHeight = 2,
+    FoamMask = 3,
+    Velocity = 4,
+}
+
+impl Default for OceanDebugView {
+    fn default() -> Self {
+        Self::None
     }
 }
 
@@ -117,6 +132,8 @@ pub struct OceanFrameSettings {
     pub ssr_thickness: f32,
     /// Max number of SSR raymarch steps.
     pub ssr_steps: u32,
+    /// Debug rendering mode for the ocean surface.
+    pub debug_view: OceanDebugView,
 }
 
 impl Default for OceanFrameSettings {
@@ -154,6 +171,7 @@ impl Default for OceanFrameSettings {
             ssr_max_distance: 120.0,
             ssr_thickness: 1.2,
             ssr_steps: 24,
+            debug_view: OceanDebugView::None,
         }
     }
 }
@@ -161,6 +179,33 @@ impl Default for OceanFrameSettings {
 impl OceanFrameSettings {
     pub fn register_debug(&mut self) {
         unsafe {
+            debug_register_radial(
+                PageType::Ocean,
+                "Debug View",
+                DebugRegistryValue::OceanDebugView(&mut self.debug_view),
+                &[
+                    DebugRadialOption {
+                        label: "None",
+                        value: 0.0,
+                    },
+                    DebugRadialOption {
+                        label: "Normals",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Wave Height",
+                        value: 2.0,
+                    },
+                    DebugRadialOption {
+                        label: "Foam Mask",
+                        value: 3.0,
+                    },
+                    DebugRadialOption {
+                        label: "Velocity",
+                        value: 4.0,
+                    },
+                ],
+            );
             debug_register(
                 PageType::Ocean,
                 Slider::new(0, "Wind Speed", 0.1, 20.0, 0.0),
@@ -383,7 +428,7 @@ struct OceanDrawParams {
     ssr_max_distance: f32,
     ssr_thickness: f32,
     ssr_steps: u32,
-    _padding2: f32,
+    debug_view: f32,
 }
 
 #[derive(Debug)]
@@ -441,6 +486,7 @@ pub struct OceanRenderer {
     ssr_max_distance: f32,
     ssr_thickness: f32,
     ssr_steps: u32,
+    debug_view: OceanDebugView,
     use_depth: bool,
     environment_sampler: Handle<Sampler>,
     scene_sampler: Handle<Sampler>,
@@ -911,6 +957,7 @@ impl OceanRenderer {
             ssr_max_distance: default_frame.ssr_max_distance,
             ssr_thickness: default_frame.ssr_thickness,
             ssr_steps: default_frame.ssr_steps,
+            debug_view: default_frame.debug_view,
             use_depth: info.use_depth,
             environment_sampler,
             scene_sampler,
@@ -953,10 +1000,38 @@ impl OceanRenderer {
         self.ssr_max_distance = settings.ssr_max_distance;
         self.ssr_thickness = settings.ssr_thickness;
         self.ssr_steps = settings.ssr_steps;
+        self.debug_view = settings.debug_view;
     }
 
     pub fn register_debug(&mut self) {
         unsafe {
+            debug_register_radial(
+                PageType::Ocean,
+                "Debug View",
+                DebugRegistryValue::OceanDebugView(&mut self.debug_view),
+                &[
+                    DebugRadialOption {
+                        label: "None",
+                        value: 0.0,
+                    },
+                    DebugRadialOption {
+                        label: "Normals",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Wave Height",
+                        value: 2.0,
+                    },
+                    DebugRadialOption {
+                        label: "Foam Mask",
+                        value: 3.0,
+                    },
+                    DebugRadialOption {
+                        label: "Velocity",
+                        value: 4.0,
+                    },
+                ],
+            );
             debug_register(
                 PageType::Ocean,
                 Slider::new(0, "Wind Speed", 0.1, 20.0, 0.0),
@@ -1475,7 +1550,7 @@ impl OceanRenderer {
             ssr_max_distance: self.ssr_max_distance,
             ssr_thickness: self.ssr_thickness,
             ssr_steps: self.ssr_steps,
-            _padding2: 0.0,
+            debug_view: self.debug_view as u32 as f32,
         };
 
         let grid_resolution = self.vertex_resolution.max(2);

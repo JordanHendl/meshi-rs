@@ -6,8 +6,8 @@ pub mod cloud_pass_temporal;
 
 use crate::gui::Slider;
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial,
-    debug_register_slider,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_int,
+    debug_register_radial,
 };
 use crate::structs::{CloudResolutionScale, CloudSettings};
 use cloud_assets::{CloudAssets, CloudNoiseSizes};
@@ -143,16 +143,16 @@ pub fn register_debug(settings: &mut CloudSettings) {
             &mut settings.layer_b.wind_speed as *mut f32,
             "Layer B Wind Speed",
         );
-        debug_register_slider(
+        debug_register_int(
             PageType::Clouds,
-            Slider::new(0, "Step Count", 8.0, 256.0, 0.0),
-            DebugRegistryValue::U32(&mut settings.step_count as *mut u32),
+            Slider::new_int(0, "Step Count", 8.0, 256.0, 0.0),
+            &mut settings.step_count as *mut u32,
             "Step Count",
         );
-        debug_register_slider(
+        debug_register_int(
             PageType::Clouds,
-            Slider::new(0, "Light Step Count", 4.0, 128.0, 0.0),
-            DebugRegistryValue::U32(&mut settings.light_step_count as *mut u32),
+            Slider::new_int(0, "Light Step Count", 4.0, 128.0, 0.0),
+            &mut settings.light_step_count as *mut u32,
             "Light Step Count",
         );
         debug_register(
@@ -320,10 +320,10 @@ pub fn register_debug(settings: &mut CloudSettings) {
                 },
             ],
         );
-        debug_register_slider(
+        debug_register_int(
             PageType::Clouds,
-            Slider::new(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
-            DebugRegistryValue::U32(&mut settings.shadow.resolution),
+            Slider::new_int(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.shadow.resolution as *mut u32,
             "Shadow Resolution",
         );
         debug_register(

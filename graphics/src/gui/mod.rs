@@ -403,10 +403,12 @@ impl GuiContext {
         let formatted_values: Vec<String> = sliders
             .iter()
             .map(|slider| {
-                if slider.show_value {
-                    format!("{:.2}", slider.value)
-                } else {
-                    String::new()
+                if !slider.show_value {
+                    return String::new();
+                }
+                match slider.value_format {
+                    SliderValueFormat::Float => format!("{:.2}", slider.value),
+                    SliderValueFormat::Integer => format!("{}", slider.value.round() as i64),
                 }
             })
             .collect();
@@ -2326,6 +2328,18 @@ pub struct CommandPaletteItemLayout {
     pub action_id: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliderValueFormat {
+    Float,
+    Integer,
+}
+
+impl Default for SliderValueFormat {
+    fn default() -> Self {
+        Self::Float
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Slider {
     pub id: u32,
@@ -2335,6 +2349,7 @@ pub struct Slider {
     pub max: f32,
     pub enabled: bool,
     pub show_value: bool,
+    pub value_format: SliderValueFormat,
 }
 
 impl Slider {
@@ -2347,6 +2362,14 @@ impl Slider {
             max,
             enabled: true,
             show_value: true,
+            value_format: SliderValueFormat::Float,
+        }
+    }
+
+    pub fn new_int(id: u32, label: impl Into<String>, min: f32, max: f32, value: f32) -> Self {
+        Self {
+            value_format: SliderValueFormat::Integer,
+            ..Self::new(id, label, min, max, value)
         }
     }
 }

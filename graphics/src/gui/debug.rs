@@ -7,9 +7,9 @@ use crate::gui::{
     GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
     RadialButtonColors, RadialButtonLayout, RadialButtonMetrics, RadialButtonRenderOptions,
     RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
-    SliderState,
+    SliderState, SliderValueFormat,
 };
-use crate::render::environment::ocean::OceanFrameSettings;
+use crate::render::environment::ocean::{OceanDebugView, OceanFrameSettings};
 use crate::render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
 use crate::structs::{CloudDebugView, CloudResolutionScale, CloudSettings};
 
@@ -56,6 +56,7 @@ enum DebugRegistryControl {
         max: f32,
         enabled: bool,
         show_value: bool,
+        value_format: SliderValueFormat,
     },
     Radial {
         options: Vec<DebugRegistryRadialOption>,
@@ -69,6 +70,7 @@ pub enum DebugRegistryValue {
     Bool(*mut bool),
     CloudResolutionScale(*mut CloudResolutionScale),
     CloudDebugView(*mut CloudDebugView),
+    OceanDebugView(*mut OceanDebugView),
 }
 
 impl DebugRegistryValue {
@@ -82,6 +84,9 @@ impl DebugRegistryValue {
                 DebugRegistryValue::CloudResolutionScale(rhs),
             ) => lhs == rhs,
             (DebugRegistryValue::CloudDebugView(lhs), DebugRegistryValue::CloudDebugView(rhs)) => {
+                lhs == rhs
+            }
+            (DebugRegistryValue::OceanDebugView(lhs), DebugRegistryValue::OceanDebugView(rhs)) => {
                 lhs == rhs
             }
             _ => false,
@@ -98,6 +103,10 @@ impl DebugRegistryValue {
                 .map(|value| cloud_resolution_scale_value(*value))
                 .unwrap_or(0.0),
             DebugRegistryValue::CloudDebugView(ptr) => ptr
+                .as_ref()
+                .map(|value| *value as u32 as f32)
+                .unwrap_or(0.0),
+            DebugRegistryValue::OceanDebugView(ptr) => ptr
                 .as_ref()
                 .map(|value| *value as u32 as f32)
                 .unwrap_or(0.0),
@@ -131,6 +140,11 @@ impl DebugRegistryValue {
                     *target = cloud_debug_view_from_value(value);
                 }
             }
+            DebugRegistryValue::OceanDebugView(ptr) => {
+                if let Some(target) = ptr.as_mut() {
+                    *target = ocean_debug_view_from_value(value);
+                }
+            }
         }
     }
 }
@@ -157,6 +171,16 @@ pub unsafe fn debug_register(
     debug_register_slider(page, slider, DebugRegistryValue::Float(value_ptr), label)
 }
 
+pub unsafe fn debug_register_int(
+    page: PageType,
+    mut slider: Slider,
+    value_ptr: *mut u32,
+    label: &str,
+) -> u32 {
+    slider.value_format = SliderValueFormat::Integer;
+    debug_register_slider(page, slider, DebugRegistryValue::U32(value_ptr), label)
+}
+
 pub unsafe fn debug_register_slider(
     page: PageType,
     slider: Slider,
@@ -174,6 +198,7 @@ pub unsafe fn debug_register_slider(
             max: slider.max,
             enabled: slider.enabled,
             show_value: slider.show_value,
+            value_format: slider.value_format,
         };
         return entry.id;
     }
@@ -187,6 +212,7 @@ pub unsafe fn debug_register_slider(
             max: slider.max,
             enabled: slider.enabled,
             show_value: slider.show_value,
+            value_format: slider.value_format,
         },
         value,
     });
@@ -273,6 +299,7 @@ unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
                 max,
                 enabled,
                 show_value,
+                value_format,
             } => Some(Slider {
                 id: entry.id,
                 label: entry.label.clone(),
@@ -281,6 +308,7 @@ unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
                 max: *max,
                 enabled: *enabled,
                 show_value: *show_value,
+                value_format: *value_format,
             }),
             DebugRegistryControl::Radial { .. } => None,
         })
@@ -1218,6 +1246,10 @@ impl DebugGui {
                             "Wind dir: {:.2}, {:.2}",
                             ocean.wind_dir.x, ocean.wind_dir.y
                         ));
+                        info_lines.push(format!(
+                            "Debug view: {}",
+                            ocean_debug_view_label(ocean.debug_view)
+                        ));
                     }
                 }
                 DebugGraphicsTab::Clouds => {
@@ -1632,6 +1664,26 @@ fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
         CloudDebugView::OpaqueShadowCascade1 => "Opaque Shadow Cascade 1",
         CloudDebugView::OpaqueShadowCascade2 => "Opaque Shadow Cascade 2",
         CloudDebugView::OpaqueShadowCascade3 => "Opaque Shadow Cascade 3",
+    }
+}
+
+fn ocean_debug_view_from_value(value: f32) -> OceanDebugView {
+    match value.round().clamp(0.0, 4.0) as u32 {
+        1 => OceanDebugView::Normals,
+        2 => OceanDebugView::WaveHeight,
+        3 => OceanDebugView::FoamMask,
+        4 => OceanDebugView::Velocity,
+        _ => OceanDebugView::None,
+    }
+}
+
+fn ocean_debug_view_label(view: OceanDebugView) -> &'static str {
+    match view {
+        OceanDebugView::None => "None",
+        OceanDebugView::Normals => "Normals",
+        OceanDebugView::WaveHeight => "Wave Height",
+        OceanDebugView::FoamMask => "Foam Mask",
+        OceanDebugView::Velocity => "Velocity",
     }
 }
 
