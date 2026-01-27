@@ -440,20 +440,31 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     label: "Multi Scatter",
                     value: 10.0,
                 },
+            ],
+        );
+        debug_register_radial(
+            PageType::Clouds,
+            "Shadow Cascades",
+            DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
+            &[
                 DebugRadialOption {
-                    label: "Shadow Cascade 0",
+                    label: "None",
+                    value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "Cloud Cascade 0",
                     value: 11.0,
                 },
                 DebugRadialOption {
-                    label: "Shadow Cascade 1",
+                    label: "Cloud Cascade 1",
                     value: 12.0,
                 },
                 DebugRadialOption {
-                    label: "Shadow Cascade 2",
+                    label: "Cloud Cascade 2",
                     value: 13.0,
                 },
                 DebugRadialOption {
-                    label: "Shadow Cascade 3",
+                    label: "Cloud Cascade 3",
                     value: 14.0,
                 },
                 DebugRadialOption {
