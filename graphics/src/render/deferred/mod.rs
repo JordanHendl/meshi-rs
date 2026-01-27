@@ -7,11 +7,11 @@ use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::gui::{GuiFrame, Slider};
 use crate::gui::debug::{
-        DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
     debug_register_radial_with_description, debug_register_with_description,
 };
+use crate::gui::{GuiFrame, Slider};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
@@ -243,7 +243,11 @@ impl DeferredRenderer {
         let outer = light.spot_outer_angle_rad.max(0.01);
         let fov = (outer * 2.0).clamp(0.01, std::f32::consts::PI - 0.01);
         let near = 0.1;
-        let far = if light.range > near { light.range } else { 1000.0 };
+        let far = if light.range > near {
+            light.range
+        } else {
+            1000.0
+        };
         let proj = Mat4::perspective_rh(fov, 1.0, near, far);
         proj * view
     }
@@ -583,9 +587,7 @@ impl DeferredRenderer {
             ),
         };
 
-        let mut subrender = Renderers {
-            environment,
-        };
+        let mut subrender = Renderers { environment };
 
         subrender.environment.initialize_terrain_deferred(
             ctx.as_mut(),
@@ -1993,11 +1995,11 @@ impl DeferredRenderer {
                     }
 
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
-                    per_obj.pos = position.bindless_id.unwrap() as u32;
-                    per_obj.diff = diffuse.bindless_id.unwrap() as u32;
-                    per_obj.norm = normal.bindless_id.unwrap() as u32;
-                    per_obj.mat = material_code.bindless_id.unwrap() as u32;
-                    per_obj.shadow = shadow_map.bindless_id.unwrap() as u32;
+                    per_obj.pos = position.bindless_id.unwrap_or(u16::MAX) as u32;
+                    per_obj.diff = diffuse.bindless_id.unwrap_or(u16::MAX) as u32;
+                    per_obj.norm = normal.bindless_id.unwrap_or(u16::MAX ) as u32;
+                    per_obj.mat = material_code.bindless_id.unwrap_or(u16::MAX) as u32;
+                    per_obj.shadow = shadow_map.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.shadow_cascade_count = cascade_data.count;
                     per_obj.shadow_resolution = shadow_resolution;
                     per_obj.debug_view =
@@ -2052,14 +2054,13 @@ impl DeferredRenderer {
                 cmd.end()
             });
 
-            let overlay_text =
-                if self.subrender.environment.cloud_settings().debug_view
-                    == CloudDebugView::Stats
-                {
-                    self.subrender.environment.cloud_timing_overlay_text()
-                } else {
-                    String::new()
-                };
+            let overlay_text = if self.subrender.environment.cloud_settings().debug_view
+                == CloudDebugView::Stats
+            {
+                self.subrender.environment.cloud_timing_overlay_text()
+            } else {
+                String::new()
+            };
             self.text.set_text(self.cloud_overlay, &overlay_text);
 
             ///////////////////////////////////////////////////////////////////
@@ -2111,16 +2112,12 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    cmd = cmd.combine(
-                        self.subrender
-                            .environment
-                            .render(
-                                &self.data.viewport,
-                                camera_handle,
-                                Some(scene_color.view),
-                                Some(depth),
-                            ),
-                    );
+                    cmd = cmd.combine(self.subrender.environment.render(
+                        &self.data.viewport,
+                        camera_handle,
+                        Some(scene_color.view),
+                        Some(depth),
+                    ));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
@@ -2154,7 +2151,10 @@ impl DeferredRenderer {
                         cmd = c.unbind_graphics_pipeline();
                     }
 
-                    cmd = cmd.combine(self.gui.render_gui(&self.data.viewport, &mut self.data.dynamic));
+                    cmd = cmd.combine(
+                        self.gui
+                            .render_gui(&self.data.viewport, &mut self.data.dynamic),
+                    );
                     cmd.combine(
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.data.viewport),

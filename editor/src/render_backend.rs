@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::{project::ProjectManager, ui::EditorUi};
+use crate::{project::ProjectManager, runtime::RuntimeControlState, ui::EditorUi};
 use meshi_graphics::gui::{GuiContext, GuiFrame};
 
 pub trait EditorRenderBackend {
@@ -62,7 +62,8 @@ impl EditorRenderBackend for EguiBackend {
             egui::vec2(viewport[0], viewport[1]),
         ));
         self.last_output = Some(self.ctx.run(raw_input, |ctx| {
-            ui.build_egui(ctx, project_manager);
+            let mut controls = RuntimeControlState::default();
+            ui.build_egui(ctx, project_manager, &mut controls);
         }));
     }
 

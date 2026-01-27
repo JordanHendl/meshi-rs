@@ -1717,8 +1717,10 @@ dependencies = [
 name = "editor"
 version = "0.1.0"
 dependencies = [
+ "dashi",
  "eframe 0.29.1",
  "egui 0.29.1",
+ "glam 0.29.3",
  "meshi-graphics",
  "serde",
  "toml",

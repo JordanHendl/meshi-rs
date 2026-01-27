@@ -4,12 +4,17 @@ use meshi_graphics::gui::{
 };
 use std::fmt::Write;
 
-use crate::project::ProjectManager;
+use crate::{
+    project::ProjectManager,
+    runtime::{RuntimeControlState, RuntimeFrame},
+};
 
 pub struct EditorUi {
     menu_bar: MenuBar,
     menu_state: MenuBarState,
     viewport: [f32; 2],
+    runtime_texture: Option<egui::TextureHandle>,
+    runtime_texture_size: [usize; 2],
 }
 
 impl EditorUi {
@@ -41,6 +46,8 @@ impl EditorUi {
             },
             menu_state: MenuBarState::default(),
             viewport: [1280.0, 720.0],
+            runtime_texture: None,
+            runtime_texture_size: [0, 0],
         }
     }
 
@@ -61,10 +68,7 @@ impl EditorUi {
         );
 
         let content_origin = [0.0, metrics.bar_height];
-        let content_size = [
-            self.viewport[0],
-            self.viewport[1] - metrics.bar_height,
-        ];
+        let content_size = [self.viewport[0], self.viewport[1] - metrics.bar_height];
 
         let gutter = 12.0;
         let left_width = 280.0;
@@ -95,11 +99,7 @@ impl EditorUi {
             gui,
             &left_panel,
             "ECS / Scene",
-            &[
-                "Scene Hierarchy",
-                "Entities & Components",
-                "Systems",
-            ],
+            &["Scene Hierarchy", "Entities & Components", "Systems"],
         );
         self.draw_panel(
             gui,
@@ -124,7 +124,12 @@ impl EditorUi {
         );
     }
 
-    pub fn build_egui(&mut self, ctx: &egui::Context, project_manager: &ProjectManager) {
+    pub fn build_egui(
+        &mut self,
+        ctx: &egui::Context,
+        project_manager: &ProjectManager,
+        runtime_controls: &mut RuntimeControlState,
+    ) -> ViewportMetrics {
         self.refresh_file_menu(project_manager);
         self.refresh_build_menu();
 
@@ -144,11 +149,7 @@ impl EditorUi {
             .show(ctx, |ui| {
                 ui.heading("ECS / Scene");
                 ui.separator();
-                for line in [
-                    "Scene Hierarchy",
-                    "Entities & Components",
-                    "Systems",
-                ] {
+                for line in ["Scene Hierarchy", "Entities & Components", "Systems"] {
                     ui.label(line);
                 }
             });
@@ -169,17 +170,51 @@ impl EditorUi {
                 }
             });
 
+        let mut viewport_pixels = [1_u32, 1_u32];
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Engine Preview (egui)");
+            ui.heading("Engine Preview");
             ui.separator();
-            for line in [
-                "Runtime frame will render here",
-                "Use external IDE for C++ scripts",
-                "egui backend active (no renderer wired yet)",
-            ] {
-                ui.label(line);
+            ui.horizontal(|ui| {
+                let play_label = if runtime_controls.playing {
+                    "Pause"
+                } else {
+                    "Play"
+                };
+                if ui.button(play_label).clicked() {
+                    runtime_controls.playing = !runtime_controls.playing;
+                }
+                if ui.button("Step").clicked() {
+                    runtime_controls.request_step();
+                }
+                let status = if runtime_controls.playing {
+                    "Running"
+                } else {
+                    "Paused"
+                };
+                ui.label(status);
+            });
+            ui.separator();
+
+            let available = ui.available_size();
+            let viewport_points = egui::vec2(available.x.max(1.0), available.y.max(1.0));
+            let pixels_per_point = ctx.pixels_per_point();
+            viewport_pixels = [
+                (viewport_points.x * pixels_per_point).round().max(1.0) as u32,
+                (viewport_points.y * pixels_per_point).round().max(1.0) as u32,
+            ];
+
+            if let Some(texture) = &self.runtime_texture {
+                ui.add(egui::Image::new(texture).fit_to_exact_size(viewport_points));
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Waiting for runtime frame...");
+                });
             }
         });
+        self.viewport = [viewport_pixels[0] as f32, viewport_pixels[1] as f32];
+        ViewportMetrics {
+            pixels: viewport_pixels,
+        }
     }
 
     pub fn build_qt_placeholder(&mut self, project_manager: &ProjectManager, frame: usize) {
@@ -223,6 +258,27 @@ impl EditorUi {
 
     pub fn set_viewport(&mut self, size: [f32; 2]) {
         self.viewport = size;
+    }
+
+    pub fn update_runtime_texture(&mut self, ctx: &egui::Context, frame: Option<&RuntimeFrame>) {
+        let Some(frame) = frame else {
+            return;
+        };
+        let size = frame.size;
+        let image = egui::ColorImage::from_rgba_unmultiplied(size, &frame.pixels);
+        match self.runtime_texture.as_mut() {
+            Some(texture) if self.runtime_texture_size == size => {
+                texture.set(image, egui::TextureOptions::LINEAR);
+            }
+            _ => {
+                self.runtime_texture = Some(ctx.load_texture(
+                    "meshi_editor_runtime_viewport",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+                self.runtime_texture_size = size;
+            }
+        }
     }
 
     fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {
@@ -280,13 +336,7 @@ impl EditorUi {
         }
     }
 
-    fn draw_panel(
-        &self,
-        gui: &mut GuiContext,
-        layout: &PanelLayout,
-        title: &str,
-        lines: &[&str],
-    ) {
+    fn draw_panel(&self, gui: &mut GuiContext, layout: &PanelLayout, title: &str, lines: &[&str]) {
         gui.submit_draw(GuiDraw::new(
             GuiLayer::Overlay,
             None,
@@ -334,6 +384,10 @@ impl EditorUi {
 struct PanelLayout {
     position: [f32; 2],
     size: [f32; 2],
+}
+
+pub struct ViewportMetrics {
+    pub pixels: [u32; 2],
 }
 
 fn quad_from_pixels(
