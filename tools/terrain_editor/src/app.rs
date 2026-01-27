@@ -9,8 +9,9 @@ use meshi_graphics::{
         project_settings_entry, TerrainChunkArtifact, TerrainMutationOpKind, TerrainProjectSettings,
     },
     terrain_loader::terrain_chunk_transform,
-    Camera, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo, RendererSelect,
-    TextInfo, TextRenderMode, WindowInfo, DB,
+    Camera, DBInfo, Display, DisplayInfo, EnvironmentLightingSettings, RDBFile, RenderEngine,
+    RenderEngineInfo, RendererSelect, SkyFrameSettings, SkyboxFrameSettings, TextInfo,
+    TextRenderMode, WindowInfo, DB,
 };
 use meshi_utils::timer::Timer;
 use rfd::FileDialog;
@@ -25,6 +26,7 @@ use crate::ui::{
     MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
     MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL,
 };
+use crate::camera::{CameraController, CameraInput};
 use meshi_graphics::TerrainRenderObject;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
@@ -55,12 +57,21 @@ impl TerrainMode {
 struct EventState {
     running: bool,
     cursor: Vec2,
+    last_cursor: Option<Vec2>,
+    window_resized: Option<Vec2>,
     mouse_pressed: bool,
     mouse_down: bool,
     mouse_released: bool,
     key_presses: Vec<KeyCode>,
     shift_down: bool,
     control_down: bool,
+    move_forward: bool,
+    move_back: bool,
+    move_left: bool,
+    move_right: bool,
+    move_up: bool,
+    move_down: bool,
+    move_active: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -77,6 +88,7 @@ pub struct TerrainEditorApp {
     db: Box<DB>,
     display: dashi::Handle<Display>,
     camera: dashi::Handle<Camera>,
+    camera_controller: CameraController,
     status_text: dashi::Handle<meshi_graphics::TextObject>,
     window_size: Vec2,
     terrain_mode: TerrainMode,
@@ -162,6 +174,30 @@ impl TerrainEditorApp {
             0.1,
             50000.0,
         );
+        let camera_controller = CameraController::new(Vec3::new(0.0, 22.0, 32.0));
+        let camera_transform = camera_controller.transform();
+        engine.set_camera_transform(camera, &camera_transform);
+        engine.set_skybox_settings(SkyboxFrameSettings {
+            intensity: 0.95,
+            use_procedural_cubemap: true,
+            update_interval_frames: 1,
+            ..Default::default()
+        });
+        engine.set_environment_lighting(EnvironmentLightingSettings {
+            sky: SkyFrameSettings {
+                enabled: true,
+                sun_color: Vec3::new(1.0, 0.96, 0.9),
+                sun_intensity: 6.0,
+                moon_color: Vec3::new(0.6, 0.7, 1.0),
+                moon_intensity: 0.25,
+                auto_sun_enabled: true,
+                timer_speed: 0.0,
+                current_time_of_day: 14.0,
+                ..Default::default()
+            },
+            sun_light_intensity: 3.0,
+            moon_light_intensity: 0.4,
+        });
 
         let window_size_vec = Vec2::new(window_size[0] as f32, window_size[1] as f32);
         let render_mode = text_render_mode(&db);
@@ -176,12 +212,21 @@ impl TerrainEditorApp {
         let event_state = Box::new(EventState {
             running: true,
             cursor: Vec2::ZERO,
+            last_cursor: None,
+            window_resized: None,
             mouse_pressed: false,
             mouse_down: false,
             mouse_released: false,
             key_presses: Vec::new(),
             shift_down: false,
             control_down: false,
+            move_forward: false,
+            move_back: false,
+            move_left: false,
+            move_right: false,
+            move_up: false,
+            move_down: false,
+            move_active: false,
         });
 
         let generation_seed = EARTHLIKE_SEED;
@@ -197,6 +242,7 @@ impl TerrainEditorApp {
             db,
             display,
             camera,
+            camera_controller,
             status_text,
             window_size: window_size_vec,
             terrain_mode: TerrainMode::Procedural,
@@ -254,6 +300,12 @@ impl TerrainEditorApp {
                 if e.source() == EventSource::Window && e.event_type() == EventType::Quit {
                     state.running = false;
                 }
+                if e.source() == EventSource::Window
+                    && e.event_type() == EventType::WindowResized
+                {
+                    let size = e.motion2d();
+                    state.window_resized = Some(Vec2::new(size.x.max(1.0), size.y.max(1.0)));
+                }
 
                 if e.source() == EventSource::Key {
                     if e.event_type() == EventType::Pressed {
@@ -261,6 +313,13 @@ impl TerrainEditorApp {
                         match key {
                             KeyCode::Shift => state.shift_down = true,
                             KeyCode::Control => state.control_down = true,
+                            KeyCode::W => state.move_forward = true,
+                            KeyCode::S => state.move_back = true,
+                            KeyCode::A => state.move_left = true,
+                            KeyCode::D => state.move_right = true,
+                            KeyCode::E => state.move_up = true,
+                            KeyCode::Q => state.move_down = true,
+                            KeyCode::Space => state.move_active = true,
                             _ => {}
                         }
                         state.key_presses.push(key);
@@ -269,6 +328,13 @@ impl TerrainEditorApp {
                         match key {
                             KeyCode::Shift => state.shift_down = false,
                             KeyCode::Control => state.control_down = false,
+                            KeyCode::W => state.move_forward = false,
+                            KeyCode::S => state.move_back = false,
+                            KeyCode::A => state.move_left = false,
+                            KeyCode::D => state.move_right = false,
+                            KeyCode::E => state.move_up = false,
+                            KeyCode::Q => state.move_down = false,
+                            KeyCode::Space => state.move_active = false,
                             _ => {}
                         }
                     }
@@ -298,6 +364,10 @@ impl TerrainEditorApp {
             self.handle_key_press(key);
         }
         self.sync_generation_inputs();
+        if let Some(size) = self.event_state.window_resized.take() {
+            self.handle_window_resize(size);
+        }
+        let cursor_delta = self.consume_cursor_delta();
 
         let mut gui = GuiContext::new();
         let ui_input = TerrainEditorUiInput {
@@ -341,6 +411,24 @@ impl TerrainEditorApp {
         if !self.ui_hovered {
             self.last_world_cursor = self.event_state.cursor;
         }
+
+        let move_active = self.event_state.move_active
+            && !self.ui_hovered
+            && self.focused_input.is_none();
+        let camera_input = CameraInput {
+            forward: self.event_state.move_forward,
+            back: self.event_state.move_back,
+            left: self.event_state.move_left,
+            right: self.event_state.move_right,
+            up: self.event_state.move_up,
+            down: self.event_state.move_down,
+            fast: self.event_state.shift_down,
+            move_active,
+        };
+        let camera_transform = self
+            .camera_controller
+            .update(dt, &camera_input, cursor_delta);
+        self.engine.set_camera_transform(self.camera, &camera_transform);
 
         if ui_output.open_clicked {
             self.open_database_dialog();
@@ -486,6 +574,7 @@ impl TerrainEditorApp {
         );
         status.push_str(" | Tab: toggle | Ctrl+O: open | Ctrl+W: close | Ctrl+S: save");
         status.push_str(" | Up/Down: select chunk");
+        status.push_str(" | Hold Space + WASDQE to move | Mouse to look");
         if self.focused_input == Some(FocusedInput::DbPath) {
             status.push_str("\nDB Path: ");
             status.push_str(&self.rdb_path_input);
@@ -510,6 +599,29 @@ impl TerrainEditorApp {
                 render_mode: text_render_mode(&self.db),
             },
         );
+    }
+
+    fn handle_window_resize(&mut self, size: Vec2) {
+        self.window_size = size;
+        self.engine.set_camera_perspective(
+            self.camera,
+            60f32.to_radians(),
+            size.x,
+            size.y,
+            0.1,
+            50000.0,
+        );
+        self.update_status_text();
+    }
+
+    fn consume_cursor_delta(&mut self) -> Vec2 {
+        let delta = if let Some(last) = self.event_state.last_cursor {
+            self.event_state.cursor - last
+        } else {
+            Vec2::ZERO
+        };
+        self.event_state.last_cursor = Some(self.event_state.cursor);
+        delta
     }
 
     fn sync_generation_inputs(&mut self) {
