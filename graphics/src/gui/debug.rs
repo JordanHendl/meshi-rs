@@ -155,6 +155,7 @@ struct DebugRegistryItem {
     id: u32,
     page: PageType,
     label: String,
+    description: Option<String>,
     control: DebugRegistryControl,
     value: DebugRegistryValue,
 }
@@ -169,7 +170,13 @@ pub unsafe fn debug_register(
     value_ptr: *mut f32,
     label: &str,
 ) -> u32 {
-    debug_register_slider(page, slider, DebugRegistryValue::Float(value_ptr), label)
+    debug_register_slider_with_description(
+        page,
+        slider,
+        DebugRegistryValue::Float(value_ptr),
+        label,
+        None,
+    )
 }
 
 pub unsafe fn debug_register_int(
@@ -179,7 +186,46 @@ pub unsafe fn debug_register_int(
     label: &str,
 ) -> u32 {
     slider.value_format = SliderValueFormat::Integer;
-    debug_register_slider(page, slider, DebugRegistryValue::U32(value_ptr), label)
+    debug_register_slider_with_description(
+        page,
+        slider,
+        DebugRegistryValue::U32(value_ptr),
+        label,
+        None,
+    )
+}
+
+pub unsafe fn debug_register_with_description(
+    page: PageType,
+    slider: Slider,
+    value_ptr: *mut f32,
+    label: &str,
+    description: Option<&str>,
+) -> u32 {
+    debug_register_slider_with_description(
+        page,
+        slider,
+        DebugRegistryValue::Float(value_ptr),
+        label,
+        description,
+    )
+}
+
+pub unsafe fn debug_register_int_with_description(
+    page: PageType,
+    mut slider: Slider,
+    value_ptr: *mut u32,
+    label: &str,
+    description: Option<&str>,
+) -> u32 {
+    slider.value_format = SliderValueFormat::Integer;
+    debug_register_slider_with_description(
+        page,
+        slider,
+        DebugRegistryValue::U32(value_ptr),
+        label,
+        description,
+    )
 }
 
 pub unsafe fn debug_register_slider(
@@ -187,6 +233,16 @@ pub unsafe fn debug_register_slider(
     slider: Slider,
     value: DebugRegistryValue,
     label: &str,
+) -> u32 {
+    debug_register_slider_with_description(page, slider, value, label, None)
+}
+
+pub unsafe fn debug_register_slider_with_description(
+    page: PageType,
+    slider: Slider,
+    value: DebugRegistryValue,
+    label: &str,
+    description: Option<&str>,
 ) -> u32 {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
@@ -201,6 +257,9 @@ pub unsafe fn debug_register_slider(
             show_value: slider.show_value,
             value_format: slider.value_format,
         };
+        if let Some(description) = description {
+            entry.description = Some(description.to_string());
+        }
         return entry.id;
     }
     let id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -208,6 +267,7 @@ pub unsafe fn debug_register_slider(
         id,
         page,
         label: label.to_string(),
+        description: description.map(str::to_string),
         control: DebugRegistryControl::Slider {
             min: slider.min,
             max: slider.max,
@@ -225,6 +285,16 @@ pub unsafe fn debug_register_radial(
     label: &str,
     value: DebugRegistryValue,
     options: &[DebugRadialOption],
+) -> u32 {
+    debug_register_radial_with_description(page, label, value, options, None)
+}
+
+pub unsafe fn debug_register_radial_with_description(
+    page: PageType,
+    label: &str,
+    value: DebugRegistryValue,
+    options: &[DebugRadialOption],
+    description: Option<&str>,
 ) -> u32 {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
@@ -250,6 +320,9 @@ pub unsafe fn debug_register_radial(
         } else {
             *existing = build_radial_options(options);
         }
+        if let Some(description) = description {
+            entry.description = Some(description.to_string());
+        }
         return entry.id;
     }
 
@@ -267,6 +340,7 @@ pub unsafe fn debug_register_radial(
         id: base_id,
         page,
         label: label.to_string(),
+        description: description.map(str::to_string),
         control: DebugRegistryControl::Radial {
             options: radial_options,
         },
@@ -338,6 +412,43 @@ unsafe fn debug_registry_radials(page: PageType) -> Vec<DebugRegistryRadialGroup
             DebugRegistryControl::Slider { .. } => None,
         })
         .collect()
+}
+
+unsafe fn debug_registry_tooltip_for_id(id: u32) -> Option<String> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    for entry in registry.iter() {
+        if entry.id == id {
+            if matches!(entry.control, DebugRegistryControl::Slider { .. }) {
+                return Some(build_slider_tooltip(
+                    &entry.label,
+                    entry.description.as_deref(),
+                ));
+            }
+        }
+        if let DebugRegistryControl::Radial { options } = &entry.control {
+            if let Some(option) = options.iter().find(|option| option.id == id) {
+                return Some(build_radial_tooltip(
+                    &entry.label,
+                    &option.label,
+                    entry.description.as_deref(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+fn build_slider_tooltip(label: &str, description: Option<&str>) -> String {
+    description
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| format!("Adjust {label}."))
+}
+
+fn build_radial_tooltip(group_label: &str, option_label: &str, description: Option<&str>) -> String {
+    description
+        .map(|text| format!("{text} ({option_label})."))
+        .unwrap_or_else(|| format!("Set {group_label} to {option_label}."))
 }
 
 unsafe fn debug_registry_update_value(id: u32, value: f32) -> Option<PageType> {
@@ -675,6 +786,12 @@ impl DebugGui {
                         || point_in_menu_rect(self.cursor, item.button_rect))
             });
         self.debug_param_radial_state.hovered = hovered_param_radial.map(|item| item.id);
+        let tooltip_text = hovered_debug_slider
+            .and_then(|item| unsafe { debug_registry_tooltip_for_id(item.id) })
+            .or_else(|| {
+                hovered_param_radial
+                    .and_then(|item| unsafe { debug_registry_tooltip_for_id(item.id) })
+            });
 
         if self.mouse_pressed {
             if let Some(item) = hovered_debug_slider {
@@ -1141,6 +1258,43 @@ impl DebugGui {
             color: Vec4::new(0.95, 0.9, 0.92, 1.0).to_array(),
             scale: 0.75,
         });
+
+        if let Some(tooltip_text) = tooltip_text {
+            let tooltip_padding = vec2(8.0, 6.0) * ui_scale;
+            let tooltip_text_height = 16.0 * ui_scale;
+            let tooltip_char_width = 6.6 * ui_scale;
+            let tooltip_text_width = tooltip_text.len() as f32 * tooltip_char_width;
+            let tooltip_size = vec2(
+                tooltip_text_width + tooltip_padding.x * 2.0,
+                tooltip_text_height + tooltip_padding.y * 2.0,
+            );
+            let mut tooltip_pos = self.cursor + vec2(12.0, 16.0) * ui_scale;
+            if tooltip_pos.x + tooltip_size.x > viewport.x {
+                tooltip_pos.x = (viewport.x - tooltip_size.x - 8.0 * ui_scale).max(0.0);
+            }
+            if tooltip_pos.y + tooltip_size.y > viewport.y {
+                tooltip_pos.y = (viewport.y - tooltip_size.y - 8.0 * ui_scale).max(0.0);
+            }
+            gui.submit_draw(GuiDraw::new(
+                GuiLayer::Overlay,
+                None,
+                quad_from_pixels(
+                    tooltip_pos,
+                    tooltip_size,
+                    Vec4::new(0.08, 0.1, 0.14, 0.96),
+                    viewport,
+                ),
+            ));
+            gui.submit_text(GuiTextDraw {
+                text: tooltip_text,
+                position: [
+                    tooltip_pos.x + tooltip_padding.x,
+                    tooltip_pos.y + tooltip_padding.y + 2.0 * ui_scale,
+                ],
+                color: Vec4::new(0.9, 0.93, 0.98, 1.0).to_array(),
+                scale: 0.78 * ui_scale,
+            });
+        }
 
         self.debug_slider_layout = debug_slider_layout;
         self.debug_param_radial_layouts = debug_param_radial_layouts;

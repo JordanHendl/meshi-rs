@@ -105,7 +105,7 @@ fn main() {
         wind_speed: 2.0,
         wave_amplitude: 4.0,
         gerstner_amplitude: 0.35,
-        cascade_spectrum_scales: [1000.0, 1.0, 0.8],
+        cascade_spectrum_scales: [500.0, 1.0, 0.8],
         ..Default::default()
     });
 

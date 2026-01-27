@@ -315,7 +315,7 @@ void main() {
     float thickness = max(scene_depth - view_depth, 0.0);
     float turbidity_depth = max(params.turbidity_depth, 0.1);
     float depth_factor = clamp(thickness / turbidity_depth, 0.0, 1.0);
-    vec3 turbidity_color = mix(params.shallow_color.xyz, params.deep_color.xyz, depth_factor);
+    vec3 turbidity_color = mix(params.deep_color.xyz, params.shallow_color.xyz, depth_factor);
     vec3 base_color = turbidity_color * shade;
 
     float refraction_scale = params.refraction_strength * (0.35 + 0.65 * (1.0 - ndotv));
