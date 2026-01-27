@@ -10,6 +10,14 @@ struct GuiVertex {
 
 StructuredBuffer<GuiVertex> gui_vertices : register(t0, space1);
 StructuredBuffer<uint> gui_indices : register(t1, space1);
+struct GuiDrawParams {
+    uint index_offset;
+    uint _padding0;
+    uint _padding1;
+    uint _padding2;
+};
+StructuredBuffer<GuiDrawParams> gui_draw_ssbo : register(t2, space1);
+static GuiDrawParams gui_draw = gui_draw_ssbo[0];
 
 struct VSOutput {
     float4 position : SV_POSITION;
@@ -21,7 +29,7 @@ struct VSOutput {
 [shader("vertex")]
 VSOutput main(uint vertex_id : SV_VertexID) {
     VSOutput output;
-    const uint index = gui_indices[vertex_id];
+    const uint index = gui_indices[vertex_id + gui_draw.index_offset];
     const GuiVertex vertex = gui_vertices[index];
     float2 position = vertex.position;
     position.y = -position.y;

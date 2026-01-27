@@ -5,8 +5,8 @@ use dashi::cmd::{PendingGraphics, Recording};
 use dashi::driver::command::Draw;
 use dashi::{
     BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
-    DepthInfo, DynamicState, Format, GraphicsPipelineDetails, IndexedResource, MemoryVisibility,
-    Rect2D, SampleCount, ShaderResource, ShaderType, Viewport,
+    DepthInfo, DynamicAllocator, DynamicState, Format, GraphicsPipelineDetails, IndexedResource,
+    MemoryVisibility, Rect2D, SampleCount, ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
 use resource_pool::{resource_list::ResourceList, Handle};
@@ -45,6 +45,13 @@ pub struct GuiMesh {
 pub struct GuiMeshRange {
     pub vertex_count: usize,
     pub index_count: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+struct GuiDrawParams {
+    index_offset: u32,
+    _padding: [u32; 3],
 }
 
 pub struct GuiRenderer {
@@ -90,6 +97,7 @@ impl GuiRenderer {
         &mut self,
         ctx: &mut Context,
         state: &mut furikake::BindlessState,
+        dynamic: &DynamicAllocator,
         sample_count: SampleCount,
     ) {
         if self.gui_pso.is_some() {
@@ -118,7 +126,8 @@ impl GuiRenderer {
             },
         );
 
-        let gui_pso = Self::build_gui_pipeline(ctx, state, sample_count, &vertex_buffer, &index_buffer);
+        let gui_pso =
+            Self::build_gui_pipeline(ctx, state, dynamic, sample_count, &vertex_buffer, &index_buffer);
         state.register_pso_tables(&gui_pso);
 
         self.gui_pso = Some(gui_pso);
@@ -129,6 +138,7 @@ impl GuiRenderer {
     fn build_gui_pipeline(
         ctx: &mut Context,
         state: &mut furikake::BindlessState,
+        dynamic: &DynamicAllocator,
         sample_count: SampleCount,
         vertex_buffer: &StagedBuffer,
         index_buffer: &StagedBuffer,
@@ -176,6 +186,13 @@ impl GuiRenderer {
                 "gui_indices",
                 vec![IndexedResource {
                     resource: ShaderResource::StorageBuffer(index_buffer.device().into()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "gui_draw_ssbo",
+                vec![IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
                     slot: 0,
                 }],
             )
@@ -267,6 +284,7 @@ impl GuiRenderer {
     pub fn render_gui(
         &mut self,
         viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
     ) -> CommandStream<PendingGraphics> {
         let cmd = CommandStream::<PendingGraphics>::subdraw();
         let Some(pso) = self.gui_pso.as_ref() else {
@@ -287,11 +305,16 @@ impl GuiRenderer {
                 return graphics_cmd.unbind_graphics_pipeline();
             }
 
+            let mut alloc = dynamic.bump().expect("Failed to allocate GUI draw params");
+            let params = &mut alloc.slice::<GuiDrawParams>()[0];
+            *params = GuiDrawParams::default();
+
             graphics_cmd = graphics_cmd
                 .combine(self.sync_mesh_range(self.mesh_range))
                 .update_viewport(viewport)
                 .draw(&Draw {
                     bind_tables,
+                    dynamic_buffers: [None, Some(alloc), None, None],
                     count: self.mesh_range.index_count as u32,
                     instance_count: 1,
                     ..Default::default()
@@ -324,10 +347,17 @@ impl GuiRenderer {
                         graphics_cmd = graphics_cmd.combine(self.sync_mesh_range(range));
                     }
 
+                    let mut alloc = dynamic
+                        .bump()
+                        .expect("Failed to allocate GUI draw params");
+                    let params = &mut alloc.slice::<GuiDrawParams>()[0];
+                    *params = GuiDrawParams::default();
+
                     graphics_cmd = graphics_cmd
                         .update_viewport(&batch_viewport)
                         .draw(&Draw {
                             bind_tables,
+                            dynamic_buffers: [None, Some(alloc), None, None],
                             count: range.index_count as u32,
                             instance_count: 1,
                             ..Default::default()
@@ -335,28 +365,51 @@ impl GuiRenderer {
                 }
             } else {
                 self.last_single_batch_hash = None;
+                let mut combined_mesh = GuiMesh::default();
+                let mut combined_batches = Vec::with_capacity(batches.len());
+
                 for batch in &batches {
-                    let range = self.upload_mesh_inner(&batch.mesh);
-                    if range.index_count == 0 {
-                        continue;
+                    let index_start = combined_mesh.indices.len() as u32;
+                    let base_vertex = combined_mesh.vertices.len() as u32;
+                    combined_mesh.vertices.extend_from_slice(&batch.mesh.vertices);
+                    combined_mesh
+                        .indices
+                        .extend(batch.mesh.indices.iter().map(|index| *index + base_vertex));
+                    let index_end = combined_mesh.indices.len() as u32;
+                    combined_batches.push((batch.batch.clip_rect, index_start, index_end));
+                }
+
+                let range = self.upload_mesh_inner(&combined_mesh);
+                if range.index_count > 0 {
+                    graphics_cmd = graphics_cmd.combine(self.sync_mesh_range(range));
+                    for (clip_rect, index_start, index_end) in combined_batches {
+                        let index_count = index_end.saturating_sub(index_start);
+                        if index_count == 0 {
+                            continue;
+                        }
+
+                        let scissor = clip_rect
+                            .map(|clip| scissor_from_clip(clip, viewport))
+                            .unwrap_or(viewport.scissor);
+                        let batch_viewport = Viewport { scissor, ..*viewport };
+
+                        let mut alloc = dynamic
+                            .bump()
+                            .expect("Failed to allocate GUI draw params");
+                        let params = &mut alloc.slice::<GuiDrawParams>()[0];
+                        params.index_offset = index_start;
+                        params._padding = [0; 3];
+
+                        graphics_cmd = graphics_cmd
+                            .update_viewport(&batch_viewport)
+                            .draw(&Draw {
+                                bind_tables,
+                                dynamic_buffers: [None, Some(alloc), None, None],
+                                count: index_count,
+                                instance_count: 1,
+                                ..Default::default()
+                            });
                     }
-
-                    let scissor = batch
-                        .batch
-                        .clip_rect
-                        .map(|clip| scissor_from_clip(clip, viewport))
-                        .unwrap_or(viewport.scissor);
-                    let batch_viewport = Viewport { scissor, ..*viewport };
-
-                    graphics_cmd = graphics_cmd
-                        .combine(self.sync_mesh_range(range))
-                        .update_viewport(&batch_viewport)
-                        .draw(&Draw {
-                            bind_tables,
-                            count: range.index_count as u32,
-                            instance_count: 1,
-                            ..Default::default()
-                        });
                 }
             }
             self.last_batch_count = batches.len();

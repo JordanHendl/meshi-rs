@@ -1468,8 +1468,12 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        self.gui
-            .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
+        self.gui.initialize_renderer(
+            self.ctx.as_mut(),
+            self.state.as_mut(),
+            &self.data.dynamic,
+            self.sample_count,
+        );
         let skinning_complete = self.proc.skinning.update(delta_time);
 
         // Set active scene cameras..
@@ -1955,7 +1959,7 @@ impl DeferredRenderer {
                         cmd = c.unbind_graphics_pipeline();
                     }
 
-                    cmd = cmd.combine(self.gui.render_gui(&self.data.viewport));
+                    cmd = cmd.combine(self.gui.render_gui(&self.data.viewport, &mut self.data.dynamic));
                     cmd.combine(
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.data.viewport),

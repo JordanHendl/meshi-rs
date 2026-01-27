@@ -485,8 +485,12 @@ impl ForwardRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        self.gui
-            .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
+        self.gui.initialize_renderer(
+            self.ctx.as_mut(),
+            self.state.as_mut(),
+            &self.dynamic,
+            self.sample_count,
+        );
         self.text
             .initialize_renderer(self.ctx.as_mut(), self.state.as_mut(), self.sample_count);
         if self.cull_queue.current_index() == 0 {
@@ -651,7 +655,7 @@ impl ForwardRenderer {
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.viewport),
                     );
-                    cmd.combine(self.gui.render_gui(&self.viewport))
+                    cmd.combine(self.gui.render_gui(&self.viewport, &mut self.dynamic))
                 },
             );
 

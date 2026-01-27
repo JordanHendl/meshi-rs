@@ -233,7 +233,7 @@ impl GuiContext {
         self.text_draws.push(draw);
     }
 
-    /// Build a frame mesh by sorting by layer and grouping by texture id.
+    /// Build a frame mesh by sorting by layer and grouping consecutive draws by texture id.
     pub fn build_frame(&mut self) -> GuiFrame {
         if self.draws.is_empty() && self.text_draws.is_empty() {
             self.draw_sequence = 0;
@@ -250,16 +250,14 @@ impl GuiContext {
             };
         }
 
-        let draws_sorted = self.draws.is_sorted_by(|a, b| {
-            (a.draw.layer, a.draw.texture_id, a.order)
-                <= (b.draw.layer, b.draw.texture_id, b.order)
-        });
+        let draws_sorted = self
+            .draws
+            .is_sorted_by(|a, b| (a.draw.layer, a.order) <= (b.draw.layer, b.order));
         if !draws_sorted {
             self.draws.sort_by(|a, b| {
                 a.draw
                     .layer
                     .cmp(&b.draw.layer)
-                    .then_with(|| a.draw.texture_id.cmp(&b.draw.texture_id))
                     .then_with(|| a.order.cmp(&b.order))
             });
         }
