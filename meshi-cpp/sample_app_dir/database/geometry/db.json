@@ -1,0 +1,10 @@
+{
+  "geometry": [{
+      "name": "witch",
+      "path": "/geometry/witch.glb"
+  },
+  {
+      "name": "animcube",
+      "path": "/geometry/animcube.glb"
+  }]
+}

@@ -1,0 +1,53 @@
+#pragma once
+#include "meshi/bits/components/actor_component.hpp"
+#include "meshi/engine.hpp"
+#include <meshi/bits/util/slice.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
+namespace meshi {
+class PhysicsComponent : public ActorComponent {
+public:
+  using CreateInfo = RigidBodyCreateInfo;
+
+  PhysicsComponent() {
+    auto info = CreateInfo {
+      .material = {},
+      .has_gravity = false,
+    };
+
+    m_handle = engine()->backend().physics().create_rigid_body(info);
+  }
+
+  PhysicsComponent(CreateInfo info) {
+    m_handle = engine()->backend().physics().create_rigid_body(info);
+  }
+
+  //////////////////////////////////////////////////////
+  ////VIRTUAL FUNCITONS/////////////////////////////////
+  //////////////////////////////////////////////////////
+
+  virtual ~PhysicsComponent() = default;
+
+  virtual auto update(float dt) -> void {
+    ActorComponent::update(dt);
+
+    auto root = this->get_root_component();
+    if (root) {
+      auto c = root->as_type<ActorComponent>();
+      if (c) {
+        auto status = engine()->backend().physics().get_rigid_body_status(m_handle);
+        auto mat = glm::translate(glm::mat4(1.0f), status.position) *
+                   glm::toMat4(status.rotation);
+        c->set_transform(mat);
+      }
+    }
+  }
+
+  //////////////////////////////////////////////////////
+  ////NON-VIRTUAL FUNCTIONS/////////////////////////////
+  //////////////////////////////////////////////////////
+
+protected:
+  Handle<RigidBody> m_handle;
+};
+} // namespace meshi
