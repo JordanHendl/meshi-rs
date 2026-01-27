@@ -3,16 +3,19 @@ use furikake::types::Material;
 use furikake::types::*;
 use glam::*;
 use glam::{Mat4, Vec2, Vec4};
-use meshi_ffi_structs::*;
+use meshi_ffi_structs::{LightInfo, LightType};
 use noren::meta::DeviceModel;
 use resource_pool::Handle;
 
 #[derive(Default)]
-pub struct MeshObject {
+pub struct RenderObjectInstance {
     //pub mesh: MeshResource,
     pub transform: Mat4,
     pub renderer_handle: Option<usize>,
 }
+
+#[deprecated(note = "Use RenderObjectInstance instead.")]
+pub type MeshObject = RenderObjectInstance;
 
 pub enum RenderObjectInfo {
     Empty,

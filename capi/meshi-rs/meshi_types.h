@@ -27,6 +27,20 @@ struct MeshiMat4 {
     float m[4][4];
 };
 
+#if defined(__cplusplus)
+#if __cplusplus >= 201402L
+#define MESHI_DEPRECATED [[deprecated]]
+#elif defined(_MSC_VER)
+#define MESHI_DEPRECATED __declspec(deprecated)
+#elif defined(__GNUC__) || defined(__clang__)
+#define MESHI_DEPRECATED __attribute__((deprecated))
+#else
+#define MESHI_DEPRECATED
+#endif
+#else
+#define MESHI_DEPRECATED
+#endif
+
 struct MeshiEngine;
 struct MeshiAudioEngine;
 struct MeshiPhysicsSimulation;
@@ -41,11 +55,14 @@ struct MeshiEngineInfo {
     std::int32_t debug_mode = 0;
 };
 
-struct MeshiMeshObjectInfo {
+struct MeshiRenderObjectInfo {
     const char* mesh = nullptr;
     const char* material = nullptr;
     MeshiMat4 transform;
 };
+
+MESHI_DEPRECATED
+typedef MeshiRenderObjectInfo MeshiMeshObjectInfo;
 
 enum class MeshiLightType : std::uint32_t {
     Directional = 0,
@@ -305,7 +322,9 @@ struct MeshiContactInfo {
     float penetration;
 };
 
-using MeshiMeshObjectHandle = MeshiHandle;
+using MeshiRenderObjectHandle = MeshiHandle;
+MESHI_DEPRECATED
+using MeshiMeshObjectHandle = MeshiRenderObjectHandle;
 using MeshiLightHandle = MeshiHandle;
 using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;

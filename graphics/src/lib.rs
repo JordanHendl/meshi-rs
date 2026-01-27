@@ -18,7 +18,7 @@ use dashi::{
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use meshi_ffi_structs::*;
+use meshi_ffi_structs::{EventCallbackInfo, FFIImage, LightFlags, LightInfo, LightType, event};
 use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;

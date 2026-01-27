@@ -5,7 +5,9 @@ use meshi_audio::{
 };
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
-use meshi_graphics::{Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo};
+use meshi_graphics::{
+    Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo as GfxRenderObjectInfo,
+};
 use meshi_physics::SimulationInfo;
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::{
@@ -26,7 +28,7 @@ macro_rules! return_if_null {
     };
 }
 
-pub const MESHI_PLUGIN_ABI_VERSION: u32 = 2;
+pub const MESHI_PLUGIN_ABI_VERSION: u32 = 3;
 
 #[repr(C)]
 pub struct MeshiPluginApi {
@@ -42,6 +44,8 @@ pub struct MeshiPluginApi {
     pub get_physics_system: extern "C" fn(*mut MeshiEngine) -> *mut MeshiEngine,
     pub gfx_create_mesh_object:
         extern "C" fn(*mut MeshiEngine, *const MeshObjectInfo) -> Handle<RenderObject>,
+    pub gfx_create_render_object:
+        extern "C" fn(*mut MeshiEngine, *const RenderObjectInfo) -> Handle<RenderObject>,
     pub gfx_release_render_object: extern "C" fn(*mut MeshiEngine, *const Handle<RenderObject>),
     pub gfx_set_transform: extern "C" fn(*mut MeshiEngine, Handle<RenderObject>, *const Mat4),
     pub gfx_create_light: extern "C" fn(*mut MeshiEngine, *const LightInfo) -> Handle<Light>,
@@ -115,6 +119,7 @@ pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
     get_audio_system: meshi_get_audio_system,
     get_physics_system: meshi_get_physics_system,
     gfx_create_mesh_object: meshi_gfx_create_mesh_object,
+    gfx_create_render_object: meshi_gfx_create_render_object,
     gfx_release_render_object: meshi_gfx_release_render_object,
     gfx_set_transform: meshi_gfx_set_transform,
     gfx_create_light: meshi_gfx_create_light,
@@ -499,20 +504,33 @@ pub extern "C" fn meshi_get_graphics_system(engine: *mut MeshiEngine) -> *mut Me
     return engine;
 }
 
-/// Register a new renderable mesh object.
+/// Register a new renderable object using mesh-based info.
 ///
 /// # Safety
 /// `render` must be a valid pointer obtained from [`meshi_get_graphics_system`]
-/// and `info` must point to a valid [`FFIMeshObjectInfo`].
+/// and `info` must point to a valid [`RenderObjectInfo`].
 #[no_mangle]
 pub extern "C" fn meshi_gfx_create_mesh_object(
     render: *mut MeshiEngine,
     info: *const MeshObjectInfo,
 ) -> Handle<RenderObject> {
+    meshi_gfx_create_render_object(render, info)
+}
+
+/// Register a new renderable object.
+///
+/// # Safety
+/// `render` must be a valid pointer obtained from [`meshi_get_graphics_system`]
+/// and `info` must point to a valid [`RenderObjectInfo`].
+#[no_mangle]
+pub extern "C" fn meshi_gfx_create_render_object(
+    render: *mut MeshiEngine,
+    info: *const RenderObjectInfo,
+) -> Handle<RenderObject> {
     return_if_null!(Handle::default(), render, info);
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
 
-    let info: &MeshObjectInfo = unsafe { &(*info) };
+    let info: &RenderObjectInfo = unsafe { &(*info) };
     let mesh = unsafe { CStr::from_ptr(info.mesh) }
         .to_str()
         .unwrap_or("mesh/default");
@@ -534,7 +552,7 @@ pub extern "C" fn meshi_gfx_create_mesh_object(
 
     let h = engine
         .render
-        .register_object(&RenderObjectInfo::Model(model))
+        .register_object(&GfxRenderObjectInfo::Model(model))
         .expect("Unable to register object");
     meshi_gfx_set_transform(engine, h, &info.transform);
 

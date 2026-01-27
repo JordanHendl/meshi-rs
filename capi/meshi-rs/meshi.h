@@ -28,8 +28,9 @@ typedef struct MeshiPluginApi {
     struct MeshiEngine* (*get_audio_system)(struct MeshiEngine* engine);
     struct MeshiEngine* (*get_physics_system)(struct MeshiEngine* engine);
     MeshiMeshObjectHandle (*gfx_create_mesh_object)(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
-    void (*gfx_release_render_object)(struct MeshiEngine* render, const MeshiMeshObjectHandle* h);
-    void (*gfx_set_transform)(struct MeshiEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
+    MeshiRenderObjectHandle (*gfx_create_render_object)(struct MeshiEngine* render, const MeshiRenderObjectInfo* info);
+    void (*gfx_release_render_object)(struct MeshiEngine* render, const MeshiRenderObjectHandle* h);
+    void (*gfx_set_transform)(struct MeshiEngine* render, MeshiRenderObjectHandle h, const MeshiMat4* transform);
     MeshiLightHandle (*gfx_create_light)(struct MeshiEngine* render, const MeshiLightInfo* info);
     void (*gfx_release_light)(struct MeshiEngine* render, const MeshiLightHandle* h);
     void (*gfx_set_light_transform)(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
@@ -80,11 +81,11 @@ typedef struct MeshiPluginApi {
     MeshiCollisionShape (*physx_collision_shape_capsule)(float half_height, float radius);
     int32_t (*pair_render_physics)(
         struct MeshiEngine* engine,
-        MeshiMeshObjectHandle render_handle,
+        MeshiRenderObjectHandle render_handle,
         MeshiRigidBodyHandle physics_handle);
     void (*unpair_render_physics)(
         struct MeshiEngine* engine,
-        const MeshiMeshObjectHandle* render_handle,
+        const MeshiRenderObjectHandle* render_handle,
         const MeshiRigidBodyHandle* physics_handle);
 } MeshiPluginApi;
 
@@ -127,9 +128,11 @@ void meshi_audio_set_bus_volume(struct MeshiEngine* engine, MeshiAudioBusHandle 
 void meshi_audio_register_finished_callback(struct MeshiEngine* engine, void* user_data, MeshiAudioFinishedCallback cb);
 
 // Graphics
+MESHI_DEPRECATED
 MeshiMeshObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
-void meshi_gfx_release_render_object(struct MeshiEngine* render, const MeshiMeshObjectHandle* h);
-void meshi_gfx_set_transform(struct MeshiEngine* render, MeshiMeshObjectHandle h, const MeshiMat4* transform);
+MeshiRenderObjectHandle meshi_gfx_create_render_object(struct MeshiEngine* render, const MeshiRenderObjectInfo* info);
+void meshi_gfx_release_render_object(struct MeshiEngine* render, const MeshiRenderObjectHandle* h);
+void meshi_gfx_set_transform(struct MeshiEngine* render, MeshiRenderObjectHandle h, const MeshiMat4* transform);
 MeshiLightHandle meshi_gfx_create_light(struct MeshiEngine* render, const MeshiLightInfo* info);
 void meshi_gfx_release_light(struct MeshiEngine* render, const MeshiLightHandle* h);
 void meshi_gfx_set_light_transform(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
@@ -159,11 +162,11 @@ MeshiCollisionShape meshi_physx_collision_shape_box(MeshiVec3 dimensions);
 MeshiCollisionShape meshi_physx_collision_shape_capsule(float half_height, float radius);
 int32_t meshi_pair_render_physics(
     struct MeshiEngine* engine,
-    MeshiMeshObjectHandle render_handle,
+    MeshiRenderObjectHandle render_handle,
     MeshiRigidBodyHandle physics_handle);
 void meshi_unpair_render_physics(
     struct MeshiEngine* engine,
-    const MeshiMeshObjectHandle* render_handle,
+    const MeshiRenderObjectHandle* render_handle,
     const MeshiRigidBodyHandle* physics_handle);
 
 #ifdef __cplusplus

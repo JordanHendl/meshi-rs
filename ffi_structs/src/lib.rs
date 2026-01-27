@@ -5,11 +5,14 @@ use std::ffi::{c_char, c_void};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
-pub struct MeshObjectInfo {
+pub struct RenderObjectInfo {
     pub mesh: *const c_char,
     pub material: *const c_char,
     pub transform: glam::Mat4,
 }
+
+#[deprecated(note = "Use RenderObjectInfo instead.")]
+pub type MeshObjectInfo = RenderObjectInfo;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
