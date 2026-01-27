@@ -12,6 +12,8 @@ pub enum AssetKind {
     Material,
     Scene,
     Shader,
+    Database,
+    Dbgen,
     Unknown,
 }
 
@@ -23,6 +25,8 @@ impl AssetKind {
             AssetKind::Material => "Material",
             AssetKind::Scene => "Scene",
             AssetKind::Shader => "Shader",
+            AssetKind::Database => "Database",
+            AssetKind::Dbgen => "Dbgen",
             AssetKind::Unknown => "Unknown",
         }
     }
@@ -34,6 +38,8 @@ impl AssetKind {
             AssetKind::Material => "material",
             AssetKind::Scene => "scene",
             AssetKind::Shader => "shader",
+            AssetKind::Database => "rdb",
+            AssetKind::Dbgen => "dbgen",
             AssetKind::Unknown => "asset",
         }
     }
@@ -110,6 +116,16 @@ impl AssetImporterRegistry {
                     extensions: &["shader", "wgsl", "vert", "frag"],
                     kind: AssetKind::Shader,
                     default_tags: &["shader"],
+                },
+                AssetImporter {
+                    extensions: &["rdb", "db.json"],
+                    kind: AssetKind::Database,
+                    default_tags: &["noren", "database", "rdb"],
+                },
+                AssetImporter {
+                    extensions: &["dbgen", "dbgen.json"],
+                    kind: AssetKind::Dbgen,
+                    default_tags: &["noren", "dbgen", "generator"],
                 },
             ],
         }
@@ -232,10 +248,7 @@ impl AssetDatabase {
                 continue;
             }
 
-            let extension = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.to_ascii_lowercase());
+            let extension = detect_extension_override(&path);
 
             let Some(extension) = extension else {
                 continue;
@@ -299,7 +312,28 @@ fn asset_roots(project: Option<&ProjectMetadata>, workspace_root: &Path) -> Vec<
             .map(|path| root.join(path))
             .collect();
     }
-    vec![workspace_root.join("assets")]
+    vec![
+        workspace_root.join("assets"),
+        workspace_root.join("database"),
+    ]
+}
+
+fn detect_extension_override(path: &Path) -> Option<String> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_ascii_lowercase())?;
+
+    if file_name.ends_with(".dbgen.json") {
+        return Some("dbgen.json".to_string());
+    }
+    if file_name.ends_with(".db.json") {
+        return Some("db.json".to_string());
+    }
+
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
 }
 
 fn default_import_path(source: &Path, kind: AssetKind) -> PathBuf {

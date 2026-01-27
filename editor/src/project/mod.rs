@@ -267,7 +267,7 @@ fn default_engine_version() -> String {
 }
 
 fn default_asset_roots() -> Vec<String> {
-    vec!["assets".to_string()]
+    vec!["assets".to_string(), "database".to_string()]
 }
 
 fn default_build_profiles() -> Vec<String> {
