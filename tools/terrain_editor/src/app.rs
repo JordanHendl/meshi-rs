@@ -1,22 +1,30 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 
-use glam::{Mat4, Vec2, Vec3, vec2};
+use glam::{vec2, Mat4, Vec2, Vec3};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
-    Camera, DB, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo,
-    RendererSelect, TextInfo, TextRenderMode, WindowInfo,
     rdb::terrain::{
-        TerrainChunkArtifact, TerrainMutationOpKind, TerrainProjectSettings, project_settings_entry,
+        project_settings_entry, TerrainChunkArtifact, TerrainMutationOpKind, TerrainProjectSettings,
     },
     terrain_loader::terrain_chunk_transform,
+    Camera, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo, RendererSelect,
+    TextInfo, TextRenderMode, WindowInfo, DB,
 };
 use meshi_utils::timer::Timer;
+use rfd::FileDialog;
 use tracing::warn;
 
 use crate::dbgen::{TerrainBrushRequest, TerrainDbgen, TerrainGenerationRequest};
-use crate::ui::{FocusedInput, TerrainEditorUi, TerrainEditorUiData, TerrainEditorUiInput};
+use crate::ui::{
+    FocusedInput, TerrainEditorUi, TerrainEditorUiData, TerrainEditorUiInput,
+    MENU_ACTION_APPLY_BRUSH, MENU_ACTION_CLOSE_RDB, MENU_ACTION_EARTH_PRESET, MENU_ACTION_GENERATE,
+    MENU_ACTION_NEW_RDB, MENU_ACTION_OPEN_RDB, MENU_ACTION_SAVE_RDB, MENU_ACTION_SET_MANUAL,
+    MENU_ACTION_SET_PROCEDURAL, MENU_ACTION_SHOW_WORKFLOW, MENU_ACTION_TOGGLE_BRUSH_PANEL,
+    MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
+    MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL,
+};
 use meshi_graphics::TerrainRenderObject;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
@@ -53,6 +61,15 @@ struct EventState {
     key_presses: Vec<KeyCode>,
     shift_down: bool,
     control_down: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PanelVisibility {
+    db: bool,
+    chunks: bool,
+    generation: bool,
+    brush: bool,
+    workflow: bool,
 }
 
 pub struct TerrainEditorApp {
@@ -92,6 +109,7 @@ pub struct TerrainEditorApp {
     brush_tool: TerrainMutationOpKind,
     ui_hovered: bool,
     last_world_cursor: Vec2,
+    panel_visibility: PanelVisibility,
 }
 
 impl TerrainEditorApp {
@@ -211,6 +229,13 @@ impl TerrainEditorApp {
             brush_tool: TerrainMutationOpKind::SphereAdd,
             ui_hovered: false,
             last_world_cursor: Vec2::ZERO,
+            panel_visibility: PanelVisibility {
+                db: false,
+                chunks: true,
+                generation: false,
+                brush: false,
+                workflow: false,
+            },
         };
 
         app.rdb_path_input = app.rdb_path.to_string_lossy().to_string();
@@ -297,6 +322,12 @@ impl TerrainEditorApp {
             brush_tool: self.brush_tool,
             brush_radius: self.brush_radius,
             brush_strength: self.brush_strength,
+            show_db_panel: self.panel_visibility.db,
+            show_chunk_panel: self.panel_visibility.chunks,
+            show_generation_panel: self.panel_visibility.generation,
+            show_brush_panel: self.panel_visibility.brush,
+            show_workflow_panel: self.panel_visibility.workflow,
+            manual_mode: self.terrain_mode == TerrainMode::Manual,
         };
         let ui_output = self
             .ui
@@ -312,10 +343,13 @@ impl TerrainEditorApp {
         }
 
         if ui_output.open_clicked {
-            self.open_database_from_input();
+            self.open_database_dialog();
+        }
+        if ui_output.new_clicked {
+            self.create_new_database_dialog();
         }
         if ui_output.save_clicked {
-            self.commit_database();
+            self.save_database_dialog();
         }
         if ui_output.generate_clicked {
             self.refresh_terrain();
@@ -352,6 +386,9 @@ impl TerrainEditorApp {
         }
         if let Some(value) = ui_output.generator_biome_frequency {
             self.generator_biome_frequency = value;
+        }
+        if let Some(action) = ui_output.menu_action {
+            self.handle_menu_action(action);
         }
         let previous_focus = self.focused_input;
         if let Some(focused) = ui_output.focused_input {
@@ -399,6 +436,9 @@ impl TerrainEditorApp {
             return;
         };
 
+        let entry_key = self
+            .dbgen
+            .chunk_entry_for_key(&request.chunk_key, request.lod);
         match self.dbgen.generate_chunk(&request, rdb) {
             Ok(result) => {
                 self.persistence_error = None;
@@ -408,8 +448,13 @@ impl TerrainEditorApp {
                 self.update_rendered_chunk(result.entry_key.clone(), result.artifact);
             }
             Err(err) => {
-                warn!(error = %err, "Terrain generation failed.");
-                self.persistence_error = Some(format!("Generation failed: {err}"));
+                warn!(
+                    error = %err,
+                    chunk_key = %request.chunk_key,
+                    entry_key = %entry_key,
+                    "Terrain generation failed."
+                );
+                self.persistence_error = Some(format!("Generation failed for {entry_key}: {err}"));
                 self.status_note =
                     Some("Terrain generation failed. Check cache inputs.".to_string());
                 self.update_status_text();
@@ -419,7 +464,11 @@ impl TerrainEditorApp {
 
     fn update_status_text(&mut self) {
         let db_status = if self.rdb_open.is_some() {
-            if self.db_dirty { "open*" } else { "open" }
+            if self.db_dirty {
+                "open*"
+            } else {
+                "open"
+            }
         } else {
             "closed"
         };
@@ -600,19 +649,13 @@ impl TerrainEditorApp {
 
         match key {
             KeyCode::Tab => {
-                self.terrain_mode = match self.terrain_mode {
+                let new_mode = match self.terrain_mode {
                     TerrainMode::Procedural => TerrainMode::Manual,
                     TerrainMode::Manual => TerrainMode::Procedural,
                 };
-                self.needs_refresh = true;
-                self.update_status_text();
+                self.set_terrain_mode(new_mode);
             }
-            KeyCode::O if control => {
-                self.focused_input = Some(FocusedInput::DbPath);
-                self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
-                self.status_note = Some("Editing database path".to_string());
-                self.update_status_text();
-            }
+            KeyCode::O if control => self.open_database_dialog(),
             KeyCode::W if control => {
                 self.close_database();
             }
@@ -697,6 +740,74 @@ impl TerrainEditorApp {
         } else {
             self.open_database(path);
         }
+    }
+
+    fn create_new_database(&mut self) {
+        self.rdb_open = Some(RDBFile::new());
+        if self.rdb_path_input.trim().is_empty() {
+            self.rdb_path = PathBuf::from("terrain.rdb");
+            self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
+        } else {
+            self.rdb_path = PathBuf::from(self.rdb_path_input.trim());
+        }
+        self.db_dirty = true;
+        self.persistence_error = None;
+        self.status_note = Some("New database created (unsaved).".to_string());
+        self.chunk_keys.clear();
+        self.selected_chunk_index = None;
+        self.needs_refresh = true;
+        self.update_status_text();
+    }
+
+    fn create_new_database_dialog(&mut self) {
+        let selected = FileDialog::new().set_file_name("terrain.rdb").save_file();
+        if let Some(path) = selected {
+            self.rdb_open = Some(RDBFile::new());
+            self.rdb_path = path;
+            self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
+            self.db_dirty = false;
+            self.persistence_error = None;
+            if let Some(rdb) = self.rdb_open.as_mut() {
+                if let Err(err) = rdb.save(&self.rdb_path) {
+                    warn!(
+                        error = %err,
+                        path = %self.rdb_path.display(),
+                        "Failed to create new terrain RDB."
+                    );
+                    self.persistence_error = Some(format!("RDB create failed: {err}"));
+                    self.db_dirty = true;
+                }
+            }
+            self.status_note = Some("New database created.".to_string());
+            self.chunk_keys.clear();
+            self.selected_chunk_index = None;
+            self.needs_refresh = true;
+            self.update_status_text();
+        }
+    }
+
+    fn open_database_dialog(&mut self) {
+        let selected = FileDialog::new().pick_file();
+        if let Some(path) = selected {
+            self.open_database(path);
+        }
+    }
+
+    fn save_database_dialog(&mut self) {
+        if self.rdb_open.is_none() {
+            self.persistence_error = Some("No database open.".to_string());
+            self.update_status_text();
+            return;
+        }
+        if self.rdb_path_input.trim().is_empty() {
+            if let Some(path) = FileDialog::new().set_file_name("terrain.rdb").save_file() {
+                self.rdb_path = path;
+                self.rdb_path_input = self.rdb_path.to_string_lossy().to_string();
+            } else {
+                return;
+            }
+        }
+        self.commit_database();
     }
 
     fn open_database(&mut self, path: PathBuf) {
@@ -866,6 +977,56 @@ impl TerrainEditorApp {
             .and_then(|index| self.chunk_keys.get(index))
             .cloned()
             .unwrap_or_else(|| DEFAULT_CHUNK_KEY.to_string())
+    }
+
+    fn handle_menu_action(&mut self, action: u32) {
+        match action {
+            MENU_ACTION_NEW_RDB => self.create_new_database_dialog(),
+            MENU_ACTION_OPEN_RDB => self.open_database_dialog(),
+            MENU_ACTION_SAVE_RDB => self.save_database_dialog(),
+            MENU_ACTION_CLOSE_RDB => self.close_database(),
+            MENU_ACTION_SET_PROCEDURAL => self.set_terrain_mode(TerrainMode::Procedural),
+            MENU_ACTION_SET_MANUAL => self.set_terrain_mode(TerrainMode::Manual),
+            MENU_ACTION_APPLY_BRUSH => self.apply_brush_at_cursor(),
+            MENU_ACTION_TOGGLE_DB_PANEL => self.panel_visibility.db = !self.panel_visibility.db,
+            MENU_ACTION_TOGGLE_CHUNK_PANEL => {
+                self.panel_visibility.chunks = !self.panel_visibility.chunks;
+            }
+            MENU_ACTION_TOGGLE_GENERATION_PANEL => {
+                self.panel_visibility.generation = !self.panel_visibility.generation;
+            }
+            MENU_ACTION_TOGGLE_BRUSH_PANEL => {
+                self.panel_visibility.brush = !self.panel_visibility.brush;
+            }
+            MENU_ACTION_TOGGLE_WORKFLOW_PANEL => {
+                self.panel_visibility.workflow = !self.panel_visibility.workflow;
+            }
+            MENU_ACTION_SHOW_WORKFLOW => {
+                self.panel_visibility.workflow = true;
+            }
+            MENU_ACTION_EARTH_PRESET => self.apply_earthlike_preset(),
+            MENU_ACTION_GENERATE => self.refresh_terrain(),
+            _ => {}
+        }
+    }
+
+    fn set_terrain_mode(&mut self, mode: TerrainMode) {
+        if self.terrain_mode == mode {
+            return;
+        }
+        self.terrain_mode = mode;
+        match self.terrain_mode {
+            TerrainMode::Procedural => {
+                self.panel_visibility.generation = true;
+                self.panel_visibility.brush = false;
+            }
+            TerrainMode::Manual => {
+                self.panel_visibility.brush = true;
+                self.panel_visibility.generation = false;
+            }
+        }
+        self.needs_refresh = true;
+        self.update_status_text();
     }
 }
 

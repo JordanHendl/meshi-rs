@@ -1,16 +1,16 @@
 use meshi_graphics::rdb::terrain::TerrainChunkArtifact;
 use noren::{
-    RDBFile,
     rdb::terrain::{
-        TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition, TerrainMaterialBlendMode,
-        TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind, TerrainMutationParams,
-        TerrainProjectSettings, chunk_artifact_entry, chunk_coord_key, chunk_state_entry,
-        generator_entry, lod_key, mutation_layer_entry, mutation_op_entry,
-        parse_chunk_artifact_entry, project_settings_entry,
+        chunk_artifact_entry, chunk_coord_key, chunk_state_entry, generator_entry, lod_key,
+        mutation_layer_entry, mutation_op_entry, parse_chunk_artifact_entry,
+        project_settings_entry, TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition,
+        TerrainMaterialBlendMode, TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind,
+        TerrainMutationParams, TerrainProjectSettings,
     },
     terrain::{
-        TerrainChunkBuildRequest, build_terrain_chunk_with_context, prepare_terrain_build_context,
+        build_terrain_chunk_with_context, prepare_terrain_build_context, TerrainChunkBuildRequest,
     },
+    RDBFile,
 };
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -85,8 +85,12 @@ impl TerrainDbgen {
             request.generator_biome_frequency,
         )?;
 
-        let context = prepare_terrain_build_context(rdb, &target.project_key)
-            .map_err(|err| format!("Terrain build context failed: {err}"))?;
+        let context = prepare_terrain_build_context(rdb, &target.project_key).map_err(|err| {
+            format!(
+                "Terrain build context failed for project '{}': {err}",
+                target.project_key
+            )
+        })?;
         let build_request = TerrainChunkBuildRequest {
             chunk_coords: target.chunk_coords,
             lod: request.lod,
@@ -102,17 +106,31 @@ impl TerrainDbgen {
         .map_err(|err| format!("Terrain build failed: {err}"))?;
 
         if let Some(state) = outcome.state {
-            rdb.upsert(&target.state_entry, &state)
-                .map_err(|err| format!("Chunk state upsert failed: {err}"))?;
+            rdb.upsert(&target.state_entry, &state).map_err(|err| {
+                format!(
+                    "Chunk state upsert failed for entry '{}': {err}",
+                    target.state_entry
+                )
+            })?;
         }
 
         let artifact = if let Some(artifact) = outcome.artifact {
             rdb.upsert(&target.artifact_entry, &artifact)
-                .map_err(|err| format!("Chunk artifact upsert failed: {err}"))?;
+                .map_err(|err| {
+                    format!(
+                        "Chunk artifact upsert failed for entry '{}': {err}",
+                        target.artifact_entry
+                    )
+                })?;
             artifact
         } else {
             rdb.fetch::<TerrainChunkArtifact>(&target.artifact_entry)
-                .map_err(|err| format!("Chunk artifact fetch failed: {err}"))?
+                .map_err(|err| {
+                    format!(
+                        "Chunk artifact fetch failed for entry '{}': {err}",
+                        target.artifact_entry
+                    )
+                })?
         };
 
         Ok(TerrainChunkResult {
@@ -147,7 +165,9 @@ impl TerrainDbgen {
         }
 
         let chunk_hash = hash_chunk_key(self.seed, chunk_key);
-        [chunk_hash as i32, (chunk_hash >> 32) as i32]
+        let x = (chunk_hash & 0xffff) as i16;
+        let y = ((chunk_hash >> 16) & 0xffff) as i16;
+        [x as i32, y as i32]
     }
 
     pub fn project_key_for_chunk(&self, chunk_key: &str) -> String {
@@ -155,7 +175,7 @@ impl TerrainDbgen {
             return parsed.project_key;
         }
 
-        sanitize_project_key(chunk_key)
+        short_project_key(chunk_key)
     }
 
     pub fn chunk_entry_for_key(&self, chunk_key: &str, lod: u8) -> String {
@@ -220,8 +240,8 @@ impl TerrainDbgen {
         mark_chunk_dirty(rdb, &target.project_key, &settings, target.chunk_coords)
             .map_err(|err| format!("Chunk dirty update failed: {err}"))?;
 
-        let context =
-            prepare_terrain_build_context(rdb, &target.project_key).map_err(|err| err.to_string())?;
+        let context = prepare_terrain_build_context(rdb, &target.project_key)
+            .map_err(|err| err.to_string())?;
         let build_request = TerrainChunkBuildRequest {
             chunk_coords: target.chunk_coords,
             lod: request.lod,
@@ -320,26 +340,18 @@ impl TerrainDbgen {
             return TerrainChunkTarget {
                 project_key: project_key.clone(),
                 chunk_coords: parsed.chunk_coords,
-                artifact_entry: chunk_artifact_entry(
-                    &project_key,
-                    &coord_key,
-                    &lod_key(lod),
-                ),
+                artifact_entry: chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod)),
                 state_entry: chunk_state_entry(&project_key, &coord_key),
             };
         }
 
-        let project_key = sanitize_project_key(chunk_key);
+        let project_key = short_project_key(chunk_key);
         let chunk_coords = self.chunk_coords_for_key(chunk_key);
         let coord_key = chunk_coord_key(chunk_coords[0], chunk_coords[1]);
         TerrainChunkTarget {
             project_key: project_key.clone(),
             chunk_coords,
-            artifact_entry: chunk_artifact_entry(
-                &project_key,
-                &coord_key,
-                &lod_key(lod),
-            ),
+            artifact_entry: chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod)),
             state_entry: chunk_state_entry(&project_key, &coord_key),
         }
     }
@@ -361,24 +373,9 @@ fn hash_chunk_key(seed: u64, chunk_key: &str) -> u64 {
     hash
 }
 
-fn sanitize_project_key(chunk_key: &str) -> String {
-    let mut sanitized = String::with_capacity(chunk_key.len());
-    for ch in chunk_key.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            sanitized.push(ch);
-        } else {
-            sanitized.push('_');
-        }
-    }
-    if sanitized.is_empty() {
-        "terrain-preview".to_string()
-    } else if sanitized.len() > 32 {
-        let hash = hash_chunk_key(0, chunk_key);
-        let prefix_len = 15;
-        format!("{}-{hash:016x}", &sanitized[..prefix_len])
-    } else {
-        sanitized
-    }
+fn short_project_key(chunk_key: &str) -> String {
+    let hash = hash_chunk_key(0, chunk_key);
+    format!("t{hash:016x}")
 }
 
 fn current_timestamp() -> u64 {
