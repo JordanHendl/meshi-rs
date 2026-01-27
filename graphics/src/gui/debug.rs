@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3, Vec4, vec2};
+use glam::{Vec2, Vec4, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -9,9 +9,8 @@ use crate::gui::{
     RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
     SliderState, SliderValueFormat,
 };
-use crate::render::environment::ocean::{OceanDebugView, OceanFrameSettings};
-use crate::render::environment::sky::{SkyFrameSettings, SkyboxFrameSettings};
-use crate::structs::{CloudDebugView, CloudResolutionScale, CloudSettings};
+use crate::render::environment::ocean::OceanDebugView;
+use crate::structs::{CloudDebugView, CloudResolutionScale};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DebugTab {
@@ -341,24 +340,28 @@ unsafe fn debug_registry_radials(page: PageType) -> Vec<DebugRegistryRadialGroup
         .collect()
 }
 
-unsafe fn debug_registry_update_value(id: u32, value: f32) -> bool {
+unsafe fn debug_registry_update_value(id: u32, value: f32) -> Option<PageType> {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
     if let Some(entry) = registry.iter_mut().find(|entry| entry.id == id) {
         let (min, max) = match &entry.control {
             DebugRegistryControl::Slider { min, max, .. } => (*min, *max),
-            DebugRegistryControl::Radial { .. } => return false,
+            DebugRegistryControl::Radial { .. } => return None,
         };
         let clamped = value.clamp(min, max);
         unsafe {
-            entry.value.set(clamped);
+            let previous = entry.value.get();
+            if (previous - clamped).abs() > f32::EPSILON {
+                entry.value.set(clamped);
+                return Some(entry.page);
+            }
         }
-        return true;
+        return None;
     }
-    false
+    None
 }
 
-unsafe fn debug_registry_update_radial(id: u32) -> bool {
+unsafe fn debug_registry_update_radial(id: u32) -> Option<PageType> {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
     for entry in registry.iter_mut() {
@@ -367,12 +370,38 @@ unsafe fn debug_registry_update_radial(id: u32) -> bool {
         };
         if let Some(option) = options.iter().find(|option| option.id == id) {
             unsafe {
-                entry.value.set(option.value);
+                let previous = entry.value.get();
+                if (previous - option.value).abs() > f32::EPSILON {
+                    entry.value.set(option.value);
+                    return Some(entry.page);
+                }
             }
-            return true;
+            return None;
         }
     }
-    false
+    None
+}
+
+fn mark_page_dirty(
+    page: PageType,
+    skybox_dirty: &mut bool,
+    sky_dirty: &mut bool,
+    ocean_dirty: &mut bool,
+    cloud_dirty: &mut bool,
+) {
+    match page {
+        PageType::Sky => {
+            *skybox_dirty = true;
+            *sky_dirty = true;
+        }
+        PageType::Ocean => {
+            *ocean_dirty = true;
+        }
+        PageType::Clouds | PageType::Shadow => {
+            *cloud_dirty = true;
+        }
+        PageType::Physics | PageType::Audio => {}
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,53 +409,8 @@ enum DragTarget {
     DebugPanel,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct DebugSliderValues {
-    skybox_intensity: f32,
-    sun_intensity: f32,
-    sun_angular_radius: f32,
-    moon_intensity: f32,
-    moon_angular_radius: f32,
-    ocean_wind_speed: f32,
-    ocean_fetch_length: f32,
-    ocean_swell_dir_x: f32,
-    ocean_swell_dir_y: f32,
-    ocean_current_x: f32,
-    ocean_current_y: f32,
-    ocean_wave_amplitude: f32,
-    ocean_gerstner_amplitude: f32,
-    ocean_cascade_spectrum_near: f32,
-    ocean_cascade_spectrum_mid: f32,
-    ocean_cascade_spectrum_far: f32,
-    ocean_cascade_swell_near: f32,
-    ocean_cascade_swell_mid: f32,
-    ocean_cascade_swell_far: f32,
-    ocean_depth_meters: f32,
-    ocean_depth_damping: f32,
-    ocean_fresnel_bias: f32,
-    ocean_fresnel_strength: f32,
-    ocean_foam_strength: f32,
-    ocean_foam_threshold: f32,
-    ocean_foam_advection: f32,
-    ocean_foam_decay: f32,
-    ocean_foam_noise_scale: f32,
-    ocean_capillary_strength: f32,
-    ocean_time_scale: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DebugToggleValues {
-    sky_enabled: bool,
-    ocean_enabled: bool,
-    cloud_enabled: bool,
-}
-
 pub struct DebugGuiBindings {
     pub debug_mode: *mut bool,
-    pub skybox_settings: *mut SkyboxFrameSettings,
-    pub sky_settings: *mut SkyFrameSettings,
-    pub ocean_settings: *mut OceanFrameSettings,
-    pub cloud_settings: *mut CloudSettings,
 }
 
 pub struct DebugGuiOutput {
@@ -447,8 +431,6 @@ pub struct DebugGui {
     debug_graphics_tab: DebugGraphicsTab,
     debug_slider_state: SliderState,
     debug_slider_layout: SliderLayout,
-    debug_toggle_state: RadialButtonState,
-    debug_toggle_layout: RadialButtonLayout,
     debug_param_radial_state: RadialButtonState,
     debug_param_radial_layouts: Vec<RadialButtonLayout>,
     debug_panel_position: Vec2,
@@ -456,8 +438,6 @@ pub struct DebugGui {
     drag_offset: Vec2,
     scroll_offset: f32,
     scroll_delta: f32,
-    slider_values: DebugSliderValues,
-    toggle_values: DebugToggleValues,
 }
 
 impl DebugGui {
@@ -472,8 +452,6 @@ impl DebugGui {
             debug_graphics_tab: DebugGraphicsTab::Sky,
             debug_slider_state: SliderState::default(),
             debug_slider_layout: SliderLayout::default(),
-            debug_toggle_state: RadialButtonState::default(),
-            debug_toggle_layout: RadialButtonLayout::default(),
             debug_param_radial_state: RadialButtonState::default(),
             debug_param_radial_layouts: Vec::new(),
             debug_panel_position: vec2(560.0, 60.0),
@@ -481,43 +459,6 @@ impl DebugGui {
             drag_offset: Vec2::ZERO,
             scroll_offset: 0.0,
             scroll_delta: 0.0,
-            slider_values: DebugSliderValues {
-                skybox_intensity: 1.0,
-                sun_intensity: 1.0,
-                sun_angular_radius: 0.0045,
-                moon_intensity: 0.1,
-                moon_angular_radius: 0.0045,
-                ocean_wind_speed: 2.0,
-                ocean_fetch_length: 5000.0,
-                ocean_swell_dir_x: 0.8,
-                ocean_swell_dir_y: 0.1,
-                ocean_current_x: 0.0,
-                ocean_current_y: 0.0,
-                ocean_wave_amplitude: 2.0,
-                ocean_gerstner_amplitude: 0.12,
-                ocean_cascade_spectrum_near: 1.0,
-                ocean_cascade_spectrum_mid: 0.85,
-                ocean_cascade_spectrum_far: 0.65,
-                ocean_cascade_swell_near: 0.35,
-                ocean_cascade_swell_mid: 0.55,
-                ocean_cascade_swell_far: 0.75,
-                ocean_depth_meters: 200.0,
-                ocean_depth_damping: 0.3,
-                ocean_fresnel_bias: 0.02,
-                ocean_fresnel_strength: 0.85,
-                ocean_foam_strength: 1.0,
-                ocean_foam_threshold: 0.55,
-                ocean_foam_advection: 0.25,
-                ocean_foam_decay: 0.08,
-                ocean_foam_noise_scale: 0.2,
-                ocean_capillary_strength: 1.0,
-                ocean_time_scale: 1.0,
-            },
-            toggle_values: DebugToggleValues {
-                sky_enabled: false,
-                ocean_enabled: false,
-                cloud_enabled: true,
-            },
         }
     }
 
@@ -582,81 +523,19 @@ impl DebugGui {
         let debug_mode = unsafe { bindings.debug_mode.as_ref().copied().unwrap_or(false) };
         if !debug_mode {
             self.reset_for_hidden();
-            let mut cloud_dirty = false;
-            unsafe {
-                if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                    if clouds.debug_view == CloudDebugView::Stats {
-                        clouds.debug_view = CloudDebugView::None;
-                        cloud_dirty = true;
-                    }
-                }
-            }
             return DebugGuiOutput {
                 frame: None,
                 skybox_dirty: false,
                 sky_dirty: false,
                 ocean_dirty: false,
-                cloud_dirty,
+                cloud_dirty: false,
             };
         }
 
-        if self.debug_slider_state.active.is_none() {
-            unsafe {
-                if let Some(skybox) = bindings.skybox_settings.as_ref() {
-                    self.slider_values.skybox_intensity = skybox.intensity;
-                }
-                if let Some(sky) = bindings.sky_settings.as_ref() {
-                    self.slider_values.sun_intensity = sky.sun_intensity;
-                    self.slider_values.sun_angular_radius = sky.sun_angular_radius;
-                    self.slider_values.moon_intensity = sky.moon_intensity;
-                    self.slider_values.moon_angular_radius = sky.moon_angular_radius;
-                }
-                if let Some(ocean) = bindings.ocean_settings.as_ref() {
-                    self.slider_values.ocean_wind_speed = ocean.wind_speed;
-                    self.slider_values.ocean_fetch_length = ocean.fetch_length;
-                    self.slider_values.ocean_swell_dir_x = ocean.swell_dir.x;
-                    self.slider_values.ocean_swell_dir_y = ocean.swell_dir.y;
-                    self.slider_values.ocean_current_x = ocean.current.x;
-                    self.slider_values.ocean_current_y = ocean.current.y;
-                    self.slider_values.ocean_wave_amplitude = ocean.wave_amplitude;
-                    self.slider_values.ocean_gerstner_amplitude = ocean.gerstner_amplitude;
-                    self.slider_values.ocean_cascade_spectrum_near =
-                        ocean.cascade_spectrum_scales[0];
-                    self.slider_values.ocean_cascade_spectrum_mid =
-                        ocean.cascade_spectrum_scales[1];
-                    self.slider_values.ocean_cascade_spectrum_far =
-                        ocean.cascade_spectrum_scales[2];
-                    self.slider_values.ocean_cascade_swell_near = ocean.cascade_swell_strengths[0];
-                    self.slider_values.ocean_cascade_swell_mid = ocean.cascade_swell_strengths[1];
-                    self.slider_values.ocean_cascade_swell_far = ocean.cascade_swell_strengths[2];
-                    self.slider_values.ocean_depth_meters = ocean.depth_meters;
-                    self.slider_values.ocean_depth_damping = ocean.depth_damping;
-                    self.slider_values.ocean_fresnel_bias = ocean.fresnel_bias;
-                    self.slider_values.ocean_fresnel_strength = ocean.fresnel_strength;
-                    self.slider_values.ocean_foam_strength = ocean.foam_strength;
-                    self.slider_values.ocean_foam_threshold = ocean.foam_threshold;
-                    self.slider_values.ocean_foam_advection = ocean.foam_advection_strength;
-                    self.slider_values.ocean_foam_decay = ocean.foam_decay_rate;
-                    self.slider_values.ocean_foam_noise_scale = ocean.foam_noise_scale;
-                    self.slider_values.ocean_capillary_strength = ocean.capillary_strength;
-                    self.slider_values.ocean_time_scale = ocean.time_scale;
-                }
-            }
-        }
-
-        if self.debug_toggle_state.active.is_none() {
-            unsafe {
-                if let Some(sky) = bindings.sky_settings.as_ref() {
-                    self.toggle_values.sky_enabled = sky.enabled;
-                }
-                if let Some(ocean) = bindings.ocean_settings.as_ref() {
-                    self.toggle_values.ocean_enabled = ocean.enabled;
-                }
-                if let Some(clouds) = bindings.cloud_settings.as_ref() {
-                    self.toggle_values.cloud_enabled = clouds.enabled;
-                }
-            }
-        }
+        let mut skybox_dirty = false;
+        let mut sky_dirty = false;
+        let mut ocean_dirty = false;
+        let mut cloud_dirty = false;
 
         let debug_panel_width = (viewport.x * 0.34).clamp(320.0, 520.0);
         let debug_panel_height = (viewport.y * 0.7).clamp(360.0, 720.0);
@@ -740,8 +619,6 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_tab = *tab;
                     self.debug_slider_state.active = None;
-                    self.debug_toggle_state = RadialButtonState::default();
-                    self.debug_toggle_layout = RadialButtonLayout::default();
                     self.debug_param_radial_state = RadialButtonState::default();
                     self.debug_param_radial_layouts.clear();
                     self.scroll_offset = 0.0;
@@ -774,8 +651,6 @@ impl DebugGui {
                 if point_in_rect(self.cursor, tab_pos, tab_size) {
                     self.debug_graphics_tab = *tab;
                     self.debug_slider_state.active = None;
-                    self.debug_toggle_state = RadialButtonState::default();
-                    self.debug_toggle_layout = RadialButtonLayout::default();
                     self.debug_param_radial_state = RadialButtonState::default();
                     self.debug_param_radial_layouts.clear();
                     self.scroll_offset = 0.0;
@@ -789,13 +664,6 @@ impl DebugGui {
                     || point_in_menu_rect(self.cursor, item.knob_rect))
         });
         self.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
-
-        let hovered_toggle = self.debug_toggle_layout.items.iter().find(|item| {
-            item.enabled
-                && (point_in_menu_rect(self.cursor, item.item_rect)
-                    || point_in_menu_rect(self.cursor, item.button_rect))
-        });
-        self.debug_toggle_state.hovered = hovered_toggle.map(|item| item.id);
 
         let hovered_param_radial = self
             .debug_param_radial_layouts
@@ -812,29 +680,18 @@ impl DebugGui {
             if let Some(item) = hovered_debug_slider {
                 self.debug_slider_state.active = Some(item.id);
             }
-            if let Some(item) = hovered_toggle {
-                self.debug_toggle_state.active = Some(item.id);
-                match item.id {
-                    6101 => self.toggle_values.sky_enabled = true,
-                    6102 => self.toggle_values.sky_enabled = false,
-                    6201 => self.toggle_values.ocean_enabled = true,
-                    6202 => self.toggle_values.ocean_enabled = false,
-                    6301 => self.toggle_values.cloud_enabled = true,
-                    6302 => self.toggle_values.cloud_enabled = false,
-                    _ => {}
-                }
-            }
             if let Some(item) = hovered_param_radial {
                 self.debug_param_radial_state.active = Some(item.id);
                 unsafe {
-                    debug_registry_update_radial(item.id);
+                    if let Some(page) = debug_registry_update_radial(item.id) {
+                        mark_page_dirty(page, &mut skybox_dirty, &mut sky_dirty, &mut ocean_dirty, &mut cloud_dirty);
+                    }
                 }
             }
         }
 
         if !self.mouse_down {
             self.debug_slider_state.active = None;
-            self.debug_toggle_state.active = None;
             self.debug_param_radial_state.active = None;
         }
 
@@ -847,43 +704,15 @@ impl DebugGui {
             {
                 let value =
                     slider_value_from_cursor(self.cursor, item.track_rect, item.min, item.max);
-                let mut handled = true;
-                match active_id {
-                    101 => self.slider_values.skybox_intensity = value,
-                    102 => self.slider_values.sun_intensity = value,
-                    103 => self.slider_values.sun_angular_radius = value,
-                    104 => self.slider_values.moon_intensity = value,
-                    105 => self.slider_values.moon_angular_radius = value,
-                    201 => self.slider_values.ocean_wind_speed = value,
-                    202 => self.slider_values.ocean_fetch_length = value,
-                    203 => self.slider_values.ocean_swell_dir_x = value,
-                    204 => self.slider_values.ocean_swell_dir_y = value,
-                    205 => self.slider_values.ocean_current_x = value,
-                    206 => self.slider_values.ocean_current_y = value,
-                    207 => self.slider_values.ocean_wave_amplitude = value,
-                    208 => self.slider_values.ocean_gerstner_amplitude = value,
-                    209 => self.slider_values.ocean_cascade_spectrum_near = value,
-                    210 => self.slider_values.ocean_cascade_spectrum_mid = value,
-                    211 => self.slider_values.ocean_cascade_spectrum_far = value,
-                    212 => self.slider_values.ocean_cascade_swell_near = value,
-                    213 => self.slider_values.ocean_cascade_swell_mid = value,
-                    214 => self.slider_values.ocean_cascade_swell_far = value,
-                    215 => self.slider_values.ocean_depth_meters = value,
-                    216 => self.slider_values.ocean_depth_damping = value,
-                    217 => self.slider_values.ocean_fresnel_bias = value,
-                    218 => self.slider_values.ocean_fresnel_strength = value,
-                    219 => self.slider_values.ocean_foam_strength = value,
-                    220 => self.slider_values.ocean_foam_threshold = value,
-                    221 => self.slider_values.ocean_foam_advection = value,
-                    222 => self.slider_values.ocean_foam_decay = value,
-                    223 => self.slider_values.ocean_foam_noise_scale = value,
-                    224 => self.slider_values.ocean_capillary_strength = value,
-                    225 => self.slider_values.ocean_time_scale = value,
-                    _ => handled = false,
-                }
-                if !handled {
-                    unsafe {
-                        debug_registry_update_value(active_id, value);
+                unsafe {
+                    if let Some(page) = debug_registry_update_value(active_id, value) {
+                        mark_page_dirty(
+                            page,
+                            &mut skybox_dirty,
+                            &mut sky_dirty,
+                            &mut ocean_dirty,
+                            &mut cloud_dirty,
+                        );
                     }
                 }
             }
@@ -905,194 +734,8 @@ impl DebugGui {
             };
         }
 
-        let mut skybox_dirty = false;
-        let mut sky_dirty = false;
-        let mut ocean_dirty = false;
-        let mut cloud_dirty = false;
-        unsafe {
-            if let Some(skybox) = bindings.skybox_settings.as_mut() {
-                let new_value = self.slider_values.skybox_intensity.clamp(0.2, 2.0);
-                if (skybox.intensity - new_value).abs() > f32::EPSILON {
-                    skybox.intensity = new_value;
-                    skybox_dirty = true;
-                }
-            }
-            if let Some(sky) = bindings.sky_settings.as_mut() {
-                if sky.enabled != self.toggle_values.sky_enabled {
-                    sky.enabled = self.toggle_values.sky_enabled;
-                    sky_dirty = true;
-                }
-                let new_value = self.slider_values.sun_intensity.clamp(0.1, 5.0);
-                if (sky.sun_intensity - new_value).abs() > f32::EPSILON {
-                    sky.sun_intensity = new_value;
-                    sky_dirty = true;
-                }
-                let new_value = self.slider_values.sun_angular_radius.clamp(0.001, 0.05);
-                if (sky.sun_angular_radius - new_value).abs() > f32::EPSILON {
-                    sky.sun_angular_radius = new_value;
-                    sky_dirty = true;
-                }
-                let new_value = self.slider_values.moon_intensity.clamp(0.0, 2.0);
-                if (sky.moon_intensity - new_value).abs() > f32::EPSILON {
-                    sky.moon_intensity = new_value;
-                    sky_dirty = true;
-                }
-                let new_value = self.slider_values.moon_angular_radius.clamp(0.001, 0.05);
-                if (sky.moon_angular_radius - new_value).abs() > f32::EPSILON {
-                    sky.moon_angular_radius = new_value;
-                    sky_dirty = true;
-                }
-            }
-            if let Some(ocean) = bindings.ocean_settings.as_mut() {
-                if ocean.enabled != self.toggle_values.ocean_enabled {
-                    ocean.enabled = self.toggle_values.ocean_enabled;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_wind_speed.clamp(0.1, 20.0);
-                if (ocean.wind_speed - new_value).abs() > f32::EPSILON {
-                    ocean.wind_speed = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_fetch_length.clamp(10.0, 200000.0);
-                if (ocean.fetch_length - new_value).abs() > f32::EPSILON {
-                    ocean.fetch_length = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_swell_dir_x.clamp(-1.0, 1.0);
-                if (ocean.swell_dir.x - new_value).abs() > f32::EPSILON {
-                    ocean.swell_dir.x = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_swell_dir_y.clamp(-1.0, 1.0);
-                if (ocean.swell_dir.y - new_value).abs() > f32::EPSILON {
-                    ocean.swell_dir.y = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_current_x.clamp(-5.0, 5.0);
-                if (ocean.current.x - new_value).abs() > f32::EPSILON {
-                    ocean.current.x = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_current_y.clamp(-5.0, 5.0);
-                if (ocean.current.y - new_value).abs() > f32::EPSILON {
-                    ocean.current.y = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_wave_amplitude.clamp(0.1, 10.0);
-                if (ocean.wave_amplitude - new_value).abs() > f32::EPSILON {
-                    ocean.wave_amplitude = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_gerstner_amplitude.clamp(0.0, 1.0);
-                if (ocean.gerstner_amplitude - new_value).abs() > f32::EPSILON {
-                    ocean.gerstner_amplitude = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self
-                    .slider_values
-                    .ocean_cascade_spectrum_near
-                    .clamp(0.0, 2.0);
-                if (ocean.cascade_spectrum_scales[0] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_spectrum_scales[0] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self
-                    .slider_values
-                    .ocean_cascade_spectrum_mid
-                    .clamp(0.0, 2.0);
-                if (ocean.cascade_spectrum_scales[1] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_spectrum_scales[1] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self
-                    .slider_values
-                    .ocean_cascade_spectrum_far
-                    .clamp(0.0, 2.0);
-                if (ocean.cascade_spectrum_scales[2] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_spectrum_scales[2] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_cascade_swell_near.clamp(0.0, 1.0);
-                if (ocean.cascade_swell_strengths[0] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_swell_strengths[0] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_cascade_swell_mid.clamp(0.0, 1.0);
-                if (ocean.cascade_swell_strengths[1] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_swell_strengths[1] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_cascade_swell_far.clamp(0.0, 1.0);
-                if (ocean.cascade_swell_strengths[2] - new_value).abs() > f32::EPSILON {
-                    ocean.cascade_swell_strengths[2] = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_depth_meters.clamp(0.0, 5000.0);
-                if (ocean.depth_meters - new_value).abs() > f32::EPSILON {
-                    ocean.depth_meters = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_depth_damping.clamp(0.0, 1.0);
-                if (ocean.depth_damping - new_value).abs() > f32::EPSILON {
-                    ocean.depth_damping = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_fresnel_bias.clamp(0.0, 0.2);
-                if (ocean.fresnel_bias - new_value).abs() > f32::EPSILON {
-                    ocean.fresnel_bias = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_fresnel_strength.clamp(0.0, 1.5);
-                if (ocean.fresnel_strength - new_value).abs() > f32::EPSILON {
-                    ocean.fresnel_strength = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_foam_strength.clamp(0.0, 4.0);
-                if (ocean.foam_strength - new_value).abs() > f32::EPSILON {
-                    ocean.foam_strength = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_foam_threshold.clamp(0.0, 1.0);
-                if (ocean.foam_threshold - new_value).abs() > f32::EPSILON {
-                    ocean.foam_threshold = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_foam_advection.clamp(0.0, 2.0);
-                if (ocean.foam_advection_strength - new_value).abs() > f32::EPSILON {
-                    ocean.foam_advection_strength = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_foam_decay.clamp(0.0, 1.0);
-                if (ocean.foam_decay_rate - new_value).abs() > f32::EPSILON {
-                    ocean.foam_decay_rate = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_foam_noise_scale.clamp(0.01, 1.0);
-                if (ocean.foam_noise_scale - new_value).abs() > f32::EPSILON {
-                    ocean.foam_noise_scale = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_capillary_strength.clamp(0.0, 2.0);
-                if (ocean.capillary_strength - new_value).abs() > f32::EPSILON {
-                    ocean.capillary_strength = new_value;
-                    ocean_dirty = true;
-                }
-                let new_value = self.slider_values.ocean_time_scale.clamp(0.1, 4.0);
-                if (ocean.time_scale - new_value).abs() > f32::EPSILON {
-                    ocean.time_scale = new_value;
-                    ocean_dirty = true;
-                }
-            }
-            if let Some(clouds) = bindings.cloud_settings.as_mut() {
-                if clouds.enabled != self.toggle_values.cloud_enabled {
-                    clouds.enabled = self.toggle_values.cloud_enabled;
-                    cloud_dirty = true;
-                }
-            }
-        }
-
         let mut gui = GuiContext::new();
-        let panel_brightness = (self.slider_values.skybox_intensity / 1.0).clamp(0.5, 1.4);
+        let panel_brightness = 1.0;
         let panel_color = Vec4::new(
             0.08 * panel_brightness,
             0.1 * panel_brightness,
@@ -1225,74 +868,6 @@ impl DebugGui {
             format!("Viewport: {:.0} x {:.0}", viewport.x, viewport.y),
         ];
 
-        if self.debug_tab == DebugTab::Graphics {
-            match self.debug_graphics_tab {
-                DebugGraphicsTab::Sky => {
-                    if let Some(sky) = unsafe { bindings.sky_settings.as_ref() } {
-                        info_lines.push(format!("Sky enabled: {}", sky.enabled));
-                        if let Some(dir) = sky.sun_direction {
-                            info_lines
-                                .push(format!("Sun dir: {:.2}, {:.2}, {:.2}", dir.x, dir.y, dir.z));
-                        }
-                        if let Some(dir) = sky.moon_direction {
-                            info_lines.push(format!(
-                                "Moon dir: {:.2}, {:.2}, {:.2}",
-                                dir.x, dir.y, dir.z
-                            ));
-                        }
-                        if let Some(time) = sky.time_of_day {
-                            info_lines.push(format!("Time of day: {:.2}h", time));
-                        }
-                    }
-                }
-                DebugGraphicsTab::Ocean => {
-                    if let Some(ocean) = unsafe { bindings.ocean_settings.as_ref() } {
-                        info_lines.push(format!("Ocean enabled: {}", ocean.enabled));
-                        info_lines.push(format!(
-                            "Wind dir: {:.2}, {:.2}",
-                            ocean.wind_dir.x, ocean.wind_dir.y
-                        ));
-                        info_lines.push(format!(
-                            "Debug view: {}",
-                            ocean_debug_view_label(ocean.debug_view)
-                        ));
-                    }
-                }
-                DebugGraphicsTab::Clouds => {
-                    if let Some(clouds) = unsafe { bindings.cloud_settings.as_ref() } {
-                        info_lines.push(format!(
-                            "Layer A: {:.0}-{:.0} m",
-                            clouds.layer_a.base_altitude, clouds.layer_a.top_altitude
-                        ));
-                        info_lines.push(format!(
-                            "Layer B: {:.0}-{:.0} m",
-                            clouds.layer_b.base_altitude, clouds.layer_b.top_altitude
-                        ));
-                        info_lines.push(format!("Step count: {}", clouds.step_count));
-                        info_lines.push(format!(
-                            "Debug view: {}",
-                            cloud_debug_view_label(clouds.debug_view)
-                        ));
-                    }
-                }
-                DebugGraphicsTab::Shadow => {
-                    if let Some(clouds) = unsafe { bindings.cloud_settings.as_ref() } {
-                        info_lines.push(format!("Cloud shadow enabled: {}", clouds.shadow.enabled));
-                        info_lines
-                            .push(format!("Cloud shadow res: {}", clouds.shadow.resolution));
-                        info_lines.push(format!(
-                            "Cloud shadow cascades: {}",
-                            clouds.shadow.cascades.cascade_count
-                        ));
-                        info_lines.push(format!(
-                            "Shadow debug view: {}",
-                            cloud_debug_view_label(clouds.debug_view)
-                        ));
-                    }
-                }
-            }
-        }
-
         let page_type = if self.debug_tab == DebugTab::Graphics {
             match self.debug_graphics_tab {
                 DebugGraphicsTab::Sky => PageType::Sky,
@@ -1331,17 +906,6 @@ impl DebugGui {
             content_clip_rect,
         ));
         let line_height = 18.0 * ui_scale;
-        let toggle_metrics = RadialButtonMetrics {
-            item_height: (22.0 * ui_scale).clamp(18.0, 28.0),
-            item_gap: (8.0 * ui_scale).clamp(4.0, 12.0),
-            padding: [12.0 * ui_scale, 6.0 * ui_scale],
-            button_size: [16.0 * ui_scale, 16.0 * ui_scale],
-            indicator_size: [8.0 * ui_scale, 8.0 * ui_scale],
-            label_gap: 10.0 * ui_scale,
-            char_width: 7.2 * ui_scale,
-            font_scale: 0.85 * ui_scale,
-            text_offset: [0.0, 6.0 * ui_scale],
-        };
         let radial_metrics = RadialButtonMetrics {
             item_height: (20.0 * ui_scale).clamp(18.0, 26.0),
             item_gap: (6.0 * ui_scale).clamp(4.0, 10.0),
@@ -1359,14 +923,6 @@ impl DebugGui {
             ..SliderMetrics::default()
         };
         let mut content_height_total = info_lines.len() as f32 * line_height + 8.0 * ui_scale;
-        let mut toggle_height = 0.0;
-        if self.debug_tab == DebugTab::Graphics && self.debug_graphics_tab != DebugGraphicsTab::Shadow
-        {
-            toggle_height = toggle_metrics.padding[1] * 2.0
-                + 2.0 * toggle_metrics.item_height
-                + toggle_metrics.item_gap;
-            content_height_total += toggle_height + 8.0 * ui_scale;
-        }
         if !debug_radials.is_empty() {
             let title_height = 18.0 * ui_scale;
             let group_gap = 10.0 * ui_scale;
@@ -1416,37 +972,8 @@ impl DebugGui {
                 scale: if index == 0 { 0.9 } else { 0.85 },
             });
         }
-        let toggle_start_y = text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
-        let mut slider_start_y = toggle_start_y;
-
-        let mut debug_toggle_layout = RadialButtonLayout::default();
-        if self.debug_tab == DebugTab::Graphics && self.debug_graphics_tab != DebugGraphicsTab::Shadow
-        {
-            let (toggle_label, toggle_enabled, on_id, off_id) = match self.debug_graphics_tab {
-                DebugGraphicsTab::Sky => ("Sky", self.toggle_values.sky_enabled, 6101, 6102),
-                DebugGraphicsTab::Ocean => ("Ocean", self.toggle_values.ocean_enabled, 6201, 6202),
-                DebugGraphicsTab::Clouds => {
-                    ("Clouds", self.toggle_values.cloud_enabled, 6301, 6302)
-                }
-                DebugGraphicsTab::Shadow => ("Shadow", false, 0, 0),
-            };
-            let toggle_buttons = vec![
-                RadialButton::new(on_id, format!("{toggle_label} On"), toggle_enabled),
-                RadialButton::new(off_id, format!("{toggle_label} Off"), !toggle_enabled),
-            ];
-            let toggle_options = RadialButtonRenderOptions {
-                viewport: [viewport.x, viewport.y],
-                position: [debug_panel_position.x, toggle_start_y + content_scroll],
-                size: [content_width, toggle_height],
-                layer: GuiLayer::Overlay,
-                metrics: toggle_metrics,
-                colors: RadialButtonColors::default(),
-                state: self.debug_toggle_state,
-                clip_rect: Some(content_clip_rect),
-            };
-            debug_toggle_layout = gui.submit_radial_buttons(&toggle_buttons, &toggle_options);
-            slider_start_y = toggle_start_y + toggle_height + 8.0 * ui_scale;
-        }
+        let mut slider_start_y =
+            text_start.y + info_lines.len() as f32 * line_height + 8.0 * ui_scale;
 
         let mut debug_param_radial_layouts = Vec::new();
         if !debug_radials.is_empty() {
@@ -1616,7 +1143,6 @@ impl DebugGui {
         });
 
         self.debug_slider_layout = debug_slider_layout;
-        self.debug_toggle_layout = debug_toggle_layout;
         self.debug_param_radial_layouts = debug_param_radial_layouts;
         self.mouse_pressed = false;
 
@@ -1635,8 +1161,6 @@ impl DebugGui {
         self.drag_target = None;
         self.debug_slider_state = SliderState::default();
         self.debug_slider_layout = SliderLayout::default();
-        self.debug_toggle_state = RadialButtonState::default();
-        self.debug_toggle_layout = RadialButtonLayout::default();
         self.debug_param_radial_state = RadialButtonState::default();
         self.debug_param_radial_layouts.clear();
         self.scroll_offset = 0.0;
@@ -1668,30 +1192,6 @@ fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
     }
 }
 
-fn cloud_debug_view_label(view: CloudDebugView) -> &'static str {
-    match view {
-        CloudDebugView::None => "None",
-        CloudDebugView::WeatherMap => "Weather Map",
-        CloudDebugView::ShadowMap => "Shadow Map",
-        CloudDebugView::Transmittance => "Transmittance",
-        CloudDebugView::StepHeatmap => "Step Heatmap",
-        CloudDebugView::TemporalWeight => "Temporal Weight",
-        CloudDebugView::Stats => "Stats",
-        CloudDebugView::LayerA => "Layer A",
-        CloudDebugView::LayerB => "Layer B",
-        CloudDebugView::SingleScatter => "Single Scatter",
-        CloudDebugView::MultiScatter => "Multi Scatter",
-        CloudDebugView::ShadowCascade0 => "Cloud Shadow Cascade 0",
-        CloudDebugView::ShadowCascade1 => "Cloud Shadow Cascade 1",
-        CloudDebugView::ShadowCascade2 => "Cloud Shadow Cascade 2",
-        CloudDebugView::ShadowCascade3 => "Cloud Shadow Cascade 3",
-        CloudDebugView::OpaqueShadowCascade0 => "Opaque Shadow Cascade 0",
-        CloudDebugView::OpaqueShadowCascade1 => "Opaque Shadow Cascade 1",
-        CloudDebugView::OpaqueShadowCascade2 => "Opaque Shadow Cascade 2",
-        CloudDebugView::OpaqueShadowCascade3 => "Opaque Shadow Cascade 3",
-    }
-}
-
 fn ocean_debug_view_from_value(value: f32) -> OceanDebugView {
     match value.round().clamp(0.0, 4.0) as u32 {
         1 => OceanDebugView::Normals,
@@ -1699,16 +1199,6 @@ fn ocean_debug_view_from_value(value: f32) -> OceanDebugView {
         3 => OceanDebugView::FoamMask,
         4 => OceanDebugView::Velocity,
         _ => OceanDebugView::None,
-    }
-}
-
-fn ocean_debug_view_label(view: OceanDebugView) -> &'static str {
-    match view {
-        OceanDebugView::None => "None",
-        OceanDebugView::Normals => "Normals",
-        OceanDebugView::WaveHeight => "Wave Height",
-        OceanDebugView::FoamMask => "Foam Mask",
-        OceanDebugView::Velocity => "Velocity",
     }
 }
 

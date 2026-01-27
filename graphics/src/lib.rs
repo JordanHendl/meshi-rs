@@ -5,6 +5,7 @@ pub mod structs;
 pub(crate) mod utils;
 
 use crate::gui::debug::{DebugGui, DebugGuiBindings};
+use crate::render::environment::clouds;
 use dashi::driver::command::*;
 use dashi::execution::CommandRing;
 use dashi::utils::Pool;
@@ -687,12 +688,13 @@ impl RenderEngine {
             RendererSelect::Deferred => "Deferred",
             RendererSelect::Forward => "Forward",
         };
+        self.skybox_settings.register_debug();
+        self.sky_settings.register_debug();
+        self.ocean_settings.register_debug();
+        clouds::register_debug(&mut self.cloud_settings);
+
         let bindings = DebugGuiBindings {
             debug_mode: &mut self.debug_mode as *mut bool,
-            skybox_settings: &mut self.skybox_settings as *mut SkyboxFrameSettings,
-            sky_settings: &mut self.sky_settings as *mut SkyFrameSettings,
-            ocean_settings: &mut self.ocean_settings as *mut OceanFrameSettings,
-            cloud_settings: &mut self.cloud_settings as *mut CloudSettings,
         };
         let debug_output = self
             .debug_gui

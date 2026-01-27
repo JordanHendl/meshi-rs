@@ -59,6 +59,21 @@ pub struct CloudRenderer {
 
 pub fn register_debug(settings: &mut CloudSettings) {
     unsafe {
+        debug_register_radial(
+            PageType::Clouds,
+            "Clouds Enabled",
+            DebugRegistryValue::Bool(&mut settings.enabled),
+            &[
+                DebugRadialOption {
+                    label: "On",
+                    value: 1.0,
+                },
+                DebugRadialOption {
+                    label: "Off",
+                    value: 0.0,
+                },
+            ],
+        );
         debug_register(
             PageType::Clouds,
             Slider::new(0, "Layer A Base Alt", 0.0, 3000.0, 0.0),

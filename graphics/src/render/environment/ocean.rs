@@ -181,6 +181,21 @@ impl OceanFrameSettings {
         unsafe {
             debug_register_radial(
                 PageType::Ocean,
+                "Ocean Enabled",
+                DebugRegistryValue::Bool(&mut self.enabled),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+            );
+            debug_register_radial(
+                PageType::Ocean,
                 "Debug View",
                 DebugRegistryValue::OceanDebugView(&mut self.debug_view),
                 &[

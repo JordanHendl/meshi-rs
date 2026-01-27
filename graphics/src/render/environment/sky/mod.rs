@@ -21,7 +21,9 @@ use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo
 use tare::utils::StagedBuffer;
 use tracing::warn;
 
-use crate::gui::debug::{debug_register, PageType};
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial,
+};
 use crate::gui::Slider;
 #[derive(Clone)]
 pub struct SkyboxInfo {
@@ -112,6 +114,21 @@ impl SkyboxFrameSettings {
 impl SkyFrameSettings {
     pub fn register_debug(&mut self) {
         unsafe {
+            debug_register_radial(
+                PageType::Sky,
+                "Sky Enabled",
+                DebugRegistryValue::Bool(&mut self.enabled),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+            );
             debug_register(
                 PageType::Sky,
                 Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
