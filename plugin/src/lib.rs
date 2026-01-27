@@ -8,7 +8,9 @@ pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo};
 use meshi_physics::SimulationInfo;
 pub use meshi_physics::PhysicsSimulation;
-use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo};
+use meshi_physics::{
+    CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody,
+};
 use meshi_utils::timer::Timer;
 use noren::{meta::DeviceModel, DBInfo};
 use resource_pool::Handle;
@@ -24,7 +26,7 @@ macro_rules! return_if_null {
     };
 }
 
-pub const MESHI_PLUGIN_ABI_VERSION: u32 = 1;
+pub const MESHI_PLUGIN_ABI_VERSION: u32 = 2;
 
 #[repr(C)]
 pub struct MeshiPluginApi {
@@ -96,6 +98,10 @@ pub struct MeshiPluginApi {
     pub physx_collision_shape_sphere: extern "C" fn(f32) -> CollisionShape,
     pub physx_collision_shape_box: extern "C" fn(Vec3) -> CollisionShape,
     pub physx_collision_shape_capsule: extern "C" fn(f32, f32) -> CollisionShape,
+    pub pair_render_physics:
+        extern "C" fn(*mut MeshiEngine, Handle<RenderObject>, Handle<RigidBody>) -> i32,
+    pub unpair_render_physics:
+        extern "C" fn(*mut MeshiEngine, *const Handle<RenderObject>, *const Handle<RigidBody>),
 }
 
 pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
@@ -148,6 +154,8 @@ pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
     physx_collision_shape_sphere: meshi_physx_collision_shape_sphere,
     physx_collision_shape_box: meshi_physx_collision_shape_box,
     physx_collision_shape_capsule: meshi_physx_collision_shape_capsule,
+    pair_render_physics: meshi_pair_render_physics,
+    unpair_render_physics: meshi_unpair_render_physics,
 };
 
 #[no_mangle]
@@ -185,6 +193,7 @@ pub struct MeshiEngine {
     audio: AudioEngine,
     frame_timer: Timer,
     primary_camera: Option<Handle<Camera>>,
+    render_physics_pairs: Vec<RenderPhysicsPair>,
 }
 
 impl MeshiEngine {
@@ -248,6 +257,7 @@ impl MeshiEngine {
             frame_timer: Timer::new(),
             name: appname.to_string(),
             primary_camera: None,
+            render_physics_pairs: Vec::new(),
         }))
     }
 
@@ -256,8 +266,9 @@ impl MeshiEngine {
         let dt = self.frame_timer.elapsed_duration();
         self.frame_timer.start();
         let dt_secs = dt.as_secs_f32();
-        self.render.update(dt_secs);
+        self.sync_render_physics_pairs();
         let _ = self.physics.update(dt_secs);
+        self.render.update(dt_secs);
         self.audio.update(dt_secs);
 
         dt_secs
@@ -266,6 +277,71 @@ impl MeshiEngine {
     fn shut_down(mut self) {
         self.render.shut_down();
     }
+
+    fn sync_render_physics_pairs(&mut self) {
+        if self.render_physics_pairs.is_empty() {
+            return;
+        }
+
+        let mut remaining = Vec::with_capacity(self.render_physics_pairs.len());
+        for pair in self.render_physics_pairs.drain(..) {
+            if !pair.render_handle.valid() || !pair.physics_handle.valid() {
+                continue;
+            }
+
+            if let Some(status) = self.physics.get_rigid_body_status(pair.physics_handle) {
+                let transform = Mat4::from_rotation_translation(status.rotation, status.position);
+                self.render
+                    .set_object_transform(pair.render_handle, &transform);
+                remaining.push(pair);
+            }
+        }
+        self.render_physics_pairs = remaining;
+    }
+
+    fn register_render_physics_pair(
+        &mut self,
+        render_handle: Handle<RenderObject>,
+        physics_handle: Handle<RigidBody>,
+    ) -> bool {
+        if !render_handle.valid() || !physics_handle.valid() {
+            return false;
+        }
+
+        self.remove_pairs_for_render(render_handle);
+        self.remove_pairs_for_physics(physics_handle);
+        self.render_physics_pairs.push(RenderPhysicsPair {
+            render_handle,
+            physics_handle,
+        });
+        true
+    }
+
+    fn unregister_render_physics_pair(
+        &mut self,
+        render_handle: Handle<RenderObject>,
+        physics_handle: Handle<RigidBody>,
+    ) {
+        self.render_physics_pairs.retain(|pair| {
+            pair.render_handle != render_handle || pair.physics_handle != physics_handle
+        });
+    }
+
+    fn remove_pairs_for_render(&mut self, render_handle: Handle<RenderObject>) {
+        self.render_physics_pairs
+            .retain(|pair| pair.render_handle != render_handle);
+    }
+
+    fn remove_pairs_for_physics(&mut self, physics_handle: Handle<RigidBody>) {
+        self.render_physics_pairs
+            .retain(|pair| pair.physics_handle != physics_handle);
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct RenderPhysicsPair {
+    pub render_handle: Handle<RenderObject>,
+    pub physics_handle: Handle<RigidBody>,
 }
 
 #[repr(C)]
@@ -365,6 +441,47 @@ pub extern "C" fn meshi_update(engine: *mut MeshiEngine) -> c_float {
 }
 
 ////////////////////////////////////////////
+//////////////////PAIRING///////////////////
+////////////////////////////////////////////
+
+/// Register a paired render/physics object.
+///
+/// # Safety
+/// `engine` must be a valid pointer returned by [`meshi_make_engine`].
+#[no_mangle]
+pub extern "C" fn meshi_pair_render_physics(
+    engine: *mut MeshiEngine,
+    render_handle: Handle<RenderObject>,
+    physics_handle: Handle<RigidBody>,
+) -> i32 {
+    if engine.is_null() {
+        return 0;
+    }
+    if unsafe { &mut *engine }.register_render_physics_pair(render_handle, physics_handle) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Unregister a paired render/physics object.
+///
+/// # Safety
+/// `engine`, `render_handle`, and `physics_handle` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_unpair_render_physics(
+    engine: *mut MeshiEngine,
+    render_handle: *const Handle<RenderObject>,
+    physics_handle: *const Handle<RigidBody>,
+) {
+    if engine.is_null() || render_handle.is_null() || physics_handle.is_null() {
+        return;
+    }
+    unsafe { &mut *engine }
+        .unregister_render_physics_pair(unsafe { *render_handle }, unsafe { *physics_handle });
+}
+
+////////////////////////////////////////////
 //////////////////GRAPHICS//////////////////
 ////////////////////////////////////////////
 ////////////////////////////////////////////
@@ -434,6 +551,7 @@ pub extern "C" fn meshi_gfx_release_render_object(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine.remove_pairs_for_render(unsafe { *h });
     engine.render.release_object(unsafe { *h });
 }
 
@@ -894,7 +1012,9 @@ pub extern "C" fn meshi_physx_release_rigid_body(
     if engine.is_null() || h.is_null() {
         return;
     }
-    unsafe { &mut (*engine).physics }.release_rigid_body(unsafe { *h });
+    let engine = unsafe { &mut *engine };
+    engine.remove_pairs_for_physics(unsafe { *h });
+    engine.physics.release_rigid_body(unsafe { *h });
 }
 
 /// Apply a force to a rigid body.

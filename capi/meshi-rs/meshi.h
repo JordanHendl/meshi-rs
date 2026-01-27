@@ -78,6 +78,14 @@ typedef struct MeshiPluginApi {
     MeshiCollisionShape (*physx_collision_shape_sphere)(float radius);
     MeshiCollisionShape (*physx_collision_shape_box)(MeshiVec3 dimensions);
     MeshiCollisionShape (*physx_collision_shape_capsule)(float half_height, float radius);
+    int32_t (*pair_render_physics)(
+        struct MeshiEngine* engine,
+        MeshiMeshObjectHandle render_handle,
+        MeshiRigidBodyHandle physics_handle);
+    void (*unpair_render_physics)(
+        struct MeshiEngine* engine,
+        const MeshiMeshObjectHandle* render_handle,
+        const MeshiRigidBodyHandle* physics_handle);
 } MeshiPluginApi;
 
 // Engine
@@ -149,6 +157,14 @@ size_t meshi_physx_get_contacts(struct MeshiEngine* engine, MeshiContactInfo* ou
 MeshiCollisionShape meshi_physx_collision_shape_sphere(float radius);
 MeshiCollisionShape meshi_physx_collision_shape_box(MeshiVec3 dimensions);
 MeshiCollisionShape meshi_physx_collision_shape_capsule(float half_height, float radius);
+int32_t meshi_pair_render_physics(
+    struct MeshiEngine* engine,
+    MeshiMeshObjectHandle render_handle,
+    MeshiRigidBodyHandle physics_handle);
+void meshi_unpair_render_physics(
+    struct MeshiEngine* engine,
+    const MeshiMeshObjectHandle* render_handle,
+    const MeshiRigidBodyHandle* physics_handle);
 
 #ifdef __cplusplus
 } // extern "C"
