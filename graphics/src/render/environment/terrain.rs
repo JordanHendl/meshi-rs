@@ -224,7 +224,7 @@ impl TerrainRenderer {
             })
             .expect("Failed to create terrain meshlet buffer");
 
-        let compute_pipeline = CSOBuilder::new()
+        let compute_pipeline = Some(CSOBuilder::new()
             .shader(Some(
                 include_str!("shaders/environment_terrain.comp.glsl").as_bytes(),
             ))
@@ -250,7 +250,7 @@ impl TerrainRenderer {
                 ShaderResource::StorageBuffer(meshlet_buffer.into()),
             )
             .build(ctx)
-            .ok();
+            .unwrap());
 
         let shaders = compile_terrain_shaders();
         let mut pso_builder = PSOBuilder::new()
@@ -464,10 +464,12 @@ impl TerrainRenderer {
 
     pub fn record_compute(&mut self, dynamic: &mut DynamicAllocator) -> CommandStream<Executable> {
         let stream = CommandStream::new().begin();
+
         if let Some(pipeline) = self.compute_pipeline.as_ref() {
             let mut alloc = dynamic
                 .bump()
                 .expect("Failed to allocate terrain compute params");
+
             let params = &mut alloc.slice::<TerrainComputeParams>()[0];
             *params = TerrainComputeParams {
                 camera_position: self.camera_position,
@@ -486,7 +488,7 @@ impl TerrainRenderer {
                 .prepare_buffer(self.heightmap_buffer, UsageBits::COMPUTE_SHADER)
                 .prepare_buffer(self.meshlet_buffer, UsageBits::COMPUTE_SHADER)
                 .dispatch(&Dispatch {
-                    x: (self.max_tiles + 63) / 64,
+                    x: 1,
                     y: 1,
                     z: 1,
                     pipeline: pipeline.handle,
@@ -496,7 +498,6 @@ impl TerrainRenderer {
                 .unbind_pipeline()
                 .end();
         }
-
         stream.end()
     }
 

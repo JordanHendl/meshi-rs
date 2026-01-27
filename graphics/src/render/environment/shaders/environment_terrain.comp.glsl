@@ -24,15 +24,24 @@ layout(set = 0, binding = 0) readonly buffer ClipmapBuffer {
     ClipmapDescriptor descs[];
 } clipmap;
 
-layout(set = 1, binding = 0) buffer DrawArgsBuffer {
+layout(set = 0, binding = 1) buffer DrawArgsBuffer {
     DrawIndirectArgs args[];
 } draw_args;
 
-layout(set = 2, binding = 0) buffer InstanceBuffer {
+layout(set = 0, binding = 2) buffer InstanceBuffer {
     TerrainInstance instances[];
 } instance_data;
 
-layout(set = 3, binding = 0) readonly buffer TerrainParams {
+
+layout(set = 0, binding = 3) readonly buffer HeightmapBuffer {
+    float heights[];
+} heightmap;
+
+layout(set = 0, binding = 4) readonly buffer MeshletBuffer {
+    vec4 meshlets[];
+} meshlets;
+
+layout(set = 1, binding = 0) readonly buffer TerrainParams {
     vec3 camera_position;
     uint lod_levels;
     float patch_size;
@@ -42,14 +51,6 @@ layout(set = 3, binding = 0) readonly buffer TerrainParams {
     vec2 _padding;
 } params;
 
-layout(set = 4, binding = 0) readonly buffer HeightmapBuffer {
-    float heights[];
-} heightmap;
-
-layout(set = 5, binding = 0) readonly buffer MeshletBuffer {
-    vec4 meshlets[];
-} meshlets;
-
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= params.max_tiles) {
@@ -58,6 +59,7 @@ void main() {
 
     uint resolution = max(params.clipmap_resolution, 1u);
     uint total_tiles = resolution * resolution;
+    return;
     if (idx >= total_tiles) {
         return;
     }

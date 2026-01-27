@@ -309,7 +309,7 @@ impl EnvironmentRenderer {
                     .record_compute(ctx, self.time, self.last_delta_time),
             )
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
-            //            .combine(self.terrain.record_compute(&mut self.dynamic))
+            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
     }
 
