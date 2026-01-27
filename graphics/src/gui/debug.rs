@@ -25,6 +25,7 @@ enum DebugGraphicsTab {
     Sky,
     Ocean,
     Clouds,
+    Shadow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub enum PageType {
     Sky,
     Ocean,
     Clouds,
+    Shadow,
     Physics,
     Audio,
 }
@@ -752,7 +754,6 @@ impl DebugGui {
             let subtab_height = 22.0 * ui_scale;
             let subtab_padding = 12.0 * ui_scale;
             let subtab_gap = 6.0 * ui_scale;
-            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / 3.0;
             let subtab_y = debug_title_bar_pos.y
                 + debug_title_bar_height
                 + 6.0 * ui_scale
@@ -763,7 +764,10 @@ impl DebugGui {
                 DebugGraphicsTab::Sky,
                 DebugGraphicsTab::Ocean,
                 DebugGraphicsTab::Clouds,
+                DebugGraphicsTab::Shadow,
             ];
+            let subtab_width =
+                (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
             for (index, tab) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
                 let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
@@ -1163,14 +1167,16 @@ impl DebugGui {
         if self.debug_tab == DebugTab::Graphics {
             let subtab_padding = 12.0 * ui_scale;
             let subtab_gap = 6.0 * ui_scale;
-            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / 3.0;
             let subtab_y = tab_y + tab_height + 6.0 * ui_scale;
             let subtab_x = debug_panel_position.x + subtab_padding;
             let subtabs = [
                 (DebugGraphicsTab::Sky, "Sky"),
                 (DebugGraphicsTab::Ocean, "Ocean"),
                 (DebugGraphicsTab::Clouds, "Clouds"),
+                (DebugGraphicsTab::Shadow, "Shadow"),
             ];
+            let subtab_width =
+                (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
             for (index, (tab, label)) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
                 let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
@@ -1269,6 +1275,21 @@ impl DebugGui {
                         ));
                     }
                 }
+                DebugGraphicsTab::Shadow => {
+                    if let Some(clouds) = unsafe { bindings.cloud_settings.as_ref() } {
+                        info_lines.push(format!("Cloud shadow enabled: {}", clouds.shadow.enabled));
+                        info_lines
+                            .push(format!("Cloud shadow res: {}", clouds.shadow.resolution));
+                        info_lines.push(format!(
+                            "Cloud shadow cascades: {}",
+                            clouds.shadow.cascades.cascade_count
+                        ));
+                        info_lines.push(format!(
+                            "Shadow debug view: {}",
+                            cloud_debug_view_label(clouds.debug_view)
+                        ));
+                    }
+                }
             }
         }
 
@@ -1277,6 +1298,7 @@ impl DebugGui {
                 DebugGraphicsTab::Sky => PageType::Sky,
                 DebugGraphicsTab::Ocean => PageType::Ocean,
                 DebugGraphicsTab::Clouds => PageType::Clouds,
+                DebugGraphicsTab::Shadow => PageType::Shadow,
             }
         } else {
             match self.debug_tab {
@@ -1338,7 +1360,8 @@ impl DebugGui {
         };
         let mut content_height_total = info_lines.len() as f32 * line_height + 8.0 * ui_scale;
         let mut toggle_height = 0.0;
-        if self.debug_tab == DebugTab::Graphics {
+        if self.debug_tab == DebugTab::Graphics && self.debug_graphics_tab != DebugGraphicsTab::Shadow
+        {
             toggle_height = toggle_metrics.padding[1] * 2.0
                 + 2.0 * toggle_metrics.item_height
                 + toggle_metrics.item_gap;
@@ -1397,13 +1420,15 @@ impl DebugGui {
         let mut slider_start_y = toggle_start_y;
 
         let mut debug_toggle_layout = RadialButtonLayout::default();
-        if self.debug_tab == DebugTab::Graphics {
+        if self.debug_tab == DebugTab::Graphics && self.debug_graphics_tab != DebugGraphicsTab::Shadow
+        {
             let (toggle_label, toggle_enabled, on_id, off_id) = match self.debug_graphics_tab {
                 DebugGraphicsTab::Sky => ("Sky", self.toggle_values.sky_enabled, 6101, 6102),
                 DebugGraphicsTab::Ocean => ("Ocean", self.toggle_values.ocean_enabled, 6201, 6202),
                 DebugGraphicsTab::Clouds => {
                     ("Clouds", self.toggle_values.cloud_enabled, 6301, 6302)
                 }
+                DebugGraphicsTab::Shadow => ("Shadow", false, 0, 0),
             };
             let toggle_buttons = vec![
                 RadialButton::new(on_id, format!("{toggle_label} On"), toggle_enabled),

@@ -306,7 +306,7 @@ pub fn register_debug(settings: &mut CloudSettings) {
             "Atmos Haze B",
         );
         debug_register_radial(
-            PageType::Clouds,
+            PageType::Shadow,
             "Shadow Enabled",
             DebugRegistryValue::Bool(&mut settings.shadow.enabled),
             &[
@@ -321,25 +321,25 @@ pub fn register_debug(settings: &mut CloudSettings) {
             ],
         );
         debug_register_int(
-            PageType::Clouds,
+            PageType::Shadow,
             Slider::new_int(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
             &mut settings.shadow.resolution as *mut u32,
             "Shadow Resolution",
         );
         debug_register(
-            PageType::Clouds,
+            PageType::Shadow,
             Slider::new(0, "Shadow Extent", 1000.0, 200000.0, 0.0),
             &mut settings.shadow.extent as *mut f32,
             "Shadow Extent",
         );
         debug_register(
-            PageType::Clouds,
+            PageType::Shadow,
             Slider::new(0, "Shadow Strength", 0.0, 2.0, 0.0),
             &mut settings.shadow.strength as *mut f32,
             "Shadow Strength",
         );
         debug_register_radial(
-            PageType::Clouds,
+            PageType::Shadow,
             "Shadow Cascades",
             DebugRegistryValue::U32(&mut settings.shadow.cascades.cascade_count),
             &[
@@ -362,7 +362,7 @@ pub fn register_debug(settings: &mut CloudSettings) {
             ],
         );
         debug_register(
-            PageType::Clouds,
+            PageType::Shadow,
             Slider::new(0, "Shadow Split Lambda", 0.0, 1.0, 0.0),
             &mut settings.shadow.cascades.split_lambda as *mut f32,
             "Shadow Split Lambda",
@@ -405,10 +405,6 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 1.0,
                 },
                 DebugRadialOption {
-                    label: "Shadow Map",
-                    value: 2.0,
-                },
-                DebugRadialOption {
                     label: "Transmittance",
                     value: 3.0,
                 },
@@ -443,13 +439,17 @@ pub fn register_debug(settings: &mut CloudSettings) {
             ],
         );
         debug_register_radial(
-            PageType::Clouds,
-            "Shadow Cascades",
+            PageType::Shadow,
+            "Shadow Debug View",
             DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
             &[
                 DebugRadialOption {
                     label: "None",
                     value: 0.0,
+                },
+                DebugRadialOption {
+                    label: "Shadow Map",
+                    value: 2.0,
                 },
                 DebugRadialOption {
                     label: "Cloud Cascade 0",

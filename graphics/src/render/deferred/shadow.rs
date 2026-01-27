@@ -121,12 +121,20 @@ impl ShadowPass {
         self.resolution
     }
 
+    pub fn resolution_mut(&mut self) -> &mut u32 {
+        &mut self.resolution
+    }
+
     pub fn sample_count(&self) -> SampleCount {
         self.sample_count
     }
 
     pub fn cascades(&self) -> ShadowCascadeSettings {
         self.cascades
+    }
+
+    pub fn cascades_mut(&mut self) -> &mut ShadowCascadeSettings {
+        &mut self.cascades
     }
 
     pub fn depth_clear_value(&self) -> ClearValue {

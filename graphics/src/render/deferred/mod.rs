@@ -8,7 +8,11 @@ use super::scene::GPUScene;
 use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
-use crate::gui::GuiFrame;
+use crate::gui::{GuiFrame, Slider};
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_int,
+    debug_register_radial,
+};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
@@ -1021,7 +1025,75 @@ impl DeferredRenderer {
         self.subrender.environment.initialize_database(db);
         self.subrender.environment.register_debug();
         self.subrender.clouds.register_debug();
+        self.register_shadow_debug();
         self.text.initialize_database(db);
+    }
+
+    fn register_shadow_debug(&mut self) {
+        let shadow = &mut self.shadow;
+        let shadow_resolution = shadow.resolution_mut() as *mut u32;
+        let cascades = shadow.cascades_mut();
+        unsafe {
+            debug_register_int(
+                PageType::Shadow,
+                Slider::new_int(0, "Opaque Shadow Resolution", 256.0, 4096.0, 0.0),
+                shadow_resolution,
+                "Opaque Shadow Resolution",
+            );
+            debug_register_radial(
+                PageType::Shadow,
+                "Opaque Shadow Cascades",
+                DebugRegistryValue::U32(&mut cascades.cascade_count),
+                &[
+                    DebugRadialOption {
+                        label: "1",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "2",
+                        value: 2.0,
+                    },
+                    DebugRadialOption {
+                        label: "3",
+                        value: 3.0,
+                    },
+                    DebugRadialOption {
+                        label: "4",
+                        value: 4.0,
+                    },
+                ],
+            );
+            debug_register(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Split Lambda", 0.0, 1.0, 0.0),
+                &mut cascades.split_lambda as *mut f32,
+                "Opaque Split Lambda",
+            );
+            debug_register(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 0 Extent", 100.0, 200000.0, 0.0),
+                &mut cascades.cascade_extents[0] as *mut f32,
+                "Opaque Cascade 0 Extent",
+            );
+            debug_register(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 1 Extent", 100.0, 200000.0, 0.0),
+                &mut cascades.cascade_extents[1] as *mut f32,
+                "Opaque Cascade 1 Extent",
+            );
+            debug_register(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 2 Extent", 100.0, 200000.0, 0.0),
+                &mut cascades.cascade_extents[2] as *mut f32,
+                "Opaque Cascade 2 Extent",
+            );
+            debug_register(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 3 Extent", 100.0, 200000.0, 0.0),
+                &mut cascades.cascade_extents[3] as *mut f32,
+                "Opaque Cascade 3 Extent",
+            );
+        }
     }
 
     pub fn register_object(
