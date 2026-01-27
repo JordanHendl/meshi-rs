@@ -37,11 +37,12 @@ pub struct TerrainInfo {
 
 impl Default for TerrainInfo {
     fn default() -> Self {
+        let clipmap_resolution = 8;
         Self {
             patch_size: 64.0,
             lod_levels: 4,
-            clipmap_resolution: 8,
-            max_tiles: 16,
+            clipmap_resolution,
+            max_tiles: clipmap_resolution * clipmap_resolution,
         }
     }
 }
@@ -73,8 +74,9 @@ struct TerrainComputeParams {
     lod_levels: u32,
     patch_size: f32,
     max_tiles: u32,
+    clipmap_resolution: u32,
     height_scale: f32,
-    _padding: f32,
+    _padding: [f32; 2],
 }
 
 #[repr(C)]
@@ -84,8 +86,9 @@ struct TerrainDrawParams {
     lod_levels: u32,
     patch_size: f32,
     max_tiles: u32,
+    clipmap_resolution: u32,
     height_scale: f32,
-    _padding: f32,
+    _padding: [f32; 2],
 }
 
 pub struct TerrainRenderer {
@@ -98,6 +101,7 @@ pub struct TerrainRenderer {
     meshlet_buffer: Handle<Buffer>,
     patch_size: f32,
     lod_levels: u32,
+    clipmap_resolution: u32,
     max_tiles: u32,
     camera_position: Vec3,
     use_depth: bool,
@@ -326,6 +330,7 @@ impl TerrainRenderer {
             meshlet_buffer,
             patch_size: terrain_info.patch_size,
             lod_levels: terrain_info.lod_levels,
+            clipmap_resolution: terrain_info.clipmap_resolution,
             max_tiles: terrain_info.max_tiles,
             camera_position: Vec3::ZERO,
             use_depth: info.use_depth,
@@ -469,8 +474,9 @@ impl TerrainRenderer {
                 lod_levels: self.lod_levels,
                 patch_size: self.patch_size,
                 max_tiles: self.max_tiles,
+                clipmap_resolution: self.clipmap_resolution,
                 height_scale: 5.0,
-                _padding: 0.0,
+                _padding: [0.0; 2],
             };
 
             return stream
@@ -544,8 +550,9 @@ impl TerrainRenderer {
             lod_levels: self.lod_levels,
             patch_size: self.patch_size,
             max_tiles: self.max_tiles,
+            clipmap_resolution: self.clipmap_resolution,
             height_scale: 5.0,
-            _padding: 0.0,
+            _padding: [0.0; 2],
         };
 
         CommandStream::<PendingGraphics>::subdraw()

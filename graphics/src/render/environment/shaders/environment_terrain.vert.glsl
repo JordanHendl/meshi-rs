@@ -14,8 +14,9 @@ layout(set = 1, binding = 0) readonly buffer TerrainParams {
     uint lod_levels;
     float patch_size;
     uint max_tiles;
+    uint clipmap_resolution;
     float height_scale;
-    float _padding;
+    vec2 _padding;
 } params;
 
 layout(set = 2, binding = 0) readonly buffer HeightmapBuffer {
@@ -40,7 +41,10 @@ vec2 quad_vertex(uint vertex_id) {
 void main() {
     TerrainInstance instance = instance_data.instances[gl_InstanceIndex];
     vec2 uv = quad_vertex(gl_VertexIndex);
-    uint height_index = uint(uv.x * 1.0) + uint(uv.y * 1.0);
+    uint resolution = max(params.clipmap_resolution, 1u);
+    uint tile_x = gl_InstanceIndex % resolution;
+    uint tile_y = gl_InstanceIndex / resolution;
+    uint height_index = tile_x + tile_y * resolution;
     float height = heightmap.heights[height_index] * params.height_scale;
     vec2 local = (uv * 2.0 - 1.0) * params.patch_size;
     vec3 world = instance.position + vec3(local.x, height, local.y);

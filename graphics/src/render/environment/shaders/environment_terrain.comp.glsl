@@ -37,8 +37,9 @@ layout(set = 3, binding = 0) readonly buffer TerrainParams {
     uint lod_levels;
     float patch_size;
     uint max_tiles;
+    uint clipmap_resolution;
     float height_scale;
-    float _padding;
+    vec2 _padding;
 } params;
 
 layout(set = 4, binding = 0) readonly buffer HeightmapBuffer {
@@ -55,9 +56,18 @@ void main() {
         return;
     }
 
+    uint resolution = max(params.clipmap_resolution, 1u);
+    uint total_tiles = resolution * resolution;
+    if (idx >= total_tiles) {
+        return;
+    }
+
     float spacing = params.patch_size;
-    float offset = float(idx) * spacing;
-    instance_data.instances[idx].position = vec3(offset, 0.0, 0.0);
+    uint tile_x = idx % resolution;
+    uint tile_y = idx / resolution;
+    vec2 grid_offset = (vec2(float(tile_x), float(tile_y)) - (float(resolution) - 1.0) * 0.5) * spacing;
+    vec2 grid_center = params.camera_position.xz;
+    instance_data.instances[idx].position = vec3(grid_center.x + grid_offset.x, 0.0, grid_center.y + grid_offset.y);
     instance_data.instances[idx].lod = idx % max(params.lod_levels, 1u);
 
     if (idx == 0) {
