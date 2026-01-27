@@ -1,5 +1,7 @@
+use dashi::Handle;
 use glam::{Vec2, Vec4, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
+use meshi_ffi_structs::{LightFlags, LightInfo, LightType};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -9,6 +11,7 @@ use crate::gui::{
     RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
     SliderState, SliderValueFormat,
 };
+use crate::Light;
 use crate::render::environment::ocean::OceanDebugView;
 use crate::structs::{CloudDebugView, CloudResolutionScale};
 
@@ -25,6 +28,7 @@ enum DebugGraphicsTab {
     Ocean,
     Clouds,
     Shadow,
+    Lighting,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +37,7 @@ pub enum PageType {
     Ocean,
     Clouds,
     Shadow,
+    Lighting,
     Physics,
     Audio,
 }
@@ -72,6 +77,13 @@ pub enum DebugRegistryValue {
     CloudResolutionScale(*mut CloudResolutionScale),
     CloudDebugView(*mut CloudDebugView),
     OceanDebugView(*mut OceanDebugView),
+}
+
+#[derive(Clone)]
+pub struct DebugLightEntry {
+    pub handle: Handle<Light>,
+    pub name: String,
+    pub info: LightInfo,
 }
 
 impl DebugRegistryValue {
@@ -511,7 +523,7 @@ fn mark_page_dirty(
         PageType::Clouds | PageType::Shadow => {
             *cloud_dirty = true;
         }
-        PageType::Physics | PageType::Audio => {}
+        PageType::Lighting | PageType::Physics | PageType::Audio => {}
     }
 }
 
@@ -520,8 +532,9 @@ enum DragTarget {
     DebugPanel,
 }
 
-pub struct DebugGuiBindings {
+pub struct DebugGuiBindings<'a> {
     pub debug_mode: *mut bool,
+    pub lights: &'a [DebugLightEntry],
 }
 
 pub struct DebugGuiOutput {
@@ -620,7 +633,7 @@ impl DebugGui {
         viewport: Vec2,
         renderer_label: &str,
         average_frame_time_ms: Option<f64>,
-        bindings: DebugGuiBindings,
+        bindings: DebugGuiBindings<'_>,
     ) -> DebugGuiOutput {
         if self.debug_toggle_requested {
             self.debug_toggle_requested = false;
@@ -753,6 +766,7 @@ impl DebugGui {
                 DebugGraphicsTab::Ocean,
                 DebugGraphicsTab::Clouds,
                 DebugGraphicsTab::Shadow,
+                DebugGraphicsTab::Lighting,
             ];
             let subtab_width =
                 (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
@@ -934,6 +948,7 @@ impl DebugGui {
                 (DebugGraphicsTab::Ocean, "Ocean"),
                 (DebugGraphicsTab::Clouds, "Clouds"),
                 (DebugGraphicsTab::Shadow, "Shadow"),
+                (DebugGraphicsTab::Lighting, "Lighting"),
             ];
             let subtab_width =
                 (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
@@ -984,6 +999,14 @@ impl DebugGui {
             format!("FPS: {fps_text} ({avg_ms_text} ms avg)"),
             format!("Viewport: {:.0} x {:.0}", viewport.x, viewport.y),
         ];
+        if self.debug_tab == DebugTab::Graphics
+            && self.debug_graphics_tab == DebugGraphicsTab::Lighting
+        {
+            info_lines.push(format!("Lights: {}", bindings.lights.len()));
+            for entry in bindings.lights {
+                info_lines.extend(build_light_info_lines(entry));
+            }
+        }
 
         let page_type = if self.debug_tab == DebugTab::Graphics {
             match self.debug_graphics_tab {
@@ -991,6 +1014,7 @@ impl DebugGui {
                 DebugGraphicsTab::Ocean => PageType::Ocean,
                 DebugGraphicsTab::Clouds => PageType::Clouds,
                 DebugGraphicsTab::Shadow => PageType::Shadow,
+                DebugGraphicsTab::Lighting => PageType::Lighting,
             }
         } else {
             match self.debug_tab {
@@ -999,8 +1023,14 @@ impl DebugGui {
                 DebugTab::Graphics => PageType::Sky,
             }
         };
-        let debug_radials = unsafe { debug_registry_radials(page_type) };
-        let debug_sliders = unsafe { debug_registry_sliders(page_type) };
+        let (debug_radials, debug_sliders) = if page_type == PageType::Lighting {
+            (Vec::new(), Vec::new())
+        } else {
+            (
+                unsafe { debug_registry_radials(page_type) },
+                unsafe { debug_registry_sliders(page_type) },
+            )
+        };
         let content_top = text_start.y;
         let content_bottom = debug_taskbar_pos.y - 8.0 * ui_scale;
         let content_height = (content_bottom - content_top).max(0.0);
@@ -1137,7 +1167,10 @@ impl DebugGui {
         let mut debug_slider_layout = SliderLayout::default();
         if debug_sliders.is_empty() && debug_radials.is_empty() {
             let empty_y = slider_start_y + content_scroll;
-            if empty_y + line_height >= content_top && empty_y <= content_bottom {
+            if page_type != PageType::Lighting
+                && empty_y + line_height >= content_top
+                && empty_y <= content_bottom
+            {
                 gui.submit_text(GuiTextDraw {
                     text: "No debug data available.".to_string(),
                     position: [text_start.x, empty_y],
@@ -1319,6 +1352,94 @@ impl DebugGui {
         self.debug_param_radial_layouts.clear();
         self.scroll_offset = 0.0;
         self.scroll_delta = 0.0;
+    }
+}
+
+fn build_light_info_lines(entry: &DebugLightEntry) -> Vec<String> {
+    let info = entry.info;
+    let mut lines = Vec::new();
+    lines.push(format!("Light: {} ({:?})", entry.name, entry.handle));
+    lines.push(format!("  Type: {}", light_type_label(info.ty)));
+    lines.push(format!("  Flags: {}", light_flags_label(info.flags)));
+    lines.push(format!("  Intensity: {:.3}", info.intensity));
+    lines.push(format!(
+        "  Color: {:.3}, {:.3}, {:.3}",
+        info.color_r, info.color_g, info.color_b
+    ));
+
+    match info.ty {
+        LightType::Directional => {
+            lines.push(format!(
+                "  Direction: {:.3}, {:.3}, {:.3}",
+                info.dir_x, info.dir_y, info.dir_z
+            ));
+        }
+        LightType::Point => {
+            lines.push(format!(
+                "  Position: {:.2}, {:.2}, {:.2}",
+                info.pos_x, info.pos_y, info.pos_z
+            ));
+            lines.push(format!("  Range: {:.2}", info.range));
+        }
+        LightType::Spot => {
+            lines.push(format!(
+                "  Position: {:.2}, {:.2}, {:.2}",
+                info.pos_x, info.pos_y, info.pos_z
+            ));
+            lines.push(format!(
+                "  Direction: {:.3}, {:.3}, {:.3}",
+                info.dir_x, info.dir_y, info.dir_z
+            ));
+            lines.push(format!("  Range: {:.2}", info.range));
+            lines.push(format!(
+                "  Cone: {:.1}° / {:.1}°",
+                info.spot_inner_angle_rad.to_degrees(),
+                info.spot_outer_angle_rad.to_degrees()
+            ));
+        }
+        LightType::RectArea => {
+            lines.push(format!(
+                "  Position: {:.2}, {:.2}, {:.2}",
+                info.pos_x, info.pos_y, info.pos_z
+            ));
+            lines.push(format!(
+                "  Direction: {:.3}, {:.3}, {:.3}",
+                info.dir_x, info.dir_y, info.dir_z
+            ));
+            lines.push(format!("  Range: {:.2}", info.range));
+            lines.push(format!(
+                "  Size: {:.2} x {:.2}",
+                info.rect_half_width * 2.0,
+                info.rect_half_height * 2.0
+            ));
+        }
+    }
+
+    lines
+}
+
+fn light_type_label(ty: LightType) -> &'static str {
+    match ty {
+        LightType::Directional => "Directional",
+        LightType::Point => "Point",
+        LightType::Spot => "Spot",
+        LightType::RectArea => "Rect Area",
+    }
+}
+
+fn light_flags_label(flags: u32) -> String {
+    let parsed = LightFlags::from_bits_truncate(flags);
+    let mut labels = Vec::new();
+    if parsed.contains(LightFlags::CASTS_SHADOWS) {
+        labels.push("Shadows");
+    }
+    if parsed.contains(LightFlags::VOLUMETRIC) {
+        labels.push("Volumetric");
+    }
+    if labels.is_empty() {
+        "None".to_string()
+    } else {
+        labels.join(", ")
     }
 }
 

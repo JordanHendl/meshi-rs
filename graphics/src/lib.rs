@@ -4,7 +4,7 @@ mod render;
 pub mod structs;
 pub(crate) mod utils;
 
-use crate::gui::debug::{DebugGui, DebugGuiBindings};
+use crate::gui::debug::{DebugGui, DebugGuiBindings, DebugLightEntry};
 use crate::render::environment::clouds;
 use dashi::driver::command::*;
 use dashi::execution::CommandRing;
@@ -77,7 +77,7 @@ pub struct RenderEngine {
     cloud_settings: CloudSettings,
     terrain_chunk_hashes: HashMap<String, u64>,
     terrain_render_objects: HashMap<String, TerrainRenderObject>,
-    light_cache: Vec<(Handle<Light>, LightInfo)>,
+    light_cache: Vec<CachedLightEntry>,
     spot_shadow_light: Option<render::SpotShadowLight>,
 }
 
@@ -104,16 +104,23 @@ struct EnvironmentLightingState {
     settings: EnvironmentLightingSettings,
 }
 
+struct CachedLightEntry {
+    handle: Handle<Light>,
+    info: LightInfo,
+    name: String,
+}
+
 impl RenderEngine {
     fn refresh_spot_shadow_light(&mut self) {
         let mut selected: Option<render::SpotShadowLight> = None;
-        for (handle, info) in &self.light_cache {
+        for entry in &self.light_cache {
+            let info = entry.info;
             if info.ty == LightType::Spot
                 && (info.flags & LightFlags::CASTS_SHADOWS.bits()) != 0
             {
                 selected = Some(render::SpotShadowLight {
-                    handle: *handle,
-                    info: *info,
+                    handle: entry.handle,
+                    info,
                 });
                 break;
             }
@@ -122,15 +129,27 @@ impl RenderEngine {
         self.renderer.set_spot_shadow_light(selected);
     }
 
-    fn update_cached_light_info(&mut self, handle: Handle<Light>, info: LightInfo) {
+    fn update_cached_light_info(
+        &mut self,
+        handle: Handle<Light>,
+        info: LightInfo,
+        name: Option<String>,
+    ) {
         if let Some(entry) = self
             .light_cache
             .iter_mut()
-            .find(|(cached_handle, _)| *cached_handle == handle)
+            .find(|entry| entry.handle == handle)
         {
-            entry.1 = info;
+            entry.info = info;
+            if let Some(name) = name {
+                entry.name = name;
+            }
         } else {
-            self.light_cache.push((handle, info));
+            self.light_cache.push(CachedLightEntry {
+                handle,
+                info,
+                name: name.unwrap_or_else(|| default_light_name(handle)),
+            });
         }
     }
 
@@ -138,7 +157,7 @@ impl RenderEngine {
         if let Some(entry) = self
             .light_cache
             .iter_mut()
-            .find(|(cached_handle, _)| *cached_handle == handle)
+            .find(|entry| entry.handle == handle)
         {
             let (_, rotation, translation) = transform.to_scale_rotation_translation();
             let mut direction = rotation * Vec3::NEG_Z;
@@ -146,12 +165,29 @@ impl RenderEngine {
                 direction = direction.normalize();
             }
 
-            entry.1.pos_x = translation.x;
-            entry.1.pos_y = translation.y;
-            entry.1.pos_z = translation.z;
-            entry.1.dir_x = direction.x;
-            entry.1.dir_y = direction.y;
-            entry.1.dir_z = direction.z;
+            entry.info.pos_x = translation.x;
+            entry.info.pos_y = translation.y;
+            entry.info.pos_z = translation.z;
+            entry.info.dir_x = direction.x;
+            entry.info.dir_y = direction.y;
+            entry.info.dir_z = direction.z;
+        }
+    }
+
+    fn set_light_debug_name(&mut self, handle: Handle<Light>, name: impl Into<String>) {
+        let name = name.into();
+        if let Some(entry) = self
+            .light_cache
+            .iter_mut()
+            .find(|entry| entry.handle == handle)
+        {
+            entry.name = name;
+        } else {
+            self.light_cache.push(CachedLightEntry {
+                handle,
+                info: empty_light_info(),
+                name,
+            });
         }
     }
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
@@ -285,16 +321,16 @@ impl RenderEngine {
     pub fn set_environment_lighting(&mut self, settings: EnvironmentLightingSettings) {
         self.sky_settings = settings.sky.clone();
         let sky_settings = self.sky_settings.clone();
-        let (sun_direction, moon_direction) = resolve_sun_moon_direction(&sky_settings);
+        let lighting = compute_celestial_lighting(&sky_settings);
         let sun_info = directional_light_info(
-            sun_direction,
+            -lighting.sun_dir,
             sky_settings.sun_color,
-            settings.sun_light_intensity,
+            settings.sun_light_intensity * lighting.sun_intensity,
         );
         let moon_info = directional_light_info(
-            moon_direction,
+            -lighting.moon_dir,
             sky_settings.moon_color,
-            settings.moon_light_intensity,
+            settings.moon_light_intensity * lighting.moon_intensity,
         );
 
         let existing_lights = if let Some(state) = &mut self.environment_lighting {
@@ -307,9 +343,13 @@ impl RenderEngine {
         if let Some((sun_light, moon_light)) = existing_lights {
             self.set_light_info(sun_light, &sun_info);
             self.set_light_info(moon_light, &moon_info);
+            self.set_light_debug_name(sun_light, "Sun");
+            self.set_light_debug_name(moon_light, "Moon");
         } else {
             let sun_light = self.register_light(&sun_info);
             let moon_light = self.register_light(&moon_info);
+            self.set_light_debug_name(sun_light, "Sun");
+            self.set_light_debug_name(moon_light, "Moon");
             self.environment_lighting = Some(EnvironmentLightingState {
                 sun_light,
                 moon_light,
@@ -317,6 +357,10 @@ impl RenderEngine {
             });
         }
 
+        self.cloud_settings.sun_direction = lighting.sun_dir;
+        self.cloud_settings.sun_radiance =
+            sky_settings.sun_color * (settings.sun_light_intensity * lighting.sun_intensity);
+        self.renderer.set_cloud_settings(self.cloud_settings);
         self.renderer.set_sky_settings(sky_settings);
     }
 
@@ -350,7 +394,7 @@ impl RenderEngine {
             )
             .unwrap();
 
-        self.update_cached_light_info(h, *info);
+        self.update_cached_light_info(h, *info, Some(default_light_name(h)));
         self.refresh_spot_shadow_light();
 
         h
@@ -401,7 +445,7 @@ impl RenderEngine {
             )
             .unwrap();
 
-        self.update_cached_light_info(handle, *info);
+        self.update_cached_light_info(handle, *info, None);
         self.refresh_spot_shadow_light();
     }
 
@@ -420,7 +464,7 @@ impl RenderEngine {
             )
             .unwrap();
 
-        self.light_cache.retain(|(cached_handle, _)| *cached_handle != handle);
+        self.light_cache.retain(|entry| entry.handle != handle);
         self.refresh_spot_shadow_light();
     }
 
@@ -693,8 +737,18 @@ impl RenderEngine {
         self.ocean_settings.register_debug();
         clouds::register_debug(&mut self.cloud_settings);
 
+        let light_entries = self
+            .light_cache
+            .iter()
+            .map(|entry| DebugLightEntry {
+                handle: entry.handle,
+                name: entry.name.clone(),
+                info: entry.info,
+            })
+            .collect::<Vec<_>>();
         let bindings = DebugGuiBindings {
             debug_mode: &mut self.debug_mode as *mut bool,
+            lights: &light_entries,
         };
         let debug_output = self
             .debug_gui
@@ -732,19 +786,23 @@ impl RenderEngine {
             None
         };
         if let Some((settings, sun_light, moon_light)) = light_updates {
-            let (sun_direction, moon_direction) = resolve_sun_moon_direction(&settings.sky);
+            let lighting = compute_celestial_lighting(&settings.sky);
             let sun_info = directional_light_info(
-                sun_direction,
+                -lighting.sun_dir,
                 settings.sky.sun_color,
-                settings.sun_light_intensity,
+                settings.sun_light_intensity * lighting.sun_intensity,
             );
             let moon_info = directional_light_info(
-                moon_direction,
+                -lighting.moon_dir,
                 settings.sky.moon_color,
-                settings.moon_light_intensity,
+                settings.moon_light_intensity * lighting.moon_intensity,
             );
             self.set_light_info(sun_light, &sun_info);
             self.set_light_info(moon_light, &moon_info);
+            self.cloud_settings.sun_direction = lighting.sun_dir;
+            self.cloud_settings.sun_radiance =
+                settings.sky.sun_color * (settings.sun_light_intensity * lighting.sun_intensity);
+            self.renderer.set_cloud_settings(self.cloud_settings);
         }
 
 
@@ -1140,6 +1198,7 @@ impl RenderEngine {
 }
 
 fn directional_light_info(direction: Vec3, color: Vec3, intensity: f32) -> LightInfo {
+    let direction = direction.normalize_or_zero();
     LightInfo {
         ty: LightType::Directional,
         flags: LightFlags::CASTS_SHADOWS.bits(),
@@ -1178,6 +1237,65 @@ fn resolve_sun_moon_direction(settings: &SkyFrameSettings) -> (Vec3, Vec3) {
         true,
     );
     (sun_dir, moon_dir)
+}
+
+struct CelestialLighting {
+    sun_dir: Vec3,
+    moon_dir: Vec3,
+    sun_intensity: f32,
+    moon_intensity: f32,
+}
+
+fn compute_celestial_lighting(settings: &SkyFrameSettings) -> CelestialLighting {
+    let (sun_dir, moon_dir) = resolve_sun_moon_direction(settings);
+    let sun_height = sun_dir.y.clamp(-1.0, 1.0);
+    let day_factor = smoothstep(0.0, 0.25, sun_height);
+    let night_factor = 1.0 - smoothstep(-0.2, 0.05, sun_height);
+    let twilight_factor = (1.0 - day_factor - night_factor).clamp(0.0, 1.0);
+
+    let sun_intensity_scale = day_factor + twilight_factor * 0.6;
+    let moon_intensity_scale = night_factor + twilight_factor * 0.5;
+
+    CelestialLighting {
+        sun_dir,
+        moon_dir,
+        sun_intensity: settings.sun_intensity * sun_intensity_scale,
+        moon_intensity: settings.moon_intensity * moon_intensity_scale,
+    }
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn default_light_name(handle: Handle<Light>) -> String {
+    format!("Light {:?}", handle)
+}
+
+fn empty_light_info() -> LightInfo {
+    LightInfo {
+        ty: LightType::Directional,
+        flags: LightFlags::NONE.bits(),
+        intensity: 0.0,
+        range: 0.0,
+        color_r: 0.0,
+        color_g: 0.0,
+        color_b: 0.0,
+        pos_x: 0.0,
+        pos_y: 0.0,
+        pos_z: 0.0,
+        dir_x: 0.0,
+        dir_y: 0.0,
+        dir_z: 0.0,
+        spot_inner_angle_rad: 0.0,
+        spot_outer_angle_rad: 0.0,
+        rect_half_width: 0.0,
+        rect_half_height: 0.0,
+    }
 }
 
 fn resolve_celestial_direction(
