@@ -99,6 +99,7 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     uint max_tile_radius;
     uint far_tile_radius;
     float tile_height_step;
+    uint endless;
     float time;
     vec2 wind_dir;
     float wind_speed;
@@ -233,6 +234,9 @@ void main() {
     float far_radius_f = ceil(far_plane / tile_size);
     uint far_radius = uint(clamp(far_radius_f, float(base_radius), float(far_radius_cap)));
     uint tile_radius = min(max(height_radius, far_radius), max_radius);
+    if (params.endless != 0u) {
+        tile_radius = max_radius;
+    }
     // --- Clipmap selection ---
     // Choose the active tile radius based on camera height and far plane.
     uint tile_count = tile_radius * 2 + 1;

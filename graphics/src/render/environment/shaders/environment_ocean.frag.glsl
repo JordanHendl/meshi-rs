@@ -21,6 +21,7 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     uint max_tile_radius;
     uint far_tile_radius;
     float tile_height_step;
+    uint endless;
     float time;
     vec2 wind_dir;
     float wind_speed;

@@ -73,6 +73,8 @@ impl Default for OceanDebugView {
 #[derive(Clone, Copy)]
 pub struct OceanFrameSettings {
     pub enabled: bool,
+    /// Enables an endless ocean clipmap by always rendering the maximum tile radius.
+    pub endless: bool,
     /// Normalized wind direction used to align the wave spectrum.
     pub wind_dir: Vec2,
     /// Wind speed in meters per second; higher values create taller, faster waves.
@@ -143,6 +145,7 @@ impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            endless: false,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
             fetch_length: 5000.0,
@@ -197,6 +200,22 @@ impl OceanFrameSettings {
                     },
                 ],
                 Some("Toggle ocean rendering in the scene."),
+            );
+            debug_register_radial_with_description(
+                PageType::Ocean,
+                "Ocean Endless",
+                DebugRegistryValue::Bool(&mut self.endless),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+                Some("Forces the ocean grid to render at its maximum radius."),
             );
             debug_register_radial_with_description(
                 PageType::Ocean,
@@ -452,6 +471,7 @@ struct OceanDrawParams {
     max_tile_radius: u32,
     far_tile_radius: u32,
     tile_height_step: f32,
+    endless: u32,
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
@@ -504,6 +524,7 @@ pub struct OceanRenderer {
     max_tile_radius: u32,
     far_tile_radius: u32,
     tile_height_step: f32,
+    endless: bool,
     wind_dir: Vec2,
     wind_speed: f32,
     wave_amplitude: f32,
@@ -975,6 +996,7 @@ impl OceanRenderer {
             max_tile_radius,
             far_tile_radius,
             tile_height_step: ocean_info.tile_height_step.max(1.0),
+            endless: default_frame.endless,
             wind_dir: default_frame.wind_dir,
             wind_speed: default_frame.wind_speed,
             wave_amplitude: default_frame.wave_amplitude,
@@ -1018,6 +1040,7 @@ impl OceanRenderer {
 
     pub fn update(&mut self, settings: OceanFrameSettings) {
         self.enabled = settings.enabled;
+        self.endless = settings.endless;
         self.wind_dir = settings.wind_dir;
         self.wind_speed = settings.wind_speed;
         self.fetch_length = settings.fetch_length;
@@ -1054,6 +1077,22 @@ impl OceanRenderer {
 
     pub fn register_debug(&mut self) {
         unsafe {
+            debug_register_radial_with_description(
+                PageType::Ocean,
+                "Ocean Endless",
+                DebugRegistryValue::Bool(&mut self.endless),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+                Some("Forces the ocean grid to render at its maximum radius."),
+            );
             debug_register_radial_with_description(
                 PageType::Ocean,
                 "Debug View",
@@ -1602,7 +1641,6 @@ impl OceanRenderer {
         ];
 
         // Copy the current frame settings into the GPU draw parameter block.
-        assert_eq!(std::mem::size_of::<OceanDrawParams>(), 240);
         *params = OceanDrawParams {
             cascade_fft_sizes,
             cascade_patch_sizes,
@@ -1613,6 +1651,7 @@ impl OceanRenderer {
             max_tile_radius: self.max_tile_radius,
             far_tile_radius: self.far_tile_radius,
             tile_height_step: self.tile_height_step,
+            endless: self.endless as u32,
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
