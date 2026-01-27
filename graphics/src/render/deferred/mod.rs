@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use super::environment::clouds::CloudRenderer;
 use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -148,7 +147,6 @@ struct DataProcessors {
 
 struct Renderers {
     environment: EnvironmentRenderer,
-    clouds: super::environment::clouds::CloudRenderer,
 }
 
 struct DeferredPSO {
@@ -431,19 +429,6 @@ impl DeferredRenderer {
             },
         );
 
-        let environment = EnvironmentRenderer::new(
-            ctx.as_mut(),
-            state.as_mut(),
-            EnvironmentRendererInfo {
-                color_format: Format::BGRA8,
-                sample_count: info.sample_count,
-                use_depth: true,
-                skybox: super::environment::sky::SkyboxInfo::default(),
-                ocean: super::environment::ocean::OceanInfo::default(),
-                terrain: super::environment::terrain::TerrainInfo::default(),
-            },
-        );
-
         let depth_image = ctx
             .make_image(&ImageInfo {
                 debug_name: "[MESHI DEFERRED] Persistent Depth",
@@ -467,6 +452,21 @@ impl DeferredRenderer {
             view_type: ImageViewType::Type2D,
             range: SubresourceRange::new(0, 1, 0, 1),
         };
+
+        let environment = EnvironmentRenderer::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            EnvironmentRendererInfo {
+                initial_viewport: info.initial_viewport,
+                color_format: Format::BGRA8,
+                sample_count: info.sample_count,
+                use_depth: true,
+                skybox: super::environment::sky::SkyboxInfo::default(),
+                ocean: super::environment::ocean::OceanInfo::default(),
+                terrain: super::environment::terrain::TerrainInfo::default(),
+                cloud_depth_view: Some(depth),
+            },
+        );
 
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
@@ -583,17 +583,8 @@ impl DeferredRenderer {
             ),
         };
 
-        let clouds = CloudRenderer::new(
-            ctx.as_mut(),
-            state.as_mut(),
-            &info.initial_viewport,
-            depth,
-            info.sample_count,
-            environment.environment_cubemap_view(),
-        );
         let mut subrender = Renderers {
             environment,
-            clouds,
         };
 
         subrender.environment.initialize_terrain_deferred(
@@ -1730,7 +1721,7 @@ impl DeferredRenderer {
 
             self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
-                    .combine(self.subrender.clouds.update(
+                    .combine(self.subrender.environment.record_clouds_update(
                         self.ctx.as_mut(),
                         self.state.as_mut(),
                         &self.data.viewport,
@@ -2009,7 +2000,8 @@ impl DeferredRenderer {
                     per_obj.shadow = shadow_map.bindless_id.unwrap() as u32;
                     per_obj.shadow_cascade_count = cascade_data.count;
                     per_obj.shadow_resolution = shadow_resolution;
-                    per_obj.debug_view = self.subrender.clouds.settings().debug_view as u32;
+                    per_obj.debug_view =
+                        self.subrender.environment.cloud_settings().debug_view as u32;
                     per_obj.spot_shadow_texture = spot_shadow_bindless_id;
                     per_obj.spot_shadow_resolution = spot_shadow_resolution;
                     per_obj.spot_shadow_padding0 = 0;
@@ -2061,8 +2053,10 @@ impl DeferredRenderer {
             });
 
             let overlay_text =
-                if self.subrender.clouds.settings().debug_view == CloudDebugView::Stats {
-                    self.subrender.clouds.timing_overlay_text()
+                if self.subrender.environment.cloud_settings().debug_view
+                    == CloudDebugView::Stats
+                {
+                    self.subrender.environment.cloud_timing_overlay_text()
                 } else {
                     String::new()
                 };
@@ -2127,7 +2121,6 @@ impl DeferredRenderer {
                                 Some(depth),
                             ),
                     );
-                    cmd = cmd.combine(self.subrender.clouds.record_composite(&self.data.viewport));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
@@ -2351,15 +2344,15 @@ impl Renderer for DeferredRenderer {
     }
 
     fn cloud_settings(&self) -> crate::CloudSettings {
-        self.subrender.clouds.settings()
+        self.subrender.environment.cloud_settings()
     }
 
     fn set_cloud_settings(&mut self, settings: crate::CloudSettings) {
-        self.subrender.clouds.set_settings(settings);
+        self.subrender.environment.set_cloud_settings(settings);
     }
 
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
-        self.subrender.clouds.set_authored_weather_map(view);
+        self.subrender.environment.set_cloud_weather_map(view);
     }
 
     fn set_terrain_render_objects(

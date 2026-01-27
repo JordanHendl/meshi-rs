@@ -5,24 +5,29 @@ pub mod terrain;
 
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::{
-    Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, SampleCount, Viewport,
+    Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
+    Viewport,
 };
 use furikake::{BindlessState, types::Camera};
 use glam::Vec3;
 use noren::DB;
 
+use crate::CloudSettings;
+use clouds::CloudRenderer;
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
 use terrain::TerrainRenderer;
 
 #[derive(Clone)]
 pub struct EnvironmentRendererInfo {
+    pub initial_viewport: Viewport,
     pub color_format: Format,
     pub sample_count: SampleCount,
     pub use_depth: bool,
     pub skybox: sky::SkyboxInfo,
     pub ocean: ocean::OceanInfo,
     pub terrain: terrain::TerrainInfo,
+    pub cloud_depth_view: Option<ImageView>,
 }
 
 pub struct EnvironmentFrameSettings {
@@ -56,6 +61,8 @@ pub struct EnvironmentRenderer {
     paused: bool,
     last_delta_time: f32,
     sky: SkyRenderer,
+    clouds: Option<CloudRenderer>,
+    cloud_settings: CloudSettings,
     ocean: OceanRenderer,
     terrain: TerrainRenderer,
     color_format: Format,
@@ -73,6 +80,16 @@ impl EnvironmentRenderer {
             .expect("Failed to make environment dynamic allocator");
 
         let sky = SkyRenderer::new(ctx, state, &info, &dynamic);
+        let clouds = info.cloud_depth_view.map(|depth_view| {
+            CloudRenderer::new(
+                ctx,
+                state,
+                &info.initial_viewport,
+                depth_view,
+                info.sample_count,
+                sky.environment_cubemap_view(),
+            )
+        });
         let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, sky.environment_cubemap_view());
         let terrain = TerrainRenderer::new(ctx, state, &info, &dynamic);
 
@@ -84,6 +101,8 @@ impl EnvironmentRenderer {
             paused: false,
             last_delta_time: 0.0,
             sky,
+            clouds,
+            cloud_settings: CloudSettings::default(),
             ocean,
             terrain,
             dynamic,
@@ -193,6 +212,9 @@ impl EnvironmentRenderer {
 
     pub fn register_debug(&mut self) {
         self.sky.register_debug();
+        if let Some(clouds) = self.clouds.as_mut() {
+            clouds.register_debug();
+        }
         self.ocean.register_debug();
     }
 
@@ -267,6 +289,12 @@ impl EnvironmentRenderer {
                 self.last_delta_time,
             ))
             .combine(
+                self.clouds
+                    .as_mut()
+                    .map(|clouds| clouds.record_composite(viewport))
+                    .unwrap_or_else(CommandStream::<PendingGraphics>::subdraw),
+            )
+            .combine(
                 self.ocean
                     .record_draws(viewport, &mut self.dynamic, camera, self.time),
             )
@@ -283,6 +311,49 @@ impl EnvironmentRenderer {
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
             //            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
+    }
+
+    pub fn record_clouds_update(
+        &mut self,
+        ctx: &mut Context,
+        state: &mut BindlessState,
+        viewport: &Viewport,
+        camera: Handle<Camera>,
+        delta_time: f32,
+    ) -> CommandStream<Executable> {
+        if let Some(clouds) = self.clouds.as_mut() {
+            clouds.update(ctx, state, viewport, camera, delta_time)
+        } else {
+            CommandStream::new().begin().end()
+        }
+    }
+
+    pub fn cloud_settings(&self) -> CloudSettings {
+        self.clouds
+            .as_ref()
+            .map(CloudRenderer::settings)
+            .unwrap_or(self.cloud_settings)
+    }
+
+    pub fn set_cloud_settings(&mut self, settings: CloudSettings) {
+        if let Some(clouds) = self.clouds.as_mut() {
+            clouds.set_settings(settings);
+        } else {
+            self.cloud_settings = settings;
+        }
+    }
+
+    pub fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
+        if let Some(clouds) = self.clouds.as_mut() {
+            clouds.set_authored_weather_map(view);
+        }
+    }
+
+    pub fn cloud_timing_overlay_text(&self) -> String {
+        self.clouds
+            .as_ref()
+            .map(CloudRenderer::timing_overlay_text)
+            .unwrap_or_default()
     }
 
     pub fn environment_cubemap_view(&self) -> dashi::ImageView {

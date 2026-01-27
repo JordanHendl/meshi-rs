@@ -60,7 +60,6 @@ pub struct ForwardRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
-    cloud_settings: CloudSettings,
 }
 
 struct RenderObjectData {
@@ -805,14 +804,16 @@ impl Renderer for ForwardRenderer {
     }
 
     fn cloud_settings(&self) -> CloudSettings {
-        self.cloud_settings
+        self.environment.cloud_settings()
     }
 
     fn set_cloud_settings(&mut self, settings: CloudSettings) {
-        self.cloud_settings = settings;
+        self.environment.set_cloud_settings(settings);
     }
 
-    fn set_cloud_weather_map(&mut self, _view: Option<ImageView>) {}
+    fn set_cloud_weather_map(&mut self, view: Option<ImageView>) {
+        self.environment.set_cloud_weather_map(view);
+    }
 
     fn set_terrain_render_objects(
         &mut self,
