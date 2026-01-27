@@ -214,10 +214,14 @@ void main() {
     uint quad_x = quad_index % (grid_resolution - 1);
     uint quad_y = quad_index / (grid_resolution - 1);
     float grid_scale = 1.0 / float(grid_resolution - 1);
+    // --- Mesh sizing and tiling setup ---
+    // Compute the base patch size and tile size used to lay out the clipmap grid.
     uint base_radius = max(params.base_tile_radius, 1);
     uint max_radius = max(params.max_tile_radius, base_radius);
     uint far_radius_cap = max(params.far_tile_radius, base_radius);
-    float base_patch_size = max(params.cascade_patch_sizes.y, 0.001);
+    float near_patch_size = max(params.cascade_patch_sizes.x, 0.001);
+    float base_patch_size = min(params.cascade_patch_sizes.y, near_patch_size * 2.5);
+    base_patch_size = max(base_patch_size, 0.001);
     float tile_size = max(base_patch_size * 2.0, 0.001);
     float height_step = max(params.tile_height_step, 0.001);
     float camera_height = abs(camera_position_world().y);
@@ -229,6 +233,8 @@ void main() {
     float far_radius_f = ceil(far_plane / tile_size);
     uint far_radius = uint(clamp(far_radius_f, float(base_radius), float(far_radius_cap)));
     uint tile_radius = min(max(height_radius, far_radius), max_radius);
+    // --- Clipmap selection ---
+    // Choose the active tile radius based on camera height and far plane.
     uint tile_count = tile_radius * 2 + 1;
     if (gl_InstanceIndex >= tile_count * tile_count) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -245,6 +251,8 @@ void main() {
     vec2 tile_grid = vec2(tile_count);
     vec2 tile_center = (tile_grid - 1.0) * 0.5;
     ivec2 tile_coord = ivec2(tile_x, tile_y) - ivec2(tile_center);
+    // --- LOD ring selection ---
+    // Each ring around the camera increases LOD; morph to the next ring for continuity.
     uint ring = uint(max(abs(tile_coord.x), abs(tile_coord.y)));
     float ring_f = float(max(ring, 1u));
     float base_radius_f = float(base_radius);
@@ -257,12 +265,18 @@ void main() {
     uint clip_outer = max(base_radius * (1u << clip_level), 1u);
     float morph_band = max(base_radius_f * 0.25, 1.0);
     float morph = smoothstep(float(clip_outer) - morph_band, float(clip_outer), ring_f);
+    // --- World anchoring ---
+    // Anchor geometry to the camera for smooth motion, but anchor wave sampling
+    // to a snapped origin to prevent wave swimming artifacts.
     vec2 tile_offset = (vec2(tile_coord)) * tile_size;
     vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
+    vec2 camera_origin = camera_position();
+    vec2 wave_origin = floor(camera_origin / tile_size) * tile_size;
     vec3 camera_world = camera_position_world();
-    float near_range = params.cascade_blend_ranges.x;
-    float mid_range = params.cascade_blend_ranges.y;
-    float far_range = params.cascade_blend_ranges.z;
+
+    float near_range = max(params.cascade_blend_ranges.x, 0.001);
+    float mid_range = max(params.cascade_blend_ranges.y, near_range + 0.001);
+    float far_range = max(params.cascade_blend_ranges.z, mid_range + 0.001);
     uvec2 vertex_index = uvec2(quad_x, quad_y) + vertex_corner(local_vertex);
     uint max_index = grid_resolution - 1u;
     uvec2 snapped_current_index = uvec2(
@@ -278,16 +292,26 @@ void main() {
     vec2 uv = mix(snapped_current, snapped_next, morph);
     vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
     vec2 world = local + snapped_origin + tile_offset;
+//    vec2 world = local + camera_origin + tile_offset;
     float distance = length(world - camera_world.xz);
     vec2 wave_world = world + params.current * params.time;
-    float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
-    float w_far = smoothstep(mid_range, far_range, distance);
-    float w_mid = clamp(1.0 - w_near - w_far, 0.0, 1.0);
+ //   float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
+ //   float w_far = smoothstep(mid_range, far_range, distance);
+ //   float w_mid = clamp(1.0 - w_near - w_far, 0.0, 1.0);
+//    vec2 wave_world = world + (wave_origin - camera_origin) + params.current * params.time;
+    // --- Cascade blending ---
+    // Blend near/mid/far cascades by distance with overlapping smooth ramps.
+    float w_near = 1.0 - smoothstep(near_range * 0.5, near_range * 1.4, distance);
+    float w_far = smoothstep(mid_range * 0.6, far_range * 1.1, distance);
+    float w_mid = smoothstep(near_range * 0.4, mid_range * 1.05, distance)
+        * (1.0 - smoothstep(mid_range * 0.6, far_range * 1.05, distance));
     float weight_sum = max(w_near + w_mid + w_far, 0.001);
     w_near /= weight_sum;
     w_mid /= weight_sum;
     w_far /= weight_sum;
 
+    // --- Wave sampling ---
+    // Sample wave buffers per cascade using world-space coordinates.
     uint fft_near = max(params.cascade_fft_sizes.x, 1);
     uint fft_mid = max(params.cascade_fft_sizes.y, 1);
     uint fft_far = max(params.cascade_fft_sizes.z, 1);
@@ -306,7 +330,10 @@ void main() {
     vec2 wind_dir = safe_normalize(params.wind_dir);
     vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
     vec4 position = vec4(world.x + choppy_offset.x, height * 100.0, world.y + choppy_offset.y, 1.0);
-    vec3 normal = normalize(vec3(-gradient_world.x * 2.0, 1.0, -gradient_world.y * 2.0));
+    // --- Surface shading ---
+    // Use gradients to compute normals and choppy displacement.
+    float normal_strength = 500.0;
+    vec3 normal = normalize(vec3(-gradient_world.x * normal_strength, 1.0, -gradient_world.y * normal_strength));
     mat4 view = inverse(camera_view());
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;

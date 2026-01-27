@@ -53,6 +53,9 @@ pub struct SkyFrameSettings {
     pub moon_intensity: f32,
     pub moon_angular_radius: f32,
     pub time_of_day: Option<f32>,
+    pub timer_speed: f32,
+    pub current_time_of_day: f32,
+    pub auto_sun_enabled: bool,
     pub latitude_degrees: Option<f32>,
     pub longitude_degrees: Option<f32>,
 }
@@ -92,6 +95,9 @@ impl Default for SkyFrameSettings {
             moon_intensity: 0.1,
             moon_angular_radius: 0.0045,
             time_of_day: None,
+            timer_speed: 1.0,
+            current_time_of_day: 12.0,
+            auto_sun_enabled: false,
             latitude_degrees: None,
             longitude_degrees: None,
         }
@@ -112,6 +118,33 @@ impl SkyboxFrameSettings {
 }
 
 impl SkyFrameSettings {
+    pub fn effective_time_of_day(&self) -> Option<f32> {
+        if self.auto_sun_enabled {
+            Some(self.current_time_of_day)
+        } else {
+            self.time_of_day
+        }
+    }
+
+    pub fn advance_time_of_day(&mut self, delta_time: f32) -> bool {
+        if !self.auto_sun_enabled {
+            return false;
+        }
+
+        if !delta_time.is_finite() {
+            return false;
+        }
+
+        let delta_hours = delta_time * self.timer_speed;
+        if delta_hours == 0.0 {
+            return false;
+        }
+
+        self.current_time_of_day = (self.current_time_of_day + delta_hours).rem_euclid(24.0);
+        self.time_of_day = Some(self.current_time_of_day);
+        true
+    }
+
     pub fn register_debug(&mut self) {
         unsafe {
             debug_register_radial(
@@ -152,6 +185,33 @@ impl SkyFrameSettings {
                 Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.moon_angular_radius as *mut f32,
                 "Moon Angular Radius",
+            );
+            debug_register_radial(
+                PageType::Sky,
+                "Auto Sun",
+                DebugRegistryValue::Bool(&mut self.auto_sun_enabled),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Auto Sun Speed", 0.0, 4.0, 0.0),
+                &mut self.timer_speed as *mut f32,
+                "Auto Sun Speed",
+            );
+            debug_register(
+                PageType::Sky,
+                Slider::new(0, "Current Time (Hours)", 0.0, 24.0, 0.0),
+                &mut self.current_time_of_day as *mut f32,
+                "Current Time (Hours)",
             );
         }
     }
@@ -588,7 +648,7 @@ impl SkyRenderer {
     pub fn sun_direction(&self) -> Vec3 {
         resolve_celestial_direction(
             self.sky_settings.sun_direction,
-            self.sky_settings.time_of_day,
+            self.sky_settings.effective_time_of_day(),
             self.sky_settings.latitude_degrees,
             self.sky_settings.longitude_degrees,
             false,
@@ -1045,16 +1105,17 @@ fn resolve_celestial_direction(
 }
 
 fn compute_celestial_lighting(settings: &SkyFrameSettings) -> CelestialLighting {
+    let time_of_day = settings.effective_time_of_day();
     let sun_dir = resolve_celestial_direction(
         settings.sun_direction,
-        settings.time_of_day,
+        time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         false,
     );
     let moon_dir = resolve_celestial_direction(
         settings.moon_direction,
-        settings.time_of_day,
+        time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         true,

@@ -716,6 +716,38 @@ impl RenderEngine {
                 .set_cloud_settings(self.cloud_settings.clone());
         }
 
+        let time_advanced = self.sky_settings.advance_time_of_day(delta_time);
+        if time_advanced {
+            self.renderer.set_sky_settings(self.sky_settings.clone());
+        }
+
+        let light_updates = if let Some(state) = self.environment_lighting.as_mut() {
+            state.settings.sky = self.sky_settings.clone();
+            Some((
+                state.settings.clone(),
+                state.sun_light,
+                state.moon_light,
+            ))
+        } else {
+            None
+        };
+        if let Some((settings, sun_light, moon_light)) = light_updates {
+            let (sun_direction, moon_direction) = resolve_sun_moon_direction(&settings.sky);
+            let sun_info = directional_light_info(
+                sun_direction,
+                settings.sky.sun_color,
+                settings.sun_light_intensity,
+            );
+            let moon_info = directional_light_info(
+                moon_direction,
+                settings.sky.moon_color,
+                settings.moon_light_intensity,
+            );
+            self.set_light_info(sun_light, &sun_info);
+            self.set_light_info(moon_light, &moon_info);
+        }
+
+
         let mut gui_frame = self.pending_gui_frame.take().unwrap_or_default();
         if let Some(mut debug_frame) = debug_output.frame {
             gui_frame.batches.append(&mut debug_frame.batches);
@@ -1130,16 +1162,17 @@ fn directional_light_info(direction: Vec3, color: Vec3, intensity: f32) -> Light
 }
 
 fn resolve_sun_moon_direction(settings: &SkyFrameSettings) -> (Vec3, Vec3) {
+    let time_of_day = settings.effective_time_of_day();
     let sun_dir = resolve_celestial_direction(
         settings.sun_direction,
-        settings.time_of_day,
+        time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         false,
     );
     let moon_dir = resolve_celestial_direction(
         settings.moon_direction,
-        settings.time_of_day,
+        time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         true,

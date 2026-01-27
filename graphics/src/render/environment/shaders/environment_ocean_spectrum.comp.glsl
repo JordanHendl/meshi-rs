@@ -68,7 +68,7 @@ void main() {
     float k_len = length(k);
     vec2 wind_dir = normalize(params.wind_dir + vec2(0.0001, 0.0001));
     float wind_speed = max(params.wind_speed, 0.1);
-    float amplitude = max(params.wave_amplitude, 0.0) * max(params.spectrum_scale, 0.0);
+    float amplitude = max(params.spectrum_scale, 0.0);
     float spectrum = max(phillips_spectrum(k, wind_dir, wind_speed, amplitude), 0.0);
 
     vec2 seed = vec2(float(x), float(y));

@@ -89,6 +89,7 @@ fn main() {
     let day_length_seconds = 120.0;
     let latitude_degrees = 37.0;
     let longitude_degrees = 0.0;
+    let timer_speed = 24.0 / day_length_seconds;
 
     setup.engine.set_skybox_settings(SkyboxFrameSettings {
         intensity: 1.0,
@@ -101,10 +102,10 @@ fn main() {
     setup.engine.set_cloud_settings(cloud_settings);
     setup.engine.set_ocean_settings(OceanFrameSettings {
         enabled: true,
-        wind_speed: 8.0,
+        wind_speed: 2.0,
         wave_amplitude: 4.0,
         gerstner_amplitude: 0.35,
-        cascade_spectrum_scales: [1.2, 1.0, 0.8],
+        cascade_spectrum_scales: [1000.0, 1.0, 0.8],
         ..Default::default()
     });
 
@@ -113,44 +114,43 @@ fn main() {
         setup.engine.set_terrain_render_objects(&terrain_objects);
     }
 
+    setup
+        .engine
+        .set_environment_lighting(EnvironmentLightingSettings {
+            sky: SkyFrameSettings {
+                enabled: true,
+                sun_direction: None,
+                sun_color: Vec3::new(1.0, 0.95, 0.85),
+                sun_intensity: 8.0,
+                sun_angular_radius: 0.0035,
+                moon_direction: None,
+                moon_color: Vec3::new(0.6, 0.7, 1.0),
+                moon_intensity: 0.25,
+                moon_angular_radius: 0.0045,
+                time_of_day: None,
+                timer_speed,
+                current_time_of_day: 6.0,
+                auto_sun_enabled: true,
+                latitude_degrees: Some(latitude_degrees),
+                longitude_degrees: Some(longitude_degrees),
+            },
+            sun_light_intensity: 3.5,
+            moon_light_intensity: 0.4,
+        });
+
     while data.running {
         let now = timer.elapsed_seconds_f32();
         let dt = (now - last_time).min(1.0 / 30.0);
-        let time_of_day = (now / day_length_seconds * 24.0) % 24.0;
-        let sun_dir = celestial_direction(time_of_day, latitude_degrees, longitude_degrees, false);
-        let moon_dir = celestial_direction(time_of_day, latitude_degrees, longitude_degrees, true);
         let camera_transform = data.camera.update(dt);
         setup
             .engine
             .set_camera_transform(setup.camera, &camera_transform);
 
-        setup
-            .engine
-            .set_environment_lighting(EnvironmentLightingSettings {
-                sky: SkyFrameSettings {
-                    enabled: true,
-                    sun_direction: None,
-                    sun_color: Vec3::new(1.0, 0.95, 0.85),
-                    sun_intensity: 8.0,
-                    sun_angular_radius: 0.0035,
-                    moon_direction: None,
-                    moon_color: Vec3::new(0.6, 0.7, 1.0),
-                    moon_intensity: 0.25,
-                    moon_angular_radius: 0.0045,
-                    time_of_day: Some(time_of_day),
-                    latitude_degrees: Some(latitude_degrees),
-                    longitude_degrees: Some(longitude_degrees),
-                },
-                sun_light_intensity: 3.5,
-                moon_light_intensity: 0.4,
-            });
-
-
         setup.engine.set_text(
             data.environment_text,
             &format!(
-                "Time: {time_of_day:05.2}h | Sun dir: [{:.2}, {:.2}, {:.2}] | Moon dir: [{:.2}, {:.2}, {:.2}]",
-                sun_dir.x, sun_dir.y, sun_dir.z, moon_dir.x, moon_dir.y, moon_dir.z
+                "Environment lighting: automatic day cycle ({:.1} seconds per day).",
+                day_length_seconds
             ),
         );
         setup.engine.update(dt);
@@ -158,32 +158,6 @@ fn main() {
     }
 
     setup.engine.shut_down();
-}
-
-fn celestial_direction(
-    time_of_day: f32,
-    latitude_degrees: f32,
-    longitude_degrees: f32,
-    is_moon: bool,
-) -> Vec3 {
-    let day_time = time_of_day.rem_euclid(24.0);
-    let angle = day_time / 24.0 * std::f32::consts::TAU;
-    let elevation = (angle - std::f32::consts::FRAC_PI_2).sin();
-    let base = Vec3::new(angle.cos(), elevation, angle.sin());
-    let latitude = latitude_degrees.to_radians();
-    let longitude = longitude_degrees.to_radians();
-    let rotation = Mat3::from_rotation_y(longitude) * Mat3::from_rotation_x(latitude);
-    let mut dir = rotation * base;
-    if is_moon {
-        dir = -dir;
-    }
-    if dir.length_squared() > 0.0 {
-        dir.normalize()
-    } else if is_moon {
-        -Vec3::Y
-    } else {
-        Vec3::Y
-    }
 }
 
 fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {

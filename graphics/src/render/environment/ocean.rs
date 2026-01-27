@@ -41,7 +41,7 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             patch_size: 200.0,
-            vertex_resolution: 64,
+            vertex_resolution: 128,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
@@ -271,20 +271,20 @@ impl OceanFrameSettings {
             );
             debug_register(
                 PageType::Ocean,
-                Slider::new(0, "Cascade Spectrum Near", 0.0, 2.0, 0.0),
+                Slider::new(0, "Cascade Spectrum Near", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[0] as *mut f32,
                 "Cascade Spectrum Near",
             );
 
             debug_register(
                 PageType::Ocean,
-                Slider::new(0, "Cascade Spectrum Mid", 0.0, 2.0, 0.0),
+                Slider::new(0, "Cascade Spectrum Mid", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[1] as *mut f32,
                 "Cascade Spectrum Mid",
             );
             debug_register(
                 PageType::Ocean,
-                Slider::new(0, "Cascade Spectrum Far", 0.0, 2.0, 0.0),
+                Slider::new(0, "Cascade Spectrum Far", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[2] as *mut f32,
                 "Cascade Spectrum Far",
             );
@@ -1266,6 +1266,10 @@ impl OceanRenderer {
             return CommandStream::new().begin().end();
         }
 
+        // Per-cascade FFT pipeline:
+        // 1) Build spectrum parameters and generate the frequency-domain spectrum.
+        // 2) Run horizontal and vertical FFT passes with bit-reversal.
+        // 3) Finalize the spatial-domain output into the packed wave buffer.
         let mut stream = CommandStream::new().begin();
         for (cascade_index, cascade) in self.cascades.iter().enumerate() {
             let Some(spectrum_pipeline) = cascade.spectrum_pipeline.as_ref() else {
@@ -1291,6 +1295,7 @@ impl OceanRenderer {
                 .bump()
                 .expect("Failed to allocate ocean spectrum params");
             let spectrum_params = &mut spectrum_alloc.slice::<OceanSpectrumParams>()[0];
+            // Per-cascade spectrum scaling to balance amplitudes across FFT sizes.
             let spectrum_scale = self
                 .cascade_spectrum_scales
                 .get(cascade_index)
@@ -1307,6 +1312,7 @@ impl OceanRenderer {
                 spectrum_scale,
             };
 
+            // Spectrum synthesis into the cascade spectrum buffer.
             stream = stream
                 .prepare_buffer(cascade.spectrum_buffer, UsageBits::COMPUTE_SHADER)
                 .prepare_buffer(cascade.ping_buffer, UsageBits::COMPUTE_SHADER)
@@ -1320,6 +1326,7 @@ impl OceanRenderer {
                 })
                 .unbind_pipeline();
 
+            // FFT setup: first stage does bit-reversal, followed by log2(N) passes.
             let log_n = cascade.fft_size.trailing_zeros();
             let mut current_is_ping = true;
 
@@ -1334,6 +1341,7 @@ impl OceanRenderer {
                 _padding: [0.0; 3],
             };
 
+            // Initial FFT step (bit-reversal + horizontal pass into ping buffer).
             stream = stream
                 .prepare_buffer(cascade.spectrum_buffer, UsageBits::COMPUTE_SHADER)
                 .prepare_buffer(cascade.ping_buffer, UsageBits::COMPUTE_SHADER)
@@ -1347,6 +1355,7 @@ impl OceanRenderer {
                 })
                 .unbind_pipeline();
 
+            // Horizontal FFT passes.
             for stage in 0..log_n {
                 let mut pass_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
                 let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
@@ -1383,6 +1392,7 @@ impl OceanRenderer {
                 current_is_ping = !current_is_ping;
             }
 
+            // Bit-reversal for the vertical FFT.
             let mut bitrev_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
             let bitrev_params = &mut bitrev_alloc.slice::<OceanFftParams>()[0];
             *bitrev_params = OceanFftParams {
@@ -1417,6 +1427,7 @@ impl OceanRenderer {
                 .unbind_pipeline();
             current_is_ping = !current_is_ping;
 
+            // Vertical FFT passes.
             for stage in 0..log_n {
                 let mut pass_alloc = dynamic.bump().expect("Failed to allocate ocean FFT params");
                 let pass_params = &mut pass_alloc.slice::<OceanFftParams>()[0];
@@ -1453,6 +1464,7 @@ impl OceanRenderer {
                 current_is_ping = !current_is_ping;
             }
 
+            // Finalize spatial-domain waves into the packed wave buffer.
             let mut finalize_alloc = dynamic
                 .bump()
                 .expect("Failed to allocate ocean finalize params");
@@ -1499,6 +1511,7 @@ impl OceanRenderer {
             return CommandStream::subdraw();
         }
 
+        // Populate draw parameters consumed by the ocean vertex/fragment shaders.
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean draw params");
@@ -1506,17 +1519,20 @@ impl OceanRenderer {
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
         let mut cascade_fft_sizes = [0u32; 4];
         let mut cascade_patch_sizes = [0.0f32; 4];
+        // Collect per-cascade FFT and patch sizes for sampling and blend distances.
         for (index, cascade) in self.cascades.iter().enumerate() {
             cascade_fft_sizes[index] = cascade.fft_size;
             cascade_patch_sizes[index] = cascade.patch_size;
         }
+        // Blend ranges determine how quickly we transition between cascades by distance.
         let blend_ranges = [
-            cascade_patch_sizes[0] * 6.0,
-            cascade_patch_sizes[1] * 10.0,
-            cascade_patch_sizes[2] * 12.0,
+            cascade_patch_sizes[0] * 1.0,
+            cascade_patch_sizes[1] * 32.0,
+            cascade_patch_sizes[2] * 64.0,
             0.0,
         ];
 
+        // Copy the current frame settings into the GPU draw parameter block.
         assert_eq!(std::mem::size_of::<OceanDrawParams>(), 240);
         *params = OceanDrawParams {
             cascade_fft_sizes,
