@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use super::environment::{EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo};
+use super::environment::{
+    terrain::TerrainFrameSettings, EnvironmentFrameSettings, EnvironmentRenderer,
+    EnvironmentRendererInfo,
+};
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
 use super::scene::GPUScene;
@@ -1530,11 +1533,25 @@ impl DeferredRenderer {
         self.text.set_frame_draws(frame_draws);
     }
 
-    fn record_frame_compute(&mut self, delta_time: f32) {
+    fn record_frame_compute(&mut self, delta_time: f32, camera: Handle<Camera>) {
         self.subrender.environment.update(EnvironmentFrameSettings {
             delta_time,
             ..Default::default()
         });
+        let mut camera_position = Vec3::ZERO;
+        if camera.valid() {
+            self.state
+                .reserved_mut(
+                    "meshi_bindless_cameras",
+                    |a: &mut ReservedBindlessCamera| {
+                        camera_position = a.camera(camera).position();
+                    },
+                )
+                .expect("Failed to read camera for terrain update");
+        }
+        self.subrender
+            .environment
+            .update_terrain(TerrainFrameSettings { camera_position });
 
         self.graph.add_compute_pass(|mut cmd| {
             let c = CommandStream::new()
@@ -1574,7 +1591,8 @@ impl DeferredRenderer {
 
         // Set active scene cameras..
         self.proc.scene.set_active_cameras(views);
-        self.record_frame_compute(delta_time);
+        let primary_camera = views.first().copied().unwrap_or_default();
+        self.record_frame_compute(delta_time, primary_camera);
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
