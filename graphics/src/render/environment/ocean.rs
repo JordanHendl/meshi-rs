@@ -387,6 +387,9 @@ struct OceanSpectrumParams {
     wind_speed: f32,
     patch_size: f32,
     spectrum_scale: f32,
+    fetch_length: f32,
+    swell_dir: Vec2,
+    swell_strength: f32,
 }
 
 #[repr(C)]
@@ -1301,6 +1304,11 @@ impl OceanRenderer {
                 .get(cascade_index)
                 .copied()
                 .unwrap_or(1.0);
+            let swell_strength = self
+                .cascade_swell_strengths
+                .get(cascade_index)
+                .copied()
+                .unwrap_or(0.0);
             *spectrum_params = OceanSpectrumParams {
                 fft_size: cascade.fft_size,
                 time,
@@ -1310,6 +1318,9 @@ impl OceanRenderer {
                 wind_speed: self.wind_speed,
                 patch_size: cascade.patch_size,
                 spectrum_scale,
+                fetch_length: self.fetch_length,
+                swell_dir: self.swell_dir,
+                swell_strength,
             };
 
             // Spectrum synthesis into the cascade spectrum buffer.

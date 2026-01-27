@@ -15,6 +15,9 @@ layout(set = 1, binding = 0) readonly buffer OceanSpectrumParams {
     float wind_speed;
     float patch_size;
     float spectrum_scale;
+    float fetch_length;
+    vec2 swell_dir;
+    float swell_strength;
 } params;
 
 float hash11(float n) {
@@ -51,6 +54,39 @@ float phillips_spectrum(vec2 k, vec2 wind_dir, float wind_speed, float amplitude
     return amplitude * phillips;
 }
 
+float jonswap_spectrum(
+    vec2 k,
+    vec2 wind_dir,
+    vec2 swell_dir,
+    float wind_speed,
+    float fetch_length,
+    float amplitude,
+    float swell_strength
+) {
+    float k_len = length(k);
+    if (k_len < 0.0001) {
+        return 0.0;
+    }
+    float g = 9.81;
+    float omega = sqrt(g * k_len);
+    float wind = max(wind_speed, 0.1);
+    float fetch = max(fetch_length, 1.0);
+    float x = g * fetch / (wind * wind);
+    float alpha = 0.076 * pow(max(x, 0.1), -0.22);
+    float fp = 3.5 * g / wind * pow(max(x, 0.1), -0.33);
+    float omega_p = 6.28318530718 * fp;
+    float sigma = omega <= omega_p ? 0.07 : 0.09;
+    float r = exp(-((omega - omega_p) * (omega - omega_p)) / (2.0 * sigma * sigma * omega_p * omega_p));
+    float gamma = 3.3;
+    float peak = pow(gamma, r);
+    float beta = 1.25;
+    float base = alpha * g * g * pow(max(omega, 0.001), -5.0) * exp(-beta * pow(omega_p / max(omega, 0.001), 4.0));
+    float align_wind = max(dot(normalize(k), wind_dir), 0.0);
+    float align_swell = max(dot(normalize(k), swell_dir), 0.0);
+    float spread = mix(align_wind * align_wind, align_swell * align_swell, clamp(swell_strength, 0.0, 1.0));
+    return amplitude * base * peak * spread;
+}
+
 void main() {
     uint x = gl_GlobalInvocationID.x;
     uint y = gl_GlobalInvocationID.y;
@@ -67,9 +103,22 @@ void main() {
     vec2 k = grid * k_scale;
     float k_len = length(k);
     vec2 wind_dir = normalize(params.wind_dir + vec2(0.0001, 0.0001));
+    vec2 swell_dir = normalize(params.swell_dir + vec2(0.0001, 0.0001));
     float wind_speed = max(params.wind_speed, 0.1);
     float amplitude = max(params.spectrum_scale, 0.0);
-    float spectrum = max(phillips_spectrum(k, wind_dir, wind_speed, amplitude), 0.0);
+    float spectrum = max(
+        phillips_spectrum(k, wind_dir, wind_speed, amplitude) +
+        jonswap_spectrum(
+            k,
+            wind_dir,
+            swell_dir,
+            wind_speed,
+            params.fetch_length,
+            amplitude,
+            params.swell_strength
+        ),
+        0.0
+    );
 
     vec2 seed = vec2(float(x), float(y));
     vec2 gaussian = gaussian_random(seed);

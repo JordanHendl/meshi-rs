@@ -218,7 +218,7 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
     } else if (light_type == LIGHT_TYPE_DIRECTIONAL) {
         vec3 dir = light.direction_range.xyz;
         float dir_len = length(dir);
-        light_dir = dir_len > 0.0 ? dir / dir_len : vec3(0.0, 1.0, 0.0);
+        light_dir = dir_len > 0.0 ? -dir / dir_len : vec3(0.0, 1.0, 0.0);
     } else {
         vec3 to_light = light.position_type.xyz - world_pos;
         float distance = length(to_light);
@@ -240,6 +240,8 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
     vec3 numerator = d * g * f;
     float denom = max(4.0 * ndotv * ndotl, 1e-4);
     vec3 specular = numerator / denom;
+    float specular_boost = mix(1.0, 1.35, 1.0 - roughness);
+    specular *= specular_boost;
     vec3 k_s = f;
     vec3 k_d = (vec3(1.0) - k_s);
     vec3 diffuse = k_d * base_color / PI;
