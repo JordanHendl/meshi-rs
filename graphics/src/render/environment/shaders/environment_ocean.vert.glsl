@@ -85,11 +85,11 @@ vec2 safe_normalize(vec2 v) {
     return v / len;
 }
 
-layout(set = 0, binding = 0) readonly buffer OceanWaves {
+layout(set = 0, binding = 1) readonly buffer OceanWaves {
     vec4 values[];
 } ocean_waves[];
 
-layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
+layout(scalar, set = 0, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -103,7 +103,6 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     float time;
     vec2 wind_dir;
     float wind_speed;
-    float wave_amplitude;
     float gerstner_amplitude;
     float fresnel_bias;
     float fresnel_strength;
@@ -125,10 +124,24 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     float ssr_max_distance;
     float ssr_thickness;
     uint ssr_steps;
-    float _padding2;
+    float debug_view;
+    vec3 _padding2;
 } params;
 
-layout(set = 1, binding = 1) readonly buffer SceneCameras {
+
+layout(scalar, set = 1, binding = 10) readonly buffer OceanShadowParams {
+    uint shadow_cascade_count;
+    uint shadow_resolution;
+    uint shadow_padding0;
+    uint shadow_padding1;
+    vec4 shadow_splits;
+} shadow_params;
+
+layout(scalar, set = 2, binding = 0) readonly buffer OceanShadowMatrices {
+    mat4 shadow_matrices[4];
+} shadow_matrices;
+
+layout(set = 0, binding = 34) readonly buffer SceneCameras {
   Camera cameras[];
 } meshi_bindless_cameras;
 

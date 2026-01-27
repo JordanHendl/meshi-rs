@@ -2130,12 +2130,21 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    cmd = cmd.combine(self.subrender.environment.render(
-                        &self.data.viewport,
-                        camera_handle,
-                        Some(scene_color.view),
-                        Some(depth),
-                    ));
+                    cmd = cmd.combine(
+                        self.subrender
+                            .environment
+                            .render(
+                                &self.data.viewport,
+                                camera_handle,
+                                Some(scene_color.view),
+                                Some(depth),
+                                Some(shadow_map.view),
+                                cascade_data.count,
+                                shadow_resolution,
+                                Vec4::from_array(cascade_data.splits),
+                                cascade_data.matrices,
+                            ),
+                    );
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd

@@ -11,7 +11,7 @@ layout(location = 4) in float v_velocity;
 layout(location = 5) in vec2 v_flow;
 layout(location = 0) out vec4 out_color;
 
-layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
+layout(scalar, set = 0, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -25,7 +25,6 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     float time;
     vec2 wind_dir;
     float wind_speed;
-    float wave_amplitude;
     float gerstner_amplitude;
     float fresnel_bias;
     float fresnel_strength;
@@ -48,7 +47,21 @@ layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     float ssr_thickness;
     uint ssr_steps;
     float debug_view;
+    vec3 _padding2;
 } params;
+
+
+layout(scalar, set = 1, binding = 10) readonly buffer OceanShadowParams {
+    uint shadow_cascade_count;
+    uint shadow_resolution;
+    uint shadow_padding0;
+    uint shadow_padding1;
+    vec4 shadow_splits;
+} shadow_params;
+
+layout(scalar, set = 2, binding = 0) readonly buffer OceanShadowMatrices {
+    mat4 shadow_matrices[4];
+} shadow_matrices;
 
 struct Camera {
     mat4 world_from_camera;
@@ -82,6 +95,8 @@ layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
 layout(set = 1, binding = 5) uniform texture2D ocean_scene_color;
 layout(set = 1, binding = 6) uniform texture2D ocean_scene_depth;
 layout(set = 1, binding = 7) uniform sampler ocean_scene_sampler;
+layout(set = 1, binding = 8) uniform texture2D ocean_shadow_map;
+layout(set = 1, binding = 9) uniform sampler ocean_shadow_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
 const float PI = 3.14159265359;
@@ -202,7 +217,60 @@ vec3 compute_ssr(Camera cam, vec3 view_pos, vec3 view_normal, vec3 view_dir, out
     return color;
 }
 
-vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float roughness, vec3 f0) {
+uint select_shadow_cascade(float view_depth) {
+    uint count = max(shadow_params.shadow_cascade_count, 1u);
+    uint index = count - 1u;
+    for (uint i = 0u; i < count; ++i) {
+        if (view_depth <= shadow_params.shadow_splits[i]) {
+            index = i;
+            break;
+        }
+    }
+    return index;
+}
+
+float sample_shadow(vec3 world_pos, float view_depth, float bias) {
+    uint cascade_count = max(shadow_params.shadow_cascade_count, 1u);
+    uint shadow_res = max(shadow_params.shadow_resolution, 1u);
+    if (shadow_res == 0u) {
+        return 1.0;
+    }
+
+    uint cascade_index = select_shadow_cascade(view_depth);
+    vec4 shadow_pos = shadow_matrices.shadow_matrices[cascade_index] * vec4(world_pos, 1.0);
+    shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
+    shadow_pos.y = -shadow_pos.y;
+    vec2 uv = shadow_pos.xy * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0;
+    }
+
+    uint grid_x = (cascade_count > 1u) ? 2u : 1u;
+    uint grid_y = (cascade_count > 2u) ? 2u : 1u;
+    vec2 atlas_size = vec2(float(shadow_res * grid_x), float(shadow_res * grid_y));
+    vec2 texel = vec2(1.0) / atlas_size;
+    vec2 uv_adjusted = uv;
+    uint tile_x = cascade_index % grid_x;
+    uint tile_y = cascade_index / grid_x;
+    uv_adjusted.x = uv.x / float(grid_x) + float(tile_x) / float(grid_x);
+    uv_adjusted.y = uv.y / float(grid_y) + float(tile_y) / float(grid_y);
+
+    float shadow = 0.0;
+    float depth = shadow_pos.z;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 offset = vec2(x, y) * texel;
+            vec2 coord = uv_adjusted + offset;
+            ivec2 texel_coord = ivec2(coord * atlas_size);
+            texel_coord = clamp(texel_coord, ivec2(0), ivec2(int(atlas_size.x) - 1, int(atlas_size.y) - 1));
+            float map_depth = texelFetch(ocean_shadow_map, texel_coord, 0).x;
+            shadow += (depth - bias) <= map_depth ? 1.0 : 0.0;
+        }
+    }
+    return shadow / 9.0;
+}
+
+vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float view_depth, float roughness, vec3 f0) {
     if (meshi_bindless_lights.lights.length() == 0) {
         return base_color * 0.1;
     }
@@ -247,8 +315,18 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
     vec3 k_d = (vec3(1.0) - k_s);
     vec3 diffuse = k_d * base_color / PI;
 
+    float shadow_factor = 1.0;
+    if (light_type == LIGHT_TYPE_DIRECTIONAL && shadow_params.shadow_resolution > 0u) {
+        uint light_flags = floatBitsToUint(light.extra.x);
+        bool casts_shadows = (light_flags & 1u) != 0u;
+        if (casts_shadows) {
+            float bias = max(0.0005, 0.002 * (1.0 - ndotl));
+            shadow_factor = sample_shadow(world_pos, view_depth, bias);
+        }
+    }
+
     vec3 radiance = light_color * attenuation;
-    gain += (diffuse + specular) * radiance * ndotl;
+    gain += (diffuse + specular) * radiance * ndotl * shadow_factor;
     }
 
     return gain;
@@ -286,7 +364,7 @@ void main() {
         return;
     }
     if (debug_view == 2) {
-        float height_scale = max(params.wave_amplitude, 0.1);
+        float height_scale = 1.0;
         float height = v_world_pos.y / height_scale;
         float height_norm = clamp(height * 0.5 + 0.5, 0.0, 1.0);
         vec3 height_color = mix(vec3(0.02, 0.2, 0.55), vec3(0.9, 0.4, 0.15), height_norm);
@@ -298,7 +376,7 @@ void main() {
         return;
     }
     if (debug_view == 4) {
-        float velocity = clamp(abs(v_velocity) / max(params.wave_amplitude, 0.1), 0.0, 1.0);
+        float velocity = clamp(abs(v_velocity) / 1.0, 0.0, 1.0);
         out_color = vec4(vec3(velocity), 1.0);
         return;
     }
@@ -338,7 +416,7 @@ void main() {
     vec3 specular_ibl = reflection_color * mix(fresnel, vec3(1.0), roughness * 0.2);
     vec3 diffuse_ibl = base_color * (1.0 - fresnel) * 0.08;
 
-    vec3 surface = apply_light(base_color, n, v, v_world_pos, roughness, f0);
+    vec3 surface = apply_light(base_color, n, v, v_world_pos, view_depth, roughness, f0);
     surface += diffuse_ibl * fresnel_strength;
     surface += specular_ibl * fresnel_strength;
     float reflect_factor = clamp(fresnel_strength * fresnel.r, 0.0, 1.0);

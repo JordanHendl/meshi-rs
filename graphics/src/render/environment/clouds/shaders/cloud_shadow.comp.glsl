@@ -114,7 +114,7 @@ void main() {
     float max_top = max(params.cloud_top_a, params.cloud_top_b);
     float min_base = min(params.cloud_base_a, params.cloud_base_b);
     vec3 origin = camera_position + vec3(centered.x, max_top, centered.y);
-    vec3 dir = normalize(-params.sun_direction);
+    vec3 dir = normalize(params.sun_direction);
 
     float layer_depth = max_top - min_base;
     if (layer_depth <= 0.0) {

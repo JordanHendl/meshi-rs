@@ -228,7 +228,7 @@ vec3 light_direction(Light light, vec3 sample_pos, out float attenuation, out fl
         float dir_len = length(dir);
         attenuation = 1.0;
         max_dist = 5000.0;
-        return dir_len > 0.0 ? normalize(dir) : vec3(0.0, -1.0, 0.0);
+        return dir_len > 0.0 ? normalize(-dir) : vec3(0.0, 1.0, 0.0);
     }
 
     vec3 to_light = light.position_type.xyz - sample_pos;

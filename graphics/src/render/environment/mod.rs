@@ -9,7 +9,7 @@ use dashi::{
     Viewport,
 };
 use furikake::{BindlessState, types::Camera};
-use glam::Vec3;
+use glam::{Mat4, Vec3, Vec4};
 use noren::DB;
 
 use crate::CloudSettings;
@@ -276,10 +276,22 @@ impl EnvironmentRenderer {
         camera: dashi::Handle<Camera>,
         scene_color: Option<dashi::ImageView>,
         scene_depth: Option<dashi::ImageView>,
+        shadow_map: Option<dashi::ImageView>,
+        shadow_cascade_count: u32,
+        shadow_resolution: u32,
+        shadow_splits: Vec4,
+        shadow_matrices: [Mat4; 4],
     ) -> CommandStream<PendingGraphics> {
         self.ocean
             .set_environment_map(self.sky.environment_cubemap_view());
         self.ocean.set_scene_textures(scene_color, scene_depth);
+        self.ocean.set_shadow_map(
+            shadow_map,
+            shadow_cascade_count,
+            shadow_resolution,
+            shadow_splits,
+            shadow_matrices,
+        );
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
                 viewport,

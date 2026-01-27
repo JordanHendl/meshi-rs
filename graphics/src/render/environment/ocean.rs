@@ -11,7 +11,7 @@ use dashi::{
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use furikake::types::Camera;
-use glam::{Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use tracing::warn;
 
 use crate::gui::Slider;
@@ -459,7 +459,7 @@ struct OceanFinalizeParams {
     _padding: [u32; 3],
 }
 
-#[repr(C)]
+#[repr(packed)]
 #[derive(Debug, Clone, Copy)]
 struct OceanDrawParams {
     cascade_fft_sizes: [u32; 4],
@@ -475,7 +475,6 @@ struct OceanDrawParams {
     time: f32,
     wind_dir: Vec2,
     wind_speed: f32,
-    wave_amplitude: f32,
     gerstner_amplitude: f32,
     fresnel_bias: f32,
     fresnel_strength: f32,
@@ -498,7 +497,25 @@ struct OceanDrawParams {
     ssr_thickness: f32,
     ssr_steps: u32,
     debug_view: f32,
+    _padding2: Vec3,
 }
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct OceanShadowParams {
+    shadow_cascade_count: u32,
+    shadow_resolution: u32,
+    shadow_padding0: u32,
+    shadow_padding1: u32,
+    shadow_splits: Vec4,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct OceanShadowMatrices {
+    shadow_matrices: [Mat4; 4],
+}
+
 
 #[derive(Debug)]
 struct OceanCascade {
@@ -562,6 +579,10 @@ pub struct OceanRenderer {
     scene_sampler: Handle<Sampler>,
     scene_color_fallback: ImageView,
     scene_depth_fallback: ImageView,
+    shadow_cascade_count: u32,
+    shadow_resolution: u32,
+    shadow_splits: Vec4,
+    shadow_matrices: [Mat4; 4],
     enabled: bool,
 }
 
@@ -914,6 +935,21 @@ impl OceanRenderer {
                 }],
             )
             .add_table_variable_with_resources(
+                "shadow_params",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "shadow_matrices",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+
+            .add_table_variable_with_resources(
                 "ocean_env_map",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Image(environment_map),
@@ -943,6 +979,21 @@ impl OceanRenderer {
             )
             .add_table_variable_with_resources(
                 "ocean_scene_sampler",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Sampler(scene_sampler),
+                    slot: 0,
+                }],
+            );
+        pso_builder = pso_builder
+            .add_table_variable_with_resources(
+                "ocean_shadow_map",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(scene_depth_fallback),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "ocean_shadow_sampler",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Sampler(scene_sampler),
                     slot: 0,
@@ -1034,6 +1085,10 @@ impl OceanRenderer {
             scene_sampler,
             scene_color_fallback,
             scene_depth_fallback,
+            shadow_cascade_count: 0,
+            shadow_resolution: 0,
+            shadow_splits: Vec4::ZERO,
+            shadow_matrices: [Mat4::IDENTITY; 4],
             enabled: default_frame.enabled,
         }
     }
@@ -1357,6 +1412,35 @@ impl OceanRenderer {
         );
     }
 
+    pub fn set_shadow_map(
+        &mut self,
+        shadow_map: Option<ImageView>,
+        cascade_count: u32,
+        resolution: u32,
+        splits: Vec4,
+        matrices: [Mat4; 4],
+    ) {
+        let shadow_view = shadow_map.unwrap_or(self.scene_depth_fallback);
+        self.pipeline.update_table(
+            "ocean_shadow_map",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(shadow_view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "ocean_shadow_sampler",
+            dashi::IndexedResource {
+                resource: ShaderResource::Sampler(self.scene_sampler),
+                slot: 0,
+            },
+        );
+        self.shadow_cascade_count = cascade_count;
+        self.shadow_resolution = resolution;
+        self.shadow_splits = splits;
+        self.shadow_matrices = matrices;
+    }
+
     pub fn record_compute(
         &mut self,
         dynamic: &mut DynamicAllocator,
@@ -1623,7 +1707,8 @@ impl OceanRenderer {
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean draw params");
-
+            
+        assert_eq!(std::mem::size_of::<OceanDrawParams>(),  252);
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
         let mut cascade_fft_sizes = [0u32; 4];
         let mut cascade_patch_sizes = [0.0f32; 4];
@@ -1655,7 +1740,6 @@ impl OceanRenderer {
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
-            wave_amplitude: self.wave_amplitude,
             gerstner_amplitude: self.gerstner_amplitude,
             fresnel_bias: self.fresnel_bias,
             fresnel_strength: self.fresnel_strength,
@@ -1693,7 +1777,27 @@ impl OceanRenderer {
             ssr_thickness: self.ssr_thickness,
             ssr_steps: self.ssr_steps,
             debug_view: self.debug_view as u32 as f32,
+            _padding2: Default::default(),
         };
+        let mut shadow_alloc = dynamic
+            .bump()
+            .expect("Failed to allocate ocean shadow params");
+        let mut shadow_matrix_alloc = dynamic
+            .bump()
+            .expect("Failed to allocate ocean shadow params");
+
+        shadow_alloc.slice::<OceanShadowParams>()[0] = OceanShadowParams {
+            shadow_cascade_count: self.shadow_cascade_count,
+            shadow_resolution: self.shadow_resolution,
+            shadow_padding0: 0,
+            shadow_padding1: 0,
+            shadow_splits: self.shadow_splits,
+        };
+
+        shadow_matrix_alloc.slice::<OceanShadowMatrices>()[0] = OceanShadowMatrices {
+            shadow_matrices: self.shadow_matrices,
+        };
+
         
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
@@ -1707,7 +1811,7 @@ impl OceanRenderer {
             .update_viewport(viewport)
             .draw(&Draw {
                 bind_tables: self.pipeline.tables(),
-                dynamic_buffers: [None, Some(alloc), None, None],
+                dynamic_buffers: [Some(alloc), Some(shadow_alloc), Some(shadow_matrix_alloc), None],
                 instance_count,
                 count: vertex_count,
                 ..Default::default()

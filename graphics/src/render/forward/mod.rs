@@ -632,6 +632,11 @@ impl ForwardRenderer {
                         camera_handle,
                         None,
                         None,
+                        None,
+                        0,
+                        0,
+                        Vec4::ZERO,
+                        [Mat4::IDENTITY; 4],
                     ))
                 },
             );
