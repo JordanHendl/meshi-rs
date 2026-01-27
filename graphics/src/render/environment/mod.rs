@@ -139,6 +139,10 @@ impl EnvironmentRenderer {
         self.sky.sun_direction()
     }
 
+    pub fn primary_light_direction(&self) -> Vec3 {
+        self.sky.primary_light_direction()
+    }
+
     pub fn prepare_sky_cubemap(
         &mut self,
         ctx: &mut Context,

@@ -723,6 +723,8 @@ impl Renderer for ForwardRenderer {
         self.environment.update_ocean(settings);
     }
 
+    fn set_spot_shadow_light(&mut self, _light: Option<super::SpotShadowLight>) {}
+
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,

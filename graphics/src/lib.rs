@@ -76,6 +76,8 @@ pub struct RenderEngine {
     cloud_settings: CloudSettings,
     terrain_chunk_hashes: HashMap<String, u64>,
     terrain_render_objects: HashMap<String, TerrainRenderObject>,
+    light_cache: Vec<(Handle<Light>, LightInfo)>,
+    spot_shadow_light: Option<render::SpotShadowLight>,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +104,55 @@ struct EnvironmentLightingState {
 }
 
 impl RenderEngine {
+    fn refresh_spot_shadow_light(&mut self) {
+        let mut selected: Option<render::SpotShadowLight> = None;
+        for (handle, info) in &self.light_cache {
+            if info.ty == LightType::Spot
+                && (info.flags & LightFlags::CASTS_SHADOWS.bits()) != 0
+            {
+                selected = Some(render::SpotShadowLight {
+                    handle: *handle,
+                    info: *info,
+                });
+                break;
+            }
+        }
+        self.spot_shadow_light = selected;
+        self.renderer.set_spot_shadow_light(selected);
+    }
+
+    fn update_cached_light_info(&mut self, handle: Handle<Light>, info: LightInfo) {
+        if let Some(entry) = self
+            .light_cache
+            .iter_mut()
+            .find(|(cached_handle, _)| *cached_handle == handle)
+        {
+            entry.1 = info;
+        } else {
+            self.light_cache.push((handle, info));
+        }
+    }
+
+    fn update_cached_light_transform(&mut self, handle: Handle<Light>, transform: &Mat4) {
+        if let Some(entry) = self
+            .light_cache
+            .iter_mut()
+            .find(|(cached_handle, _)| *cached_handle == handle)
+        {
+            let (_, rotation, translation) = transform.to_scale_rotation_translation();
+            let mut direction = rotation * Vec3::NEG_Z;
+            if direction.length_squared() > 0.0 {
+                direction = direction.normalize();
+            }
+
+            entry.1.pos_x = translation.x;
+            entry.1.pos_y = translation.y;
+            entry.1.pos_z = translation.z;
+            entry.1.dir_x = direction.x;
+            entry.1.dir_y = direction.y;
+            entry.1.dir_z = direction.z;
+        }
+    }
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
         let sample_count = info.sample_count.unwrap_or(SampleCount::S4);
@@ -170,6 +221,8 @@ impl RenderEngine {
             cloud_settings,
             terrain_chunk_hashes: HashMap::new(),
             terrain_render_objects: HashMap::new(),
+            light_cache: Vec::new(),
+            spot_shadow_light: None,
         })
     }
 
@@ -296,6 +349,9 @@ impl RenderEngine {
             )
             .unwrap();
 
+        self.update_cached_light_info(h, *info);
+        self.refresh_spot_shadow_light();
+
         h
     }
 
@@ -325,6 +381,9 @@ impl RenderEngine {
                 },
             )
             .unwrap();
+
+        self.update_cached_light_transform(handle, transform);
+        self.refresh_spot_shadow_light();
     }
 
     pub fn set_light_info(&mut self, handle: Handle<Light>, info: &LightInfo) {
@@ -340,6 +399,9 @@ impl RenderEngine {
                 },
             )
             .unwrap();
+
+        self.update_cached_light_info(handle, *info);
+        self.refresh_spot_shadow_light();
     }
 
     pub fn release_light(&mut self, handle: Handle<Light>) {
@@ -356,6 +418,9 @@ impl RenderEngine {
                 },
             )
             .unwrap();
+
+        self.light_cache.retain(|(cached_handle, _)| *cached_handle != handle);
+        self.refresh_spot_shadow_light();
     }
 
     pub fn register_object(

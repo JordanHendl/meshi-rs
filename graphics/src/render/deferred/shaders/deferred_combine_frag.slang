@@ -7,6 +7,11 @@ struct DeferredCombineInfo {
   uint shadow_cascade_count;
   uint shadow_resolution;
   uint debug_view;
+  uint spot_shadow_texture_id;
+  uint spot_shadow_resolution;
+  uint spot_shadow_padding0;
+  uint spot_shadow_padding1;
+  float4x4 spot_shadow_matrix;
 };
 
 struct ShadowCascadeInfo {
@@ -200,6 +205,32 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
   return shadow / 9.0;
 }
 
+float sample_spot_shadow(float4x4 spot_shadow_matrix, uint shadow_id, float3 world_pos, float bias) {
+  float4 shadow_pos = mul(spot_shadow_matrix, float4(world_pos, 1.0));
+  shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
+  shadow_pos.y = -shadow_pos.y;
+  float2 uv = shadow_pos.xy * 0.5 + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    return 1.0;
+  }
+
+  float depth = shadow_pos.z;
+  uint shadow_res = max(per_obj.spot_shadow_resolution, 1u);
+  float2 atlas_size = float2(shadow_res, shadow_res);
+  float2 texel_size = 1.0 / atlas_size;
+  float shadow = 0.0;
+  for (int x = -1; x <= 1; ++x) {
+    for (int y = -1; y <= 1; ++y) {
+      float2 offset = float2(x, y) * texel_size;
+      int2 coord = int2((uv + offset) * atlas_size);
+      float map_depth = meshi_bindless_textures[shadow_id].Load(coord, 0).x;
+      shadow += (depth - bias) <= map_depth ? 1.0 : 0.0;
+    }
+  }
+
+  return shadow / 9.0;
+}
+
 [shader("fragment")]
 FSOutput main(FSInput input) {
   FSOutput output;
@@ -319,6 +350,14 @@ FSOutput main(FSInput input) {
       if (casts_shadows) {
         float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
         shadow_factor = sample_shadow(per_obj.shadow_texture_id, position.xyz, cascade_index, cascade_count, bias);
+      }
+    } else if (light_type == LIGHT_TYPE_SPOT && per_obj.spot_shadow_texture_id != 0u) {
+      uint light_flags = asuint(light.extra.x);
+      bool casts_shadows = (light_flags & 1u) != 0u;
+      bool spot_shadow_enabled = light.extra.y > 0.5;
+      if (casts_shadows && spot_shadow_enabled) {
+        float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
+        shadow_factor = sample_spot_shadow(per_obj.spot_shadow_matrix, per_obj.spot_shadow_texture_id, position.xyz, bias);
       }
     }
 

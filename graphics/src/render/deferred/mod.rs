@@ -36,6 +36,7 @@ use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::types::*;
 use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
+use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
@@ -178,6 +179,7 @@ pub struct DeferredRenderer {
     shadow_cascade_buffer: StagedBuffer,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
+    spot_shadow_light: Option<super::SpotShadowLight>,
 }
 
 struct RenderObjectData {
@@ -225,6 +227,29 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
+    fn spot_shadow_matrix(light: &LightInfo) -> Mat4 {
+        let position = Vec3::new(light.pos_x, light.pos_y, light.pos_z);
+        let mut direction = Vec3::new(light.dir_x, light.dir_y, light.dir_z);
+        if direction.length_squared() > 0.0 {
+            direction = direction.normalize();
+        } else {
+            direction = Vec3::NEG_Z;
+        }
+        let up = if direction.abs().dot(Vec3::Y) > 0.9 {
+            Vec3::X
+        } else {
+            Vec3::Y
+        };
+        let view = Mat4::look_at_rh(position, position + direction, up);
+
+        let outer = light.spot_outer_angle_rad.max(0.01);
+        let fov = (outer * 2.0).clamp(0.01, std::f32::consts::PI - 0.01);
+        let near = 0.1;
+        let far = if light.range > near { light.range } else { 1000.0 };
+        let proj = Mat4::perspective_rh(fov, 1.0, near, far);
+        proj * view
+    }
+
     fn compute_frustum_corners(camera: &Camera, split_near: f32, split_far: f32) -> [Vec3; 8] {
         let aspect = if camera.viewport.y.abs() > f32::EPSILON {
             camera.viewport.x / camera.viewport.y
@@ -265,7 +290,7 @@ impl DeferredRenderer {
         let light_dir = self
             .subrender
             .environment
-            .sun_direction()
+            .primary_light_direction()
             .normalize_or_zero();
         let light_dir = if light_dir.length_squared() > 0.0 {
             -light_dir
@@ -638,6 +663,7 @@ impl DeferredRenderer {
             shadow_cascade_buffer,
             depth,
             cloud_overlay,
+            spot_shadow_light: None,
         }
     }
 
@@ -1658,6 +1684,29 @@ impl DeferredRenderer {
             let mut shadow_map = shadow_map;
             shadow_map.view.aspect = AspectMask::Depth;
 
+            let mut spot_shadow_bindless_id = 0u32;
+            let mut spot_shadow_resolution = 0u32;
+            let mut spot_shadow_matrix = Mat4::IDENTITY;
+            let mut spot_shadow_map = None;
+            if let Some(spot_light) = self.spot_shadow_light {
+                spot_shadow_resolution = shadow_resolution.max(1);
+                spot_shadow_matrix = Self::spot_shadow_matrix(&spot_light.info);
+                let spot_shadow_image = self.graph.make_image(&ImageInfo {
+                    debug_name: &format!("[MESHI DEFERRED] Spot Shadow Map {view_idx}"),
+                    dim: [spot_shadow_resolution, spot_shadow_resolution, 1],
+                    layers: 1,
+                    format: Format::D24S8,
+                    mip_levels: 1,
+                    samples: self.shadow.sample_count(),
+                    initial_data: None,
+                    ..Default::default()
+                });
+                let mut spot_shadow_image = spot_shadow_image;
+                spot_shadow_image.view.aspect = AspectMask::Depth;
+                spot_shadow_bindless_id = spot_shadow_image.bindless_id.unwrap() as u32;
+                spot_shadow_map = Some(spot_shadow_image);
+            }
+
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_pass_attachments[0] = Some(position.view);
             deferred_pass_attachments[1] = Some(diffuse.view);
@@ -1772,6 +1821,72 @@ impl DeferredRenderer {
                 },
             );
 
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            // Spot shadow map pass.                                          //
+            ///////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////
+            if let Some(spot_shadow_map) = spot_shadow_map.as_ref() {
+                let spot_shadow_viewport = Viewport {
+                    area: FRect2D {
+                        x: 0.0,
+                        y: 0.0,
+                        w: spot_shadow_resolution as f32,
+                        h: spot_shadow_resolution as f32,
+                    },
+                    scissor: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: spot_shadow_resolution,
+                        h: spot_shadow_resolution,
+                    },
+                    ..Default::default()
+                };
+
+                self.graph.add_subpass(
+                    &SubpassInfo {
+                        viewport: spot_shadow_viewport,
+                        color_attachments: [None; 8],
+                        depth_attachment: Some(spot_shadow_map.view),
+                        clear_values: shadow_clear,
+                        depth_clear: Some(self.shadow.depth_clear_value()),
+                    },
+                    |mut cmd| {
+                        let indices = self
+                            .state
+                            .binding("meshi_bindless_indices")
+                            .unwrap()
+                            .binding();
+
+                        let indices_handle = match indices {
+                            ReservedBinding::TableBinding {
+                                binding: _,
+                                resources,
+                            } => match resources[0].resource {
+                                ShaderResource::StorageBuffer(view) => Some(view.handle),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+
+                        let Some(indices_handle) = indices_handle else {
+                            return cmd;
+                        };
+
+                        cmd = cmd.combine(self.shadow.record(
+                            &spot_shadow_viewport,
+                            &mut self.data.dynamic,
+                            spot_shadow_matrix,
+                            indices_handle,
+                            self.proc.draw_builder.draw_list(),
+                            self.proc.draw_builder.draw_count(),
+                        ));
+
+                        cmd
+                    },
+                );
+            }
+
             // Deferred SPLIT pass. Renders the following framebuffers:
             // 1) Position
             // 2) Albedo (or diffuse)
@@ -1874,6 +1989,11 @@ impl DeferredRenderer {
                         shadow_cascade_count: u32,
                         shadow_resolution: u32,
                         debug_view: u32,
+                        spot_shadow_texture: u32,
+                        spot_shadow_resolution: u32,
+                        spot_shadow_padding0: u32,
+                        spot_shadow_padding1: u32,
+                        spot_shadow_matrix: Mat4,
                     }
 
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
@@ -1885,6 +2005,11 @@ impl DeferredRenderer {
                     per_obj.shadow_cascade_count = cascade_data.count;
                     per_obj.shadow_resolution = shadow_resolution;
                     per_obj.debug_view = self.subrender.clouds.settings().debug_view as u32;
+                    per_obj.spot_shadow_texture = spot_shadow_bindless_id;
+                    per_obj.spot_shadow_resolution = spot_shadow_resolution;
+                    per_obj.spot_shadow_padding0 = 0;
+                    per_obj.spot_shadow_padding1 = 0;
+                    per_obj.spot_shadow_matrix = spot_shadow_matrix;
 
                     cmd = cmd
                         .combine(self.shadow_cascade_buffer.sync_up())
@@ -2113,6 +2238,31 @@ impl Renderer for DeferredRenderer {
 
     fn set_ocean_settings(&mut self, settings: super::environment::ocean::OceanFrameSettings) {
         self.subrender.environment.update_ocean(settings);
+    }
+
+    fn set_spot_shadow_light(&mut self, light: Option<super::SpotShadowLight>) {
+        let previous_handle = self.spot_shadow_light.map(|entry| entry.handle);
+        let next_handle = light.map(|entry| entry.handle);
+        if previous_handle != next_handle {
+            self.state
+                .reserved_mut(
+                    "meshi_bindless_lights",
+                    |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                        if let Some(handle) = previous_handle {
+                            if handle.valid() {
+                                lights.light_mut(handle).extra.y = 0.0;
+                            }
+                        }
+                        if let Some(handle) = next_handle {
+                            if handle.valid() {
+                                lights.light_mut(handle).extra.y = 1.0;
+                            }
+                        }
+                    },
+                )
+                .ok();
+        }
+        self.spot_shadow_light = light;
     }
 
     fn register_object(

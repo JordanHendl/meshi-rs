@@ -14,8 +14,9 @@ use crate::{
     ShadowCascadeSettings, TextInfo, TextObject,
 };
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{types::Camera, types::Material, BindlessState};
+use furikake::{types::Camera, types::Light, types::Material, BindlessState};
 use glam::Mat4;
+use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::DB;
 use std::collections::VecDeque;
@@ -32,6 +33,12 @@ pub struct ViewOutput {
     pub camera: Handle<Camera>,
     pub image: ImageView,
     pub semaphore: Handle<Semaphore>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpotShadowLight {
+    pub handle: Handle<Light>,
+    pub info: LightInfo,
 }
 
 pub struct FrameTimer {
@@ -110,6 +117,7 @@ pub trait Renderer {
         &mut self,
         settings: crate::render::environment::ocean::OceanFrameSettings,
     );
+    fn set_spot_shadow_light(&mut self, light: Option<SpotShadowLight>);
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,

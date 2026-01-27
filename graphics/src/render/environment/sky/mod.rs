@@ -199,6 +199,14 @@ pub struct SkyRenderer {
     enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CelestialLighting {
+    sun_dir: Vec3,
+    moon_dir: Vec3,
+    sun_intensity: f32,
+    moon_intensity: f32,
+}
+
 fn compile_skybox_shaders() -> [bento::CompilationResult; 2] {
     let compiler = Compiler::new().expect("Failed to create shader compiler");
     let base_request = Request {
@@ -568,6 +576,15 @@ impl SkyRenderer {
             self.sky_settings.longitude_degrees,
             false,
         )
+    }
+
+    pub fn primary_light_direction(&self) -> Vec3 {
+        let lighting = compute_celestial_lighting(&self.sky_settings);
+        if lighting.moon_intensity > lighting.sun_intensity {
+            lighting.moon_dir
+        } else {
+            lighting.sun_dir
+        }
     }
 
     pub fn environment_cubemap_view(&self) -> ImageView {
@@ -942,21 +959,8 @@ impl SkyRenderer {
 
     fn update_sky_config(&mut self) {
         let config = &mut self.cfg.as_slice_mut::<SkyConfig>()[0];
-        let sun_dir = resolve_celestial_direction(
-            self.sky_settings.sun_direction,
-            self.sky_settings.time_of_day,
-            self.sky_settings.latitude_degrees,
-            self.sky_settings.longitude_degrees,
-            false,
-        );
-        let moon_dir = resolve_celestial_direction(
-            self.sky_settings.moon_direction,
-            self.sky_settings.time_of_day,
-            self.sky_settings.latitude_degrees,
-            self.sky_settings.longitude_degrees,
-            true,
-        );
-        let sun_height = sun_dir.y.clamp(-1.0, 1.0);
+        let lighting = compute_celestial_lighting(&self.sky_settings);
+        let sun_height = lighting.sun_dir.y.clamp(-1.0, 1.0);
         let day_factor = smoothstep(0.0, 0.25, sun_height);
         let night_factor = 1.0 - smoothstep(-0.2, 0.05, sun_height);
         let twilight_factor = (1.0 - day_factor - night_factor).clamp(0.0, 1.0);
@@ -975,18 +979,16 @@ impl SkyRenderer {
             + twilight_zenith * twilight_factor
             + day_zenith * day_factor;
         let intensity_scale = night_factor * 0.25 + twilight_factor * 0.7 + day_factor * 1.0;
-        let sun_intensity_scale = day_factor + twilight_factor * 0.6;
-        let moon_intensity_scale = night_factor + twilight_factor * 0.5;
 
         config.horizon_init = horizon_tint;
         config.zenith_tint = zenith_tint;
-        config.sun_dir = sun_dir;
+        config.sun_dir = lighting.sun_dir;
         config.sun_color = self.sky_settings.sun_color;
-        config.sun_intensity = self.sky_settings.sun_intensity * sun_intensity_scale;
+        config.sun_intensity = lighting.sun_intensity;
         config.sun_angular_radius = self.sky_settings.sun_angular_radius;
-        config.moon_dir = moon_dir;
+        config.moon_dir = lighting.moon_dir;
         config.moon_color = self.sky_settings.moon_color;
-        config.moon_intensity = self.sky_settings.moon_intensity * moon_intensity_scale;
+        config.moon_intensity = lighting.moon_intensity;
         config.moon_angular_radius = self.sky_settings.moon_angular_radius;
         config.intensity_scale = intensity_scale;
     }
@@ -1023,6 +1025,37 @@ fn resolve_celestial_direction(
     }
 
     if is_moon { -Vec3::Y } else { Vec3::Y }
+}
+
+fn compute_celestial_lighting(settings: &SkyFrameSettings) -> CelestialLighting {
+    let sun_dir = resolve_celestial_direction(
+        settings.sun_direction,
+        settings.time_of_day,
+        settings.latitude_degrees,
+        settings.longitude_degrees,
+        false,
+    );
+    let moon_dir = resolve_celestial_direction(
+        settings.moon_direction,
+        settings.time_of_day,
+        settings.latitude_degrees,
+        settings.longitude_degrees,
+        true,
+    );
+    let sun_height = sun_dir.y.clamp(-1.0, 1.0);
+    let day_factor = smoothstep(0.0, 0.25, sun_height);
+    let night_factor = 1.0 - smoothstep(-0.2, 0.05, sun_height);
+    let twilight_factor = (1.0 - day_factor - night_factor).clamp(0.0, 1.0);
+
+    let sun_intensity_scale = day_factor + twilight_factor * 0.6;
+    let moon_intensity_scale = night_factor + twilight_factor * 0.5;
+
+    CelestialLighting {
+        sun_dir,
+        moon_dir,
+        sun_intensity: settings.sun_intensity * sun_intensity_scale,
+        moon_intensity: settings.moon_intensity * moon_intensity_scale,
+    }
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
