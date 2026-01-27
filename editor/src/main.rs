@@ -62,6 +62,57 @@ mod editor {
                         RuntimeLogLevel::Warn,
                         "Generate C++ Bindings is not implemented yet.",
                     ),
+                    UiAction::CreateProject => {
+                        if let Err(err) = self.project_manager.create_project(None) {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Error,
+                                format!("Failed to create project: {}", err),
+                            );
+                        } else {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Info,
+                                "Created new project in workspace.",
+                            );
+                        }
+                    }
+                    UiAction::OpenProject => {
+                        let workspace_root = self.project_manager.workspace_root();
+                        if let Err(err) = self.project_manager.open_project(workspace_root) {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Error,
+                                format!("Failed to open project: {}", err),
+                            );
+                        } else {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Info,
+                                "Opened workspace root as project.",
+                            );
+                        }
+                    }
+                    UiAction::OpenWorkspace => {
+                        let workspace_root = self.project_manager.workspace_root();
+                        if let Err(err) = self.project_manager.select_workspace(workspace_root) {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Error,
+                                format!("Failed to select workspace: {}", err),
+                            );
+                        } else {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Info,
+                                "Workspace selection updated.",
+                            );
+                        }
+                    }
+                    UiAction::SaveAll => {
+                        if let Err(err) = self.project_manager.save_all() {
+                            self.runtime.log_message(
+                                RuntimeLogLevel::Error,
+                                format!("Failed to save project metadata: {}", err),
+                            );
+                        } else {
+                            self.runtime.log_message(RuntimeLogLevel::Info, "Saved project data.");
+                        }
+                    }
                 }
             }
             let delta_time = ctx.input(|input| input.unstable_dt);

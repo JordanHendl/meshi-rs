@@ -23,12 +23,20 @@ pub enum UiAction {
     BuildAndRun,
     RebuildAll,
     GenerateBindings,
+    CreateProject,
+    OpenProject,
+    OpenWorkspace,
+    SaveAll,
 }
 
 const ACTION_BUILD_PROJECT: u32 = 1;
 const ACTION_BUILD_AND_RUN: u32 = 2;
 const ACTION_REBUILD_ALL: u32 = 3;
 const ACTION_GENERATE_BINDINGS: u32 = 4;
+const ACTION_CREATE_PROJECT: u32 = 5;
+const ACTION_OPEN_PROJECT: u32 = 6;
+const ACTION_OPEN_WORKSPACE: u32 = 7;
+const ACTION_SAVE_ALL: u32 = 8;
 
 impl EditorUi {
     pub fn new() -> Self {
@@ -309,6 +317,10 @@ impl EditorUi {
                         ACTION_BUILD_AND_RUN => Some(UiAction::BuildAndRun),
                         ACTION_REBUILD_ALL => Some(UiAction::RebuildAll),
                         ACTION_GENERATE_BINDINGS => Some(UiAction::GenerateBindings),
+                        ACTION_CREATE_PROJECT => Some(UiAction::CreateProject),
+                        ACTION_OPEN_PROJECT => Some(UiAction::OpenProject),
+                        ACTION_OPEN_WORKSPACE => Some(UiAction::OpenWorkspace),
+                        ACTION_SAVE_ALL => Some(UiAction::SaveAll),
                         _ => None,
                     });
                 }
@@ -364,10 +376,26 @@ impl EditorUi {
         };
 
         let file_items = vec![
-            MenuItem::new("New Project"),
-            MenuItem::new("Open Project"),
-            MenuItem::new("Open Workspace"),
-            MenuItem::new("Save All"),
+            {
+                let mut item = MenuItem::new("New Project");
+                item.action_id = Some(ACTION_CREATE_PROJECT);
+                item
+            },
+            {
+                let mut item = MenuItem::new("Open Project");
+                item.action_id = Some(ACTION_OPEN_PROJECT);
+                item
+            },
+            {
+                let mut item = MenuItem::new("Open Workspace");
+                item.action_id = Some(ACTION_OPEN_WORKSPACE);
+                item
+            },
+            {
+                let mut item = MenuItem::new("Save All");
+                item.action_id = Some(ACTION_SAVE_ALL);
+                item
+            },
             MenuItem::separator(),
             MenuItem::new("Recent Projects").with_submenu(recent_menu_items),
         ];
