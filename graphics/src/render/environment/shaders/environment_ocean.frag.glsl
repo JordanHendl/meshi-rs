@@ -1,5 +1,6 @@
 #version 450
 
+#extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_samplerless_texture_functions : enable
 layout(location = 0) in vec2 v_uv;
@@ -10,7 +11,7 @@ layout(location = 4) in float v_velocity;
 layout(location = 5) in vec2 v_flow;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 1, binding = 0) readonly buffer OceanParams {
+layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -33,7 +34,7 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float foam_decay_rate;
     float foam_noise_scale;
     vec2 current;
-    float _padding1;
+    vec3 _padding1;
     vec4 absorption_coeff;
     vec4 shallow_color;
     vec4 deep_color;

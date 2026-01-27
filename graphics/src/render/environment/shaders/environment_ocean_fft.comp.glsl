@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_EXT_scalar_block_layout : enable
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) readonly buffer OceanSpectrumIn {
@@ -10,7 +12,7 @@ layout(set = 0, binding = 1) buffer OceanSpectrumOut {
     vec4 values[];
 } spectrum_out;
 
-layout(set = 1, binding = 0) readonly buffer OceanFftParams {
+layout(scalar, set = 1, binding = 0) readonly buffer OceanFftParams {
     uint fft_size;
     uint stage;
     uint direction;

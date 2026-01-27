@@ -1,5 +1,6 @@
 #version 450
 
+#extension GL_EXT_scalar_block_layout : enable
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) readonly buffer OceanSpectrumSpatial {
@@ -10,7 +11,7 @@ layout(set = 0, binding = 1) buffer OceanWaves {
     vec4 values[];
 } ocean_waves;
 
-layout(set = 1, binding = 0) readonly buffer OceanFinalizeParams {
+layout(scalar, set = 1, binding = 0) readonly buffer OceanFinalizeParams {
     uint fft_size;
     vec3 _padding;
 } params;
@@ -45,8 +46,6 @@ void main() {
     float height_r = sample_height(xr, y) * scale;
     float height_d = sample_height(x, yd) * scale;
     float height_u = sample_height(x, yu) * scale;
-
-    vec2 gradient = vec2(height_r - height_l, height_u - height_d) * 0.5;
-
+    vec2 gradient = vec2(height_r - height_l, height_u - height_d) * 0.5 * n_f;
     ocean_waves.values[idx] = vec4(height, gradient.x, gradient.y, velocity);
 }

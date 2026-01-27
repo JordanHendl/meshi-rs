@@ -41,7 +41,7 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             patch_size: 200.0,
-            vertex_resolution: 32,
+            vertex_resolution: 256,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
@@ -260,6 +260,7 @@ impl OceanFrameSettings {
                 &mut self.cascade_spectrum_scales[0] as *mut f32,
                 "Cascade Spectrum Near",
             );
+
             debug_register(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Mid", 0.0, 2.0, 0.0),
@@ -392,7 +393,7 @@ struct OceanFinalizeParams {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct OceanDrawParams {
     cascade_fft_sizes: [u32; 4],
     cascade_patch_sizes: [f32; 4],
@@ -416,7 +417,7 @@ struct OceanDrawParams {
     foam_decay_rate: f32,
     foam_noise_scale: f32,
     current: Vec2,
-    _padding1: f32,
+    _padding1: Vec3,
     absorption_coeff: Vec4,
     shallow_color: Vec4,
     deep_color: Vec4,
@@ -1495,11 +1496,13 @@ impl OceanRenderer {
             cascade_patch_sizes[index] = cascade.patch_size;
         }
         let blend_ranges = [
-            cascade_patch_sizes[0] * 6.0,
-            cascade_patch_sizes[1] * 10.0,
-            cascade_patch_sizes[2] * 12.0,
+            cascade_patch_sizes[0] * 1.0,
+            cascade_patch_sizes[1] * 4.0,
+            cascade_patch_sizes[2] * 8.0,
             0.0,
         ];
+
+        assert_eq!(std::mem::size_of::<OceanDrawParams>(), 240);
         *params = OceanDrawParams {
             cascade_fft_sizes,
             cascade_patch_sizes,
@@ -1513,7 +1516,7 @@ impl OceanRenderer {
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
-            wave_amplitude: self.wave_amplitude,
+            wave_amplitude: 10.0,
             gerstner_amplitude: self.gerstner_amplitude,
             fresnel_bias: self.fresnel_bias,
             fresnel_strength: self.fresnel_strength,
@@ -1523,7 +1526,7 @@ impl OceanRenderer {
             foam_decay_rate: self.foam_decay_rate,
             foam_noise_scale: self.foam_noise_scale,
             current: self.current,
-            _padding1: 0.0,
+            _padding1: Default::default(),
             absorption_coeff: Vec4::new(
                 self.absorption_coeff.x,
                 self.absorption_coeff.y,
@@ -1552,7 +1555,7 @@ impl OceanRenderer {
             ssr_steps: self.ssr_steps,
             debug_view: self.debug_view as u32 as f32,
         };
-
+        
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
         let vertex_count = quad_count * 6;

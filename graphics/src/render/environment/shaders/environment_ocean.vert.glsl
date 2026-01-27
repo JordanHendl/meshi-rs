@@ -1,5 +1,7 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+
 struct Camera {
     mat4 world_from_camera;
     mat4 projection;
@@ -87,7 +89,7 @@ layout(set = 0, binding = 0) readonly buffer OceanWaves {
     vec4 values[];
 } ocean_waves[];
 
-layout(set = 1, binding = 0) readonly buffer OceanParams {
+layout(scalar, set = 1, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -110,7 +112,7 @@ layout(set = 1, binding = 0) readonly buffer OceanParams {
     float foam_decay_rate;
     float foam_noise_scale;
     vec2 current;
-    float _padding1;
+    vec3 _padding1;
     vec4 absorption_coeff;
     vec4 shallow_color;
     vec4 deep_color;
@@ -289,13 +291,13 @@ void main() {
     vec4 waves_far = sample_waves(wave_world / (patch_far * 2.0) + vec2(0.5), 2u, fft_far);
     float height = waves_near.x * w_near + waves_mid.x * w_mid + waves_far.x * w_far;
     vec2 gradient_world =
-        waves_near.yz * (w_near / (2.0 * patch_near)) +
-        waves_mid.yz * (w_mid / (2.0 * patch_mid)) +
-        waves_far.yz * (w_far / (2.0 * patch_far));
+        waves_near.yz * (w_near / (patch_near)) +
+        waves_mid.yz * (w_mid / (patch_mid)) +
+        waves_far.yz * (w_far / (patch_far));
     float velocity = waves_near.w * w_near + waves_mid.w * w_mid + waves_far.w * w_far;
     vec2 wind_dir = safe_normalize(params.wind_dir);
     vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
-    vec4 position = vec4(world.x + choppy_offset.x, height, world.y + choppy_offset.y, 1.0);
+    vec4 position = vec4(world.x + choppy_offset.x, height * 100.0, world.y + choppy_offset.y, 1.0);
     vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
     mat4 view = inverse(camera_view());
     mat4 proj = camera_proj();
