@@ -7,7 +7,10 @@ use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
     Camera, DB, DBInfo, Display, DisplayInfo, RDBFile, RenderEngine, RenderEngineInfo,
     RendererSelect, TextInfo, TextRenderMode, WindowInfo,
-    rdb::terrain::{TerrainChunkArtifact, TerrainMutationOpKind},
+    rdb::terrain::{
+        TerrainChunkArtifact, TerrainMutationOpKind, TerrainProjectSettings, project_settings_entry,
+    },
+    terrain_loader::terrain_chunk_transform,
 };
 use meshi_utils::timer::Timer;
 use tracing::warn;
@@ -519,10 +522,22 @@ impl TerrainEditorApp {
 
     fn update_rendered_chunk(&mut self, chunk_key: String, artifact: TerrainChunkArtifact) {
         self.update_status_text();
+        let settings = {
+            let project_key = self.dbgen.project_key_for_chunk(&chunk_key);
+            self.rdb_open
+                .as_ref()
+                .and_then(|rdb| {
+                    rdb.fetch::<TerrainProjectSettings>(&project_settings_entry(&project_key))
+                        .ok()
+                })
+                .unwrap_or_default()
+        };
+        let transform =
+            terrain_chunk_transform(&settings, artifact.chunk_coords, artifact.bounds_min);
         let render_object = TerrainRenderObject {
             key: chunk_key,
             artifact,
-            transform: Mat4::IDENTITY,
+            transform,
         };
         self.terrain_objects.clear();
         self.terrain_objects.push(render_object);

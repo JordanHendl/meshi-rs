@@ -11,6 +11,7 @@ use meshi_graphics::terrain::{
     TerrainChunkBuildRequest, TerrainChunkBuildStatus, build_terrain_chunk_with_context,
     prepare_terrain_build_context,
 };
+use meshi_graphics::terrain_loader::terrain_chunk_transform;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
 
@@ -272,11 +273,6 @@ fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
 
     let grid_radius = 1;
     let mut objects = Vec::new();
-    let chunk_stride = Vec2::new(
-        settings.tile_size * settings.tiles_per_chunk[0] as f32,
-        settings.tile_size * settings.tiles_per_chunk[1] as f32,
-    );
-    let terrain_rotation = Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2);
 
     for x in -grid_radius..=grid_radius {
         for z in -grid_radius..=grid_radius {
@@ -304,15 +300,8 @@ fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
                 continue;
             };
 
-            let bounds_min = Vec3::from(artifact.bounds_min);
-            let grid_origin = Vec3::new(
-                x as f32 * chunk_stride.x,
-                z as f32 * chunk_stride.y,
-                0.0,
-            );
-            let offset = Mat4::from_translation(grid_origin)
-                * terrain_rotation
-                * Mat4::from_translation(-bounds_min);
+            let offset =
+                terrain_chunk_transform(&settings, artifact.chunk_coords, artifact.bounds_min);
             objects.push(TerrainRenderObject {
                 key: format!("terrain-{x}-{z}"),
                 artifact,

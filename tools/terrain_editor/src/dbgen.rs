@@ -134,6 +134,10 @@ impl TerrainDbgen {
         [chunk_hash as i32, (chunk_hash >> 32) as i32]
     }
 
+    pub fn project_key_for_chunk(&self, chunk_key: &str) -> String {
+        sanitize_project_key(chunk_key)
+    }
+
     fn apply_brush_internal(
         &mut self,
         request: &TerrainBrushRequest,
