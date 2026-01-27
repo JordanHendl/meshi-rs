@@ -22,8 +22,8 @@ use tare::utils::StagedBuffer;
 use tracing::warn;
 
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register_radial_with_description,
-    debug_register_with_description,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int,
+    debug_register_radial_with_description, debug_register_with_description,
 };
 use crate::gui::Slider;
 #[derive(Clone)]
@@ -108,12 +108,34 @@ impl Default for SkyFrameSettings {
 impl SkyboxFrameSettings {
     pub fn register_debug(&mut self) {
         unsafe {
+            debug_register_radial_with_description(
+                PageType::Sky,
+                "Procedural Skybox",
+                DebugRegistryValue::Bool(&mut self.use_procedural_cubemap),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+                Some("Toggle procedural skybox cubemap rendering."),
+            );
             debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Skybox Intensity", 0.2, 2.0, 0.0),
                 &mut self.intensity as *mut f32,
                 "Skybox Intensity",
                 Some("Scales the brightness of the skybox cubemap."),
+            );
+            debug_register_int(
+                PageType::Sky,
+                Slider::new(0, "Skybox Update Interval", 1.0, 240.0, 0.0),
+                &mut self.update_interval_frames as *mut u32,
+                "Skybox Update Interval",
             );
         }
     }
@@ -174,11 +196,55 @@ impl SkyFrameSettings {
             );
             debug_register_with_description(
                 PageType::Sky,
+                Slider::new(0, "Sun Color R", 0.0, 2.0, 0.0),
+                &mut self.sun_color.x as *mut f32,
+                "Sun Color R",
+                Some("Red channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Sun Color G", 0.0, 2.0, 0.0),
+                &mut self.sun_color.y as *mut f32,
+                "Sun Color G",
+                Some("Green channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Sun Color B", 0.0, 2.0, 0.0),
+                &mut self.sun_color.z as *mut f32,
+                "Sun Color B",
+                Some("Blue channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
                 Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sun_angular_radius as *mut f32,
                 "Sun Angular Radius",
                 Some("Adjusts the apparent size of the sun disc."),
             );
+            if let Some(direction) = self.sun_direction.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir X", -1.0, 1.0, 0.0),
+                    &mut direction.x as *mut f32,
+                    "Sun Dir X",
+                    Some("X component of the sun direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir Y", -1.0, 1.0, 0.0),
+                    &mut direction.y as *mut f32,
+                    "Sun Dir Y",
+                    Some("Y component of the sun direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir Z", -1.0, 1.0, 0.0),
+                    &mut direction.z as *mut f32,
+                    "Sun Dir Z",
+                    Some("Z component of the sun direction."),
+                );
+            }
             debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
@@ -188,11 +254,55 @@ impl SkyFrameSettings {
             );
             debug_register_with_description(
                 PageType::Sky,
+                Slider::new(0, "Moon Color R", 0.0, 2.0, 0.0),
+                &mut self.moon_color.x as *mut f32,
+                "Moon Color R",
+                Some("Red channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Moon Color G", 0.0, 2.0, 0.0),
+                &mut self.moon_color.y as *mut f32,
+                "Moon Color G",
+                Some("Green channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Moon Color B", 0.0, 2.0, 0.0),
+                &mut self.moon_color.z as *mut f32,
+                "Moon Color B",
+                Some("Blue channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
                 Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.moon_angular_radius as *mut f32,
                 "Moon Angular Radius",
                 Some("Adjusts the apparent size of the moon disc."),
             );
+            if let Some(direction) = self.moon_direction.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir X", -1.0, 1.0, 0.0),
+                    &mut direction.x as *mut f32,
+                    "Moon Dir X",
+                    Some("X component of the moon direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir Y", -1.0, 1.0, 0.0),
+                    &mut direction.y as *mut f32,
+                    "Moon Dir Y",
+                    Some("Y component of the moon direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir Z", -1.0, 1.0, 0.0),
+                    &mut direction.z as *mut f32,
+                    "Moon Dir Z",
+                    Some("Z component of the moon direction."),
+                );
+            }
             debug_register_radial_with_description(
                 PageType::Sky,
                 "Auto Sun",
@@ -209,6 +319,15 @@ impl SkyFrameSettings {
                 ],
                 Some("Automatically updates sun direction from time of day."),
             );
+            if let Some(time_of_day) = self.time_of_day.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Time of Day", 0.0, 24.0, 0.0),
+                    time_of_day as *mut f32,
+                    "Time of Day",
+                    Some("Manual time of day used when auto sun is disabled."),
+                );
+            }
             debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Auto Sun Speed", 0.0, 4.0, 0.0),
@@ -223,6 +342,24 @@ impl SkyFrameSettings {
                 "Current Time (Hours)",
                 Some("Current time of day used when auto sun is enabled."),
             );
+            if let Some(latitude) = self.latitude_degrees.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Latitude", -90.0, 90.0, 0.0),
+                    latitude as *mut f32,
+                    "Latitude",
+                    Some("Latitude in degrees for time-of-day lighting."),
+                );
+            }
+            if let Some(longitude) = self.longitude_degrees.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Longitude", -180.0, 180.0, 0.0),
+                    longitude as *mut f32,
+                    "Longitude",
+                    Some("Longitude in degrees for time-of-day lighting."),
+                );
+            }
         }
     }
 }
@@ -629,6 +766,28 @@ impl SkyRenderer {
                 "Skybox Intensity",
                 Some("Scales the brightness of the skybox cubemap."),
             );
+            debug_register_radial_with_description(
+                PageType::Sky,
+                "Procedural Skybox",
+                DebugRegistryValue::Bool(&mut self.use_procedural_cubemap),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+                Some("Toggle procedural skybox cubemap rendering."),
+            );
+            debug_register_int(
+                PageType::Sky,
+                Slider::new(0, "Skybox Update Interval", 1.0, 240.0, 0.0),
+                &mut self.cubemap_update_interval as *mut u32,
+                "Skybox Update Interval",
+            );
             debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
@@ -638,11 +797,55 @@ impl SkyRenderer {
             );
             debug_register_with_description(
                 PageType::Sky,
+                Slider::new(0, "Sun Color R", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.sun_color.x as *mut f32,
+                "Sun Color R",
+                Some("Red channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Sun Color G", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.sun_color.y as *mut f32,
+                "Sun Color G",
+                Some("Green channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Sun Color B", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.sun_color.z as *mut f32,
+                "Sun Color B",
+                Some("Blue channel of the sun color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
                 Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sky_settings.sun_angular_radius as *mut f32,
                 "Sun Angular Radius",
                 Some("Adjusts the apparent size of the sun disc."),
             );
+            if let Some(direction) = self.sky_settings.sun_direction.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir X", -1.0, 1.0, 0.0),
+                    &mut direction.x as *mut f32,
+                    "Sun Dir X",
+                    Some("X component of the sun direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir Y", -1.0, 1.0, 0.0),
+                    &mut direction.y as *mut f32,
+                    "Sun Dir Y",
+                    Some("Y component of the sun direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Sun Dir Z", -1.0, 1.0, 0.0),
+                    &mut direction.z as *mut f32,
+                    "Sun Dir Z",
+                    Some("Z component of the sun direction."),
+                );
+            }
             debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
@@ -652,11 +855,112 @@ impl SkyRenderer {
             );
             debug_register_with_description(
                 PageType::Sky,
+                Slider::new(0, "Moon Color R", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.moon_color.x as *mut f32,
+                "Moon Color R",
+                Some("Red channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Moon Color G", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.moon_color.y as *mut f32,
+                "Moon Color G",
+                Some("Green channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Moon Color B", 0.0, 2.0, 0.0),
+                &mut self.sky_settings.moon_color.z as *mut f32,
+                "Moon Color B",
+                Some("Blue channel of the moon color."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
                 Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sky_settings.moon_angular_radius as *mut f32,
                 "Moon Angular Radius",
                 Some("Adjusts the apparent size of the moon disc."),
             );
+            if let Some(direction) = self.sky_settings.moon_direction.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir X", -1.0, 1.0, 0.0),
+                    &mut direction.x as *mut f32,
+                    "Moon Dir X",
+                    Some("X component of the moon direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir Y", -1.0, 1.0, 0.0),
+                    &mut direction.y as *mut f32,
+                    "Moon Dir Y",
+                    Some("Y component of the moon direction."),
+                );
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Moon Dir Z", -1.0, 1.0, 0.0),
+                    &mut direction.z as *mut f32,
+                    "Moon Dir Z",
+                    Some("Z component of the moon direction."),
+                );
+            }
+            debug_register_radial_with_description(
+                PageType::Sky,
+                "Auto Sun",
+                DebugRegistryValue::Bool(&mut self.sky_settings.auto_sun_enabled),
+                &[
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                ],
+                Some("Automatically updates sun direction from time of day."),
+            );
+            if let Some(time_of_day) = self.sky_settings.time_of_day.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Time of Day", 0.0, 24.0, 0.0),
+                    time_of_day as *mut f32,
+                    "Time of Day",
+                    Some("Manual time of day used when auto sun is disabled."),
+                );
+            }
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Auto Sun Speed", 0.0, 4.0, 0.0),
+                &mut self.sky_settings.timer_speed as *mut f32,
+                "Auto Sun Speed",
+                Some("Speed multiplier for the day-night cycle."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Current Time (Hours)", 0.0, 24.0, 0.0),
+                &mut self.sky_settings.current_time_of_day as *mut f32,
+                "Current Time (Hours)",
+                Some("Current time of day used when auto sun is enabled."),
+            );
+            if let Some(latitude) = self.sky_settings.latitude_degrees.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Latitude", -90.0, 90.0, 0.0),
+                    latitude as *mut f32,
+                    "Latitude",
+                    Some("Latitude in degrees for time-of-day lighting."),
+                );
+            }
+            if let Some(longitude) = self.sky_settings.longitude_degrees.as_mut() {
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, "Longitude", -180.0, 180.0, 0.0),
+                    longitude as *mut f32,
+                    "Longitude",
+                    Some("Longitude in degrees for time-of-day lighting."),
+                );
+            }
         }
     }
 
