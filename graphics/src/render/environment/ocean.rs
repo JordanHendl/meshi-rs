@@ -41,7 +41,7 @@ impl Default for OceanInfo {
     fn default() -> Self {
         Self {
             patch_size: 200.0,
-            vertex_resolution: 256,
+            vertex_resolution: 64,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
@@ -1516,7 +1516,7 @@ impl OceanRenderer {
             time,
             wind_dir: self.wind_dir,
             wind_speed: self.wind_speed,
-            wave_amplitude: 10.0,
+            wave_amplitude: self.wave_amplitude,
             gerstner_amplitude: self.gerstner_amplitude,
             fresnel_bias: self.fresnel_bias,
             fresnel_strength: self.fresnel_strength,

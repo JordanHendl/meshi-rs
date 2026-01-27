@@ -160,17 +160,23 @@ mat4 camera_proj() {
     return meshi_bindless_cameras.cameras[params.camera_index].projection;
 }
 
-vec2 vertex_uv(uint vertex_id) {
-    vec2 positions[6] = vec2[](
-        vec2(0.0, 0.0),
-        vec2(1.0, 0.0),
-        vec2(0.0, 1.0),
-        vec2(0.0, 1.0),
-        vec2(1.0, 0.0),
-        vec2(1.0, 1.0)
+uvec2 vertex_corner(uint vertex_id) {
+    uvec2 corners[6] = uvec2[](
+        uvec2(0u, 0u),
+        uvec2(1u, 0u),
+        uvec2(0u, 1u),
+        uvec2(0u, 1u),
+        uvec2(1u, 0u),
+        uvec2(1u, 1u)
     );
 
-    return positions[vertex_id];
+    return corners[vertex_id];
+}
+
+uint snap_vertex_index(uint vertex_index, uint step, uint max_index) {
+    uint half_step = step / 2u;
+    uint snapped = ((vertex_index + half_step) / step) * step;
+    return min(snapped, max_index);
 }
 
 vec4 sample_waves(vec2 uv, uint cascade_index, uint fft_size) {
@@ -208,8 +214,6 @@ void main() {
     uint quad_x = quad_index % (grid_resolution - 1);
     uint quad_y = quad_index / (grid_resolution - 1);
     float grid_scale = 1.0 / float(grid_resolution - 1);
-    vec2 base_quad_origin = vec2(quad_x, quad_y) * grid_scale;
-    vec2 base_quad_size = vec2(grid_scale);
     uint base_radius = max(params.base_tile_radius, 1);
     uint max_radius = max(params.max_tile_radius, base_radius);
     uint far_radius_cap = max(params.far_tile_radius, base_radius);
@@ -255,22 +259,26 @@ void main() {
     float morph = smoothstep(float(clip_outer) - morph_band, float(clip_outer), ring_f);
     vec2 tile_offset = (vec2(tile_coord)) * tile_size;
     vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
-    vec2 quad_center_uv = base_quad_origin + base_quad_size * 0.5;
-    vec2 quad_center_local = (quad_center_uv * 2.0 - 1.0) * base_patch_size;
-    vec2 quad_center_world = quad_center_local + snapped_origin + tile_offset;
     vec3 camera_world = camera_position_world();
-    float distance = length(quad_center_world - camera_world.xz);
     float near_range = params.cascade_blend_ranges.x;
     float mid_range = params.cascade_blend_ranges.y;
     float far_range = params.cascade_blend_ranges.z;
-    vec2 vertex_index = vec2(quad_x, quad_y) + vertex_uv(local_vertex);
-    vec2 snapped_current =
-        floor(vertex_index / float(lod_step) + 0.5) * float(lod_step) * grid_scale;
-    vec2 snapped_next =
-        floor(vertex_index / float(lod_step_next) + 0.5) * float(lod_step_next) * grid_scale;
+    uvec2 vertex_index = uvec2(quad_x, quad_y) + vertex_corner(local_vertex);
+    uint max_index = grid_resolution - 1u;
+    uvec2 snapped_current_index = uvec2(
+        snap_vertex_index(vertex_index.x, lod_step, max_index),
+        snap_vertex_index(vertex_index.y, lod_step, max_index)
+    );
+    uvec2 snapped_next_index = uvec2(
+        snap_vertex_index(vertex_index.x, lod_step_next, max_index),
+        snap_vertex_index(vertex_index.y, lod_step_next, max_index)
+    );
+    vec2 snapped_current = vec2(snapped_current_index) * grid_scale;
+    vec2 snapped_next = vec2(snapped_next_index) * grid_scale;
     vec2 uv = mix(snapped_current, snapped_next, morph);
     vec2 local = (uv * 2.0 - 1.0) * base_patch_size;
     vec2 world = local + snapped_origin + tile_offset;
+    float distance = length(world - camera_world.xz);
     vec2 wave_world = world + params.current * params.time;
     float w_near = 1.0 - smoothstep(near_range * 0.6, near_range, distance);
     float w_far = smoothstep(mid_range, far_range, distance);
@@ -298,7 +306,7 @@ void main() {
     vec2 wind_dir = safe_normalize(params.wind_dir);
     vec2 choppy_offset = -gradient_world * (base_patch_size * 0.15);
     vec4 position = vec4(world.x + choppy_offset.x, height * 100.0, world.y + choppy_offset.y, 1.0);
-    vec3 normal = normalize(vec3(-gradient_world.x, 1.0, -gradient_world.y));
+    vec3 normal = normalize(vec3(-gradient_world.x * 2.0, 1.0, -gradient_world.y * 2.0));
     mat4 view = inverse(camera_view());
     mat4 proj = camera_proj();
     gl_Position = proj * view * position;
