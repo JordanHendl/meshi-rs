@@ -1496,9 +1496,9 @@ impl OceanRenderer {
             cascade_patch_sizes[index] = cascade.patch_size;
         }
         let blend_ranges = [
-            cascade_patch_sizes[0] * 1.0,
-            cascade_patch_sizes[1] * 4.0,
-            cascade_patch_sizes[2] * 8.0,
+            cascade_patch_sizes[0] * 6.0,
+            cascade_patch_sizes[1] * 10.0,
+            cascade_patch_sizes[2] * 12.0,
             0.0,
         ];
 
