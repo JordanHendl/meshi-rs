@@ -2,7 +2,7 @@ use glam::Vec2;
 use meshi_graphics::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, Panel, PanelColors,
     PanelInteraction, PanelMetrics, PanelRenderOptions, PanelState, Slider, SliderColors,
-    SliderLayout, SliderMetrics, SliderRenderOptions, SliderState,
+    SliderLayout, SliderMetrics, SliderRenderOptions, SliderState, SliderValueFormat,
 };
 use meshi_graphics::rdb::terrain::TerrainMutationOpKind;
 
@@ -31,6 +31,9 @@ pub struct TerrainEditorUiData<'a> {
     pub seed_input: &'a str,
     pub lod_input: &'a str,
     pub graph_id_input: &'a str,
+    pub generator_frequency: f32,
+    pub generator_amplitude: f32,
+    pub generator_biome_frequency: f32,
     pub brush_tool: TerrainMutationOpKind,
     pub brush_radius: f32,
     pub brush_strength: f32,
@@ -40,11 +43,15 @@ pub struct TerrainEditorUiOutput {
     pub open_clicked: bool,
     pub save_clicked: bool,
     pub generate_clicked: bool,
+    pub earth_preset_clicked: bool,
     pub brush_apply_clicked: bool,
     pub select_chunk: Option<usize>,
     pub prev_chunk_clicked: bool,
     pub next_chunk_clicked: bool,
     pub focused_input: Option<FocusedInput>,
+    pub generator_frequency: Option<f32>,
+    pub generator_amplitude: Option<f32>,
+    pub generator_biome_frequency: Option<f32>,
     pub brush_tool: Option<TerrainMutationOpKind>,
     pub brush_radius: Option<f32>,
     pub brush_strength: Option<f32>,
@@ -56,10 +63,15 @@ pub struct TerrainEditorUi {
     chunk_panel: PanelState,
     generation_panel: PanelState,
     brush_panel: PanelState,
-    slider_layout: SliderLayout,
-    active_slider: Option<u32>,
+    generation_slider_layout: SliderLayout,
+    brush_slider_layout: SliderLayout,
+    active_generation_slider: Option<u32>,
+    active_brush_slider: Option<u32>,
 }
 
+const SLIDER_GENERATOR_FREQUENCY: u32 = 10;
+const SLIDER_GENERATOR_AMPLITUDE: u32 = 11;
+const SLIDER_GENERATOR_BIOME_FREQUENCY: u32 = 12;
 const SLIDER_RADIUS: u32 = 1;
 const SLIDER_STRENGTH: u32 = 2;
 
@@ -79,8 +91,10 @@ impl TerrainEditorUi {
                 [margin + panel_width + 16.0, margin + 232.0],
                 [panel_width, 300.0],
             ),
-            slider_layout: SliderLayout::default(),
-            active_slider: None,
+            generation_slider_layout: SliderLayout::default(),
+            brush_slider_layout: SliderLayout::default(),
+            active_generation_slider: None,
+            active_brush_slider: None,
         }
     }
 
@@ -95,11 +109,15 @@ impl TerrainEditorUi {
             open_clicked: false,
             save_clicked: false,
             generate_clicked: false,
+            earth_preset_clicked: false,
             brush_apply_clicked: false,
             select_chunk: None,
             prev_chunk_clicked: false,
             next_chunk_clicked: false,
             focused_input: None,
+            generator_frequency: None,
+            generator_amplitude: None,
+            generator_biome_frequency: None,
             brush_tool: None,
             brush_radius: None,
             brush_strength: None,
@@ -129,7 +147,9 @@ impl TerrainEditorUi {
                 show_outline: true,
             },
         );
-        output.ui_hovered |= db_layout.display_rect.contains([input.cursor.x, input.cursor.y]);
+        output.ui_hovered |= db_layout
+            .display_rect
+            .contains([input.cursor.x, input.cursor.y]);
         if db_layout.show_content() {
             let content_width = db_layout.content_rect.max[0] - db_layout.content_rect.min[0];
             let mut cursor_y = db_layout.content_rect.min[1] + 10.0;
@@ -142,10 +162,8 @@ impl TerrainEditorUi {
             });
             cursor_y += 18.0;
 
-            let input_rect = MenuRect::from_position_size(
-                [label_x, cursor_y],
-                [content_width - 24.0, 26.0],
-            );
+            let input_rect =
+                MenuRect::from_position_size([label_x, cursor_y], [content_width - 24.0, 26.0]);
             if text_field(
                 gui,
                 input_rect,
@@ -162,10 +180,8 @@ impl TerrainEditorUi {
             let button_width = 90.0;
             let button_height = 26.0;
             let button_gap = 10.0;
-            let open_rect = MenuRect::from_position_size(
-                [label_x, cursor_y],
-                [button_width, button_height],
-            );
+            let open_rect =
+                MenuRect::from_position_size([label_x, cursor_y], [button_width, button_height]);
             if button(gui, open_rect, "Open", input, data.viewport) {
                 output.open_clicked = true;
             }
@@ -209,7 +225,9 @@ impl TerrainEditorUi {
                 show_outline: true,
             },
         );
-        output.ui_hovered |= chunk_layout.display_rect.contains([input.cursor.x, input.cursor.y]);
+        output.ui_hovered |= chunk_layout
+            .display_rect
+            .contains([input.cursor.x, input.cursor.y]);
         if chunk_layout.show_content() {
             let content_width = chunk_layout.content_rect.max[0] - chunk_layout.content_rect.min[0];
             let mut cursor_y = chunk_layout.content_rect.min[1] + 10.0;
@@ -224,10 +242,8 @@ impl TerrainEditorUi {
 
             let item_height = 22.0;
             let item_gap = 4.0;
-            let list_height =
-                (chunk_layout.content_rect.max[1] - cursor_y - 40.0).max(item_height);
-            let max_items =
-                ((list_height + item_gap) / (item_height + item_gap)).floor() as usize;
+            let list_height = (chunk_layout.content_rect.max[1] - cursor_y - 40.0).max(item_height);
+            let max_items = ((list_height + item_gap) / (item_height + item_gap)).floor() as usize;
             for (index, key) in data.chunk_keys.iter().take(max_items).enumerate() {
                 let rect = MenuRect::from_position_size(
                     [label_x, cursor_y + index as f32 * (item_height + item_gap)],
@@ -262,10 +278,8 @@ impl TerrainEditorUi {
             let button_height = 26.0;
             let button_gap = 10.0;
             let button_y = chunk_layout.content_rect.max[1] - 32.0;
-            let prev_rect = MenuRect::from_position_size(
-                [label_x, button_y],
-                [button_width, button_height],
-            );
+            let prev_rect =
+                MenuRect::from_position_size([label_x, button_y], [button_width, button_height]);
             if button(gui, prev_rect, "Prev", input, data.viewport) {
                 output.prev_chunk_clicked = true;
             }
@@ -279,7 +293,7 @@ impl TerrainEditorUi {
         }
 
         let generation_layout = gui.submit_panel(
-            &Panel::new("Generation"),
+            &Panel::new("Earth-like Generation"),
             &mut self.generation_panel,
             &PanelRenderOptions {
                 viewport: data.viewport.to_array(),
@@ -293,8 +307,9 @@ impl TerrainEditorUi {
                 show_outline: true,
             },
         );
-        output.ui_hovered |=
-            generation_layout.display_rect.contains([input.cursor.x, input.cursor.y]);
+        output.ui_hovered |= generation_layout
+            .display_rect
+            .contains([input.cursor.x, input.cursor.y]);
         if generation_layout.show_content() {
             let content_width =
                 generation_layout.content_rect.max[0] - generation_layout.content_rect.min[0];
@@ -343,17 +358,115 @@ impl TerrainEditorUi {
                 FocusedInput::GeneratorGraph,
             );
 
-            let button_rect = MenuRect::from_position_size(
-                [label_x, cursor_y + 6.0],
-                [120.0, 28.0],
-            );
-            if button(gui, button_rect, "Generate", input, data.viewport) {
+            gui.submit_text(GuiTextDraw {
+                text: "Earth-like Procedural Settings".to_string(),
+                position: [label_x, cursor_y],
+                color: [0.82, 0.88, 0.96, 1.0],
+                scale: 0.8,
+            });
+            let slider_start_y = cursor_y + 18.0;
+            let slider_metrics = SliderMetrics {
+                item_height: 26.0,
+                item_gap: 8.0,
+                ..SliderMetrics::default()
+            };
+            let slider_height = slider_metrics.padding[1] * 2.0
+                + slider_metrics.item_height * 3.0
+                + slider_metrics.item_gap * 2.0;
+            let slider_options = SliderRenderOptions {
+                viewport: data.viewport.to_array(),
+                position: [generation_layout.content_rect.min[0], slider_start_y],
+                size: [content_width, slider_height],
+                layer: GuiLayer::Overlay,
+                metrics: slider_metrics,
+                colors: SliderColors::default(),
+                state: SliderState {
+                    hovered: hovered_slider(&self.generation_slider_layout, input.cursor),
+                    active: self.active_generation_slider,
+                },
+                clip_rect: None,
+            };
+            let sliders = [
+                Slider {
+                    id: SLIDER_GENERATOR_FREQUENCY,
+                    label: "Continent Frequency".to_string(),
+                    value: data.generator_frequency,
+                    min: 0.001,
+                    max: 0.05,
+                    enabled: true,
+                    show_value: true,
+                    value_format: SliderValueFormat::Float,
+                },
+                Slider {
+                    id: SLIDER_GENERATOR_AMPLITUDE,
+                    label: "Mountain Amplitude".to_string(),
+                    value: data.generator_amplitude,
+                    min: 8.0,
+                    max: 256.0,
+                    enabled: true,
+                    show_value: true,
+                    value_format: SliderValueFormat::Float,
+                },
+                Slider {
+                    id: SLIDER_GENERATOR_BIOME_FREQUENCY,
+                    label: "Biome Frequency".to_string(),
+                    value: data.generator_biome_frequency,
+                    min: 0.001,
+                    max: 0.02,
+                    enabled: true,
+                    show_value: true,
+                    value_format: SliderValueFormat::Float,
+                },
+            ];
+            let layout = gui.submit_sliders(&sliders, &slider_options);
+            self.generation_slider_layout = layout.clone();
+            if input.mouse_pressed {
+                if let Some(item) = layout
+                    .items
+                    .iter()
+                    .find(|item| slider_hit(item, input.cursor))
+                {
+                    self.active_generation_slider = Some(item.id);
+                }
+            }
+            if input.mouse_released {
+                self.active_generation_slider = None;
+            }
+            if input.mouse_down {
+                if let Some(active_id) = self.active_generation_slider {
+                    if let Some(item) = layout.items.iter().find(|item| item.id == active_id) {
+                        let value = slider_value_from_cursor(
+                            input.cursor,
+                            item.track_rect,
+                            item.min,
+                            item.max,
+                        );
+                        match active_id {
+                            SLIDER_GENERATOR_FREQUENCY => output.generator_frequency = Some(value),
+                            SLIDER_GENERATOR_AMPLITUDE => output.generator_amplitude = Some(value),
+                            SLIDER_GENERATOR_BIOME_FREQUENCY => {
+                                output.generator_biome_frequency = Some(value)
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            let button_y = slider_start_y + slider_height + 6.0;
+            let preset_rect = MenuRect::from_position_size([label_x, button_y], [150.0, 26.0]);
+            if button(gui, preset_rect, "Earth Preset", input, data.viewport) {
+                output.earth_preset_clicked = true;
+            }
+            let generate_rect =
+                MenuRect::from_position_size([preset_rect.max[0] + 10.0, button_y], [120.0, 26.0]);
+            if button(gui, generate_rect, "Generate", input, data.viewport) {
                 output.generate_clicked = true;
             }
         }
 
         let brush_layout = gui.submit_panel(
-            &Panel::new("Brush"),
+            &Panel::new("Manual Sculpting"),
             &mut self.brush_panel,
             &PanelRenderOptions {
                 viewport: data.viewport.to_array(),
@@ -367,7 +480,9 @@ impl TerrainEditorUi {
                 show_outline: true,
             },
         );
-        output.ui_hovered |= brush_layout.display_rect.contains([input.cursor.x, input.cursor.y]);
+        output.ui_hovered |= brush_layout
+            .display_rect
+            .contains([input.cursor.x, input.cursor.y]);
         if brush_layout.show_content() {
             let content_width = brush_layout.content_rect.max[0] - brush_layout.content_rect.min[0];
             let label_x = brush_layout.content_rect.min[0] + 12.0;
@@ -412,9 +527,9 @@ impl TerrainEditorUi {
                 item_gap: 8.0,
                 ..SliderMetrics::default()
             };
-            let slider_height =
-                slider_metrics.padding[1] * 2.0 + slider_metrics.item_height * 2.0
-                    + slider_metrics.item_gap;
+            let slider_height = slider_metrics.padding[1] * 2.0
+                + slider_metrics.item_height * 2.0
+                + slider_metrics.item_gap;
             let slider_options = SliderRenderOptions {
                 viewport: data.viewport.to_array(),
                 position: [brush_layout.content_rect.min[0], slider_start_y],
@@ -423,8 +538,8 @@ impl TerrainEditorUi {
                 metrics: slider_metrics,
                 colors: SliderColors::default(),
                 state: SliderState {
-                    hovered: hovered_slider(&self.slider_layout, input.cursor),
-                    active: self.active_slider,
+                    hovered: hovered_slider(&self.brush_slider_layout, input.cursor),
+                    active: self.active_brush_slider,
                 },
                 clip_rect: None,
             };
@@ -438,6 +553,7 @@ impl TerrainEditorUi {
                     max: 64.0,
                     enabled: true,
                     show_value: true,
+                    value_format: SliderValueFormat::Float,
                 },
                 Slider {
                     id: SLIDER_STRENGTH,
@@ -447,27 +563,33 @@ impl TerrainEditorUi {
                     max: 8.0,
                     enabled: true,
                     show_value: true,
+                    value_format: SliderValueFormat::Float,
                 },
             ];
 
             let layout = gui.submit_sliders(&sliders, &slider_options);
-            self.slider_layout = layout.clone();
+            self.brush_slider_layout = layout.clone();
             if input.mouse_pressed {
                 if let Some(item) = layout
                     .items
                     .iter()
                     .find(|item| slider_hit(item, input.cursor))
                 {
-                    self.active_slider = Some(item.id);
+                    self.active_brush_slider = Some(item.id);
                 }
             }
             if input.mouse_released {
-                self.active_slider = None;
+                self.active_brush_slider = None;
             }
             if input.mouse_down {
-                if let Some(active_id) = self.active_slider {
+                if let Some(active_id) = self.active_brush_slider {
                     if let Some(item) = layout.items.iter().find(|item| item.id == active_id) {
-                        let value = slider_value_from_cursor(input.cursor, item.track_rect, item.min, item.max);
+                        let value = slider_value_from_cursor(
+                            input.cursor,
+                            item.track_rect,
+                            item.min,
+                            item.max,
+                        );
                         match active_id {
                             SLIDER_RADIUS => output.brush_radius = Some(value),
                             SLIDER_STRENGTH => output.brush_strength = Some(value),

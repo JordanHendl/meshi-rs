@@ -19,6 +19,10 @@ pub struct TerrainGenerationRequest {
     pub chunk_key: String,
     pub generator_graph_id: String,
     pub lod: u8,
+    pub generator_frequency: f32,
+    pub generator_amplitude: f32,
+    pub generator_biome_frequency: f32,
+    pub generator_algorithm: String,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +30,10 @@ pub struct TerrainBrushRequest {
     pub chunk_key: String,
     pub generator_graph_id: String,
     pub lod: u8,
+    pub generator_frequency: f32,
+    pub generator_amplitude: f32,
+    pub generator_biome_frequency: f32,
+    pub generator_algorithm: String,
     pub world_pos: [f32; 3],
     pub radius: f32,
     pub strength: f32,
@@ -68,6 +76,12 @@ impl TerrainDbgen {
         if !request.generator_graph_id.is_empty() {
             generator.graph_id = request.generator_graph_id.clone();
         }
+        if !request.generator_algorithm.is_empty() {
+            generator.algorithm = request.generator_algorithm.clone();
+        }
+        generator.frequency = request.generator_frequency;
+        generator.amplitude = request.generator_amplitude;
+        generator.biome_frequency = request.generator_biome_frequency;
 
         let mutation_layer = TerrainMutationLayer::default();
         let mut rdb = RDBFile::new();
@@ -166,6 +180,12 @@ impl TerrainDbgen {
         if !request.generator_graph_id.is_empty() {
             generator.graph_id = request.generator_graph_id.clone();
         }
+        if !request.generator_algorithm.is_empty() {
+            generator.algorithm = request.generator_algorithm.clone();
+        }
+        generator.frequency = request.generator_frequency;
+        generator.amplitude = request.generator_amplitude;
+        generator.biome_frequency = request.generator_biome_frequency;
 
         let layer_id = "layer-1";
         let layer_entry_key =

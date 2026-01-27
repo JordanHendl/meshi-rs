@@ -22,6 +22,11 @@ use meshi_graphics::TerrainRenderObject;
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
 const DEFAULT_BRUSH_RADIUS: f32 = 8.0;
 const DEFAULT_BRUSH_STRENGTH: f32 = 1.0;
+const EARTHLIKE_SEED: u64 = 1337;
+const EARTHLIKE_FREQUENCY: f32 = 0.0065;
+const EARTHLIKE_AMPLITUDE: f32 = 120.0;
+const EARTHLIKE_BIOME_FREQUENCY: f32 = 0.003;
+const EARTHLIKE_ALGORITHM: &str = "ridge-noise";
 const DEFAULT_CHUNK_KEY: &str = "terrain/editor-preview";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +80,10 @@ pub struct TerrainEditorApp {
     generation_seed: u64,
     generation_lod: u8,
     generation_graph_id: String,
+    generator_frequency: f32,
+    generator_amplitude: f32,
+    generator_biome_frequency: f32,
+    generator_algorithm: String,
     seed_input: String,
     lod_input: String,
     graph_id_input: String,
@@ -157,9 +166,13 @@ impl TerrainEditorApp {
             control_down: false,
         });
 
-        let generation_seed = 0_u64;
+        let generation_seed = EARTHLIKE_SEED;
         let generation_lod = 0_u8;
         let generation_graph_id = String::new();
+        let generator_frequency = EARTHLIKE_FREQUENCY;
+        let generator_amplitude = EARTHLIKE_AMPLITUDE;
+        let generator_biome_frequency = EARTHLIKE_BIOME_FREQUENCY;
+        let generator_algorithm = EARTHLIKE_ALGORITHM.to_string();
 
         let mut app = Self {
             engine,
@@ -186,6 +199,10 @@ impl TerrainEditorApp {
             generation_seed,
             generation_lod,
             generation_graph_id: generation_graph_id.clone(),
+            generator_frequency,
+            generator_amplitude,
+            generator_biome_frequency,
+            generator_algorithm,
             seed_input: generation_seed.to_string(),
             lod_input: generation_lod.to_string(),
             graph_id_input: generation_graph_id,
@@ -274,13 +291,16 @@ impl TerrainEditorApp {
             seed_input: &self.seed_input,
             lod_input: &self.lod_input,
             graph_id_input: &self.graph_id_input,
+            generator_frequency: self.generator_frequency,
+            generator_amplitude: self.generator_amplitude,
+            generator_biome_frequency: self.generator_biome_frequency,
             brush_tool: self.brush_tool,
             brush_radius: self.brush_radius,
             brush_strength: self.brush_strength,
         };
-        let ui_output =
-            self.ui
-                .build(&mut gui, &ui_input, &ui_data, self.focused_input);
+        let ui_output = self
+            .ui
+            .build(&mut gui, &ui_input, &ui_data, self.focused_input);
 
         let mouse_pressed = self.event_state.mouse_pressed;
         if mouse_pressed && ui_output.ui_hovered {
@@ -299,6 +319,9 @@ impl TerrainEditorApp {
         }
         if ui_output.generate_clicked {
             self.refresh_terrain();
+        }
+        if ui_output.earth_preset_clicked {
+            self.apply_earthlike_preset();
         }
         if ui_output.brush_apply_clicked {
             self.apply_brush_at_cursor();
@@ -320,6 +343,15 @@ impl TerrainEditorApp {
         }
         if let Some(strength) = ui_output.brush_strength {
             self.brush_strength = strength;
+        }
+        if let Some(value) = ui_output.generator_frequency {
+            self.generator_frequency = value;
+        }
+        if let Some(value) = ui_output.generator_amplitude {
+            self.generator_amplitude = value;
+        }
+        if let Some(value) = ui_output.generator_biome_frequency {
+            self.generator_biome_frequency = value;
         }
         let previous_focus = self.focused_input;
         if let Some(focused) = ui_output.focused_input {
@@ -355,6 +387,10 @@ impl TerrainEditorApp {
             chunk_key: chunk_key.clone(),
             generator_graph_id: self.generation_graph_id.clone(),
             lod: self.generation_lod,
+            generator_frequency: self.generator_frequency,
+            generator_amplitude: self.generator_amplitude,
+            generator_biome_frequency: self.generator_biome_frequency,
+            generator_algorithm: self.generator_algorithm.clone(),
         };
 
         let Some(rdb) = self.rdb_open.as_mut() else {
@@ -384,7 +420,8 @@ impl TerrainEditorApp {
             Err(err) => {
                 warn!(error = %err, "Terrain generation failed.");
                 self.persistence_error = Some(format!("Generation failed: {err}"));
-                self.status_note = Some("Terrain generation failed. Check cache inputs.".to_string());
+                self.status_note =
+                    Some("Terrain generation failed. Check cache inputs.".to_string());
                 self.update_status_text();
             }
         }
@@ -392,11 +429,7 @@ impl TerrainEditorApp {
 
     fn update_status_text(&mut self) {
         let db_status = if self.rdb_open.is_some() {
-            if self.db_dirty {
-                "open*"
-            } else {
-                "open"
-            }
+            if self.db_dirty { "open*" } else { "open" }
         } else {
             "closed"
         };
@@ -406,7 +439,7 @@ impl TerrainEditorApp {
             .cloned()
             .unwrap_or_else(|| DEFAULT_CHUNK_KEY.to_string());
         let mut status = format!(
-            "Terrain Editor | Mode: {} | DB: {} ({}) | Chunk: {}",
+            "Earth-like Terrain Editor | Mode: {} | DB: {} ({}) | Chunk: {}",
             self.terrain_mode.label(),
             self.rdb_path.display(),
             db_status,
@@ -455,6 +488,20 @@ impl TerrainEditorApp {
         self.generation_graph_id = self.graph_id_input.trim().to_string();
     }
 
+    fn apply_earthlike_preset(&mut self) {
+        self.generation_seed = EARTHLIKE_SEED;
+        self.seed_input = self.generation_seed.to_string();
+        self.dbgen.set_seed(self.generation_seed);
+
+        self.generator_frequency = EARTHLIKE_FREQUENCY;
+        self.generator_amplitude = EARTHLIKE_AMPLITUDE;
+        self.generator_biome_frequency = EARTHLIKE_BIOME_FREQUENCY;
+        self.generator_algorithm = EARTHLIKE_ALGORITHM.to_string();
+
+        self.status_note = Some("Earth-like preset applied.".to_string());
+        self.update_status_text();
+    }
+
     fn handle_manual_brush(&mut self) {
         if !self.event_state.mouse_pressed {
             return;
@@ -477,6 +524,10 @@ impl TerrainEditorApp {
             chunk_key: chunk_key.clone(),
             generator_graph_id: self.generation_graph_id.clone(),
             lod: self.generation_lod,
+            generator_frequency: self.generator_frequency,
+            generator_amplitude: self.generator_amplitude,
+            generator_biome_frequency: self.generator_biome_frequency,
+            generator_algorithm: self.generator_algorithm.clone(),
             world_pos: [world_pos.x, world_pos.y, world_pos.z],
             radius: self.brush_radius,
             strength: self.brush_strength,
@@ -525,7 +576,7 @@ impl TerrainEditorApp {
         let settings = {
             let project_key = self.dbgen.project_key_for_chunk(&chunk_key);
             self.rdb_open
-                .as_ref()
+                .as_mut()
                 .and_then(|rdb| {
                     rdb.fetch::<TerrainProjectSettings>(&project_settings_entry(&project_key))
                         .ok()
@@ -753,10 +804,7 @@ impl TerrainEditorApp {
         if !self.chunk_keys.iter().any(|key| key == chunk_key) {
             self.chunk_keys.push(chunk_key.to_string());
             self.chunk_keys.sort();
-            self.selected_chunk_index = self
-                .chunk_keys
-                .iter()
-                .position(|key| key == chunk_key);
+            self.selected_chunk_index = self.chunk_keys.iter().position(|key| key == chunk_key);
         }
     }
 
