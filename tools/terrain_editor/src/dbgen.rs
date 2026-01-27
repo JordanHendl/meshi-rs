@@ -2,10 +2,11 @@ use meshi_graphics::rdb::terrain::TerrainChunkArtifact;
 use noren::{
     RDBFile,
     rdb::terrain::{
-        TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition,
-        TerrainMaterialBlendMode, TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind,
-        TerrainMutationParams, TerrainProjectSettings, chunk_coord_key, chunk_state_entry,
-        generator_entry, mutation_layer_entry, mutation_op_entry, project_settings_entry,
+        TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition, TerrainMaterialBlendMode,
+        TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind, TerrainMutationParams,
+        TerrainProjectSettings, chunk_artifact_entry, chunk_coord_key, chunk_state_entry,
+        generator_entry, lod_key, mutation_layer_entry, mutation_op_entry,
+        parse_chunk_artifact_entry, project_settings_entry,
     },
     terrain::{
         TerrainChunkBuildRequest, build_terrain_chunk_with_context, prepare_terrain_build_context,
@@ -44,13 +45,20 @@ pub struct TerrainDbgen {
     seed: u64,
 }
 
+const DEFAULT_LAYER_ID: &str = "layer-1";
+
+pub struct TerrainChunkResult {
+    pub entry_key: String,
+    pub artifact: TerrainChunkArtifact,
+}
+
 impl TerrainDbgen {
     pub fn new(seed: u64) -> Self {
         Self { seed }
     }
 
     pub fn status(&self) -> &'static str {
-        "stub"
+        "noren dbgen"
     }
 
     pub fn set_seed(&mut self, seed: u64) {
@@ -60,74 +68,64 @@ impl TerrainDbgen {
     pub fn generate_chunk(
         &mut self,
         request: &TerrainGenerationRequest,
-    ) -> Result<TerrainChunkArtifact, String> {
+        rdb: &mut RDBFile,
+    ) -> Result<TerrainChunkResult, String> {
+        let target = self.resolve_chunk_target(&request.chunk_key, request.lod);
         let chunk_hash = hash_chunk_key(self.seed, &request.chunk_key);
-        let chunk_coords = self.chunk_coords_for_key(&request.chunk_key);
-        let project_key = sanitize_project_key(&request.chunk_key);
 
-        let mut settings = TerrainProjectSettings::default();
-        settings.name = format!("Terrain Preview {}", request.chunk_key);
-        settings.seed = self.seed ^ chunk_hash;
-        if !request.generator_graph_id.is_empty() {
-            settings.generator_graph_id = request.generator_graph_id.clone();
-        }
+        self.upsert_project_state(
+            rdb,
+            &target.project_key,
+            &request.chunk_key,
+            chunk_hash,
+            &request.generator_graph_id,
+            &request.generator_algorithm,
+            request.generator_frequency,
+            request.generator_amplitude,
+            request.generator_biome_frequency,
+        )?;
 
-        let mut generator = TerrainGeneratorDefinition::default();
-        if !request.generator_graph_id.is_empty() {
-            generator.graph_id = request.generator_graph_id.clone();
-        }
-        if !request.generator_algorithm.is_empty() {
-            generator.algorithm = request.generator_algorithm.clone();
-        }
-        generator.frequency = request.generator_frequency;
-        generator.amplitude = request.generator_amplitude;
-        generator.biome_frequency = request.generator_biome_frequency;
-
-        let mutation_layer = TerrainMutationLayer::default();
-        let mut rdb = RDBFile::new();
-        rdb.add(&project_settings_entry(&project_key), &settings)
-            .map_err(|err| format!("Project settings add failed: {err}"))?;
-        rdb.add(
-            &generator_entry(&project_key, settings.active_generator_version),
-            &generator,
-        )
-        .map_err(|err| format!("Generator add failed: {err}"))?;
-        rdb.add(
-            &mutation_layer_entry(
-                &project_key,
-                &mutation_layer.layer_id,
-                settings.active_mutation_version,
-            ),
-            &mutation_layer,
-        )
-        .map_err(|err| format!("Mutation layer add failed: {err}"))?;
-
-        let context = prepare_terrain_build_context(&mut rdb, &project_key)
+        let context = prepare_terrain_build_context(rdb, &target.project_key)
             .map_err(|err| format!("Terrain build context failed: {err}"))?;
-        let request = TerrainChunkBuildRequest {
-            chunk_coords,
+        let build_request = TerrainChunkBuildRequest {
+            chunk_coords: target.chunk_coords,
             lod: request.lod,
         };
         let outcome = build_terrain_chunk_with_context(
-            &mut rdb,
-            &project_key,
+            rdb,
+            &target.project_key,
             &context,
-            request,
+            build_request,
             |_| {},
             || false,
         )
         .map_err(|err| format!("Terrain build failed: {err}"))?;
 
-        outcome
-            .artifact
-            .ok_or_else(|| "Terrain build returned no artifact".to_string())
+        if let Some(state) = outcome.state {
+            rdb.upsert(&target.state_entry, &state)
+                .map_err(|err| format!("Chunk state upsert failed: {err}"))?;
+        }
+
+        let artifact = if let Some(artifact) = outcome.artifact {
+            rdb.upsert(&target.artifact_entry, &artifact)
+                .map_err(|err| format!("Chunk artifact upsert failed: {err}"))?;
+            artifact
+        } else {
+            rdb.fetch::<TerrainChunkArtifact>(&target.artifact_entry)
+                .map_err(|err| format!("Chunk artifact fetch failed: {err}"))?
+        };
+
+        Ok(TerrainChunkResult {
+            entry_key: target.artifact_entry,
+            artifact,
+        })
     }
 
     pub fn apply_brush(
         &mut self,
         request: &TerrainBrushRequest,
         rdb_path: &Path,
-    ) -> Result<TerrainChunkArtifact, String> {
+    ) -> Result<TerrainChunkResult, String> {
         let mut rdb = RDBFile::load(rdb_path).unwrap_or_else(|_| RDBFile::new());
         let artifact = self.apply_brush_internal(request, &mut rdb)?;
         rdb.save(rdb_path)
@@ -139,71 +137,55 @@ impl TerrainDbgen {
         &mut self,
         request: &TerrainBrushRequest,
         rdb: &mut RDBFile,
-    ) -> Result<TerrainChunkArtifact, String> {
+    ) -> Result<TerrainChunkResult, String> {
         self.apply_brush_internal(request, rdb)
     }
 
     pub fn chunk_coords_for_key(&self, chunk_key: &str) -> [i32; 2] {
+        if let Some(parsed) = parse_chunk_artifact_entry(chunk_key) {
+            return parsed.chunk_coords;
+        }
+
         let chunk_hash = hash_chunk_key(self.seed, chunk_key);
         [chunk_hash as i32, (chunk_hash >> 32) as i32]
     }
 
     pub fn project_key_for_chunk(&self, chunk_key: &str) -> String {
+        if let Some(parsed) = parse_chunk_artifact_entry(chunk_key) {
+            return parsed.project_key;
+        }
+
         sanitize_project_key(chunk_key)
+    }
+
+    pub fn chunk_entry_for_key(&self, chunk_key: &str, lod: u8) -> String {
+        self.resolve_chunk_target(chunk_key, lod).artifact_entry
     }
 
     fn apply_brush_internal(
         &mut self,
         request: &TerrainBrushRequest,
         rdb: &mut RDBFile,
-    ) -> Result<TerrainChunkArtifact, String> {
-        let chunk_coords = self.chunk_coords_for_key(&request.chunk_key);
-        let project_key = sanitize_project_key(&request.chunk_key);
+    ) -> Result<TerrainChunkResult, String> {
+        let target = self.resolve_chunk_target(&request.chunk_key, request.lod);
         let chunk_hash = hash_chunk_key(self.seed, &request.chunk_key);
 
-        let mut settings = rdb
-            .fetch::<TerrainProjectSettings>(&project_settings_entry(&project_key))
-            .unwrap_or_else(|_| {
-                let mut settings = TerrainProjectSettings::default();
-                settings.name = format!("Terrain Preview {}", request.chunk_key);
-                settings.seed = self.seed ^ chunk_hash;
-                settings
-            });
-        if !request.generator_graph_id.is_empty() {
-            settings.generator_graph_id = request.generator_graph_id.clone();
-        }
+        let settings = self.upsert_project_state(
+            rdb,
+            &target.project_key,
+            &request.chunk_key,
+            chunk_hash,
+            &request.generator_graph_id,
+            &request.generator_algorithm,
+            request.generator_frequency,
+            request.generator_amplitude,
+            request.generator_biome_frequency,
+        )?;
 
-        let generator_entry_key = generator_entry(&project_key, settings.active_generator_version);
-        let mut generator = rdb
-            .fetch::<TerrainGeneratorDefinition>(&generator_entry_key)
-            .unwrap_or_default();
-        if !request.generator_graph_id.is_empty() {
-            generator.graph_id = request.generator_graph_id.clone();
-        }
-        if !request.generator_algorithm.is_empty() {
-            generator.algorithm = request.generator_algorithm.clone();
-        }
-        generator.frequency = request.generator_frequency;
-        generator.amplitude = request.generator_amplitude;
-        generator.biome_frequency = request.generator_biome_frequency;
-
-        let layer_id = "layer-1";
-        let layer_entry_key =
-            mutation_layer_entry(&project_key, layer_id, settings.active_mutation_version);
-        let layer = rdb
-            .fetch::<TerrainMutationLayer>(&layer_entry_key)
-            .unwrap_or_else(|_| TerrainMutationLayer::new(layer_id, "Layer 1", 0));
-
-        rdb.upsert(&project_settings_entry(&project_key), &settings)
-            .map_err(|err| format!("Project settings upsert failed: {err}"))?;
-        rdb.upsert(&generator_entry_key, &generator)
-            .map_err(|err| format!("Generator upsert failed: {err}"))?;
-        rdb.upsert(&layer_entry_key, &layer)
-            .map_err(|err| format!("Mutation layer upsert failed: {err}"))?;
-
+        let layer_id = DEFAULT_LAYER_ID;
         let (order, event_id) = next_op_order_and_event(
             rdb,
-            &project_key,
+            &target.project_key,
             layer_id,
             settings.active_mutation_version,
         );
@@ -225,7 +207,7 @@ impl TerrainDbgen {
         };
         rdb.add(
             &mutation_op_entry(
-                &project_key,
+                &target.project_key,
                 layer_id,
                 settings.active_mutation_version,
                 order,
@@ -235,18 +217,18 @@ impl TerrainDbgen {
         )
         .map_err(|err| format!("Mutation op add failed: {err}"))?;
 
-        mark_chunk_dirty(rdb, &project_key, &settings, chunk_coords)
+        mark_chunk_dirty(rdb, &target.project_key, &settings, target.chunk_coords)
             .map_err(|err| format!("Chunk dirty update failed: {err}"))?;
 
         let context =
-            prepare_terrain_build_context(rdb, &project_key).map_err(|err| err.to_string())?;
+            prepare_terrain_build_context(rdb, &target.project_key).map_err(|err| err.to_string())?;
         let build_request = TerrainChunkBuildRequest {
-            chunk_coords,
+            chunk_coords: target.chunk_coords,
             lod: request.lod,
         };
         let outcome = build_terrain_chunk_with_context(
             rdb,
-            &project_key,
+            &target.project_key,
             &context,
             build_request,
             |_| {},
@@ -257,11 +239,117 @@ impl TerrainDbgen {
             .artifact
             .ok_or_else(|| "Brush build returned no artifact".to_string())?;
 
-        rdb.upsert(&request.chunk_key, &artifact)
+        if let Some(state) = outcome.state {
+            rdb.upsert(&target.state_entry, &state)
+                .map_err(|err| format!("Chunk state upsert failed: {err}"))?;
+        }
+
+        rdb.upsert(&target.artifact_entry, &artifact)
             .map_err(|err| format!("Brush artifact upsert failed: {err}"))?;
 
-        Ok(artifact)
+        Ok(TerrainChunkResult {
+            entry_key: target.artifact_entry,
+            artifact,
+        })
     }
+
+    fn upsert_project_state(
+        &self,
+        rdb: &mut RDBFile,
+        project_key: &str,
+        chunk_key: &str,
+        chunk_hash: u64,
+        generator_graph_id: &str,
+        generator_algorithm: &str,
+        generator_frequency: f32,
+        generator_amplitude: f32,
+        generator_biome_frequency: f32,
+    ) -> Result<TerrainProjectSettings, String> {
+        let mut settings = rdb
+            .fetch::<TerrainProjectSettings>(&project_settings_entry(project_key))
+            .unwrap_or_else(|_| {
+                let mut settings = TerrainProjectSettings::default();
+                settings.name = format!("Terrain Preview {chunk_key}");
+                settings.seed = self.seed ^ chunk_hash;
+                settings
+            });
+        if !generator_graph_id.is_empty() {
+            settings.generator_graph_id = generator_graph_id.to_string();
+        }
+
+        let generator_entry_key = generator_entry(project_key, settings.active_generator_version);
+        let mut generator = rdb
+            .fetch::<TerrainGeneratorDefinition>(&generator_entry_key)
+            .unwrap_or_else(|_| {
+                let mut generator = TerrainGeneratorDefinition::default();
+                generator.version = settings.active_generator_version;
+                generator
+            });
+        if !generator_graph_id.is_empty() {
+            generator.graph_id = generator_graph_id.to_string();
+        }
+        if !generator_algorithm.is_empty() {
+            generator.algorithm = generator_algorithm.to_string();
+        }
+        generator.frequency = generator_frequency;
+        generator.amplitude = generator_amplitude;
+        generator.biome_frequency = generator_biome_frequency;
+
+        let layer_id = DEFAULT_LAYER_ID;
+        let layer_entry_key =
+            mutation_layer_entry(project_key, layer_id, settings.active_mutation_version);
+        let mut layer = rdb
+            .fetch::<TerrainMutationLayer>(&layer_entry_key)
+            .unwrap_or_else(|_| TerrainMutationLayer::new(layer_id, "Layer 1", 0));
+        layer.version = settings.active_mutation_version;
+
+        rdb.upsert(&project_settings_entry(project_key), &settings)
+            .map_err(|err| format!("Project settings upsert failed: {err}"))?;
+        rdb.upsert(&generator_entry_key, &generator)
+            .map_err(|err| format!("Generator upsert failed: {err}"))?;
+        rdb.upsert(&layer_entry_key, &layer)
+            .map_err(|err| format!("Mutation layer upsert failed: {err}"))?;
+
+        Ok(settings)
+    }
+
+    fn resolve_chunk_target(&self, chunk_key: &str, lod: u8) -> TerrainChunkTarget {
+        if let Some(parsed) = parse_chunk_artifact_entry(chunk_key) {
+            let coord_key = chunk_coord_key(parsed.chunk_coords[0], parsed.chunk_coords[1]);
+            let project_key = parsed.project_key.clone();
+            return TerrainChunkTarget {
+                project_key: project_key.clone(),
+                chunk_coords: parsed.chunk_coords,
+                artifact_entry: chunk_artifact_entry(
+                    &project_key,
+                    &coord_key,
+                    &lod_key(lod),
+                ),
+                state_entry: chunk_state_entry(&project_key, &coord_key),
+            };
+        }
+
+        let project_key = sanitize_project_key(chunk_key);
+        let chunk_coords = self.chunk_coords_for_key(chunk_key);
+        let coord_key = chunk_coord_key(chunk_coords[0], chunk_coords[1]);
+        TerrainChunkTarget {
+            project_key: project_key.clone(),
+            chunk_coords,
+            artifact_entry: chunk_artifact_entry(
+                &project_key,
+                &coord_key,
+                &lod_key(lod),
+            ),
+            state_entry: chunk_state_entry(&project_key, &coord_key),
+        }
+    }
+}
+
+struct TerrainChunkTarget {
+    project_key: String,
+    chunk_coords: [i32; 2],
+    artifact_entry: String,
+    state_entry: String,
 }
 
 fn hash_chunk_key(seed: u64, chunk_key: &str) -> u64 {
@@ -284,6 +372,10 @@ fn sanitize_project_key(chunk_key: &str) -> String {
     }
     if sanitized.is_empty() {
         "terrain-preview".to_string()
+    } else if sanitized.len() > 32 {
+        let hash = hash_chunk_key(0, chunk_key);
+        let prefix_len = 15;
+        format!("{}-{hash:016x}", &sanitized[..prefix_len])
     } else {
         sanitized
     }

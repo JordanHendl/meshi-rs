@@ -11,12 +11,11 @@ preview and author terrain RDB data (procedural generation and manual edits).
 ## Current Status
 - Window + render loop established.
 - Status HUD shows editor mode (procedural/manual).
-- Stub dbgen adapter ready to be wired to noren's dbgen APIs.
+- Terrain dbgen adapter uses noren terrain build pipeline to generate/brush RDB artifacts.
 
 ## Controls
 - `Tab`: toggle between Procedural and Manual modes.
 
 ## Next Steps
-- Wire `TerrainDbgen::generate_chunk` to the dbgen pipeline and push artifacts into the DB.
 - Add brushes/tools for manual terrain edits.
 - Load/save terrain databases.

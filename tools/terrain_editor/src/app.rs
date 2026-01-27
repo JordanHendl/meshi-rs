@@ -399,23 +399,13 @@ impl TerrainEditorApp {
             return;
         };
 
-        match self.dbgen.generate_chunk(&request) {
-            Ok(chunk) => {
-                if let Err(err) = rdb.upsert(&request.chunk_key, &chunk) {
-                    warn!(
-                        error = %err,
-                        entry = %request.chunk_key,
-                        "Failed to upsert terrain chunk artifact."
-                    );
-                    self.persistence_error = Some(format!("RDB upsert failed: {err}"));
-                } else {
-                    self.persistence_error = None;
-                    self.db_dirty = true;
-                    self.ensure_chunk_key(&request.chunk_key);
-                    self.status_note = Some("Terrain generated.".to_string());
-                }
-
-                self.update_rendered_chunk(request.chunk_key.clone(), chunk);
+        match self.dbgen.generate_chunk(&request, rdb) {
+            Ok(result) => {
+                self.persistence_error = None;
+                self.db_dirty = true;
+                self.ensure_chunk_key(&result.entry_key);
+                self.status_note = Some("Terrain generated.".to_string());
+                self.update_rendered_chunk(result.entry_key.clone(), result.artifact);
             }
             Err(err) => {
                 warn!(error = %err, "Terrain generation failed.");
@@ -538,12 +528,12 @@ impl TerrainEditorApp {
         self.rdb_open = Some(rdb);
 
         match result {
-            Ok(artifact) => {
+            Ok(result) => {
                 self.persistence_error = None;
                 self.db_dirty = true;
-                self.ensure_chunk_key(&request.chunk_key);
+                self.ensure_chunk_key(&result.entry_key);
                 self.status_note = Some("Brush applied.".to_string());
-                self.update_rendered_chunk(request.chunk_key, artifact);
+                self.update_rendered_chunk(result.entry_key, result.artifact);
             }
             Err(err) => {
                 warn!(error = %err, "Failed to apply terrain brush.");
