@@ -22,7 +22,8 @@ use tare::utils::StagedBuffer;
 use tracing::warn;
 
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_radial_with_description,
+    debug_register_with_description,
 };
 use crate::gui::Slider;
 #[derive(Clone)]
@@ -107,11 +108,12 @@ impl Default for SkyFrameSettings {
 impl SkyboxFrameSettings {
     pub fn register_debug(&mut self) {
         unsafe {
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Skybox Intensity", 0.2, 2.0, 0.0),
                 &mut self.intensity as *mut f32,
                 "Skybox Intensity",
+                Some("Scales the brightness of the skybox cubemap."),
             );
         }
     }
@@ -147,7 +149,7 @@ impl SkyFrameSettings {
 
     pub fn register_debug(&mut self) {
         unsafe {
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Sky,
                 "Sky Enabled",
                 DebugRegistryValue::Bool(&mut self.enabled),
@@ -161,32 +163,37 @@ impl SkyFrameSettings {
                         value: 0.0,
                     },
                 ],
+                Some("Toggle sky lighting and rendering."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
                 &mut self.sun_intensity as *mut f32,
                 "Sun Intensity",
+                Some("Controls the brightness of the sun light."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sun_angular_radius as *mut f32,
                 "Sun Angular Radius",
+                Some("Adjusts the apparent size of the sun disc."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
                 &mut self.moon_intensity as *mut f32,
                 "Moon Intensity",
+                Some("Controls the brightness of the moon light."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.moon_angular_radius as *mut f32,
                 "Moon Angular Radius",
+                Some("Adjusts the apparent size of the moon disc."),
             );
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Sky,
                 "Auto Sun",
                 DebugRegistryValue::Bool(&mut self.auto_sun_enabled),
@@ -200,18 +207,21 @@ impl SkyFrameSettings {
                         value: 0.0,
                     },
                 ],
+                Some("Automatically updates sun direction from time of day."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Auto Sun Speed", 0.0, 4.0, 0.0),
                 &mut self.timer_speed as *mut f32,
                 "Auto Sun Speed",
+                Some("Speed multiplier for the day-night cycle."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Current Time (Hours)", 0.0, 24.0, 0.0),
                 &mut self.current_time_of_day as *mut f32,
                 "Current Time (Hours)",
+                Some("Current time of day used when auto sun is enabled."),
             );
         }
     }
@@ -612,35 +622,40 @@ impl SkyRenderer {
 
     pub fn register_debug(&mut self) {
         unsafe {
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Skybox Intensity", 0.2, 2.0, 0.0),
                 &mut self.skybox_intensity as *mut f32,
                 "Skybox Intensity",
+                Some("Scales the brightness of the skybox cubemap."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Sun Intensity", 0.1, 5.0, 0.0),
                 &mut self.sky_settings.sun_intensity as *mut f32,
                 "Sun Intensity",
+                Some("Controls the brightness of the sun light."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Sun Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sky_settings.sun_angular_radius as *mut f32,
                 "Sun Angular Radius",
+                Some("Adjusts the apparent size of the sun disc."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Intensity", 0.0, 2.0, 0.0),
                 &mut self.sky_settings.moon_intensity as *mut f32,
                 "Moon Intensity",
+                Some("Controls the brightness of the moon light."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Sky,
                 Slider::new(0, "Moon Angular Radius", 0.001, 0.05, 0.0),
                 &mut self.sky_settings.moon_angular_radius as *mut f32,
                 "Moon Angular Radius",
+                Some("Adjusts the apparent size of the moon disc."),
             );
         }
     }

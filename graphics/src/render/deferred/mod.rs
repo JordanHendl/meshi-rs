@@ -10,8 +10,8 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::{GuiFrame, Slider};
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_int,
-    debug_register_radial,
+        DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    debug_register_radial_with_description, debug_register_with_description,
 };
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
@@ -1058,13 +1058,14 @@ impl DeferredRenderer {
         let shadow_resolution = shadow.resolution_mut() as *mut u32;
         let cascades = shadow.cascades_mut();
         unsafe {
-            debug_register_int(
+            debug_register_int_with_description(
                 PageType::Shadow,
                 Slider::new_int(0, "Opaque Shadow Resolution", 256.0, 4096.0, 0.0),
                 shadow_resolution,
                 "Opaque Shadow Resolution",
+                Some("Controls the resolution of the opaque shadow map atlas."),
             );
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Shadow,
                 "Opaque Shadow Cascades",
                 DebugRegistryValue::U32(&mut cascades.cascade_count),
@@ -1086,36 +1087,42 @@ impl DeferredRenderer {
                         value: 4.0,
                     },
                 ],
+                Some("Select how many cascaded shadow maps are used for opaque geometry."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Shadow,
                 Slider::new(0, "Opaque Split Lambda", 0.0, 1.0, 0.0),
                 &mut cascades.split_lambda as *mut f32,
                 "Opaque Split Lambda",
+                Some("Balances cascade distribution between linear and logarithmic splits."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Shadow,
                 Slider::new(0, "Opaque Cascade 0 Extent", 100.0, 200000.0, 0.0),
                 &mut cascades.cascade_extents[0] as *mut f32,
                 "Opaque Cascade 0 Extent",
+                Some("Sets the coverage radius for the nearest opaque shadow cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Shadow,
                 Slider::new(0, "Opaque Cascade 1 Extent", 100.0, 200000.0, 0.0),
                 &mut cascades.cascade_extents[1] as *mut f32,
                 "Opaque Cascade 1 Extent",
+                Some("Sets the coverage radius for the second opaque shadow cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Shadow,
                 Slider::new(0, "Opaque Cascade 2 Extent", 100.0, 200000.0, 0.0),
                 &mut cascades.cascade_extents[2] as *mut f32,
                 "Opaque Cascade 2 Extent",
+                Some("Sets the coverage radius for the third opaque shadow cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Shadow,
                 Slider::new(0, "Opaque Cascade 3 Extent", 100.0, 200000.0, 0.0),
                 &mut cascades.cascade_extents[3] as *mut f32,
                 "Opaque Cascade 3 Extent",
+                Some("Sets the coverage radius for the furthest opaque shadow cascade."),
             );
         }
     }

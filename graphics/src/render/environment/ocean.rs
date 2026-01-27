@@ -15,7 +15,10 @@ use glam::{Vec2, Vec3, Vec4};
 use tracing::warn;
 
 use crate::gui::Slider;
-use crate::gui::debug::{DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_radial};
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_radial_with_description,
+    debug_register_with_description,
+};
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -179,7 +182,7 @@ impl Default for OceanFrameSettings {
 impl OceanFrameSettings {
     pub fn register_debug(&mut self) {
         unsafe {
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Ocean,
                 "Ocean Enabled",
                 DebugRegistryValue::Bool(&mut self.enabled),
@@ -193,8 +196,9 @@ impl OceanFrameSettings {
                         value: 0.0,
                     },
                 ],
+                Some("Toggle ocean rendering in the scene."),
             );
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Ocean,
                 "Debug View",
                 DebugRegistryValue::OceanDebugView(&mut self.debug_view),
@@ -220,157 +224,183 @@ impl OceanFrameSettings {
                         value: 4.0,
                     },
                 ],
+                Some("Selects an ocean debug visualization mode."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wind Speed", 0.1, 20.0, 0.0),
                 &mut self.wind_speed as *mut f32,
                 "Wind Speed",
+                Some("Controls the wind speed driving wave generation."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fetch Length", 10.0, 200000.0, 0.0),
                 &mut self.fetch_length as *mut f32,
                 "Fetch Length",
+                Some("Distance over which wind generates the wave spectrum."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Swell Dir X", -1.0, 1.0, 0.0),
                 &mut self.swell_dir.x as *mut f32,
                 "Swell Dir X",
+                Some("X component of the swell direction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Swell Dir Y", -1.0, 1.0, 0.0),
                 &mut self.swell_dir.y as *mut f32,
                 "Swell Dir Y",
+                Some("Y component of the swell direction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Current X", -5.0, 5.0, 0.0),
                 &mut self.current.x as *mut f32,
                 "Current X",
+                Some("X component of the ocean current vector."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Current Y", -5.0, 5.0, 0.0),
                 &mut self.current.y as *mut f32,
                 "Current Y",
+                Some("Y component of the ocean current vector."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wave Amplitude", 0.1, 10.0, 0.0),
                 &mut self.wave_amplitude as *mut f32,
                 "Wave Amplitude",
+                Some("Scales the overall wave height."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Gerstner Amplitude", 0.0, 1.0, 0.0),
                 &mut self.gerstner_amplitude as *mut f32,
                 "Gerstner Amplitude",
+                Some("Controls the contribution of Gerstner waves."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Near", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[0] as *mut f32,
                 "Cascade Spectrum Near",
+                Some("Spectrum scale for the near cascade."),
             );
 
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Mid", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[1] as *mut f32,
                 "Cascade Spectrum Mid",
+                Some("Spectrum scale for the mid cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Far", 0.0, 100.0, 0.0),
                 &mut self.cascade_spectrum_scales[2] as *mut f32,
                 "Cascade Spectrum Far",
+                Some("Spectrum scale for the far cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Near", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[0] as *mut f32,
                 "Cascade Swell Near",
+                Some("Swell strength for the near cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Mid", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[1] as *mut f32,
                 "Cascade Swell Mid",
+                Some("Swell strength for the mid cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Far", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[2] as *mut f32,
                 "Cascade Swell Far",
+                Some("Swell strength for the far cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Depth Meters", 0.0, 5000.0, 0.0),
                 &mut self.depth_meters as *mut f32,
                 "Depth Meters",
+                Some("Water depth used for attenuation and refraction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Depth Damping", 0.0, 1.0, 0.0),
                 &mut self.depth_damping as *mut f32,
                 "Depth Damping",
+                Some("Controls how quickly waves damp with depth."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fresnel Bias", 0.0, 0.2, 0.0),
                 &mut self.fresnel_bias as *mut f32,
                 "Fresnel Bias",
+                Some("Bias applied to the Fresnel term."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fresnel Strength", 0.0, 1.5, 0.0),
                 &mut self.fresnel_strength as *mut f32,
                 "Fresnel Strength",
+                Some("Strength of the Fresnel reflectance."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Strength", 0.0, 4.0, 0.0),
                 &mut self.foam_strength as *mut f32,
                 "Foam Strength",
+                Some("Intensity of foam shading."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Threshold", 0.0, 1.0, 0.0),
                 &mut self.foam_threshold as *mut f32,
                 "Foam Threshold",
+                Some("Threshold for generating foam."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Advection", 0.0, 2.0, 0.0),
                 &mut self.foam_advection_strength as *mut f32,
                 "Foam Advection",
+                Some("Controls how foam advects across the surface."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Decay", 0.0, 1.0, 0.0),
                 &mut self.foam_decay_rate as *mut f32,
                 "Foam Decay",
+                Some("Rate at which foam fades over time."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Noise Scale", 0.01, 1.0, 0.0),
                 &mut self.foam_noise_scale as *mut f32,
                 "Foam Noise Scale",
+                Some("Noise scale applied to foam patterns."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Capillary Strength", 0.0, 2.0, 0.0),
                 &mut self.capillary_strength as *mut f32,
                 "Capillary Strength",
+                Some("Strength of small capillary waves."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Time Scale", 0.1, 4.0, 0.0),
                 &mut self.time_scale as *mut f32,
                 "Time Scale",
+                Some("Scales the simulation time for waves."),
             );
         }
     }
@@ -1024,7 +1054,7 @@ impl OceanRenderer {
 
     pub fn register_debug(&mut self) {
         unsafe {
-            debug_register_radial(
+            debug_register_radial_with_description(
                 PageType::Ocean,
                 "Debug View",
                 DebugRegistryValue::OceanDebugView(&mut self.debug_view),
@@ -1050,169 +1080,197 @@ impl OceanRenderer {
                         value: 4.0,
                     },
                 ],
+                Some("Selects an ocean debug visualization mode."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wind Speed", 0.1, 20.0, 0.0),
                 &mut self.wind_speed as *mut f32,
                 "Wind Speed",
+                Some("Controls the wind speed driving wave generation."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wind Dir X", -1.0, 1.0, 0.0),
                 &mut self.wind_dir.x as *mut f32,
                 "Wind Dir X",
+                Some("X component of the wind direction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wind Dir Y", -1.0, 1.0, 0.0),
                 &mut self.wind_dir.y as *mut f32,
                 "Wind Dir Y",
+                Some("Y component of the wind direction."),
             );
 
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fetch Length", 10.0, 200000.0, 0.0),
                 &mut self.fetch_length as *mut f32,
                 "Fetch Length",
+                Some("Distance over which wind generates the wave spectrum."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Swell Dir X", -1.0, 1.0, 0.0),
                 &mut self.swell_dir.x as *mut f32,
                 "Swell Dir X",
+                Some("X component of the swell direction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Swell Dir Y", -1.0, 1.0, 0.0),
                 &mut self.swell_dir.y as *mut f32,
                 "Swell Dir Y",
+                Some("Y component of the swell direction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Current X", -5.0, 5.0, 0.0),
                 &mut self.current.x as *mut f32,
                 "Current X",
+                Some("X component of the ocean current vector."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Current Y", -5.0, 5.0, 0.0),
                 &mut self.current.y as *mut f32,
                 "Current Y",
+                Some("Y component of the ocean current vector."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Wave Amplitude", 0.1, 10.0, 0.0),
                 &mut self.wave_amplitude as *mut f32,
                 "Wave Amplitude",
+                Some("Scales the overall wave height."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Gerstner Amplitude", 0.0, 1.0, 0.0),
                 &mut self.gerstner_amplitude as *mut f32,
                 "Gerstner Amplitude",
+                Some("Controls the contribution of Gerstner waves."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Near", 0.0, 2.0, 0.0),
                 &mut self.cascade_spectrum_scales[0] as *mut f32,
                 "Cascade Spectrum Near",
+                Some("Spectrum scale for the near cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Mid", 0.0, 2.0, 0.0),
                 &mut self.cascade_spectrum_scales[1] as *mut f32,
                 "Cascade Spectrum Mid",
+                Some("Spectrum scale for the mid cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Spectrum Far", 0.0, 2.0, 0.0),
                 &mut self.cascade_spectrum_scales[2] as *mut f32,
                 "Cascade Spectrum Far",
+                Some("Spectrum scale for the far cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Near", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[0] as *mut f32,
                 "Cascade Swell Near",
+                Some("Swell strength for the near cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Mid", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[1] as *mut f32,
                 "Cascade Swell Mid",
+                Some("Swell strength for the mid cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Cascade Swell Far", 0.0, 1.0, 0.0),
                 &mut self.cascade_swell_strengths[2] as *mut f32,
                 "Cascade Swell Far",
+                Some("Swell strength for the far cascade."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Depth Meters", 0.0, 5000.0, 0.0),
                 &mut self.depth_meters as *mut f32,
                 "Depth Meters",
+                Some("Water depth used for attenuation and refraction."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Depth Damping", 0.0, 1.0, 0.0),
                 &mut self.depth_damping as *mut f32,
                 "Depth Damping",
+                Some("Controls how quickly waves damp with depth."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fresnel Bias", 0.0, 0.2, 0.0),
                 &mut self.fresnel_bias as *mut f32,
                 "Fresnel Bias",
+                Some("Bias applied to the Fresnel term."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Fresnel Strength", 0.0, 1.5, 0.0),
                 &mut self.fresnel_strength as *mut f32,
                 "Fresnel Strength",
+                Some("Strength of the Fresnel reflectance."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Strength", 0.0, 4.0, 0.0),
                 &mut self.foam_strength as *mut f32,
                 "Foam Strength",
+                Some("Intensity of foam shading."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Threshold", 0.0, 1.0, 0.0),
                 &mut self.foam_threshold as *mut f32,
                 "Foam Threshold",
+                Some("Threshold for generating foam."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Advection", 0.0, 2.0, 0.0),
                 &mut self.foam_advection_strength as *mut f32,
                 "Foam Advection",
+                Some("Controls how foam advects across the surface."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Decay", 0.0, 1.0, 0.0),
                 &mut self.foam_decay_rate as *mut f32,
                 "Foam Decay",
+                Some("Rate at which foam fades over time."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Foam Noise Scale", 0.01, 1.0, 0.0),
                 &mut self.foam_noise_scale as *mut f32,
                 "Foam Noise Scale",
+                Some("Noise scale applied to foam patterns."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Capillary Strength", 0.0, 2.0, 0.0),
                 &mut self.capillary_strength as *mut f32,
                 "Capillary Strength",
+                Some("Strength of small capillary waves."),
             );
-            debug_register(
+            debug_register_with_description(
                 PageType::Ocean,
                 Slider::new(0, "Time Scale", 0.1, 4.0, 0.0),
                 &mut self.time_scale as *mut f32,
                 "Time Scale",
+                Some("Scales the simulation time for waves."),
             );
         }
     }

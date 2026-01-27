@@ -6,8 +6,8 @@ pub mod cloud_pass_temporal;
 
 use crate::gui::Slider;
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register, debug_register_int,
-    debug_register_radial,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    debug_register_radial_with_description, debug_register_with_description,
 };
 use crate::structs::{CloudResolutionScale, CloudSettings};
 use cloud_assets::{CloudAssets, CloudNoiseSizes};
@@ -59,7 +59,7 @@ pub struct CloudRenderer {
 
 pub fn register_debug(settings: &mut CloudSettings) {
     unsafe {
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Clouds,
             "Clouds Enabled",
             DebugRegistryValue::Bool(&mut settings.enabled),
@@ -73,110 +73,128 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 0.0,
                 },
             ],
+            Some("Toggle volumetric cloud rendering."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Base Alt", 0.0, 3000.0, 0.0),
             &mut settings.layer_a.base_altitude as *mut f32,
             "Layer A Base Alt",
+            Some("Sets the base altitude of cloud layer A in meters."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Top Alt", 100.0, 6000.0, 0.0),
             &mut settings.layer_a.top_altitude as *mut f32,
             "Layer A Top Alt",
+            Some("Sets the top altitude of cloud layer A in meters."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Density", 0.0, 2.0, 0.0),
             &mut settings.layer_a.density_scale as *mut f32,
             "Layer A Density",
+            Some("Scales the density of cloud layer A."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Noise Scale", 0.1, 2.0, 0.0),
             &mut settings.layer_a.noise_scale as *mut f32,
             "Layer A Noise Scale",
+            Some("Adjusts the base noise scale for layer A."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Wind X", -5.0, 5.0, 0.0),
             &mut settings.layer_a.wind.x as *mut f32,
             "Layer A Wind X",
+            Some("X component of layer A wind direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Wind Y", -5.0, 5.0, 0.0),
             &mut settings.layer_a.wind.y as *mut f32,
             "Layer A Wind Y",
+            Some("Y component of layer A wind direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer A Wind Speed", 0.0, 5.0, 0.0),
             &mut settings.layer_a.wind_speed as *mut f32,
             "Layer A Wind Speed",
+            Some("Controls the wind speed for cloud layer A."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Base Alt", 0.0, 12000.0, 0.0),
             &mut settings.layer_b.base_altitude as *mut f32,
             "Layer B Base Alt",
+            Some("Sets the base altitude of cloud layer B in meters."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Top Alt", 100.0, 20000.0, 0.0),
             &mut settings.layer_b.top_altitude as *mut f32,
             "Layer B Top Alt",
+            Some("Sets the top altitude of cloud layer B in meters."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Density", 0.0, 2.0, 0.0),
             &mut settings.layer_b.density_scale as *mut f32,
             "Layer B Density",
+            Some("Scales the density of cloud layer B."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Noise Scale", 0.1, 2.0, 0.0),
             &mut settings.layer_b.noise_scale as *mut f32,
             "Layer B Noise Scale",
+            Some("Adjusts the base noise scale for layer B."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Wind X", -5.0, 5.0, 0.0),
             &mut settings.layer_b.wind.x as *mut f32,
             "Layer B Wind X",
+            Some("X component of layer B wind direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Wind Y", -5.0, 5.0, 0.0),
             &mut settings.layer_b.wind.y as *mut f32,
             "Layer B Wind Y",
+            Some("Y component of layer B wind direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Layer B Wind Speed", 0.0, 5.0, 0.0),
             &mut settings.layer_b.wind_speed as *mut f32,
             "Layer B Wind Speed",
+            Some("Controls the wind speed for cloud layer B."),
         );
-        debug_register_int(
+        debug_register_int_with_description(
             PageType::Clouds,
             Slider::new_int(0, "Step Count", 8.0, 256.0, 0.0),
             &mut settings.step_count as *mut u32,
             "Step Count",
+            Some("Number of raymarch steps for primary cloud tracing."),
         );
-        debug_register_int(
+        debug_register_int_with_description(
             PageType::Clouds,
             Slider::new_int(0, "Light Step Count", 4.0, 128.0, 0.0),
             &mut settings.light_step_count as *mut u32,
             "Light Step Count",
+            Some("Number of raymarch steps for cloud lighting."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Phase G", -0.2, 0.9, 0.0),
             &mut settings.phase_g as *mut f32,
             "Phase G",
+            Some("Anisotropy term for the cloud phase function."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Clouds,
             "Low Res Scale",
             DebugRegistryValue::CloudResolutionScale(&mut settings.low_res_scale),
@@ -190,44 +208,51 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 1.0,
                 },
             ],
+            Some("Select the low-resolution rendering scale for clouds."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Coverage Power", 0.1, 4.0, 0.0),
             &mut settings.coverage_power as *mut f32,
             "Coverage Power",
+            Some("Adjusts the power curve for cloud coverage."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Detail Strength", 0.0, 2.0, 0.0),
             &mut settings.detail_strength as *mut f32,
             "Detail Strength",
+            Some("Controls the amount of high-frequency detail."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Curl Strength", 0.0, 2.0, 0.0),
             &mut settings.curl_strength as *mut f32,
             "Curl Strength",
+            Some("Strength of curl noise applied to the clouds."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Jitter Strength", 0.0, 2.0, 0.0),
             &mut settings.jitter_strength as *mut f32,
             "Jitter Strength",
+            Some("Controls the amount of raymarch jittering."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Epsilon", 0.0001, 0.1, 0.0),
             &mut settings.epsilon as *mut f32,
             "Epsilon",
+            Some("Minimum density threshold for skipping samples."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Multi Scatter Strength", 0.0, 2.0, 0.0),
             &mut settings.multi_scatter_strength as *mut f32,
             "Multi Scatter Strength",
+            Some("Controls the strength of multiple scattering."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Clouds,
             "Multi Scatter Shadowed",
             DebugRegistryValue::Bool(&mut settings.multi_scatter_respects_shadow),
@@ -241,86 +266,100 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 1.0,
                 },
             ],
+            Some("Toggle whether multiple scattering respects shadows."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Radiance R", 0.0, 10.0, 0.0),
             &mut settings.sun_radiance.x as *mut f32,
             "Sun Radiance R",
+            Some("Red channel of the sun radiance tint."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Radiance G", 0.0, 10.0, 0.0),
             &mut settings.sun_radiance.y as *mut f32,
             "Sun Radiance G",
+            Some("Green channel of the sun radiance tint."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Radiance B", 0.0, 10.0, 0.0),
             &mut settings.sun_radiance.z as *mut f32,
             "Sun Radiance B",
+            Some("Blue channel of the sun radiance tint."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Dir X", -1.0, 1.0, 0.0),
             &mut settings.sun_direction.x as *mut f32,
             "Sun Dir X",
+            Some("X component of the sun direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Dir Y", -1.0, 1.0, 0.0),
             &mut settings.sun_direction.y as *mut f32,
             "Sun Dir Y",
+            Some("Y component of the sun direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Sun Dir Z", -1.0, 1.0, 0.0),
             &mut settings.sun_direction.z as *mut f32,
             "Sun Dir Z",
+            Some("Z component of the sun direction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos View Strength", 0.0, 1.0, 0.0),
             &mut settings.atmosphere_view_strength as *mut f32,
             "Atmos View Strength",
+            Some("Strength of view-ray atmospheric extinction."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos View Extinction", 0.0, 0.005, 0.0),
             &mut settings.atmosphere_view_extinction as *mut f32,
             "Atmos View Extinction",
+            Some("Extinction coefficient for the view ray."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos Light Trans", 0.0, 1.0, 0.0),
             &mut settings.atmosphere_light_transmittance as *mut f32,
             "Atmos Light Trans",
+            Some("Transmittance applied to incoming light."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos Haze Strength", 0.0, 1.0, 0.0),
             &mut settings.atmosphere_haze_strength as *mut f32,
             "Atmos Haze Strength",
+            Some("Strength of atmospheric haze tint."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos Haze R", 0.0, 1.5, 0.0),
             &mut settings.atmosphere_haze_color.x as *mut f32,
             "Atmos Haze R",
+            Some("Red channel of the haze color."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos Haze G", 0.0, 1.5, 0.0),
             &mut settings.atmosphere_haze_color.y as *mut f32,
             "Atmos Haze G",
+            Some("Green channel of the haze color."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Atmos Haze B", 0.0, 1.5, 0.0),
             &mut settings.atmosphere_haze_color.z as *mut f32,
             "Atmos Haze B",
+            Some("Blue channel of the haze color."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Shadow,
             "Shadow Enabled",
             DebugRegistryValue::Bool(&mut settings.shadow.enabled),
@@ -334,26 +373,30 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 1.0,
                 },
             ],
+            Some("Toggle cloud shadow map rendering."),
         );
-        debug_register_int(
+        debug_register_int_with_description(
             PageType::Shadow,
             Slider::new_int(0, "Shadow Resolution", 64.0, 2048.0, 0.0),
             &mut settings.shadow.resolution as *mut u32,
             "Shadow Resolution",
+            Some("Resolution of the cloud shadow map."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Shadow,
             Slider::new(0, "Shadow Extent", 1000.0, 200000.0, 0.0),
             &mut settings.shadow.extent as *mut f32,
             "Shadow Extent",
+            Some("World-space size covered by cloud shadows."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Shadow,
             Slider::new(0, "Shadow Strength", 0.0, 2.0, 0.0),
             &mut settings.shadow.strength as *mut f32,
             "Shadow Strength",
+            Some("Darkening strength of cloud shadows."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Shadow,
             "Shadow Cascades",
             DebugRegistryValue::U32(&mut settings.shadow.cascades.cascade_count),
@@ -375,38 +418,44 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 4.0,
                 },
             ],
+            Some("Select how many cloud shadow cascades are active."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Shadow,
             Slider::new(0, "Shadow Split Lambda", 0.0, 1.0, 0.0),
             &mut settings.shadow.cascades.split_lambda as *mut f32,
             "Shadow Split Lambda",
+            Some("Balances cloud shadow cascade split distribution."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Temporal Blend", 0.0, 1.0, 0.0),
             &mut settings.temporal.blend_factor as *mut f32,
             "Temporal Blend",
+            Some("Controls the blend weight for temporal history."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Temporal Clamp", 0.0, 1.0, 0.0),
             &mut settings.temporal.clamp_strength as *mut f32,
             "Temporal Clamp",
+            Some("Clamp strength for temporal reprojection."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Temporal Depth Sigma", 0.1, 100.0, 0.0),
             &mut settings.temporal.depth_sigma as *mut f32,
             "Temporal Depth Sigma",
+            Some("Depth sigma used for temporal rejection."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Temporal History Scale", 0.0, 4.0, 0.0),
             &mut settings.temporal.history_weight_scale as *mut f32,
             "Temporal History Scale",
+            Some("Scales the weight applied to temporal history."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Clouds,
             "Debug View",
             DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
@@ -452,8 +501,9 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 10.0,
                 },
             ],
+            Some("Selects a diagnostic view of cloud rendering buffers."),
         );
-        debug_register_radial(
+        debug_register_radial_with_description(
             PageType::Shadow,
             "Shadow Debug View",
             DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
@@ -499,12 +549,14 @@ pub fn register_debug(settings: &mut CloudSettings) {
                     value: 23.0,
                 },
             ],
+            Some("Selects a diagnostic view of cloud shadow cascades."),
         );
-        debug_register(
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Budget (ms)", 0.1, 20.0, 0.0),
             &mut settings.performance_budget_ms as *mut f32,
             "Budget (ms)",
+            Some("Target frame time budget for cloud rendering."),
         );
     }
 }
