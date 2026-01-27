@@ -6,7 +6,7 @@ use std::fmt::Write;
 
 use crate::{
     project::ProjectManager,
-    runtime::{RuntimeControlState, RuntimeFrame},
+    runtime::{RuntimeControlState, RuntimeFrame, RuntimeLogEntry, RuntimeLogLevel, RuntimeStatus},
 };
 
 pub struct EditorUi {
@@ -16,6 +16,19 @@ pub struct EditorUi {
     runtime_texture: Option<egui::TextureHandle>,
     runtime_texture_size: [usize; 2],
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiAction {
+    BuildProject,
+    BuildAndRun,
+    RebuildAll,
+    GenerateBindings,
+}
+
+const ACTION_BUILD_PROJECT: u32 = 1;
+const ACTION_BUILD_AND_RUN: u32 = 2;
+const ACTION_REBUILD_ALL: u32 = 3;
+const ACTION_GENERATE_BINDINGS: u32 = 4;
 
 impl EditorUi {
     pub fn new() -> Self {
@@ -129,15 +142,21 @@ impl EditorUi {
         ctx: &egui::Context,
         project_manager: &ProjectManager,
         runtime_controls: &mut RuntimeControlState,
-    ) -> ViewportMetrics {
+        runtime_status: RuntimeStatus,
+        runtime_logs: &[RuntimeLogEntry],
+        runtime_error: Option<&str>,
+    ) -> UiFrameOutput {
         self.refresh_file_menu(project_manager);
         self.refresh_build_menu();
 
+        let mut action = None;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 for menu in &self.menu_bar.menus {
                     ui.menu_button(&menu.label, |ui| {
-                        self.draw_egui_menu_items(ui, &menu.items);
+                        if let Some(clicked) = self.draw_egui_menu_items(ui, &menu.items) {
+                            action = Some(clicked);
+                        }
                     });
                 }
             });
@@ -211,9 +230,42 @@ impl EditorUi {
                 });
             }
         });
+        egui::TopBottomPanel::bottom("runtime_logs")
+            .resizable(true)
+            .default_height(140.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Runtime Logs");
+                    ui.separator();
+                    ui.label(match runtime_status {
+                        RuntimeStatus::Idle => "Idle",
+                        RuntimeStatus::Building => "Building",
+                        RuntimeStatus::Running => "Running",
+                        RuntimeStatus::Failed => "Failed",
+                    });
+                });
+                if let Some(error) = runtime_error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for entry in runtime_logs {
+                            let color = match entry.level {
+                                RuntimeLogLevel::Info => egui::Color32::LIGHT_GRAY,
+                                RuntimeLogLevel::Warn => egui::Color32::YELLOW,
+                                RuntimeLogLevel::Error => egui::Color32::LIGHT_RED,
+                            };
+                            ui.colored_label(color, &entry.message);
+                        }
+                    });
+            });
         self.viewport = [viewport_pixels[0] as f32, viewport_pixels[1] as f32];
-        ViewportMetrics {
-            pixels: viewport_pixels,
+        UiFrameOutput {
+            metrics: ViewportMetrics {
+                pixels: viewport_pixels,
+            },
+            action,
         }
     }
 
@@ -231,7 +283,8 @@ impl EditorUi {
         let _ = buffer;
     }
 
-    fn draw_egui_menu_items(&self, ui: &mut egui::Ui, items: &[MenuItem]) {
+    fn draw_egui_menu_items(&self, ui: &mut egui::Ui, items: &[MenuItem]) -> Option<UiAction> {
+        let mut action = None;
         for item in items {
             if item.is_separator {
                 ui.separator();
@@ -240,7 +293,9 @@ impl EditorUi {
 
             if let Some(submenu) = item.submenu.as_ref() {
                 ui.menu_button(&item.label, |ui| {
-                    self.draw_egui_menu_items(ui, submenu);
+                    if let Some(clicked) = self.draw_egui_menu_items(ui, submenu) {
+                        action = Some(clicked);
+                    }
                 });
                 continue;
             }
@@ -248,8 +303,18 @@ impl EditorUi {
             let response = ui.add_enabled(item.enabled, egui::Button::new(&item.label));
             if response.clicked() {
                 ui.close_menu();
+                if let Some(action_id) = item.action_id {
+                    action = action.or(match action_id {
+                        ACTION_BUILD_PROJECT => Some(UiAction::BuildProject),
+                        ACTION_BUILD_AND_RUN => Some(UiAction::BuildAndRun),
+                        ACTION_REBUILD_ALL => Some(UiAction::RebuildAll),
+                        ACTION_GENERATE_BINDINGS => Some(UiAction::GenerateBindings),
+                        _ => None,
+                    });
+                }
             }
         }
+        action
     }
 
     pub fn viewport(&self) -> [f32; 2] {
@@ -319,11 +384,27 @@ impl EditorUi {
 
     fn refresh_build_menu(&mut self) {
         let build_items = vec![
-            MenuItem::new("Build Project"),
-            MenuItem::new("Build & Run"),
-            MenuItem::new("Rebuild All"),
+            {
+                let mut item = MenuItem::new("Build Project");
+                item.action_id = Some(ACTION_BUILD_PROJECT);
+                item
+            },
+            {
+                let mut item = MenuItem::new("Build & Run");
+                item.action_id = Some(ACTION_BUILD_AND_RUN);
+                item
+            },
+            {
+                let mut item = MenuItem::new("Rebuild All");
+                item.action_id = Some(ACTION_REBUILD_ALL);
+                item
+            },
             MenuItem::separator(),
-            MenuItem::new("Generate C++ Bindings"),
+            {
+                let mut item = MenuItem::new("Generate C++ Bindings");
+                item.action_id = Some(ACTION_GENERATE_BINDINGS);
+                item
+            },
         ];
 
         if let Some(build_menu) = self
@@ -388,6 +469,11 @@ struct PanelLayout {
 
 pub struct ViewportMetrics {
     pub pixels: [u32; 2],
+}
+
+pub struct UiFrameOutput {
+    pub metrics: ViewportMetrics,
+    pub action: Option<UiAction>,
 }
 
 fn quad_from_pixels(

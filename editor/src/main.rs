@@ -10,8 +10,8 @@ fn main() {
 mod editor {
     use crate::{
         project::ProjectManager,
-        runtime::{RuntimeBridge, RuntimeControlState},
-        ui::EditorUi,
+        runtime::{RuntimeBridge, RuntimeControlState, RuntimeLogLevel},
+        ui::{EditorUi, UiAction},
     };
     use eframe::{Frame, NativeOptions};
     use egui::Context;
@@ -45,13 +45,29 @@ mod editor {
 
     impl eframe::App for EditorApp {
         fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-            let metrics =
-                self.ui
-                    .build_egui(ctx, &self.project_manager, &mut self.runtime_controls);
+            let output = self.ui.build_egui(
+                ctx,
+                &self.project_manager,
+                &mut self.runtime_controls,
+                self.runtime.status(),
+                self.runtime.logs(),
+                self.runtime.last_error(),
+            );
+            if let Some(action) = output.action {
+                match action {
+                    UiAction::BuildProject => self.runtime.build_project(),
+                    UiAction::BuildAndRun => self.runtime.build_and_run(),
+                    UiAction::RebuildAll => self.runtime.rebuild_all(),
+                    UiAction::GenerateBindings => self.runtime.log_message(
+                        RuntimeLogLevel::Warn,
+                        "Generate C++ Bindings is not implemented yet.",
+                    ),
+                }
+            }
             let delta_time = ctx.input(|input| input.unstable_dt);
             let rendered =
                 self.runtime
-                    .tick(delta_time, &mut self.runtime_controls, metrics.pixels);
+                    .tick(delta_time, &mut self.runtime_controls, output.metrics.pixels);
             self.ui
                 .update_runtime_texture(ctx, self.runtime.latest_frame());
             if self.runtime_controls.playing || rendered {
