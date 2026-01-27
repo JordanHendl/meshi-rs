@@ -113,6 +113,11 @@ impl TextRenderer {
         self.db = Some(NonNull::new(db).expect("lmao"));
         let fonts = db.enumerate_sdf_fonts();
         self.default_sdf_font = fonts.into_iter().next();
+        if let Some(default_font) = self.default_sdf_font.clone() {
+            if !default_font.is_empty() {
+                self.fetch_sdf_font(&default_font);
+            }
+        }
     }
 
     pub fn initialize_renderer(
