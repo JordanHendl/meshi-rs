@@ -550,6 +550,7 @@ pub struct DebugGui {
     mouse_pressed: bool,
     mouse_down: bool,
     control_down: bool,
+    grave_down: bool,
     debug_toggle_requested: bool,
     debug_tab: DebugTab,
     debug_graphics_tab: DebugGraphicsTab,
@@ -571,6 +572,7 @@ impl DebugGui {
             mouse_pressed: false,
             mouse_down: false,
             control_down: false,
+            grave_down: false,
             debug_toggle_requested: false,
             debug_tab: DebugTab::Graphics,
             debug_graphics_tab: DebugGraphicsTab::Sky,
@@ -610,8 +612,14 @@ impl DebugGui {
             if event.source() == EventSource::Key {
                 if event.event_type() == EventType::Pressed {
                     match event.key() {
-                        KeyCode::Control => self.control_down = true,
+                        KeyCode::Control => {
+                            self.control_down = true;
+                            if self.grave_down {
+                                self.debug_toggle_requested = true;
+                            }
+                        }
                         KeyCode::GraveAccent => {
+                            self.grave_down = true;
                             if self.control_down {
                                 self.debug_toggle_requested = true;
                             }
@@ -622,6 +630,9 @@ impl DebugGui {
                 if event.event_type() == EventType::Released {
                     if event.key() == KeyCode::Control {
                         self.control_down = false;
+                    }
+                    if event.key() == KeyCode::GraveAccent {
+                        self.grave_down = false;
                     }
                 }
             }
@@ -639,7 +650,7 @@ impl DebugGui {
             self.debug_toggle_requested = false;
             unsafe {
                 if let Some(debug_mode) = bindings.debug_mode.as_mut() {
-                    *debug_mode = !*debug_mode;
+                    *debug_mode = true;
                 }
             }
         }
