@@ -139,6 +139,5 @@ VSOutput main(VSInput input) {
     const float4 skinned_pos = mul(skin, float4(vertex.position, 1.0));
 
     output.position = mul(mvp, skinned_pos);
-    output.position.y = -output.position.y;
     return output;
 }

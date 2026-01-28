@@ -192,7 +192,7 @@ impl CascadedShadows {
         let splits = Self::compute_splits(cascades, camera.near, camera.far);
 
         let light_dir = if light_direction.length_squared() > 0.0 {
-            light_direction.normalize()
+            -light_direction.normalize()
         } else {
             Vec3::Y
         };
@@ -220,7 +220,7 @@ impl CascadedShadows {
             };
             let mut min = Vec3::splat(f32::MAX);
             let mut max = Vec3::splat(f32::MIN);
-            let depth = 1.0;
+            let depth = 100.0;
             let eye = center - light_dir * depth;
             let light_view = Mat4::look_at_rh(eye, center, up);
 
@@ -241,7 +241,7 @@ impl CascadedShadows {
             min.y = center_xy.y - half_xy.y;
             max.y = center_xy.y + half_xy.y;
 
-            let mut min_z = min.z;
+            let mut min_z = 0.0 ; // min.z;
             let mut max_z = max.z;
             if (max_z - min_z).abs() < 0.001 {
                 max_z = min_z + 0.001;

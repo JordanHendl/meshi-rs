@@ -171,11 +171,12 @@ float geometry_smith(vec3 n, vec3 v, vec3 l, float roughness) {
 }
 
 float linearize_depth(float depth, float near_plane, float far_plane) {
-    float z = depth * 2.0 - 1.0;
+    float z = (1.0 - depth) * 2.0 - 1.0;
     return (2.0 * near_plane * far_plane) / max(far_plane + near_plane - z * (far_plane - near_plane), 1e-4);
 }
 
 vec3 sample_scene_color(vec2 uv) {
+    return vec3(0.0);
     return texture(sampler2D(ocean_scene_color, ocean_scene_sampler), uv).rgb;
 }
 
