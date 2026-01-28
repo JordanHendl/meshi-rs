@@ -1,14 +1,19 @@
 use std::ffi::c_void;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-use glam::{Mat4, Vec2, Vec3, vec2};
+use glam::{vec2, Mat4, Vec2, Vec3};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
-    Camera, DB, DBInfo, Display, DisplayInfo, EnvironmentLightingSettings, RDBFile, RenderEngine,
+    rdb::primitives::Vertex,
+    rdb::terrain::{
+        project_settings_entry, TerrainChunk, TerrainChunkArtifact, TerrainMutationOpKind,
+        TerrainProjectSettings,
+    },
+    Camera, DBInfo, Display, DisplayInfo, EnvironmentLightingSettings, RDBFile, RenderEngine,
     RenderEngineInfo, RendererSelect, SkyFrameSettings, SkyboxFrameSettings, TextInfo,
-    TextRenderMode, WindowInfo,
-    rdb::terrain::{TerrainChunk, TerrainMutationOpKind},
+    TextRenderMode, WindowInfo, DB,
 };
 use meshi_utils::timer::Timer;
 use rfd::FileDialog;
@@ -17,12 +22,12 @@ use tracing::warn;
 use crate::camera::{CameraController, CameraInput};
 use crate::dbgen::{TerrainBrushRequest, TerrainDbgen, TerrainGenerationRequest};
 use crate::ui::{
-    FocusedInput, MENU_ACTION_APPLY_BRUSH, MENU_ACTION_CLOSE_RDB, MENU_ACTION_EARTH_PRESET,
-    MENU_ACTION_GENERATE, MENU_ACTION_NEW_RDB, MENU_ACTION_OPEN_RDB, MENU_ACTION_SAVE_RDB,
-    MENU_ACTION_SET_MANUAL, MENU_ACTION_SET_PROCEDURAL, MENU_ACTION_SHOW_WORKFLOW,
-    MENU_ACTION_TOGGLE_BRUSH_PANEL, MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
-    MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL, TerrainEditorUi,
-    TerrainEditorUiData, TerrainEditorUiInput,
+    BrushTool, FocusedInput, TerrainEditorUi, TerrainEditorUiData, TerrainEditorUiInput,
+    MENU_ACTION_APPLY_BRUSH, MENU_ACTION_CLOSE_RDB, MENU_ACTION_EARTH_PRESET, MENU_ACTION_GENERATE,
+    MENU_ACTION_NEW_RDB, MENU_ACTION_OPEN_RDB, MENU_ACTION_SAVE_RDB, MENU_ACTION_SET_MANUAL,
+    MENU_ACTION_SET_PROCEDURAL, MENU_ACTION_SHOW_WORKFLOW, MENU_ACTION_TOGGLE_BRUSH_PANEL,
+    MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
+    MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL,
 };
 use meshi_graphics::TerrainChunkRef;
 
@@ -35,6 +40,9 @@ const EARTHLIKE_AMPLITUDE: f32 = 120.0;
 const EARTHLIKE_BIOME_FREQUENCY: f32 = 0.003;
 const EARTHLIKE_ALGORITHM: &str = "ridge-noise";
 const DEFAULT_CHUNK_KEY: &str = "terrain/chunk_0_0";
+const DEFAULT_WORLD_CHUNKS: [u32; 2] = [32, 32];
+const DEFAULT_VERTEX_RESOLUTION: u32 = 32;
+const DEFAULT_VERTEX_COLOR: [f32; 3] = [0.8, 0.2, 0.2];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerrainMode {
@@ -113,9 +121,15 @@ pub struct TerrainEditorApp {
     seed_input: String,
     lod_input: String,
     graph_id_input: String,
+    world_chunks: [u32; 2],
+    world_chunks_x_input: String,
+    world_chunks_y_input: String,
+    vertex_resolution: u32,
+    vertex_resolution_input: String,
     brush_radius: f32,
     brush_strength: f32,
-    brush_tool: TerrainMutationOpKind,
+    brush_tool: BrushTool,
+    vertex_paint_color: [f32; 3],
     ui_hovered: bool,
     last_world_cursor: Vec2,
     panel_visibility: PanelVisibility,
@@ -233,6 +247,9 @@ impl TerrainEditorApp {
         let generator_amplitude = EARTHLIKE_AMPLITUDE;
         let generator_biome_frequency = EARTHLIKE_BIOME_FREQUENCY;
         let generator_algorithm = EARTHLIKE_ALGORITHM.to_string();
+        let world_chunks = DEFAULT_WORLD_CHUNKS;
+        let vertex_resolution = DEFAULT_VERTEX_RESOLUTION;
+        let vertex_paint_color = DEFAULT_VERTEX_COLOR;
 
         let mut app = Self {
             engine,
@@ -267,9 +284,15 @@ impl TerrainEditorApp {
             seed_input: generation_seed.to_string(),
             lod_input: generation_lod.to_string(),
             graph_id_input: generation_graph_id,
+            world_chunks,
+            world_chunks_x_input: world_chunks[0].to_string(),
+            world_chunks_y_input: world_chunks[1].to_string(),
+            vertex_resolution,
+            vertex_resolution_input: vertex_resolution.to_string(),
             brush_radius: DEFAULT_BRUSH_RADIUS,
             brush_strength: DEFAULT_BRUSH_STRENGTH,
-            brush_tool: TerrainMutationOpKind::SphereAdd,
+            brush_tool: BrushTool::Sculpt(TerrainMutationOpKind::SphereAdd),
+            vertex_paint_color,
             ui_hovered: false,
             last_world_cursor: Vec2::ZERO,
             panel_visibility: PanelVisibility {
@@ -381,12 +404,16 @@ impl TerrainEditorApp {
             seed_input: &self.seed_input,
             lod_input: &self.lod_input,
             graph_id_input: &self.graph_id_input,
+            world_chunks_x_input: &self.world_chunks_x_input,
+            world_chunks_y_input: &self.world_chunks_y_input,
+            vertex_resolution_input: &self.vertex_resolution_input,
             generator_frequency: self.generator_frequency,
             generator_amplitude: self.generator_amplitude,
             generator_biome_frequency: self.generator_biome_frequency,
             brush_tool: self.brush_tool,
             brush_radius: self.brush_radius,
             brush_strength: self.brush_strength,
+            vertex_paint_color: self.vertex_paint_color,
             show_db_panel: self.panel_visibility.db,
             show_chunk_panel: self.panel_visibility.chunks,
             show_generation_panel: self.panel_visibility.generation,
@@ -461,6 +488,15 @@ impl TerrainEditorApp {
         if let Some(strength) = ui_output.brush_strength {
             self.brush_strength = strength;
         }
+        if let Some(value) = ui_output.vertex_paint_r {
+            self.vertex_paint_color[0] = value;
+        }
+        if let Some(value) = ui_output.vertex_paint_g {
+            self.vertex_paint_color[1] = value;
+        }
+        if let Some(value) = ui_output.vertex_paint_b {
+            self.vertex_paint_color[2] = value;
+        }
         if let Some(value) = ui_output.generator_frequency {
             self.generator_frequency = value;
         }
@@ -511,6 +547,8 @@ impl TerrainEditorApp {
             generator_amplitude: self.generator_amplitude,
             generator_biome_frequency: self.generator_biome_frequency,
             generator_algorithm: self.generator_algorithm.clone(),
+            world_chunks: self.world_chunks,
+            vertex_resolution: self.vertex_resolution,
         };
 
         let Some(rdb) = self.rdb_open.as_mut() else {
@@ -547,7 +585,11 @@ impl TerrainEditorApp {
 
     fn update_status_text(&mut self) {
         let db_status = if self.rdb_open.is_some() {
-            if self.db_dirty { "open*" } else { "open" }
+            if self.db_dirty {
+                "open*"
+            } else {
+                "open"
+            }
         } else {
             "closed"
         };
@@ -627,6 +669,17 @@ impl TerrainEditorApp {
             self.generation_lod = lod;
         }
 
+        if let Ok(chunks_x) = self.world_chunks_x_input.trim().parse::<u32>() {
+            self.world_chunks[0] = chunks_x.max(1);
+        }
+        if let Ok(chunks_y) = self.world_chunks_y_input.trim().parse::<u32>() {
+            self.world_chunks[1] = chunks_y.max(1);
+        }
+
+        if let Ok(vertex_resolution) = self.vertex_resolution_input.trim().parse::<u32>() {
+            self.vertex_resolution = vertex_resolution.max(1);
+        }
+
         self.generation_graph_id = self.graph_id_input.trim().to_string();
     }
 
@@ -639,6 +692,11 @@ impl TerrainEditorApp {
         self.generator_amplitude = EARTHLIKE_AMPLITUDE;
         self.generator_biome_frequency = EARTHLIKE_BIOME_FREQUENCY;
         self.generator_algorithm = EARTHLIKE_ALGORITHM.to_string();
+        self.world_chunks = DEFAULT_WORLD_CHUNKS;
+        self.world_chunks_x_input = self.world_chunks[0].to_string();
+        self.world_chunks_y_input = self.world_chunks[1].to_string();
+        self.vertex_resolution = DEFAULT_VERTEX_RESOLUTION;
+        self.vertex_resolution_input = self.vertex_resolution.to_string();
 
         self.status_note = Some("Earth-like preset applied.".to_string());
         self.update_status_text();
@@ -653,6 +711,14 @@ impl TerrainEditorApp {
     }
 
     fn apply_brush_at_cursor(&mut self) {
+        if self.brush_tool == BrushTool::VertexPaint {
+            self.apply_vertex_paint_at_cursor();
+            return;
+        }
+
+        let BrushTool::Sculpt(tool) = self.brush_tool else {
+            return;
+        };
         let chunk_key = self.current_chunk_key();
         let world_pos = self.cursor_to_world(self.last_world_cursor, &chunk_key);
 
@@ -670,10 +736,12 @@ impl TerrainEditorApp {
             generator_amplitude: self.generator_amplitude,
             generator_biome_frequency: self.generator_biome_frequency,
             generator_algorithm: self.generator_algorithm.clone(),
+            world_chunks: self.world_chunks,
+            vertex_resolution: self.vertex_resolution,
             world_pos: [world_pos.x, world_pos.y, world_pos.z],
             radius: self.brush_radius,
             strength: self.brush_strength,
-            tool: self.brush_tool,
+            tool,
         };
 
         let result = self.dbgen.apply_brush_in_memory(&request, &mut rdb);
@@ -696,10 +764,66 @@ impl TerrainEditorApp {
         }
     }
 
-    fn cursor_to_world(&self, cursor: Vec2, chunk_key: &str) -> Vec3 {
+    fn apply_vertex_paint_at_cursor(&mut self) {
+        let chunk_key = self.current_chunk_key();
+        let world_pos = self.cursor_to_world(self.last_world_cursor, &chunk_key);
+        let Some(mut rdb) = self.rdb_open.take() else {
+            self.persistence_error = Some("No database open.".to_string());
+            self.update_status_text();
+            return;
+        };
+
+        let artifact_entry = self
+            .dbgen
+            .chunk_entry_for_key(&chunk_key, self.generation_lod);
+        let mut artifact = match rdb.fetch::<TerrainChunkArtifact>(&artifact_entry) {
+            Ok(artifact) => artifact,
+            Err(err) => {
+                self.rdb_open = Some(rdb);
+                self.persistence_error =
+                    Some(format!("Vertex paint failed to load artifact: {err}"));
+                self.status_note = Some("Vertex paint failed.".to_string());
+                self.update_status_text();
+                return;
+            }
+        };
+
+        let changed = paint_vertices_in_artifact(
+            &mut artifact,
+            world_pos,
+            self.brush_radius,
+            self.brush_strength,
+            self.vertex_paint_color,
+        );
+
+        if !changed {
+            self.rdb_open = Some(rdb);
+            self.status_note = Some("Vertex paint: no vertices touched.".to_string());
+            self.update_status_text();
+            return;
+        }
+
+        artifact.content_hash = hash_vertex_colors(&artifact.vertices);
+        if let Err(err) = rdb.upsert(&artifact_entry, &artifact) {
+            self.rdb_open = Some(rdb);
+            self.persistence_error = Some(format!("Vertex paint save failed: {err}"));
+            self.status_note = Some("Vertex paint failed.".to_string());
+            self.update_status_text();
+            return;
+        }
+
+        self.rdb_open = Some(rdb);
+        self.persistence_error = None;
+        self.db_dirty = true;
+        self.status_note = Some("Vertex paint applied.".to_string());
+        self.update_rendered_chunk(chunk_key);
+    }
+
+    fn cursor_to_world(&mut self, cursor: Vec2, chunk_key: &str) -> Vec3 {
         let chunk_coords = self.dbgen.chunk_coords_for_key(chunk_key);
-        let tile_size = 1.0;
-        let tiles_per_chunk = [32_u32, 32_u32];
+        let (tile_size, tiles_per_chunk) = self
+            .project_chunk_settings(chunk_key)
+            .unwrap_or((1.0, [32_u32, 32_u32]));
         let chunk_size_x = tiles_per_chunk[0] as f32 * tile_size;
         let chunk_size_y = tiles_per_chunk[1] as f32 * tile_size;
         let origin_x = chunk_coords[0] as f32 * chunk_size_x;
@@ -711,6 +835,18 @@ impl TerrainEditorApp {
             origin_y + (1.0 - v) * chunk_size_y,
             0.0,
         )
+    }
+
+    fn project_chunk_settings(&mut self, chunk_key: &str) -> Option<(f32, [u32; 2])> {
+        let settings = self.project_settings_for_chunk(chunk_key)?;
+        Some((settings.tile_size, settings.tiles_per_chunk))
+    }
+
+    fn project_settings_for_chunk(&mut self, chunk_key: &str) -> Option<TerrainProjectSettings> {
+        let project_key = self.dbgen.project_key_for_chunk(chunk_key);
+        let rdb = self.rdb_open.as_mut()?;
+        let settings_entry = project_settings_entry(&project_key);
+        rdb.fetch::<TerrainProjectSettings>(&settings_entry).ok()
     }
 
     fn update_rendered_chunk(&mut self, chunk_entry: String) {
@@ -730,9 +866,12 @@ impl TerrainEditorApp {
             entries.sort();
         }
 
+        let lod = self.generation_lod;
         self.terrain_chunks.clear();
-        self.terrain_chunks
-            .extend(entries.into_iter().map(TerrainChunkRef::chunk_entry));
+        self.terrain_chunks.extend(entries.into_iter().map(|entry| {
+            let artifact_entry = self.dbgen.chunk_entry_for_key(&entry, lod);
+            TerrainChunkRef::artifact_entry(artifact_entry)
+        }));
         self.engine
             .set_terrain_render_objects_from_rdb(rdb, &project_key, &self.terrain_chunks);
     }
@@ -803,6 +942,15 @@ impl TerrainEditorApp {
                     FocusedInput::GeneratorGraph => {
                         self.graph_id_input.pop();
                     }
+                    FocusedInput::WorldChunksX => {
+                        self.world_chunks_x_input.pop();
+                    }
+                    FocusedInput::WorldChunksY => {
+                        self.world_chunks_y_input.pop();
+                    }
+                    FocusedInput::VertexResolution => {
+                        self.vertex_resolution_input.pop();
+                    }
                 }
                 self.update_status_text();
             }
@@ -825,6 +973,21 @@ impl TerrainEditorApp {
                         FocusedInput::GeneratorGraph => {
                             if !ch.is_control() {
                                 self.graph_id_input.push(ch);
+                            }
+                        }
+                        FocusedInput::WorldChunksX => {
+                            if ch.is_ascii_digit() {
+                                self.world_chunks_x_input.push(ch);
+                            }
+                        }
+                        FocusedInput::WorldChunksY => {
+                            if ch.is_ascii_digit() {
+                                self.world_chunks_y_input.push(ch);
+                            }
+                        }
+                        FocusedInput::VertexResolution => {
+                            if ch.is_ascii_digit() {
+                                self.vertex_resolution_input.push(ch);
                             }
                         }
                     }
@@ -1130,6 +1293,49 @@ impl TerrainEditorApp {
         self.needs_refresh = true;
         self.update_status_text();
     }
+}
+
+fn paint_vertices_in_artifact(
+    artifact: &mut TerrainChunkArtifact,
+    world_pos: Vec3,
+    radius: f32,
+    strength: f32,
+    target_color: [f32; 3],
+) -> bool {
+    if artifact.vertices.is_empty() {
+        return false;
+    }
+    let radius = radius.max(0.001);
+    let radius_sq = radius * radius;
+    let strength = strength.max(0.0);
+    let mut changed = false;
+    for vertex in &mut artifact.vertices {
+        let dx = vertex.position[0] - world_pos.x;
+        let dy = vertex.position[1] - world_pos.y;
+        let dist_sq = dx * dx + dy * dy;
+        if dist_sq <= radius_sq {
+            let dist = dist_sq.sqrt();
+            let falloff = (1.0 - dist / radius).clamp(0.0, 1.0);
+            let blend = (strength * falloff).clamp(0.0, 1.0);
+            for channel in 0..3 {
+                let current = vertex.color[channel];
+                vertex.color[channel] = current + (target_color[channel] - current) * blend;
+            }
+            vertex.color[3] = 1.0;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn hash_vertex_colors(vertices: &[Vertex]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for vertex in vertices {
+        for channel in vertex.color {
+            channel.to_bits().hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 
 pub fn run() {

@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw, DrawIndexedIndirect};
@@ -10,11 +10,11 @@ use dashi::{
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use glam::{Mat4, Vec3};
-use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::TerrainChunkArtifact;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
+use noren::DB;
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
 use tracing::warn;
@@ -25,7 +25,9 @@ use crate::render::scene::{GPUScene, SceneNodeType, SceneObject, SceneObjectInfo
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
-use furikake::types::{Camera, Material, Transformation, VertexBufferSlot};
+use furikake::types::{
+    Camera, Material, Transformation, VertexBufferSlot, MATERIAL_FLAG_VERTEX_COLOR,
+};
 
 #[derive(Clone, Copy)]
 pub struct TerrainInfo {
@@ -224,33 +226,35 @@ impl TerrainRenderer {
             })
             .expect("Failed to create terrain meshlet buffer");
 
-        let compute_pipeline = Some(CSOBuilder::new()
-            .shader(Some(
-                include_str!("shaders/environment_terrain.comp.glsl").as_bytes(),
-            ))
-            .add_variable(
-                "clipmap",
-                ShaderResource::StorageBuffer(clipmap_buffer.into()),
-            )
-            .add_variable(
-                "draw_args",
-                ShaderResource::StorageBuffer(draw_args_buffer.into()),
-            )
-            .add_variable(
-                "instance_data",
-                ShaderResource::StorageBuffer(instance_buffer.into()),
-            )
-            .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
-            .add_variable(
-                "heightmap",
-                ShaderResource::StorageBuffer(heightmap_buffer.into()),
-            )
-            .add_variable(
-                "meshlets",
-                ShaderResource::StorageBuffer(meshlet_buffer.into()),
-            )
-            .build(ctx)
-            .unwrap());
+        let compute_pipeline = Some(
+            CSOBuilder::new()
+                .shader(Some(
+                    include_str!("shaders/environment_terrain.comp.glsl").as_bytes(),
+                ))
+                .add_variable(
+                    "clipmap",
+                    ShaderResource::StorageBuffer(clipmap_buffer.into()),
+                )
+                .add_variable(
+                    "draw_args",
+                    ShaderResource::StorageBuffer(draw_args_buffer.into()),
+                )
+                .add_variable(
+                    "instance_data",
+                    ShaderResource::StorageBuffer(instance_buffer.into()),
+                )
+                .add_variable("params", ShaderResource::DynamicStorage(dynamic.state()))
+                .add_variable(
+                    "heightmap",
+                    ShaderResource::StorageBuffer(heightmap_buffer.into()),
+                )
+                .add_variable(
+                    "meshlets",
+                    ShaderResource::StorageBuffer(meshlet_buffer.into()),
+                )
+                .build(ctx)
+                .unwrap(),
+        );
 
         let shaders = compile_terrain_shaders();
         let mut pso_builder = PSOBuilder::new()
@@ -712,16 +716,14 @@ impl TerrainRenderer {
         let db = unsafe { db.as_mut() };
         let geometry_store = db.geometry_mut();
         let _ = geometry_store.unref_entry(&geometry_entry);
-        let mut geometry = match geometry_store.enter_gpu_geometry(
-            &geometry_entry,
-            host_geometry.clone(),
-        ) {
-            Ok(geometry) => geometry,
-            Err(err) => {
-                warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
-                return None;
-            }
-        };
+        let mut geometry =
+            match geometry_store.enter_gpu_geometry(&geometry_entry, host_geometry.clone()) {
+                Ok(geometry) => geometry,
+                Err(err) => {
+                    warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
+                    return None;
+                }
+            };
 
         if !self.register_furikake_geometry(&mut geometry, &host_geometry, state) {
             warn!("Failed to register furikake geometry for terrain '{geometry_entry}'.");
@@ -751,6 +753,7 @@ impl TerrainRenderer {
         material.metallic_roughness_texture_id = u32::MAX;
         material.occlusion_texture_id = u32::MAX;
         material.emissive_texture_id = u32::MAX;
+        material.material_flags |= MATERIAL_FLAG_VERTEX_COLOR as u32;
         state
             .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
                 material_handle = materials.add_material();

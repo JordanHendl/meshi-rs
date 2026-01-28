@@ -1,17 +1,18 @@
 use meshi_graphics::rdb::terrain::TerrainChunkArtifact;
 use noren::{
-    RDBFile,
     rdb::terrain::{
-        TerrainChunk, TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition,
-        TerrainMaterialBlendMode, TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind,
-        TerrainMutationParams, TerrainProjectSettings, TerrainTile, chunk_artifact_entry,
-        chunk_coord_key, chunk_state_entry, generator_entry, lod_key, mutation_layer_entry,
-        mutation_op_entry, parse_chunk_artifact_entry, project_settings_entry,
+        chunk_artifact_entry, chunk_coord_key, chunk_state_entry, generator_entry, lod_key,
+        mutation_layer_entry, mutation_op_entry, parse_chunk_artifact_entry,
+        project_settings_entry, TerrainChunk, TerrainChunkState, TerrainDirtyReason,
+        TerrainGeneratorDefinition, TerrainMaterialBlendMode, TerrainMutationLayer,
+        TerrainMutationOp, TerrainMutationOpKind, TerrainMutationParams, TerrainProjectSettings,
+        TerrainTile,
     },
     terrain::{
-        TerrainChunkBuildRequest, build_terrain_chunk_with_context, prepare_terrain_build_context,
-        sample_height_with_mutations,
+        build_terrain_chunk_with_context, prepare_terrain_build_context,
+        sample_height_with_mutations, TerrainChunkBuildRequest,
     },
+    RDBFile,
 };
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +26,8 @@ pub struct TerrainGenerationRequest {
     pub generator_amplitude: f32,
     pub generator_biome_frequency: f32,
     pub generator_algorithm: String,
+    pub world_chunks: [u32; 2],
+    pub vertex_resolution: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +39,8 @@ pub struct TerrainBrushRequest {
     pub generator_amplitude: f32,
     pub generator_biome_frequency: f32,
     pub generator_algorithm: String,
+    pub world_chunks: [u32; 2],
+    pub vertex_resolution: u32,
     pub world_pos: [f32; 3],
     pub radius: f32,
     pub strength: f32,
@@ -86,6 +91,8 @@ impl TerrainDbgen {
             request.generator_frequency,
             request.generator_amplitude,
             request.generator_biome_frequency,
+            request.world_chunks,
+            request.vertex_resolution,
         )?;
 
         let context = prepare_terrain_build_context(rdb, &target.project_key).map_err(|err| {
@@ -214,6 +221,8 @@ impl TerrainDbgen {
             request.generator_frequency,
             request.generator_amplitude,
             request.generator_biome_frequency,
+            request.world_chunks,
+            request.vertex_resolution,
         )?;
 
         let layer_id = DEFAULT_LAYER_ID;
@@ -305,6 +314,8 @@ impl TerrainDbgen {
         generator_frequency: f32,
         generator_amplitude: f32,
         generator_biome_frequency: f32,
+        world_chunks: [u32; 2],
+        vertex_resolution: u32,
     ) -> Result<TerrainProjectSettings, String> {
         let mut settings = rdb
             .fetch::<TerrainProjectSettings>(&project_settings_entry(project_key))
@@ -317,6 +328,15 @@ impl TerrainDbgen {
         if !generator_graph_id.is_empty() {
             settings.generator_graph_id = generator_graph_id.to_string();
         }
+        let vertex_resolution = vertex_resolution.max(1);
+        settings.tiles_per_chunk = [vertex_resolution, vertex_resolution];
+        let world_chunks = [world_chunks[0].max(1), world_chunks[1].max(1)];
+        let chunk_size_x = settings.tile_size * settings.tiles_per_chunk[0] as f32;
+        let chunk_size_y = settings.tile_size * settings.tiles_per_chunk[1] as f32;
+        settings.world_bounds_max[0] =
+            settings.world_bounds_min[0] + chunk_size_x * world_chunks[0] as f32;
+        settings.world_bounds_max[1] =
+            settings.world_bounds_min[1] + chunk_size_y * world_chunks[1] as f32;
 
         let generator_entry_key = generator_entry(project_key, settings.active_generator_version);
         let mut generator = rdb

@@ -13,6 +13,15 @@ pub enum FocusedInput {
     Seed,
     Lod,
     GeneratorGraph,
+    WorldChunksX,
+    WorldChunksY,
+    VertexResolution,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrushTool {
+    Sculpt(TerrainMutationOpKind),
+    VertexPaint,
 }
 
 pub struct TerrainEditorUiInput {
@@ -32,12 +41,16 @@ pub struct TerrainEditorUiData<'a> {
     pub seed_input: &'a str,
     pub lod_input: &'a str,
     pub graph_id_input: &'a str,
+    pub world_chunks_x_input: &'a str,
+    pub world_chunks_y_input: &'a str,
+    pub vertex_resolution_input: &'a str,
     pub generator_frequency: f32,
     pub generator_amplitude: f32,
     pub generator_biome_frequency: f32,
-    pub brush_tool: TerrainMutationOpKind,
+    pub brush_tool: BrushTool,
     pub brush_radius: f32,
     pub brush_strength: f32,
+    pub vertex_paint_color: [f32; 3],
     pub show_db_panel: bool,
     pub show_chunk_panel: bool,
     pub show_generation_panel: bool,
@@ -60,9 +73,12 @@ pub struct TerrainEditorUiOutput {
     pub generator_frequency: Option<f32>,
     pub generator_amplitude: Option<f32>,
     pub generator_biome_frequency: Option<f32>,
-    pub brush_tool: Option<TerrainMutationOpKind>,
+    pub brush_tool: Option<BrushTool>,
     pub brush_radius: Option<f32>,
     pub brush_strength: Option<f32>,
+    pub vertex_paint_r: Option<f32>,
+    pub vertex_paint_g: Option<f32>,
+    pub vertex_paint_b: Option<f32>,
     pub ui_hovered: bool,
     pub menu_action: Option<u32>,
 }
@@ -88,6 +104,9 @@ const SLIDER_GENERATOR_AMPLITUDE: u32 = 11;
 const SLIDER_GENERATOR_BIOME_FREQUENCY: u32 = 12;
 const SLIDER_RADIUS: u32 = 1;
 const SLIDER_STRENGTH: u32 = 2;
+const SLIDER_VERTEX_COLOR_R: u32 = 3;
+const SLIDER_VERTEX_COLOR_G: u32 = 4;
+const SLIDER_VERTEX_COLOR_B: u32 = 5;
 pub const MENU_ACTION_NEW_RDB: u32 = 1;
 pub const MENU_ACTION_OPEN_RDB: u32 = 2;
 pub const MENU_ACTION_SAVE_RDB: u32 = 3;
@@ -108,7 +127,7 @@ impl TerrainEditorUi {
     pub fn new(_window_size: Vec2) -> Self {
         let margin = 16.0;
         let panel_width = 360.0;
-        let panel_height = 210.0;
+        let panel_height = 380.0;
         let menu_metrics = MenuLayoutMetrics::default();
         let top_offset = margin + menu_metrics.bar_height;
         Self {
@@ -124,7 +143,7 @@ impl TerrainEditorUi {
             ),
             brush_panel: PanelState::new(
                 [margin + panel_width + 16.0, top_offset + 232.0],
-                [panel_width, 300.0],
+                [panel_width, 420.0],
             ),
             workflow_panel: PanelState::new([margin, top_offset + 512.0], [panel_width, 180.0]),
             generation_slider_layout: SliderLayout::default(),
@@ -158,6 +177,9 @@ impl TerrainEditorUi {
             brush_tool: None,
             brush_radius: None,
             brush_strength: None,
+            vertex_paint_r: None,
+            vertex_paint_g: None,
+            vertex_paint_b: None,
             ui_hovered: false,
             menu_action: None,
         };
@@ -513,6 +535,48 @@ impl TerrainEditorUi {
 
                 cursor_y = labeled_input(
                     gui,
+                    "World Chunks X",
+                    data.world_chunks_x_input,
+                    label_x,
+                    cursor_y,
+                    content_width,
+                    focused_input == Some(FocusedInput::WorldChunksX),
+                    input,
+                    data.viewport,
+                    &mut output,
+                    FocusedInput::WorldChunksX,
+                );
+
+                cursor_y = labeled_input(
+                    gui,
+                    "World Chunks Y",
+                    data.world_chunks_y_input,
+                    label_x,
+                    cursor_y,
+                    content_width,
+                    focused_input == Some(FocusedInput::WorldChunksY),
+                    input,
+                    data.viewport,
+                    &mut output,
+                    FocusedInput::WorldChunksY,
+                );
+
+                cursor_y = labeled_input(
+                    gui,
+                    "Vertex Resolution",
+                    data.vertex_resolution_input,
+                    label_x,
+                    cursor_y,
+                    content_width,
+                    focused_input == Some(FocusedInput::VertexResolution),
+                    input,
+                    data.viewport,
+                    &mut output,
+                    FocusedInput::VertexResolution,
+                );
+
+                cursor_y = labeled_input(
+                    gui,
                     "Generator Graph",
                     data.graph_id_input,
                     label_x,
@@ -672,12 +736,28 @@ impl TerrainEditorUi {
                 cursor_y += 20.0;
 
                 let tool_buttons = [
-                    (TerrainMutationOpKind::SphereAdd, "Sphere Add"),
-                    (TerrainMutationOpKind::SphereSub, "Sphere Sub"),
-                    (TerrainMutationOpKind::Smooth, "Smooth"),
-                    (TerrainMutationOpKind::MaterialPaint, "Paint"),
-                    (TerrainMutationOpKind::CapsuleAdd, "Capsule Add"),
-                    (TerrainMutationOpKind::CapsuleSub, "Capsule Sub"),
+                    (
+                        BrushTool::Sculpt(TerrainMutationOpKind::SphereAdd),
+                        "Sphere Add",
+                    ),
+                    (
+                        BrushTool::Sculpt(TerrainMutationOpKind::SphereSub),
+                        "Sphere Sub",
+                    ),
+                    (BrushTool::Sculpt(TerrainMutationOpKind::Smooth), "Smooth"),
+                    (
+                        BrushTool::Sculpt(TerrainMutationOpKind::MaterialPaint),
+                        "Material Paint",
+                    ),
+                    (
+                        BrushTool::Sculpt(TerrainMutationOpKind::CapsuleAdd),
+                        "Capsule Add",
+                    ),
+                    (
+                        BrushTool::Sculpt(TerrainMutationOpKind::CapsuleSub),
+                        "Capsule Sub",
+                    ),
+                    (BrushTool::VertexPaint, "Vertex Paint"),
                 ];
                 let button_width = (content_width - 24.0) * 0.5 - 6.0;
                 let button_height = 24.0;
@@ -697,15 +777,17 @@ impl TerrainEditorUi {
                     }
                 }
 
-                let slider_start_y = cursor_y + 3.0 * (button_height + 8.0) + 4.0;
+                let rows = (tool_buttons.len() as f32 / 2.0).ceil().max(1.0);
+                let slider_start_y = cursor_y + rows * (button_height + 8.0) + 4.0;
                 let slider_metrics = SliderMetrics {
                     item_height: 26.0,
                     item_gap: 8.0,
                     ..SliderMetrics::default()
                 };
+                let slider_items = 5.0;
                 let slider_height = slider_metrics.padding[1] * 2.0
-                    + slider_metrics.item_height * 2.0
-                    + slider_metrics.item_gap;
+                    + slider_metrics.item_height * slider_items
+                    + slider_metrics.item_gap * (slider_items - 1.0);
                 let slider_options = SliderRenderOptions {
                     viewport: data.viewport.to_array(),
                     position: [brush_layout.content_rect.min[0], slider_start_y],
@@ -741,6 +823,36 @@ impl TerrainEditorUi {
                         show_value: true,
                         value_format: SliderValueFormat::Float,
                     },
+                    Slider {
+                        id: SLIDER_VERTEX_COLOR_R,
+                        label: "Vertex Red".to_string(),
+                        value: data.vertex_paint_color[0],
+                        min: 0.0,
+                        max: 1.0,
+                        enabled: true,
+                        show_value: true,
+                        value_format: SliderValueFormat::Float,
+                    },
+                    Slider {
+                        id: SLIDER_VERTEX_COLOR_G,
+                        label: "Vertex Green".to_string(),
+                        value: data.vertex_paint_color[1],
+                        min: 0.0,
+                        max: 1.0,
+                        enabled: true,
+                        show_value: true,
+                        value_format: SliderValueFormat::Float,
+                    },
+                    Slider {
+                        id: SLIDER_VERTEX_COLOR_B,
+                        label: "Vertex Blue".to_string(),
+                        value: data.vertex_paint_color[2],
+                        min: 0.0,
+                        max: 1.0,
+                        enabled: true,
+                        show_value: true,
+                        value_format: SliderValueFormat::Float,
+                    },
                 ];
 
                 let layout = gui.submit_sliders(&sliders, &slider_options);
@@ -769,6 +881,9 @@ impl TerrainEditorUi {
                             match active_id {
                                 SLIDER_RADIUS => output.brush_radius = Some(value),
                                 SLIDER_STRENGTH => output.brush_strength = Some(value),
+                                SLIDER_VERTEX_COLOR_R => output.vertex_paint_r = Some(value),
+                                SLIDER_VERTEX_COLOR_G => output.vertex_paint_g = Some(value),
+                                SLIDER_VERTEX_COLOR_B => output.vertex_paint_b = Some(value),
                                 _ => {}
                             }
                         }
