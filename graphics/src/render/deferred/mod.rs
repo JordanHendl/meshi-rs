@@ -422,6 +422,7 @@ impl DeferredRenderer {
 
         let dynamic = ctx
             .make_dynamic_allocator(&DynamicAllocatorInfo {
+                byte_size: 2048 * 2048,
                 ..Default::default()
             })
             .expect("Unable to create dynamic allocator!");
@@ -1660,13 +1661,13 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
-            let normal = self.graph.make_image(&ImageInfo {
-                debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
+            let diffuse = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
                 ..default_framebuffer_info
             });
 
-            let diffuse = self.graph.make_image(&ImageInfo {
-                debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
+            let normal = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
                 ..default_framebuffer_info
             });
 
@@ -1766,10 +1767,10 @@ impl DeferredRenderer {
             }
 
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
-            deferred_pass_attachments[0] = Some(position.view);
-            deferred_pass_attachments[1] = Some(diffuse.view);
-            deferred_pass_attachments[2] = Some(normal.view);
-            deferred_pass_attachments[3] = Some(material_code.view);
+            deferred_pass_attachments[3] = Some(position.view);
+            deferred_pass_attachments[2] = Some(diffuse.view);
+            deferred_pass_attachments[1] = Some(normal.view);
+            deferred_pass_attachments[0] = Some(material_code.view);
 
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
             deferred_pass_clear[..4].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
@@ -2037,12 +2038,12 @@ impl DeferredRenderer {
                         .bump()
                         .expect("Failed to allocate dynamic buffer!");
 
-                    #[repr(C)]
+                    #[repr(packed)]
                     struct PerObj {
-                        pos: u32,
-                        diff: u32,
-                        norm: u32,
                         mat: u32,
+                        norm: u32,
+                        diff: u32,
+                        pos: u32,
                         shadow: u32,
                         shadow_cascade_count: u32,
                         shadow_resolution: u32,
@@ -2053,7 +2054,7 @@ impl DeferredRenderer {
                         spot_shadow_padding1: u32,
                         spot_shadow_matrix: Mat4,
                     }
-
+                    
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
                     per_obj.pos = position.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.diff = diffuse.bindless_id.unwrap_or(u16::MAX) as u32;

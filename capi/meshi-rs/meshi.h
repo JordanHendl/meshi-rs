@@ -15,7 +15,7 @@ typedef void* (*MeshiSymbolLoader)(const char* name);
 
 #define MESHI_PLUGIN_GET_API_SYMBOL "meshi_plugin_get_api"
 #define MESHI_PLUGIN_LOAD_API(loader_fn) \
-    ((loader_fn) ? ((MeshiPluginGetApiFn)(loader_fn)(MESHI_PLUGIN_GET_API_SYMBOL)) : NULL)
+    ((loader_fn) ? ((MeshiPluginGetApiFn)(loader_fn(MESHI_PLUGIN_GET_API_SYMBOL)))() : NULL)
 
 typedef struct MeshiPluginApi {
     uint32_t abi_version;
@@ -27,7 +27,7 @@ typedef struct MeshiPluginApi {
     struct MeshiEngine* (*get_graphics_system)(struct MeshiEngine* engine);
     struct MeshiEngine* (*get_audio_system)(struct MeshiEngine* engine);
     struct MeshiEngine* (*get_physics_system)(struct MeshiEngine* engine);
-    MeshiMeshObjectHandle (*gfx_create_mesh_object)(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
+    MeshiRenderObjectHandle (*gfx_create_mesh_object)(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
     MeshiRenderObjectHandle (*gfx_create_render_object)(struct MeshiEngine* render, const MeshiRenderObjectInfo* info);
     void (*gfx_release_render_object)(struct MeshiEngine* render, const MeshiRenderObjectHandle* h);
     void (*gfx_set_transform)(struct MeshiEngine* render, MeshiRenderObjectHandle h, const MeshiMat4* transform);
@@ -129,7 +129,7 @@ void meshi_audio_register_finished_callback(struct MeshiEngine* engine, void* us
 
 // Graphics
 MESHI_DEPRECATED
-MeshiMeshObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
+MeshiRenderObjectHandle meshi_gfx_create_mesh_object(struct MeshiEngine* render, const MeshiMeshObjectInfo* info);
 MeshiRenderObjectHandle meshi_gfx_create_render_object(struct MeshiEngine* render, const MeshiRenderObjectInfo* info);
 void meshi_gfx_release_render_object(struct MeshiEngine* render, const MeshiRenderObjectHandle* h);
 void meshi_gfx_set_transform(struct MeshiEngine* render, MeshiRenderObjectHandle h, const MeshiMat4* transform);

@@ -323,8 +323,11 @@ struct MeshiContactInfo {
 };
 
 using MeshiRenderObjectHandle = MeshiHandle;
-MESHI_DEPRECATED
-using MeshiMeshObjectHandle = MeshiRenderObjectHandle;
+#if defined(__cplusplus)
+using MeshiMeshObjectHandle MESHI_DEPRECATED = MeshiRenderObjectHandle;
+#else
+typedef MeshiRenderObjectHandle MeshiMeshObjectHandle MESHI_DEPRECATED;
+#endif
 using MeshiLightHandle = MeshiHandle;
 using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;

@@ -1,6 +1,7 @@
 mod project;
 mod render_backend;
 mod runtime;
+mod terrain;
 mod ui;
 
 fn main() {

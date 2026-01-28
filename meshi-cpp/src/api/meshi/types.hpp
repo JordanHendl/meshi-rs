@@ -1,29 +1,32 @@
 #pragma once
 
-#include <meshi/meshi_types.h>
+#include <meshi_types.h>
 #include <glm/glm.hpp>
+#include <cstdint>
 
 namespace meshi {
 
 using EngineBackendInfo = MeshiEngineInfo;
 using RawEngineBackend = MeshiEngine;
-using RawGraphicsSystem = MeshiRenderEngine;
-using RawPhysicsSystem = MeshiPhysicsSimulation;
+using RawGraphicsSystem = MeshiEngine;
+using RawPhysicsSystem = MeshiEngine;
 
 template <typename T> using Handle = MeshiHandle;
 
 namespace gfx {
-using Renderable = MeshiMeshObject;
+using Renderable = MeshiRenderObjectHandle;
 struct RenderableCreateInfo {
   const char *mesh = "";
   const char *material = "";
   glm::mat4 transform = glm::mat4(1.0f);
 };
-using DirectionalLight = MeshiDirectionalLight;
+using DirectionalLight = MeshiLightHandle;
 struct DirectionalLightInfo {
   glm::vec4 direction{0.0f};
   glm::vec4 color{1.0f};
   float intensity = 1.0f;
+  float range = 0.0f;
+  std::uint32_t flags = static_cast<std::uint32_t>(MeshiLightFlags::None);
 };
 } // namespace gfx
 
@@ -36,6 +39,7 @@ struct RigidBodyCreateInfo {
   glm::vec3 initial_velocity{0.0f};
   glm::quat initial_rotation{1.0f, 0.0f, 0.0f, 0.0f};
   std::uint32_t has_gravity{0};
+  MeshiCollisionShape collision_shape{};
 };
 using ForceApplyInfo = MeshiForceApplyInfo;
 struct PhysicsActorStatus {
@@ -44,4 +48,3 @@ struct PhysicsActorStatus {
 };
 
 } // namespace meshi
-

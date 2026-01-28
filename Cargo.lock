@@ -1756,6 +1756,7 @@ dependencies = [
  "glam 0.29.3",
  "meshi-graphics",
  "serde",
+ "serde_json",
  "toml",
 ]
 

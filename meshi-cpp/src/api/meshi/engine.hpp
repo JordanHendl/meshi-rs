@@ -10,11 +10,13 @@
 #include <meshi/bits/event.hpp>
 #include <string>
 #include <string_view>
+#include <meshi.h>
 
 namespace meshi {
 struct EngineInfo {
   std::string application_name = std::string("MESHI APPLICATION");
   std::string application_root = std::string("");
+  MeshiSymbolLoader plugin_loader = nullptr;
 };
 class Engine {
 public:
@@ -25,7 +27,8 @@ public:
         .headless = 0,
     };
 
-    return make_result<Engine, Error>(Engine(backend_info));
+    return make_result<Engine, Error>(
+        Engine(backend_info, info.plugin_loader));
   };
 
   inline auto world() -> World & { return m_world; }
@@ -54,8 +57,9 @@ private:
       m_backend.graphics().set_projection(p);
     }
   }
-  Engine(const EngineBackendInfo &info)
-      : m_backend(info), m_event(std::make_shared<EventHandler>(&m_backend)),
+  Engine(const EngineBackendInfo &info, MeshiSymbolLoader loader_fn)
+      : m_backend(info, loader_fn),
+        m_event(std::make_shared<EventHandler>(&m_backend)),
         m_action(std::make_shared<ActionHandler>(*m_event)){};
 
   EngineBackend m_backend;
