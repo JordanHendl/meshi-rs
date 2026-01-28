@@ -63,6 +63,21 @@ layout(scalar, set = 2, binding = 0) readonly buffer OceanShadowMatrices {
     mat4 shadow_matrices[4];
 } shadow_matrices;
 
+layout(scalar, set = 3, binding = 11) readonly buffer OceanCloudShadowParams {
+    uint shadow_enabled;
+    uint shadow_cascade_count;
+    uint shadow_resolution;
+    uint _padding0;
+    vec4 shadow_splits;
+    vec4 shadow_cascade_extents;
+    uvec4 shadow_cascade_resolutions;
+    uvec4 shadow_cascade_offsets;
+} cloud_shadow_params;
+
+layout(set = 1, binding = 12) readonly buffer OceanCloudShadowBuffer {
+    float values[];
+} cloud_shadow_buffer;
+
 struct Camera {
     mat4 world_from_camera;
     mat4 projection;
@@ -229,6 +244,18 @@ uint select_shadow_cascade(float view_depth) {
     return index;
 }
 
+uint select_cloud_shadow_cascade(float view_depth) {
+    uint count = max(cloud_shadow_params.shadow_cascade_count, 1u);
+    uint index = count - 1u;
+    for (uint i = 0u; i < count; ++i) {
+        if (view_depth <= cloud_shadow_params.shadow_splits[i]) {
+            index = i;
+            break;
+        }
+    }
+    return index;
+}
+
 float sample_shadow(vec3 world_pos, float view_depth, float bias) {
     uint cascade_count = max(shadow_params.shadow_cascade_count, 1u);
     uint shadow_res = max(shadow_params.shadow_resolution, 1u);
@@ -268,6 +295,28 @@ float sample_shadow(vec3 world_pos, float view_depth, float bias) {
         }
     }
     return shadow / 9.0;
+}
+
+float sample_cloud_shadow(vec3 world_pos, float view_depth) {
+    if (cloud_shadow_params.shadow_enabled == 0u) {
+        return 1.0;
+    }
+    uint cascade_index = select_cloud_shadow_cascade(view_depth);
+    float extent = cloud_shadow_params.shadow_cascade_extents[cascade_index];
+    uint cascade_resolution = cloud_shadow_params.shadow_cascade_resolutions[cascade_index];
+    if (cascade_resolution == 0u) {
+        cascade_resolution = cloud_shadow_params.shadow_resolution;
+    }
+    cascade_resolution = max(cascade_resolution, 1u);
+    vec2 uv = (world_pos.xz / extent) * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0;
+    }
+    uvec2 coord = uvec2(uv * float(cascade_resolution));
+    coord = min(coord, uvec2(cascade_resolution - 1));
+    uint cascade_offset = cloud_shadow_params.shadow_cascade_offsets[cascade_index];
+    uint idx = cascade_offset + coord.y * cascade_resolution + coord.x;
+    return cloud_shadow_buffer.values[idx];
 }
 
 vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float view_depth, float roughness, vec3 f0) {
@@ -323,6 +372,9 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
             float bias = max(0.0005, 0.002 * (1.0 - ndotl));
             shadow_factor = sample_shadow(world_pos, view_depth, bias);
         }
+    }
+    if (light_type == LIGHT_TYPE_DIRECTIONAL) {
+        shadow_factor *= sample_cloud_shadow(world_pos, view_depth);
     }
 
     vec3 radiance = light_color * attenuation;

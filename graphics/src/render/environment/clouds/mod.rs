@@ -18,7 +18,7 @@ use cloud_pass_temporal::{CloudTemporalPass, TemporalSettings};
 use dashi::cmd::Executable;
 use dashi::driver::command::BlitImage;
 use dashi::{
-    CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport,
+    Buffer, CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport,
 };
 use furikake::BindlessState;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
@@ -46,6 +46,7 @@ pub struct CloudRenderer {
     raymarch_pass: CloudRaymarchPass,
     temporal_pass: CloudTemporalPass,
     composite_pass: CloudCompositePass,
+    shadow_map_info: Option<CloudShadowMapInfo>,
     low_resolution: [u32; 2],
     frame_index: u32,
     prev_view_proj: Mat4,
@@ -55,6 +56,17 @@ pub struct CloudRenderer {
     sample_count: dashi::SampleCount,
     pending_weather_map: Option<dashi::ImageView>,
     weather_map_configured: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct CloudShadowMapInfo {
+    pub shadow_buffer: Handle<Buffer>,
+    pub shadow_resolution: u32,
+    pub shadow_cascade_count: u32,
+    pub shadow_cascade_resolutions: [u32; 4],
+    pub shadow_cascade_offsets: [u32; 4],
+    pub shadow_cascade_extents: [f32; 4],
+    pub shadow_cascade_splits: [f32; 4],
 }
 
 pub fn register_debug(settings: &mut CloudSettings) {
@@ -726,6 +738,7 @@ impl CloudRenderer {
             raymarch_pass,
             temporal_pass,
             composite_pass,
+            shadow_map_info: None,
             low_resolution,
             frame_index: 0,
             prev_view_proj: Mat4::IDENTITY,
@@ -752,6 +765,10 @@ impl CloudRenderer {
 
     pub fn timings(&self) -> CloudTimingResult {
         self.timings
+    }
+
+    pub fn shadow_map_info(&self) -> Option<CloudShadowMapInfo> {
+        self.shadow_map_info
     }
 
     pub fn timing_overlay_text(&self) -> String {
@@ -800,6 +817,7 @@ impl CloudRenderer {
 
         if !self.settings.enabled || !self.weather_map_configured {
             self.timings = CloudTimingResult::default();
+            self.shadow_map_info = None;
             return cmd.end();
         }
 
@@ -901,6 +919,17 @@ impl CloudRenderer {
             self.shadow_pass
                 .update_settings(sampling, sampling.sun_direction, sampling.time);
             cmd = cmd.combine(self.shadow_pass.record());
+            self.shadow_map_info = Some(CloudShadowMapInfo {
+                shadow_buffer: self.shadow_pass.shadow_buffer,
+                shadow_resolution: max_shadow_resolution,
+                shadow_cascade_count: self.settings.shadow.cascades.cascade_count.max(1),
+                shadow_cascade_resolutions: self.settings.shadow.cascades.cascade_resolutions,
+                shadow_cascade_offsets,
+                shadow_cascade_extents: self.settings.shadow.cascades.cascade_extents,
+                shadow_cascade_splits,
+            });
+        } else {
+            self.shadow_map_info = None;
         }
 
         self.raymarch_pass.update_settings(sampling);

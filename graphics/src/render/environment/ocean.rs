@@ -517,6 +517,19 @@ struct OceanShadowMatrices {
     shadow_matrices: [Mat4; 4],
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct OceanCloudShadowParams {
+    shadow_enabled: u32,
+    shadow_cascade_count: u32,
+    shadow_resolution: u32,
+    _padding0: u32,
+    shadow_splits: Vec4,
+    shadow_cascade_extents: Vec4,
+    shadow_cascade_resolutions: [u32; 4],
+    shadow_cascade_offsets: [u32; 4],
+}
+
 
 #[derive(Debug)]
 struct OceanCascade {
@@ -584,6 +597,14 @@ pub struct OceanRenderer {
     shadow_resolution: u32,
     shadow_splits: Vec4,
     shadow_matrices: [Mat4; 4],
+    cloud_shadow_buffer: Handle<Buffer>,
+    cloud_shadow_enabled: bool,
+    cloud_shadow_cascade_count: u32,
+    cloud_shadow_resolution: u32,
+    cloud_shadow_splits: Vec4,
+    cloud_shadow_cascade_extents: [f32; 4],
+    cloud_shadow_cascade_resolutions: [u32; 4],
+    cloud_shadow_cascade_offsets: [u32; 4],
     enabled: bool,
 }
 
@@ -912,6 +933,17 @@ impl OceanRenderer {
         let scene_color_fallback =
             create_scene_color_fallback(ctx, info.color_format, info.sample_count);
         let scene_depth_fallback = create_scene_depth_fallback(ctx, info.sample_count);
+        let cloud_shadow_fallback = {
+            let data = 1.0f32.to_le_bytes();
+            ctx.make_buffer(&BufferInfo {
+                debug_name: "[MESHI GFX OCEAN] Cloud Shadow Fallback",
+                byte_size: data.len() as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: Some(&data),
+            })
+            .expect("Failed to create ocean cloud shadow fallback buffer")
+        };
         let wave_resources = cascades
             .iter()
             .enumerate()
@@ -944,6 +976,13 @@ impl OceanRenderer {
             )
             .add_table_variable_with_resources(
                 "shadow_matrices",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "cloud_shadow_params",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
                     slot: 0,
@@ -1000,6 +1039,13 @@ impl OceanRenderer {
                     slot: 0,
                 }],
             );
+        pso_builder = pso_builder.add_table_variable_with_resources(
+            "cloud_shadow_buffer",
+            vec![dashi::IndexedResource {
+                resource: ShaderResource::StorageBuffer(cloud_shadow_fallback.into()),
+                slot: 0,
+            }],
+        );
 
         pso_builder = pso_builder
             .add_reserved_table_variables(state)
@@ -1090,6 +1136,14 @@ impl OceanRenderer {
             shadow_resolution: 0,
             shadow_splits: Vec4::ZERO,
             shadow_matrices: [Mat4::IDENTITY; 4],
+            cloud_shadow_buffer: cloud_shadow_fallback,
+            cloud_shadow_enabled: false,
+            cloud_shadow_cascade_count: 0,
+            cloud_shadow_resolution: 0,
+            cloud_shadow_splits: Vec4::ZERO,
+            cloud_shadow_cascade_extents: [0.0; 4],
+            cloud_shadow_cascade_resolutions: [0; 4],
+            cloud_shadow_cascade_offsets: [0; 4],
             enabled: default_frame.enabled,
         }
     }
@@ -1503,6 +1557,33 @@ impl OceanRenderer {
         self.shadow_matrices = matrices;
     }
 
+    pub fn set_cloud_shadow_map(
+        &mut self,
+        shadow_buffer: Option<Handle<Buffer>>,
+        cascade_count: u32,
+        resolution: u32,
+        splits: Vec4,
+        cascade_extents: [f32; 4],
+        cascade_resolutions: [u32; 4],
+        cascade_offsets: [u32; 4],
+    ) {
+        let buffer = shadow_buffer.unwrap_or(self.cloud_shadow_buffer);
+        self.pipeline.update_table(
+            "cloud_shadow_buffer",
+            dashi::IndexedResource {
+                resource: ShaderResource::StorageBuffer(buffer.into()),
+                slot: 0,
+            },
+        );
+        self.cloud_shadow_enabled = shadow_buffer.is_some();
+        self.cloud_shadow_cascade_count = cascade_count;
+        self.cloud_shadow_resolution = resolution;
+        self.cloud_shadow_splits = splits;
+        self.cloud_shadow_cascade_extents = cascade_extents;
+        self.cloud_shadow_cascade_resolutions = cascade_resolutions;
+        self.cloud_shadow_cascade_offsets = cascade_offsets;
+    }
+
     pub fn record_compute(
         &mut self,
         dynamic: &mut DynamicAllocator,
@@ -1847,6 +1928,9 @@ impl OceanRenderer {
         let mut shadow_matrix_alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean shadow params");
+        let mut cloud_shadow_alloc = dynamic
+            .bump()
+            .expect("Failed to allocate ocean cloud shadow params");
 
         shadow_alloc.slice::<OceanShadowParams>()[0] = OceanShadowParams {
             shadow_cascade_count: self.shadow_cascade_count,
@@ -1858,6 +1942,17 @@ impl OceanRenderer {
 
         shadow_matrix_alloc.slice::<OceanShadowMatrices>()[0] = OceanShadowMatrices {
             shadow_matrices: self.shadow_matrices,
+        };
+
+        cloud_shadow_alloc.slice::<OceanCloudShadowParams>()[0] = OceanCloudShadowParams {
+            shadow_enabled: self.cloud_shadow_enabled as u32,
+            shadow_cascade_count: self.cloud_shadow_cascade_count,
+            shadow_resolution: self.cloud_shadow_resolution,
+            _padding0: 0,
+            shadow_splits: self.cloud_shadow_splits,
+            shadow_cascade_extents: Vec4::from(self.cloud_shadow_cascade_extents),
+            shadow_cascade_resolutions: self.cloud_shadow_cascade_resolutions,
+            shadow_cascade_offsets: self.cloud_shadow_cascade_offsets,
         };
 
         
@@ -1873,7 +1968,12 @@ impl OceanRenderer {
             .update_viewport(viewport)
             .draw(&Draw {
                 bind_tables: self.pipeline.tables(),
-                dynamic_buffers: [Some(alloc), Some(shadow_alloc), Some(shadow_matrix_alloc), None],
+                dynamic_buffers: [
+                    Some(alloc),
+                    Some(shadow_alloc),
+                    Some(shadow_matrix_alloc),
+                    Some(cloud_shadow_alloc),
+                ],
                 instance_count,
                 count: vertex_count,
                 ..Default::default()

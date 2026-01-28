@@ -718,10 +718,21 @@ impl TerrainEditorApp {
         let Some(rdb) = self.rdb_open.as_mut() else {
             return;
         };
+
         let project_key = self.dbgen.project_key_for_chunk(&chunk_entry);
+        let mut entries = if self.chunk_keys.is_empty() {
+            vec![chunk_entry.clone()]
+        } else {
+            self.chunk_keys.clone()
+        };
+        if !entries.iter().any(|key| key == &chunk_entry) {
+            entries.push(chunk_entry.clone());
+            entries.sort();
+        }
+
         self.terrain_chunks.clear();
         self.terrain_chunks
-            .push(TerrainChunkRef::chunk_entry(chunk_entry));
+            .extend(entries.into_iter().map(TerrainChunkRef::chunk_entry));
         self.engine
             .set_terrain_render_objects_from_rdb(rdb, &project_key, &self.terrain_chunks);
     }

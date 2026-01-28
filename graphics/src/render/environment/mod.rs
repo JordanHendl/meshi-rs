@@ -292,6 +292,31 @@ impl EnvironmentRenderer {
             shadow_splits,
             shadow_matrices,
         );
+        let cloud_shadow_info = self
+            .clouds
+            .as_ref()
+            .and_then(|clouds| clouds.shadow_map_info());
+        if let Some(info) = cloud_shadow_info {
+            self.ocean.set_cloud_shadow_map(
+                Some(info.shadow_buffer),
+                info.shadow_cascade_count,
+                info.shadow_resolution,
+                Vec4::from(info.shadow_cascade_splits),
+                info.shadow_cascade_extents,
+                info.shadow_cascade_resolutions,
+                info.shadow_cascade_offsets,
+            );
+        } else {
+            self.ocean.set_cloud_shadow_map(
+                None,
+                0,
+                0,
+                Vec4::ZERO,
+                [0.0; 4],
+                [0; 4],
+                [0; 4],
+            );
+        }
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
                 viewport,
