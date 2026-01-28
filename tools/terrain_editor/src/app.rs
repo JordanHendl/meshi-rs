@@ -202,8 +202,8 @@ impl TerrainEditorApp {
                 moon_color: Vec3::new(0.6, 0.7, 1.0),
                 moon_intensity: 0.25,
                 auto_sun_enabled: true,
-                timer_speed: 0.0,
-                current_time_of_day: 14.0,
+                timer_speed: 1.0 / 3600.0,
+                current_time_of_day: 12.0,
                 ..Default::default()
             },
             sun_light_intensity: 3.0,

@@ -96,9 +96,9 @@ impl Default for SkyFrameSettings {
             moon_intensity: 0.1,
             moon_angular_radius: 0.0045,
             time_of_day: None,
-            timer_speed: 1.0,
+            timer_speed: 1.0 / 3600.0,
             current_time_of_day: 12.0,
-            auto_sun_enabled: false,
+            auto_sun_enabled: true,
             latitude_degrees: None,
             longitude_degrees: None,
         }
