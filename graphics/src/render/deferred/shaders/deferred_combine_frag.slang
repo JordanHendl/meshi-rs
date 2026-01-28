@@ -11,12 +11,12 @@ struct DeferredCombineInfo {
   uint spot_shadow_resolution;
   uint spot_shadow_padding0;
   uint spot_shadow_padding1;
-  float4x4 spot_shadow_matrix;
+  column_major float4x4 spot_shadow_matrix;
 };
 
 struct ShadowCascadeInfo {
   float4 splits;
-  float4x4 matrices[4];
+  column_major float4x4 matrices[4];
 };
 
 static const uint MATERIAL_FLAG_PBR_NORMAL = 1u;
@@ -169,7 +169,6 @@ uint select_cascade(float view_depth, float4 splits, uint cascade_count) {
 float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint cascade_count, float bias) {
   float4 shadow_pos = mul(shadow_cascade.matrices[cascade_index], float4(world_pos, 1.0));
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
-  shadow_pos.y = -shadow_pos.y;
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     return 1.0;
@@ -208,7 +207,6 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
 float sample_spot_shadow(float4x4 spot_shadow_matrix, uint shadow_id, float3 world_pos, float bias) {
   float4 shadow_pos = mul(spot_shadow_matrix, float4(world_pos, 1.0));
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
-  shadow_pos.y = -shadow_pos.y;
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     return 1.0;
