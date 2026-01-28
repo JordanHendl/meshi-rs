@@ -264,7 +264,7 @@ float sample_shadow(vec3 world_pos, float view_depth, float bias) {
     }
 
     uint cascade_index = select_shadow_cascade(view_depth);
-    vec4 shadow_pos = transpose(shadow_matrices.shadow_matrices[cascade_index]) * vec4(world_pos, 1.0);
+    vec4 shadow_pos = shadow_matrices.shadow_matrices[cascade_index] * vec4(world_pos, 1.0);
     shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
     vec2 uv = shadow_pos.xy * 0.5 + 0.5;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
