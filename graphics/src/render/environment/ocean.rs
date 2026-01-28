@@ -145,7 +145,7 @@ impl Default for OceanFrameSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            endless: false,
+            endless: true,
             wind_dir: Vec2::new(0.9, 0.2),
             wind_speed: 2.0,
             fetch_length: 5000.0,

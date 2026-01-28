@@ -286,10 +286,10 @@ void main() {
     // Anchor geometry to the camera for smooth motion, but anchor wave sampling
     // to a snapped origin to prevent wave swimming artifacts.
     vec2 tile_offset = (vec2(tile_coord)) * tile_size;
-    vec2 snapped_origin = floor(camera_position() / tile_size) * tile_size;
-    vec2 camera_origin = camera_position();
-    vec2 wave_origin = floor(camera_origin / tile_size) * tile_size;
     vec3 camera_world = camera_position_world();
+    vec2 camera_origin = camera_world.xz;
+    vec2 snapped_origin = floor(camera_origin / tile_size) * tile_size;
+    vec2 wave_origin = snapped_origin;
 
     float near_range = max(params.cascade_blend_ranges.x, 0.001);
     float mid_range = max(params.cascade_blend_ranges.y, near_range + 0.001);
