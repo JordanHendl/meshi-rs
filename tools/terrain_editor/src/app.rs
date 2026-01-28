@@ -1,33 +1,30 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 
-use glam::{vec2, Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3, vec2};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
-    rdb::terrain::{
-        project_settings_entry, TerrainChunkArtifact, TerrainMutationOpKind, TerrainProjectSettings,
-    },
-    terrain_loader::terrain_chunk_transform,
-    Camera, DBInfo, Display, DisplayInfo, EnvironmentLightingSettings, RDBFile, RenderEngine,
+    Camera, DB, DBInfo, Display, DisplayInfo, EnvironmentLightingSettings, RDBFile, RenderEngine,
     RenderEngineInfo, RendererSelect, SkyFrameSettings, SkyboxFrameSettings, TextInfo,
-    TextRenderMode, WindowInfo, DB,
+    TextRenderMode, WindowInfo,
+    rdb::terrain::{TerrainChunk, TerrainMutationOpKind},
 };
 use meshi_utils::timer::Timer;
 use rfd::FileDialog;
 use tracing::warn;
 
+use crate::camera::{CameraController, CameraInput};
 use crate::dbgen::{TerrainBrushRequest, TerrainDbgen, TerrainGenerationRequest};
 use crate::ui::{
-    FocusedInput, TerrainEditorUi, TerrainEditorUiData, TerrainEditorUiInput,
-    MENU_ACTION_APPLY_BRUSH, MENU_ACTION_CLOSE_RDB, MENU_ACTION_EARTH_PRESET, MENU_ACTION_GENERATE,
-    MENU_ACTION_NEW_RDB, MENU_ACTION_OPEN_RDB, MENU_ACTION_SAVE_RDB, MENU_ACTION_SET_MANUAL,
-    MENU_ACTION_SET_PROCEDURAL, MENU_ACTION_SHOW_WORKFLOW, MENU_ACTION_TOGGLE_BRUSH_PANEL,
-    MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
-    MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL,
+    FocusedInput, MENU_ACTION_APPLY_BRUSH, MENU_ACTION_CLOSE_RDB, MENU_ACTION_EARTH_PRESET,
+    MENU_ACTION_GENERATE, MENU_ACTION_NEW_RDB, MENU_ACTION_OPEN_RDB, MENU_ACTION_SAVE_RDB,
+    MENU_ACTION_SET_MANUAL, MENU_ACTION_SET_PROCEDURAL, MENU_ACTION_SHOW_WORKFLOW,
+    MENU_ACTION_TOGGLE_BRUSH_PANEL, MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
+    MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL, TerrainEditorUi,
+    TerrainEditorUiData, TerrainEditorUiInput,
 };
-use crate::camera::{CameraController, CameraInput};
-use meshi_graphics::TerrainRenderObject;
+use meshi_graphics::TerrainChunkRef;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
 const DEFAULT_BRUSH_RADIUS: f32 = 8.0;
@@ -37,7 +34,7 @@ const EARTHLIKE_FREQUENCY: f32 = 0.0065;
 const EARTHLIKE_AMPLITUDE: f32 = 120.0;
 const EARTHLIKE_BIOME_FREQUENCY: f32 = 0.003;
 const EARTHLIKE_ALGORITHM: &str = "ridge-noise";
-const DEFAULT_CHUNK_KEY: &str = "terrain/editor-preview";
+const DEFAULT_CHUNK_KEY: &str = "terrain/chunk_0_0";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerrainMode {
@@ -92,7 +89,7 @@ pub struct TerrainEditorApp {
     status_text: dashi::Handle<meshi_graphics::TextObject>,
     window_size: Vec2,
     terrain_mode: TerrainMode,
-    terrain_objects: Vec<TerrainRenderObject>,
+    terrain_chunks: Vec<TerrainChunkRef>,
     dbgen: TerrainDbgen,
     ui: TerrainEditorUi,
     event_state: Box<EventState>,
@@ -246,7 +243,7 @@ impl TerrainEditorApp {
             status_text,
             window_size: window_size_vec,
             terrain_mode: TerrainMode::Procedural,
-            terrain_objects: Vec::new(),
+            terrain_chunks: Vec::new(),
             dbgen: TerrainDbgen::new(0),
             ui: TerrainEditorUi::new(window_size_vec),
             event_state,
@@ -300,9 +297,7 @@ impl TerrainEditorApp {
                 if e.source() == EventSource::Window && e.event_type() == EventType::Quit {
                     state.running = false;
                 }
-                if e.source() == EventSource::Window
-                    && e.event_type() == EventType::WindowResized
-                {
+                if e.source() == EventSource::Window && e.event_type() == EventType::WindowResized {
                     let size = e.motion2d();
                     state.window_resized = Some(Vec2::new(size.x.max(1.0), size.y.max(1.0)));
                 }
@@ -412,9 +407,8 @@ impl TerrainEditorApp {
             self.last_world_cursor = self.event_state.cursor;
         }
 
-        let move_active = self.event_state.move_active
-            && !self.ui_hovered
-            && self.focused_input.is_none();
+        let move_active =
+            self.event_state.move_active && !self.ui_hovered && self.focused_input.is_none();
         let camera_input = CameraInput {
             forward: self.event_state.move_forward,
             back: self.event_state.move_back,
@@ -428,7 +422,8 @@ impl TerrainEditorApp {
         let camera_transform = self
             .camera_controller
             .update(dt, &camera_input, cursor_delta);
-        self.engine.set_camera_transform(self.camera, &camera_transform);
+        self.engine
+            .set_camera_transform(self.camera, &camera_transform);
 
         if ui_output.open_clicked {
             self.open_database_dialog();
@@ -531,9 +526,9 @@ impl TerrainEditorApp {
             Ok(result) => {
                 self.persistence_error = None;
                 self.db_dirty = true;
-                self.ensure_chunk_key(&result.entry_key);
+                self.ensure_chunk_key(&result.chunk_entry);
                 self.status_note = Some("Terrain generated.".to_string());
-                self.update_rendered_chunk(result.entry_key.clone(), result.artifact);
+                self.update_rendered_chunk(result.chunk_entry.clone());
             }
             Err(err) => {
                 warn!(
@@ -552,11 +547,7 @@ impl TerrainEditorApp {
 
     fn update_status_text(&mut self) {
         let db_status = if self.rdb_open.is_some() {
-            if self.db_dirty {
-                "open*"
-            } else {
-                "open"
-            }
+            if self.db_dirty { "open*" } else { "open" }
         } else {
             "closed"
         };
@@ -692,9 +683,9 @@ impl TerrainEditorApp {
             Ok(result) => {
                 self.persistence_error = None;
                 self.db_dirty = true;
-                self.ensure_chunk_key(&result.entry_key);
+                self.ensure_chunk_key(&result.chunk_entry);
                 self.status_note = Some("Brush applied.".to_string());
-                self.update_rendered_chunk(result.entry_key, result.artifact);
+                self.update_rendered_chunk(result.chunk_entry);
             }
             Err(err) => {
                 warn!(error = %err, "Failed to apply terrain brush.");
@@ -722,29 +713,17 @@ impl TerrainEditorApp {
         )
     }
 
-    fn update_rendered_chunk(&mut self, chunk_key: String, artifact: TerrainChunkArtifact) {
+    fn update_rendered_chunk(&mut self, chunk_entry: String) {
         self.update_status_text();
-        let settings = {
-            let project_key = self.dbgen.project_key_for_chunk(&chunk_key);
-            self.rdb_open
-                .as_mut()
-                .and_then(|rdb| {
-                    rdb.fetch::<TerrainProjectSettings>(&project_settings_entry(&project_key))
-                        .ok()
-                })
-                .unwrap_or_default()
+        let Some(rdb) = self.rdb_open.as_mut() else {
+            return;
         };
-        let transform =
-            terrain_chunk_transform(&settings, artifact.chunk_coords, artifact.bounds_min);
-        let render_object = TerrainRenderObject {
-            key: chunk_key,
-            artifact,
-            transform,
-        };
-        self.terrain_objects.clear();
-        self.terrain_objects.push(render_object);
+        let project_key = self.dbgen.project_key_for_chunk(&chunk_entry);
+        self.terrain_chunks.clear();
+        self.terrain_chunks
+            .push(TerrainChunkRef::chunk_entry(chunk_entry));
         self.engine
-            .set_terrain_render_objects(&self.terrain_objects);
+            .set_terrain_render_objects_from_rdb(rdb, &project_key, &self.terrain_chunks);
     }
 
     fn shutdown(self) {
@@ -998,7 +977,7 @@ impl TerrainEditorApp {
             .cloned();
         let mut keys = Vec::new();
         for entry in rdb.entries() {
-            if rdb.fetch::<TerrainChunkArtifact>(&entry.name).is_ok() {
+            if rdb.fetch::<TerrainChunk>(&entry.name).is_ok() {
                 keys.push(entry.name.clone());
             }
         }
@@ -1059,17 +1038,17 @@ impl TerrainEditorApp {
         let Some(chunk_key) = self.chunk_keys.get(index).cloned() else {
             return;
         };
-        let artifact = {
+        let chunk = {
             let Some(rdb) = self.rdb_open.as_mut() else {
                 return;
             };
-            match rdb.fetch::<TerrainChunkArtifact>(&chunk_key) {
-                Ok(artifact) => Some(artifact),
+            match rdb.fetch::<TerrainChunk>(&chunk_key) {
+                Ok(chunk) => Some(chunk),
                 Err(err) => {
                     warn!(
                         error = %err,
                         entry = %chunk_key,
-                        "Failed to load terrain chunk artifact."
+                        "Failed to load terrain chunk."
                     );
                     self.persistence_error = Some(format!("Chunk load failed: {err}"));
                     self.update_status_text();
@@ -1078,9 +1057,9 @@ impl TerrainEditorApp {
             }
         };
 
-        if let Some(artifact) = artifact {
+        if chunk.is_some() {
             self.persistence_error = None;
-            self.update_rendered_chunk(chunk_key, artifact);
+            self.update_rendered_chunk(chunk_key);
         }
     }
 

@@ -1,16 +1,17 @@
 use meshi_graphics::rdb::terrain::TerrainChunkArtifact;
 use noren::{
+    RDBFile,
     rdb::terrain::{
-        chunk_artifact_entry, chunk_coord_key, chunk_state_entry, generator_entry, lod_key,
-        mutation_layer_entry, mutation_op_entry, parse_chunk_artifact_entry,
-        project_settings_entry, TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition,
+        TerrainChunk, TerrainChunkState, TerrainDirtyReason, TerrainGeneratorDefinition,
         TerrainMaterialBlendMode, TerrainMutationLayer, TerrainMutationOp, TerrainMutationOpKind,
-        TerrainMutationParams, TerrainProjectSettings,
+        TerrainMutationParams, TerrainProjectSettings, TerrainTile, chunk_artifact_entry,
+        chunk_coord_key, chunk_state_entry, generator_entry, lod_key, mutation_layer_entry,
+        mutation_op_entry, parse_chunk_artifact_entry, project_settings_entry,
     },
     terrain::{
-        build_terrain_chunk_with_context, prepare_terrain_build_context, TerrainChunkBuildRequest,
+        TerrainChunkBuildRequest, build_terrain_chunk_with_context, prepare_terrain_build_context,
+        sample_height_with_mutations,
     },
-    RDBFile,
 };
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,6 +51,8 @@ const DEFAULT_LAYER_ID: &str = "layer-1";
 pub struct TerrainChunkResult {
     pub entry_key: String,
     pub artifact: TerrainChunkArtifact,
+    pub chunk_entry: String,
+    pub chunk: TerrainChunk,
 }
 
 impl TerrainDbgen {
@@ -133,9 +136,16 @@ impl TerrainDbgen {
                 })?
         };
 
+        let chunk = build_chunk_data(&context, target.chunk_coords);
+        let chunk_entry = chunk_entry_for_coords(target.chunk_coords);
+        rdb.upsert(&chunk_entry, &chunk)
+            .map_err(|err| format!("Chunk data upsert failed for entry '{chunk_entry}': {err}"))?;
+
         Ok(TerrainChunkResult {
             entry_key: target.artifact_entry,
             artifact,
+            chunk_entry,
+            chunk,
         })
     }
 
@@ -162,6 +172,10 @@ impl TerrainDbgen {
     pub fn chunk_coords_for_key(&self, chunk_key: &str) -> [i32; 2] {
         if let Some(parsed) = parse_chunk_artifact_entry(chunk_key) {
             return parsed.chunk_coords;
+        }
+
+        if let Some(coords) = parse_chunk_entry(chunk_key) {
+            return coords;
         }
 
         let chunk_hash = hash_chunk_key(self.seed, chunk_key);
@@ -267,9 +281,16 @@ impl TerrainDbgen {
         rdb.upsert(&target.artifact_entry, &artifact)
             .map_err(|err| format!("Brush artifact upsert failed: {err}"))?;
 
+        let chunk = build_chunk_data(&context, target.chunk_coords);
+        let chunk_entry = chunk_entry_for_coords(target.chunk_coords);
+        rdb.upsert(&chunk_entry, &chunk)
+            .map_err(|err| format!("Chunk data upsert failed for entry '{chunk_entry}': {err}"))?;
+
         Ok(TerrainChunkResult {
             entry_key: target.artifact_entry,
             artifact,
+            chunk_entry,
+            chunk,
         })
     }
 
@@ -362,6 +383,62 @@ struct TerrainChunkTarget {
     chunk_coords: [i32; 2],
     artifact_entry: String,
     state_entry: String,
+}
+
+fn chunk_entry_for_coords(chunk_coords: [i32; 2]) -> String {
+    format!("terrain/chunk_{}_{}", chunk_coords[0], chunk_coords[1])
+}
+
+fn parse_chunk_entry(entry: &str) -> Option<[i32; 2]> {
+    let suffix = entry.strip_prefix("terrain/chunk_")?;
+    let mut parts = suffix.split('_');
+    let x = parts.next()?.parse::<i32>().ok()?;
+    let y = parts.next()?.parse::<i32>().ok()?;
+    Some([x, y])
+}
+
+fn build_chunk_data(
+    context: &noren::terrain::TerrainBuildContext,
+    chunk_coords: [i32; 2],
+) -> TerrainChunk {
+    let settings = &context.settings;
+    let tile_size = settings.tile_size;
+    let tiles_per_chunk = settings.tiles_per_chunk;
+    let origin_x = chunk_coords[0] as f32 * tiles_per_chunk[0] as f32 * tile_size;
+    let origin_y = chunk_coords[1] as f32 * tiles_per_chunk[1] as f32 * tile_size;
+    let grid_x = tiles_per_chunk[0].saturating_add(1).max(1);
+    let grid_y = tiles_per_chunk[1].saturating_add(1).max(1);
+    let mut heights = vec![0.0; (grid_x * grid_y) as usize];
+    for y in 0..grid_y {
+        for x in 0..grid_x {
+            let world_x = origin_x + x as f32 * tile_size;
+            let world_y = origin_y + y as f32 * tile_size;
+            let idx = (y * grid_x + x) as usize;
+            heights[idx] = sample_height_with_mutations(
+                settings,
+                &context.generator,
+                &context.mutation_layers,
+                world_x,
+                world_y,
+            );
+        }
+    }
+    let tiles = vec![
+        TerrainTile {
+            tile_id: 1,
+            flags: 0,
+        };
+        (tiles_per_chunk[0] * tiles_per_chunk[1]) as usize
+    ];
+    TerrainChunk {
+        chunk_coords,
+        origin: [origin_x, origin_y],
+        tile_size,
+        tiles_per_chunk,
+        tiles,
+        heights,
+        mesh_entry: "geometry/terrain_chunk".to_string(),
+    }
 }
 
 fn hash_chunk_key(seed: u64, chunk_key: &str) -> u64 {

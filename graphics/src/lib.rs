@@ -1,7 +1,7 @@
 pub mod gui;
-pub mod terrain_loader;
 mod render;
 pub mod structs;
+pub mod terrain_loader;
 pub(crate) mod utils;
 
 use crate::gui::debug::{DebugGui, DebugGuiBindings, DebugLightEntry};
@@ -27,12 +27,12 @@ pub use render::environment::ocean::OceanFrameSettings;
 pub use render::environment::sky::SkyFrameSettings;
 pub use render::environment::sky::SkyboxFrameSettings;
 pub use render::environment::terrain::TerrainRenderObject;
-pub use terrain_loader::TerrainChunkRef;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
 pub use structs::*;
+pub use terrain_loader::TerrainChunkRef;
 use tracing::{info, warn};
 
 pub type DisplayInfo = DashiDisplayInfo;
@@ -115,9 +115,7 @@ impl RenderEngine {
         let mut selected: Option<render::SpotShadowLight> = None;
         for entry in &self.light_cache {
             let info = entry.info;
-            if info.ty == LightType::Spot
-                && (info.flags & LightFlags::CASTS_SHADOWS.bits()) != 0
-            {
+            if info.ty == LightType::Spot && (info.flags & LightFlags::CASTS_SHADOWS.bits()) != 0 {
                 selected = Some(render::SpotShadowLight {
                     handle: entry.handle,
                     info,
@@ -530,41 +528,80 @@ impl RenderEngine {
         chunks: &[TerrainChunkRef],
     ) {
         use noren::rdb::terrain::{
-            TerrainChunkArtifact, TerrainChunkState, chunk_artifact_entry, chunk_coord_key,
-            chunk_state_entry, lod_key, parse_chunk_artifact_entry, project_settings_entry,
+            TerrainChunk, TerrainChunkArtifact, TerrainChunkState, chunk_artifact_entry,
+            chunk_coord_key, chunk_state_entry, lod_key, parse_chunk_artifact_entry,
+            project_settings_entry,
         };
 
         let settings_entry = project_settings_entry(project_key);
-        let settings = match rdb.fetch::<noren::rdb::terrain::TerrainProjectSettings>(
-            &settings_entry,
-        ) {
-            Ok(settings) => settings,
-            Err(err) => {
-                warn!(
-                    "Failed to load terrain project settings '{}': {err:?}",
-                    settings_entry
-                );
-                return;
-            }
-        };
+        let settings =
+            match rdb.fetch::<noren::rdb::terrain::TerrainProjectSettings>(&settings_entry) {
+                Ok(settings) => settings,
+                Err(err) => {
+                    warn!(
+                        "Failed to load terrain project settings '{}': {err:?}",
+                        settings_entry
+                    );
+                    return;
+                }
+            };
 
         let mut next_objects = HashMap::with_capacity(chunks.len());
         let mut ordered_objects = Vec::with_capacity(chunks.len());
 
         for chunk in chunks {
-            let (entry, coords, lod) = match chunk {
+            let (entry, coords, lod, is_chunk_entry) = match chunk {
                 TerrainChunkRef::Coords { coords, lod } => {
                     let coord_key = chunk_coord_key(coords[0], coords[1]);
                     let entry = chunk_artifact_entry(project_key, &coord_key, &lod_key(*lod));
-                    (entry, Some(*coords), Some(*lod))
+                    (entry, Some(*coords), Some(*lod), false)
                 }
                 TerrainChunkRef::ArtifactEntry(entry) => {
                     let parsed = parse_chunk_artifact_entry(entry);
                     let coords = parsed.as_ref().map(|key| key.chunk_coords);
                     let lod = parsed.as_ref().map(|key| key.lod);
-                    (entry.clone(), coords, lod)
+                    (entry.clone(), coords, lod, false)
                 }
+                TerrainChunkRef::ChunkEntry(entry) => (entry.clone(), None, None, true),
             };
+
+            if is_chunk_entry {
+                let chunk = match rdb.fetch::<TerrainChunk>(&entry) {
+                    Ok(chunk) => chunk,
+                    Err(err) => {
+                        warn!("Failed to load terrain chunk '{entry}': {err:?}");
+                        continue;
+                    }
+                };
+                let content_hash = terrain_loader::terrain_chunk_content_hash(&chunk);
+                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                    if existing.artifact.content_hash == content_hash {
+                        let mut updated = existing.clone();
+                        updated.transform = terrain_loader::terrain_chunk_transform(
+                            &settings,
+                            existing.artifact.chunk_coords,
+                            existing.artifact.bounds_min,
+                        );
+                        next_objects.insert(entry.clone(), updated.clone());
+                        ordered_objects.push(updated);
+                        self.terrain_chunk_hashes
+                            .insert(entry.clone(), content_hash);
+                        continue;
+                    }
+                }
+
+                let object = terrain_loader::terrain_render_object_from_chunk(
+                    &settings,
+                    project_key,
+                    entry.clone(),
+                    &chunk,
+                );
+                self.terrain_chunk_hashes
+                    .insert(entry.clone(), object.artifact.content_hash);
+                next_objects.insert(entry.clone(), object.clone());
+                ordered_objects.push(object);
+                continue;
+            }
 
             let mut content_hash = None;
             if let (Some(coords), Some(lod)) = (coords, lod) {
@@ -750,9 +787,12 @@ impl RenderEngine {
             debug_mode: &mut self.debug_mode as *mut bool,
             lights: &light_entries,
         };
-        let debug_output = self
-            .debug_gui
-            .build_frame(viewport_size, renderer_label, self.average_frame_time_ms(), bindings);
+        let debug_output = self.debug_gui.build_frame(
+            viewport_size,
+            renderer_label,
+            self.average_frame_time_ms(),
+            bindings,
+        );
 
         if debug_output.skybox_dirty {
             self.renderer
@@ -777,11 +817,7 @@ impl RenderEngine {
 
         let light_updates = if let Some(state) = self.environment_lighting.as_mut() {
             state.settings.sky = self.sky_settings.clone();
-            Some((
-                state.settings.clone(),
-                state.sun_light,
-                state.moon_light,
-            ))
+            Some((state.settings.clone(), state.sun_light, state.moon_light))
         } else {
             None
         };
@@ -804,7 +840,6 @@ impl RenderEngine {
                 settings.sky.sun_color * (settings.sun_light_intensity * lighting.sun_intensity);
             self.renderer.set_cloud_settings(self.cloud_settings);
         }
-
 
         let mut gui_frame = self.pending_gui_frame.take().unwrap_or_default();
         if let Some(mut debug_frame) = debug_output.frame {
