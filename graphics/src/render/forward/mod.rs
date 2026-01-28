@@ -631,7 +631,7 @@ impl ForwardRenderer {
                         &self.viewport,
                         camera_handle,
                         None,
-                        None,
+                        Some(depth.view),
                         None,
                         0,
                         0,

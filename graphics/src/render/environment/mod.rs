@@ -236,6 +236,10 @@ impl EnvironmentRenderer {
         self.terrain.draw_builder()
     }
 
+    pub fn terrain_draw_info(&self) -> Option<terrain::TerrainDrawInfo> {
+        self.terrain.draw_info()
+    }
+
     pub fn record_terrain_draws(
         &mut self,
         viewport: &Viewport,

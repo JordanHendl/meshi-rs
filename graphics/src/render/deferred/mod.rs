@@ -1816,6 +1816,11 @@ impl DeferredRenderer {
                             .environment
                             .build_terrain_draws(BIN_SHADOW, view_idx as u32),
                     )
+                    .combine(
+                        self.subrender
+                            .environment
+                            .build_terrain_draws(BIN_SHADOW, view_idx as u32),
+                    )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
                 cmd.end()
@@ -1865,6 +1870,8 @@ impl DeferredRenderer {
                         .unwrap_or((Handle::default(), 0));
 
                     let cascade_count = cascade_data.count.max(1);
+                    let main_per_draw = self.proc.draw_builder.per_draw_data();
+                    self.shadow.set_per_draw_data(main_per_draw);
                     for cascade_index in 0..cascade_count as usize {
                         let tile_x = (cascade_index as u32) % grid_x;
                         let tile_y = (cascade_index as u32) / grid_x;
@@ -1900,6 +1907,43 @@ impl DeferredRenderer {
                                 terrain_draw_list,
                                 terrain_draw_count,
                             ));
+                        }
+                    }
+
+                    if let Some(terrain_draw_info) =
+                        self.subrender.environment.terrain_draw_info()
+                    {
+                        if terrain_draw_info.draw_count > 0 {
+                            self.shadow
+                                .set_per_draw_data(terrain_draw_info.per_draw_data);
+                            for cascade_index in 0..cascade_count as usize {
+                                let tile_x = (cascade_index as u32) % grid_x;
+                                let tile_y = (cascade_index as u32) / grid_x;
+                                let cascade_viewport = Viewport {
+                                    area: FRect2D {
+                                        x: (tile_x * shadow_resolution) as f32,
+                                        y: (tile_y * shadow_resolution) as f32,
+                                        w: shadow_resolution as f32,
+                                        h: shadow_resolution as f32,
+                                    },
+                                    scissor: Rect2D {
+                                        x: tile_x * shadow_resolution,
+                                        y: tile_y * shadow_resolution,
+                                        w: shadow_resolution,
+                                        h: shadow_resolution,
+                                    },
+                                    ..Default::default()
+                                };
+                                cmd = cmd.combine(self.shadow.record(
+                                    &cascade_viewport,
+                                    &mut self.data.dynamic,
+                                    cascade_data.matrices[cascade_index],
+                                    indices_handle,
+                                    terrain_draw_info.draw_list,
+                                    terrain_draw_info.draw_count,
+                                ));
+                            }
+                            self.shadow.set_per_draw_data(main_per_draw);
                         }
                     }
 

@@ -144,6 +144,16 @@ impl ShadowPass {
         }
     }
 
+    pub fn set_per_draw_data(&mut self, per_draw_data: Handle<dashi::Buffer>) {
+        self.pipeline.update_table(
+            "per_draw_ssbo",
+            IndexedResource {
+                resource: ShaderResource::StorageBuffer(per_draw_data.into()),
+                slot: 0,
+            },
+        );
+    }
+
     pub fn record(
         &self,
         viewport: &Viewport,

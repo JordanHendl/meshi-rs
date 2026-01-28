@@ -190,7 +190,6 @@ vec2 compute_screen_uv(Camera cam, vec3 world_pos, out vec3 view_pos, out vec3 v
     view_pos = (view * vec4(world_pos, 1.0)).xyz;
     view_normal = normalize((view * vec4(normal, 0.0)).xyz);
     vec4 clip = proj * vec4(view_pos, 1.0);
-    clip.y = -clip.y;
     vec2 ndc = clip.xy / max(clip.w, 1e-4);
     return ndc * 0.5 + 0.5;
 }
@@ -216,7 +215,6 @@ vec3 compute_ssr(Camera cam, vec3 view_pos, vec3 view_normal, vec3 view_dir, out
         if (clip.w <= 0.0) {
             break;
         }
-        clip.y = -clip.y;
         vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
             break;

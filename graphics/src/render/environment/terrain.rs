@@ -61,6 +61,13 @@ pub struct TerrainRenderObject {
     pub transform: Mat4,
 }
 
+#[derive(Clone, Copy)]
+pub struct TerrainDrawInfo {
+    pub per_draw_data: Handle<Buffer>,
+    pub draw_list: Handle<Buffer>,
+    pub draw_count: u32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ClipmapDescriptor {
@@ -395,6 +402,14 @@ impl TerrainRenderer {
 
     pub fn draw_builder(&self) -> Option<&GPUDrawBuilder> {
         self.deferred.as_ref().map(|deferred| &deferred.draw_builder)
+    }
+
+    pub fn draw_info(&self) -> Option<TerrainDrawInfo> {
+        self.deferred.as_ref().map(|deferred| TerrainDrawInfo {
+            per_draw_data: deferred.draw_builder.per_draw_data(),
+            draw_list: deferred.draw_builder.draw_list(),
+            draw_count: deferred.draw_builder.draw_count(),
+        })
     }
 
     pub fn set_render_objects(
