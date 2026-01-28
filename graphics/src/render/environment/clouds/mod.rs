@@ -428,6 +428,106 @@ pub fn register_debug(settings: &mut CloudSettings) {
             Some("Balances cloud shadow cascade split distribution."),
         );
         debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 0 Extent", 1000.0, 200000.0, 0.0),
+            &mut settings.shadow.cascades.cascade_extents[0] as *mut f32,
+            "Shadow Cascade 0 Extent",
+            Some("Sets the coverage radius for the nearest cloud shadow cascade."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 1 Extent", 1000.0, 200000.0, 0.0),
+            &mut settings.shadow.cascades.cascade_extents[1] as *mut f32,
+            "Shadow Cascade 1 Extent",
+            Some("Sets the coverage radius for the second cloud shadow cascade."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 2 Extent", 1000.0, 200000.0, 0.0),
+            &mut settings.shadow.cascades.cascade_extents[2] as *mut f32,
+            "Shadow Cascade 2 Extent",
+            Some("Sets the coverage radius for the third cloud shadow cascade."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 3 Extent", 1000.0, 200000.0, 0.0),
+            &mut settings.shadow.cascades.cascade_extents[3] as *mut f32,
+            "Shadow Cascade 3 Extent",
+            Some("Sets the coverage radius for the furthest cloud shadow cascade."),
+        );
+        debug_register_int_with_description(
+            PageType::Shadow,
+            Slider::new_int(0, "Shadow Cascade 0 Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.shadow.cascades.cascade_resolutions[0] as *mut u32,
+            "Shadow Cascade 0 Resolution",
+            Some("Overrides the resolution of the nearest cloud shadow cascade."),
+        );
+        debug_register_int_with_description(
+            PageType::Shadow,
+            Slider::new_int(0, "Shadow Cascade 1 Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.shadow.cascades.cascade_resolutions[1] as *mut u32,
+            "Shadow Cascade 1 Resolution",
+            Some("Overrides the resolution of the second cloud shadow cascade."),
+        );
+        debug_register_int_with_description(
+            PageType::Shadow,
+            Slider::new_int(0, "Shadow Cascade 2 Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.shadow.cascades.cascade_resolutions[2] as *mut u32,
+            "Shadow Cascade 2 Resolution",
+            Some("Overrides the resolution of the third cloud shadow cascade."),
+        );
+        debug_register_int_with_description(
+            PageType::Shadow,
+            Slider::new_int(0, "Shadow Cascade 3 Resolution", 64.0, 2048.0, 0.0),
+            &mut settings.shadow.cascades.cascade_resolutions[3] as *mut u32,
+            "Shadow Cascade 3 Resolution",
+            Some("Overrides the resolution of the furthest cloud shadow cascade."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 0 Strength", 0.0, 2.0, 0.0),
+            &mut settings.shadow.cascades.cascade_strengths[0] as *mut f32,
+            "Shadow Cascade 0 Strength",
+            Some("Multiplier for the nearest cloud shadow cascade strength."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 1 Strength", 0.0, 2.0, 0.0),
+            &mut settings.shadow.cascades.cascade_strengths[1] as *mut f32,
+            "Shadow Cascade 1 Strength",
+            Some("Multiplier for the second cloud shadow cascade strength."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 2 Strength", 0.0, 2.0, 0.0),
+            &mut settings.shadow.cascades.cascade_strengths[2] as *mut f32,
+            "Shadow Cascade 2 Strength",
+            Some("Multiplier for the third cloud shadow cascade strength."),
+        );
+        debug_register_with_description(
+            PageType::Shadow,
+            Slider::new(0, "Shadow Cascade 3 Strength", 0.0, 2.0, 0.0),
+            &mut settings.shadow.cascades.cascade_strengths[3] as *mut f32,
+            "Shadow Cascade 3 Strength",
+            Some("Multiplier for the furthest cloud shadow cascade strength."),
+        );
+        debug_register_radial_with_description(
+            PageType::Shadow,
+            "Multi Scatter Shadowed",
+            DebugRegistryValue::Bool(&mut settings.multi_scatter_respects_shadow),
+            &[
+                DebugRadialOption {
+                    label: "On",
+                    value: 1.0,
+                },
+                DebugRadialOption {
+                    label: "Off",
+                    value: 0.0,
+                },
+            ],
+            Some("Toggle whether multi-scatter lighting respects cloud shadows."),
+        );
+        debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Temporal Blend", 0.0, 1.0, 0.0),
             &mut settings.temporal.blend_factor as *mut f32,

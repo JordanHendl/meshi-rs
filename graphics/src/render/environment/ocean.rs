@@ -16,8 +16,8 @@ use tracing::warn;
 
 use crate::gui::Slider;
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register_radial_with_description,
-    debug_register_with_description,
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    debug_register_radial_with_description, debug_register_with_description,
 };
 
 #[derive(Clone, Copy)]
@@ -421,6 +421,7 @@ impl OceanFrameSettings {
                 "Time Scale",
                 Some("Scales the simulation time for waves."),
             );
+
         }
     }
 }
@@ -1365,6 +1366,67 @@ impl OceanRenderer {
                 &mut self.time_scale as *mut f32,
                 "Time Scale",
                 Some("Scales the simulation time for waves."),
+            );
+
+            let mut ocean_shadow_cascades =
+                Slider::new_int(0, "Ocean Shadow Cascades", 0.0, 4.0, 0.0);
+            ocean_shadow_cascades.enabled = false;
+            debug_register_int_with_description(
+                PageType::Shadow,
+                ocean_shadow_cascades,
+                &mut self.shadow_cascade_count as *mut u32,
+                "Ocean Shadow Cascades",
+                Some("Read-only cascade count used by ocean shadow sampling."),
+            );
+            let mut ocean_shadow_resolution =
+                Slider::new_int(0, "Ocean Shadow Resolution", 0.0, 4096.0, 0.0);
+            ocean_shadow_resolution.enabled = false;
+            debug_register_int_with_description(
+                PageType::Shadow,
+                ocean_shadow_resolution,
+                &mut self.shadow_resolution as *mut u32,
+                "Ocean Shadow Resolution",
+                Some("Read-only resolution used by ocean shadow sampling."),
+            );
+            let mut ocean_shadow_split0 =
+                Slider::new(0, "Ocean Shadow Split 0", 0.0, 200000.0, 0.0);
+            ocean_shadow_split0.enabled = false;
+            debug_register_with_description(
+                PageType::Shadow,
+                ocean_shadow_split0,
+                &mut self.shadow_splits.x as *mut f32,
+                "Ocean Shadow Split 0",
+                Some("Read-only split distance for the nearest ocean shadow cascade."),
+            );
+            let mut ocean_shadow_split1 =
+                Slider::new(0, "Ocean Shadow Split 1", 0.0, 200000.0, 0.0);
+            ocean_shadow_split1.enabled = false;
+            debug_register_with_description(
+                PageType::Shadow,
+                ocean_shadow_split1,
+                &mut self.shadow_splits.y as *mut f32,
+                "Ocean Shadow Split 1",
+                Some("Read-only split distance for the second ocean shadow cascade."),
+            );
+            let mut ocean_shadow_split2 =
+                Slider::new(0, "Ocean Shadow Split 2", 0.0, 200000.0, 0.0);
+            ocean_shadow_split2.enabled = false;
+            debug_register_with_description(
+                PageType::Shadow,
+                ocean_shadow_split2,
+                &mut self.shadow_splits.z as *mut f32,
+                "Ocean Shadow Split 2",
+                Some("Read-only split distance for the third ocean shadow cascade."),
+            );
+            let mut ocean_shadow_split3 =
+                Slider::new(0, "Ocean Shadow Split 3", 0.0, 200000.0, 0.0);
+            ocean_shadow_split3.enabled = false;
+            debug_register_with_description(
+                PageType::Shadow,
+                ocean_shadow_split3,
+                &mut self.shadow_splits.w as *mut f32,
+                "Ocean Shadow Split 3",
+                Some("Read-only split distance for the furthest ocean shadow cascade."),
             );
         }
     }

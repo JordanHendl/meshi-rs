@@ -181,6 +181,8 @@ pub struct DeferredRenderer {
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
     spot_shadow_light: Option<super::SpotShadowLight>,
+    spot_shadow_enabled: bool,
+    spot_shadow_resolution: u32,
 }
 
 struct RenderObjectData {
@@ -630,6 +632,7 @@ impl DeferredRenderer {
                 ..Default::default()
             },
         );
+        let spot_shadow_resolution = shadow.resolution();
 
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
@@ -660,6 +663,8 @@ impl DeferredRenderer {
             depth,
             cloud_overlay,
             spot_shadow_light: None,
+            spot_shadow_enabled: true,
+            spot_shadow_resolution,
         }
     }
 
@@ -1119,6 +1124,29 @@ impl DeferredRenderer {
                 &mut cascades.cascade_extents[3] as *mut f32,
                 "Opaque Cascade 3 Extent",
                 Some("Sets the coverage radius for the furthest opaque shadow cascade."),
+            );
+            debug_register_radial_with_description(
+                PageType::Shadow,
+                "Spot Shadow Enabled",
+                DebugRegistryValue::Bool(&mut self.spot_shadow_enabled),
+                &[
+                    DebugRadialOption {
+                        label: "Off",
+                        value: 0.0,
+                    },
+                    DebugRadialOption {
+                        label: "On",
+                        value: 1.0,
+                    },
+                ],
+                Some("Toggle rendering the active spot light shadow map."),
+            );
+            debug_register_int_with_description(
+                PageType::Shadow,
+                Slider::new_int(0, "Spot Shadow Resolution", 128.0, 4096.0, 0.0),
+                &mut self.spot_shadow_resolution as *mut u32,
+                "Spot Shadow Resolution",
+                Some("Controls the resolution of the spot light shadow map."),
             );
         }
     }
@@ -1581,6 +1609,18 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
+        if let Some(spot_light) = self.spot_shadow_light {
+            let enabled_value = if self.spot_shadow_enabled { 1.0 } else { 0.0 };
+            let handle = spot_light.handle;
+            let _ = self.state.reserved_mut(
+                "meshi_bindless_lights",
+                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
+                    if handle.valid() {
+                        lights.light_mut(handle).extra.y = enabled_value;
+                    }
+                },
+            );
+        }
         self.gui.initialize_renderer(
             self.ctx.as_mut(),
             self.state.as_mut(),
@@ -1704,23 +1744,25 @@ impl DeferredRenderer {
             let mut spot_shadow_resolution = 0u32;
             let mut spot_shadow_matrix = Mat4::IDENTITY;
             let mut spot_shadow_map = None;
-            if let Some(spot_light) = self.spot_shadow_light {
-                spot_shadow_resolution = shadow_resolution.max(1);
-                spot_shadow_matrix = Self::spot_shadow_matrix(&spot_light.info);
-                let spot_shadow_image = self.graph.make_image(&ImageInfo {
-                    debug_name: &format!("[MESHI DEFERRED] Spot Shadow Map {view_idx}"),
-                    dim: [spot_shadow_resolution, spot_shadow_resolution, 1],
-                    layers: 1,
-                    format: Format::D24S8,
-                    mip_levels: 1,
-                    samples: self.shadow.sample_count(),
-                    initial_data: None,
-                    ..Default::default()
-                });
-                let mut spot_shadow_image = spot_shadow_image;
-                spot_shadow_image.view.aspect = AspectMask::Depth;
-                spot_shadow_bindless_id = spot_shadow_image.bindless_id.unwrap() as u32;
-                spot_shadow_map = Some(spot_shadow_image);
+            if self.spot_shadow_enabled {
+                if let Some(spot_light) = self.spot_shadow_light {
+                    spot_shadow_resolution = self.spot_shadow_resolution.max(1);
+                    spot_shadow_matrix = Self::spot_shadow_matrix(&spot_light.info);
+                    let spot_shadow_image = self.graph.make_image(&ImageInfo {
+                        debug_name: &format!("[MESHI DEFERRED] Spot Shadow Map {view_idx}"),
+                        dim: [spot_shadow_resolution, spot_shadow_resolution, 1],
+                        layers: 1,
+                        format: Format::D24S8,
+                        mip_levels: 1,
+                        samples: self.shadow.sample_count(),
+                        initial_data: None,
+                        ..Default::default()
+                    });
+                    let mut spot_shadow_image = spot_shadow_image;
+                    spot_shadow_image.view.aspect = AspectMask::Depth;
+                    spot_shadow_bindless_id = spot_shadow_image.bindless_id.unwrap() as u32;
+                    spot_shadow_map = Some(spot_shadow_image);
+                }
             }
 
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
