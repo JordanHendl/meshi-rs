@@ -177,6 +177,7 @@ pub struct DeferredRenderer {
     text: TextRenderer,
     gui: GuiRenderer,
     shadow: ShadowPass,
+    terrain_shadow: ShadowPass,
     shadow_cascade_buffer: StagedBuffer,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
@@ -633,6 +634,19 @@ impl DeferredRenderer {
                 ..Default::default()
             },
         );
+        let terrain_shadow = ShadowPass::new(
+            ctx.as_mut(),
+            state.as_mut(),
+            subrender
+                .environment
+                .terrain_draw_builder()
+                .expect("terrain draw builder"),
+            &data.dynamic,
+            ShadowPassInfo {
+                cascades: info.shadow_cascades,
+                ..Default::default()
+            },
+        );
         let spot_shadow_resolution = shadow.resolution();
 
         let exec = DeferredExecution { cull_queue };
@@ -660,6 +674,7 @@ impl DeferredRenderer {
             text,
             gui,
             shadow,
+            terrain_shadow,
             shadow_cascade_buffer,
             depth,
             cloud_overlay,
@@ -1794,17 +1809,12 @@ impl DeferredRenderer {
                     .combine(
                         self.proc
                             .draw_builder
-                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
-                    )
-                    .combine(
-                        self.proc
-                            .draw_builder
                             .build_draws(BIN_SHADOW, view_idx as u32),
                     )
                     .combine(
                         self.subrender
                             .environment
-                            .build_terrain_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                            .build_terrain_draws(BIN_SHADOW, view_idx as u32),
                     )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
@@ -1847,6 +1857,13 @@ impl DeferredRenderer {
                         return cmd;
                     };
 
+                    let (terrain_draw_list, terrain_draw_count) = self
+                        .subrender
+                        .environment
+                        .terrain_draw_builder()
+                        .map(|builder| (builder.draw_list(), builder.draw_count()))
+                        .unwrap_or((Handle::default(), 0));
+
                     let cascade_count = cascade_data.count.max(1);
                     for cascade_index in 0..cascade_count as usize {
                         let tile_x = (cascade_index as u32) % grid_x;
@@ -1874,6 +1891,16 @@ impl DeferredRenderer {
                             self.proc.draw_builder.draw_list(),
                             self.proc.draw_builder.draw_count(),
                         ));
+                        if terrain_draw_count > 0 {
+                            cmd = cmd.combine(self.terrain_shadow.record(
+                                &cascade_viewport,
+                                &mut self.data.dynamic,
+                                cascade_data.matrices[cascade_index],
+                                indices_handle,
+                                terrain_draw_list,
+                                terrain_draw_count,
+                            ));
+                        }
                     }
 
                     cmd
@@ -1925,26 +1952,60 @@ impl DeferredRenderer {
                                 ShaderResource::StorageBuffer(view) => Some(view.handle),
                                 _ => None,
                             },
-                            _ => None,
-                        };
+                        _ => None,
+                    };
 
-                        let Some(indices_handle) = indices_handle else {
-                            return cmd;
-                        };
+                    let Some(indices_handle) = indices_handle else {
+                        return cmd;
+                    };
 
-                        cmd = cmd.combine(self.shadow.record(
+                    let (terrain_draw_list, terrain_draw_count) = self
+                        .subrender
+                        .environment
+                        .terrain_draw_builder()
+                        .map(|builder| (builder.draw_list(), builder.draw_count()))
+                        .unwrap_or((Handle::default(), 0));
+
+                    cmd = cmd.combine(self.shadow.record(
+                        &spot_shadow_viewport,
+                        &mut self.data.dynamic,
+                        spot_shadow_matrix,
+                        indices_handle,
+                        self.proc.draw_builder.draw_list(),
+                        self.proc.draw_builder.draw_count(),
+                    ));
+                    if terrain_draw_count > 0 {
+                        cmd = cmd.combine(self.terrain_shadow.record(
                             &spot_shadow_viewport,
                             &mut self.data.dynamic,
                             spot_shadow_matrix,
                             indices_handle,
-                            self.proc.draw_builder.draw_list(),
-                            self.proc.draw_builder.draw_count(),
+                            terrain_draw_list,
+                            terrain_draw_count,
                         ));
+                    }
 
-                        cmd
-                    },
-                );
+                    cmd
+                },
+            );
             }
+
+            self.graph.add_compute_pass(|cmd| {
+                let cmd = cmd
+                    .combine(
+                        self.proc
+                            .draw_builder
+                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                    )
+                    .combine(
+                        self.subrender
+                            .environment
+                            .build_terrain_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                    )
+                    .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
+
+                cmd.end()
+            });
 
             // Deferred SPLIT pass. Renders the following framebuffers:
             // 1) Position

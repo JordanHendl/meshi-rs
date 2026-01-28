@@ -13,6 +13,7 @@ use glam::{Mat4, Vec3, Vec4};
 use noren::DB;
 
 use crate::CloudSettings;
+use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
@@ -229,6 +230,10 @@ impl EnvironmentRenderer {
 
     pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
         self.terrain.build_deferred_draws(bin, view)
+    }
+
+    pub fn terrain_draw_builder(&self) -> Option<&GPUDrawBuilder> {
+        self.terrain.draw_builder()
     }
 
     pub fn record_terrain_draws(

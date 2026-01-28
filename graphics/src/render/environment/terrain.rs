@@ -393,6 +393,10 @@ impl TerrainRenderer {
         deferred.draw_builder.build_draws(bin, view)
     }
 
+    pub fn draw_builder(&self) -> Option<&GPUDrawBuilder> {
+        self.deferred.as_ref().map(|deferred| &deferred.draw_builder)
+    }
+
     pub fn set_render_objects(
         &mut self,
         objects: &[TerrainRenderObject],
