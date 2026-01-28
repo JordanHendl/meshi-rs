@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
@@ -8,17 +8,17 @@ use dashi::{
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, Sampler, SamplerInfo,
     ShaderResource, SubresourceRange, UsageBits, Viewport,
 };
+use furikake::types::Camera;
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
-use furikake::types::Camera;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use tracing::warn;
 
-use crate::gui::Slider;
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
-    debug_register_radial_with_description, debug_register_with_description,
+    debug_register_int_with_description, debug_register_radial_with_description,
+    debug_register_with_description, DebugRadialOption, DebugRegistryValue, PageType,
 };
+use crate::gui::Slider;
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -421,7 +421,6 @@ impl OceanFrameSettings {
                 "Time Scale",
                 Some("Scales the simulation time for waves."),
             );
-
         }
     }
 }
@@ -529,7 +528,6 @@ struct OceanCloudShadowParams {
     shadow_cascade_resolutions: [u32; 4],
     shadow_cascade_offsets: [u32; 4],
 }
-
 
 #[derive(Debug)]
 struct OceanCascade {
@@ -988,7 +986,6 @@ impl OceanRenderer {
                     slot: 0,
                 }],
             )
-
             .add_table_variable_with_resources(
                 "ocean_env_map",
                 vec![dashi::IndexedResource {
@@ -1149,6 +1146,8 @@ impl OceanRenderer {
     }
 
     pub fn update(&mut self, settings: OceanFrameSettings) {
+        let bump = crate::render::global_bump().get();
+        let _frame_marker = bump.alloc(0u8);
         self.enabled = settings.enabled;
         self.endless = settings.endless;
         self.wind_dir = settings.wind_dir;
@@ -1850,8 +1849,8 @@ impl OceanRenderer {
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean draw params");
-            
-        assert_eq!(std::mem::size_of::<OceanDrawParams>(),  252);
+
+        assert_eq!(std::mem::size_of::<OceanDrawParams>(), 252);
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
         let mut cascade_fft_sizes = [0u32; 4];
         let mut cascade_patch_sizes = [0.0f32; 4];
@@ -1955,7 +1954,6 @@ impl OceanRenderer {
             shadow_cascade_offsets: self.cloud_shadow_cascade_offsets,
         };
 
-        
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
         let vertex_count = quad_count * 6;

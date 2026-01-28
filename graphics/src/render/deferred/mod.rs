@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::environment::{
-    terrain::TerrainFrameSettings, EnvironmentFrameSettings, EnvironmentRenderer,
-    EnvironmentRendererInfo,
+    EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
+    terrain::TerrainFrameSettings,
 };
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -22,6 +22,8 @@ use crate::{
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
+use bumpalo::Bump;
+use bumpalo::collections::Vec as BumpVec;
 use bytemuck::cast_slice;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
@@ -38,7 +40,6 @@ use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::types::*;
 use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
-use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
@@ -51,8 +52,10 @@ use tare::utils::StagedBuffer;
 use tracing::{info, warn};
 
 mod shadow;
+mod shadows;
 
-use shadow::{ShadowPass, ShadowPassInfo};
+use shadow::ShadowPassInfo;
+use shadows::{ShadowCascadeInfo, ShadowPipelineMode, ShadowSystem};
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -70,19 +73,6 @@ const BIN_PRE_Z: u32 = 0;
 const BIN_GBUFFER_OPAQUE: u32 = 1;
 const BIN_SHADOW: u32 = 2;
 const BIN_TRANSPARENT: u32 = 3;
-
-struct ShadowCascadeData {
-    count: u32,
-    splits: [f32; 4],
-    matrices: [Mat4; 4],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct ShadowCascadeInfo {
-    splits: [f32; 4],
-    matrices: [Mat4; 4],
-}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -176,14 +166,11 @@ pub struct DeferredRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
-    shadow: ShadowPass,
-    terrain_shadow: ShadowPass,
-    shadow_cascade_buffer: StagedBuffer,
     depth: ImageView,
     cloud_overlay: Handle<TextObject>,
-    spot_shadow_light: Option<super::SpotShadowLight>,
-    spot_shadow_enabled: bool,
-    spot_shadow_resolution: u32,
+    shadows: ShadowSystem,
+    frame_count: usize,
+    frame_bump: Bump,
 }
 
 struct RenderObjectData {
@@ -231,141 +218,6 @@ fn from_handle(h: Handle<RenderObject>) -> Handle<RenderObjectData> {
 }
 
 impl DeferredRenderer {
-    fn spot_shadow_matrix(light: &LightInfo) -> Mat4 {
-        let position = Vec3::new(light.pos_x, light.pos_y, light.pos_z);
-        let mut direction = Vec3::new(light.dir_x, light.dir_y, light.dir_z);
-        if direction.length_squared() > 0.0 {
-            direction = direction.normalize();
-        } else {
-            direction = Vec3::NEG_Z;
-        }
-        let up = if direction.abs().dot(Vec3::Y) > 0.9 {
-            Vec3::X
-        } else {
-            Vec3::Y
-        };
-        let view = Mat4::look_at_rh(position, position + direction, up);
-
-        let outer = light.spot_outer_angle_rad.max(0.01);
-        let fov = (outer * 2.0).clamp(0.01, std::f32::consts::PI - 0.01);
-        let near = 0.1;
-        let far = if light.range > near {
-            light.range
-        } else {
-            1000.0
-        };
-        let proj = Mat4::perspective_rh(fov, 1.0, near, far);
-        proj * view
-    }
-
-    fn compute_frustum_corners(camera: &Camera, split_near: f32, split_far: f32) -> [Vec3; 8] {
-        let aspect = if camera.viewport.y.abs() > f32::EPSILON {
-            camera.viewport.x / camera.viewport.y
-        } else {
-            1.0
-        };
-        let fov_y = camera.fov_y_radians.max(0.001);
-        let tan_fov = (fov_y * 0.5).tan();
-        let near_height = split_near * tan_fov;
-        let near_width = near_height * aspect;
-        let far_height = split_far * tan_fov;
-        let far_width = far_height * aspect;
-
-        let view_corners = [
-            Vec3::new(-near_width, -near_height, -split_near),
-            Vec3::new(near_width, -near_height, -split_near),
-            Vec3::new(near_width, near_height, -split_near),
-            Vec3::new(-near_width, near_height, -split_near),
-            Vec3::new(-far_width, -far_height, -split_far),
-            Vec3::new(far_width, -far_height, -split_far),
-            Vec3::new(far_width, far_height, -split_far),
-            Vec3::new(-far_width, far_height, -split_far),
-        ];
-
-        let mut corners = [Vec3::ZERO; 8];
-        for (idx, corner) in view_corners.iter().enumerate() {
-            corners[idx] = camera.world_from_camera.transform_point3(*corner);
-        }
-
-        corners
-    }
-
-    fn compute_shadow_cascade_data(&self, camera: &Camera) -> ShadowCascadeData {
-        let cascades = self.shadow.cascades();
-        let cascade_count = cascades.cascade_count.clamp(1, 4);
-        let splits = cascades.compute_splits(camera.near, camera.far);
-
-        let light_dir = self
-            .subrender
-            .environment
-            .primary_light_direction()
-            .normalize_or_zero();
-        let light_dir = if light_dir.length_squared() > 0.0 {
-            -light_dir
-        } else {
-            Vec3::Y
-        };
-
-        let mut matrices = [Mat4::IDENTITY; 4];
-        for cascade_index in 0..cascade_count as usize {
-            let split_near = if cascade_index == 0 {
-                camera.near
-            } else {
-                splits[cascade_index - 1]
-            };
-            let split_far = splits[cascade_index];
-
-            let corners = Self::compute_frustum_corners(camera, split_near, split_far);
-            let mut center = Vec3::ZERO;
-            for corner in corners.iter() {
-                center += *corner;
-            }
-            center /= corners.len() as f32;
-
-            let up = if light_dir.abs().dot(Vec3::Y) > 0.9 {
-                Vec3::X
-            } else {
-                Vec3::Y
-            };
-            let eye = center - light_dir;
-            let light_view = Mat4::look_at_rh(eye, center, up);
-
-            let mut min = Vec3::splat(f32::MAX);
-            let mut max = Vec3::splat(f32::MIN);
-            for corner in corners.iter() {
-                let light_space = light_view.transform_point3(*corner);
-                min = min.min(light_space);
-                max = max.max(light_space);
-            }
-
-            let extent = cascades.cascade_extents[cascade_index].max(0.01);
-            let center_xy = Vec2::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5);
-            let half_xy = Vec2::new(
-                ((max.x - min.x) * 0.5).max(extent),
-                ((max.y - min.y) * 0.5).max(extent),
-            );
-            min.x = center_xy.x - half_xy.x;
-            max.x = center_xy.x + half_xy.x;
-            min.y = center_xy.y - half_xy.y;
-            max.y = center_xy.y + half_xy.y;
-
-            let mut min_z = min.z;
-            let mut max_z = max.z;
-            if (max_z - min_z).abs() < 0.001 {
-                max_z = min_z + 0.001;
-            }
-
-            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, min_z, max_z);
-            matrices[cascade_index] = light_proj * light_view;
-        }
-
-        ShadowCascadeData {
-            count: cascade_count,
-            splits,
-            matrices,
-        }
-    }
-
     pub fn new(info: &RendererInfo) -> Self {
         let device = DeviceSelector::new()
             .unwrap()
@@ -624,30 +476,23 @@ impl DeferredRenderer {
             ),
         };
 
-        let shadow = ShadowPass::new(
+        let terrain_draw_builder = subrender
+            .environment
+            .terrain_draw_builder()
+            .expect("terrain draw builder");
+        let shadows = ShadowSystem::new(
             ctx.as_mut(),
             state.as_mut(),
             &proc.draw_builder,
+            terrain_draw_builder,
             &data.dynamic,
+            shadow_cascade_buffer,
             ShadowPassInfo {
                 cascades: info.shadow_cascades,
                 ..Default::default()
             },
+            ShadowPipelineMode::Deferred,
         );
-        let terrain_shadow = ShadowPass::new(
-            ctx.as_mut(),
-            state.as_mut(),
-            subrender
-                .environment
-                .terrain_draw_builder()
-                .expect("terrain draw builder"),
-            &data.dynamic,
-            ShadowPassInfo {
-                cascades: info.shadow_cascades,
-                ..Default::default()
-            },
-        );
-        let spot_shadow_resolution = shadow.resolution();
 
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
@@ -673,14 +518,11 @@ impl DeferredRenderer {
             psos,
             text,
             gui,
-            shadow,
-            terrain_shadow,
-            shadow_cascade_buffer,
             depth,
             cloud_overlay,
-            spot_shadow_light: None,
-            spot_shadow_enabled: true,
-            spot_shadow_resolution,
+            shadows,
+            frame_count: 0,
+            frame_bump: Bump::new(),
         }
     }
 
@@ -1071,9 +913,9 @@ impl DeferredRenderer {
     }
 
     fn register_shadow_debug(&mut self) {
-        let shadow = &mut self.shadow;
-        let shadow_resolution = shadow.resolution_mut() as *mut u32;
-        let cascades = shadow.cascades_mut();
+        let shadows = &mut self.shadows;
+        let shadow_resolution = shadows.resolution_mut() as *mut u32;
+        let cascades = shadows.cascades_mut();
         unsafe {
             debug_register_int_with_description(
                 PageType::Shadow,
@@ -1108,10 +950,31 @@ impl DeferredRenderer {
             );
             debug_register_with_description(
                 PageType::Shadow,
-                Slider::new(0, "Opaque Split Lambda", 0.0, 1.0, 0.0),
-                &mut cascades.split_lambda as *mut f32,
-                "Opaque Split Lambda",
-                Some("Balances cascade distribution between linear and logarithmic splits."),
+                Slider::new(0, "Opaque Cascade 0 Split", 0.0, 1.0, 0.0),
+                &mut cascades.cascade_splits[0] as *mut f32,
+                "Opaque Cascade 0 Split",
+                Some("Sets the normalized split distance for the first cascade."),
+            );
+            debug_register_with_description(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 1 Split", 0.0, 1.0, 0.0),
+                &mut cascades.cascade_splits[1] as *mut f32,
+                "Opaque Cascade 1 Split",
+                Some("Sets the normalized split distance for the second cascade."),
+            );
+            debug_register_with_description(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 2 Split", 0.0, 1.0, 0.0),
+                &mut cascades.cascade_splits[2] as *mut f32,
+                "Opaque Cascade 2 Split",
+                Some("Sets the normalized split distance for the third cascade."),
+            );
+            debug_register_with_description(
+                PageType::Shadow,
+                Slider::new(0, "Opaque Cascade 3 Split", 0.0, 1.0, 0.0),
+                &mut cascades.cascade_splits[3] as *mut f32,
+                "Opaque Cascade 3 Split",
+                Some("Sets the normalized split distance for the fourth cascade."),
             );
             debug_register_with_description(
                 PageType::Shadow,
@@ -1144,7 +1007,7 @@ impl DeferredRenderer {
             debug_register_radial_with_description(
                 PageType::Shadow,
                 "Spot Shadow Enabled",
-                DebugRegistryValue::Bool(&mut self.spot_shadow_enabled),
+                DebugRegistryValue::Bool(shadows.spot_enabled_mut()),
                 &[
                     DebugRadialOption {
                         label: "Off",
@@ -1160,7 +1023,7 @@ impl DeferredRenderer {
             debug_register_int_with_description(
                 PageType::Shadow,
                 Slider::new_int(0, "Spot Shadow Resolution", 128.0, 4096.0, 0.0),
-                &mut self.spot_shadow_resolution as *mut u32,
+                shadows.spot_resolution_mut() as *mut u32,
                 "Spot Shadow Resolution",
                 Some("Controls the resolution of the spot light shadow map."),
             );
@@ -1622,21 +1485,14 @@ impl DeferredRenderer {
         views: &[Handle<Camera>],
         delta_time: f32,
     ) -> Vec<ViewOutput> {
+        self.frame_count += 1;
+        if self.frame_count % 3 == 0 {
+            self.frame_bump.reset();
+        }
         if views.is_empty() {
             return Vec::new();
         }
-        if let Some(spot_light) = self.spot_shadow_light {
-            let enabled_value = if self.spot_shadow_enabled { 1.0 } else { 0.0 };
-            let handle = spot_light.handle;
-            let _ = self.state.reserved_mut(
-                "meshi_bindless_lights",
-                |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
-                    if handle.valid() {
-                        lights.light_mut(handle).extra.y = enabled_value;
-                    }
-                },
-            );
-        }
+        self.shadows.update_spot_light_state(self.state.as_mut());
         self.gui.initialize_renderer(
             self.ctx.as_mut(),
             self.state.as_mut(),
@@ -1704,7 +1560,6 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
-            let shadow_resolution = self.shadow.resolution();
             let camera_data = match self
                 .state
                 .reserved::<ReservedBindlessCamera>("meshi_bindless_cameras")
@@ -1715,72 +1570,6 @@ impl DeferredRenderer {
                     Camera::default()
                 }
             };
-            let cascade_data = self.compute_shadow_cascade_data(&camera_data);
-            let cascade_count = cascade_data.count.max(1);
-            let grid_x = if cascade_count > 1 { 2 } else { 1 };
-            let grid_y = if cascade_count > 2 { 2 } else { 1 };
-            {
-                let cascade_info = &mut self
-                    .shadow_cascade_buffer
-                    .as_slice_mut::<ShadowCascadeInfo>()[0];
-                cascade_info.splits = cascade_data.splits;
-                cascade_info.matrices = cascade_data.matrices;
-            }
-            let shadow_atlas_width = shadow_resolution * grid_x;
-            let shadow_atlas_height = shadow_resolution * grid_y;
-            let shadow_viewport = Viewport {
-                area: FRect2D {
-                    x: 0.0,
-                    y: 0.0,
-                    w: shadow_atlas_width as f32,
-                    h: shadow_atlas_height as f32,
-                },
-                scissor: Rect2D {
-                    x: 0,
-                    y: 0,
-                    w: shadow_atlas_width,
-                    h: shadow_atlas_height,
-                },
-                ..Default::default()
-            };
-            let shadow_map = self.graph.make_image(&ImageInfo {
-                debug_name: &format!("[MESHI DEFERRED] Shadow Map {view_idx}"),
-                dim: [shadow_atlas_width, shadow_atlas_height, 1],
-                layers: 1,
-                format: Format::D24S8,
-                mip_levels: 1,
-                samples: self.shadow.sample_count(),
-                initial_data: None,
-                ..Default::default()
-            });
-            let mut shadow_map = shadow_map;
-            shadow_map.view.aspect = AspectMask::Depth;
-
-            let mut spot_shadow_bindless_id = 0u32;
-            let mut spot_shadow_resolution = 0u32;
-            let mut spot_shadow_matrix = Mat4::IDENTITY;
-            let mut spot_shadow_map = None;
-            if self.spot_shadow_enabled {
-                if let Some(spot_light) = self.spot_shadow_light {
-                    spot_shadow_resolution = self.spot_shadow_resolution.max(1);
-                    spot_shadow_matrix = Self::spot_shadow_matrix(&spot_light.info);
-                    let spot_shadow_image = self.graph.make_image(&ImageInfo {
-                        debug_name: &format!("[MESHI DEFERRED] Spot Shadow Map {view_idx}"),
-                        dim: [spot_shadow_resolution, spot_shadow_resolution, 1],
-                        layers: 1,
-                        format: Format::D24S8,
-                        mip_levels: 1,
-                        samples: self.shadow.sample_count(),
-                        initial_data: None,
-                        ..Default::default()
-                    });
-                    let mut spot_shadow_image = spot_shadow_image;
-                    spot_shadow_image.view.aspect = AspectMask::Depth;
-                    spot_shadow_bindless_id = spot_shadow_image.bindless_id.unwrap() as u32;
-                    spot_shadow_map = Some(spot_shadow_image);
-                }
-            }
-
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_pass_attachments[3] = Some(position.view);
             deferred_pass_attachments[2] = Some(diffuse.view);
@@ -1806,233 +1595,26 @@ impl DeferredRenderer {
                         camera_handle,
                         delta_time,
                     ))
-                    .combine(
-                        self.proc
-                            .draw_builder
-                            .build_draws(BIN_SHADOW, view_idx as u32),
-                    )
-                    .combine(
-                        self.subrender
-                            .environment
-                            .build_terrain_draws(BIN_SHADOW, view_idx as u32),
-                    )
-                    .combine(
-                        self.subrender
-                            .environment
-                            .build_terrain_draws(BIN_SHADOW, view_idx as u32),
-                    )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
                 cmd.end()
             });
 
-            ///////////////////////////////////////////////////////////////////
-            ///////////////////////////////////////////////////////////////////
-            // Shadow map pass.                                               //
-            ///////////////////////////////////////////////////////////////////
-            ///////////////////////////////////////////////////////////////////
-            let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
-            self.graph.add_subpass(
-                &SubpassInfo {
-                    viewport: shadow_viewport,
-                    color_attachments: [None; 8],
-                    depth_attachment: Some(shadow_map.view),
-                    clear_values: shadow_clear,
-                    depth_clear: Some(self.shadow.depth_clear_value()),
-                },
-                |mut cmd| {
-                    let indices = self
-                        .state
-                        .binding("meshi_bindless_indices")
-                        .unwrap()
-                        .binding();
-
-                    let indices_handle = match indices {
-                        ReservedBinding::TableBinding {
-                            binding: _,
-                            resources,
-                        } => match resources[0].resource {
-                            ShaderResource::StorageBuffer(view) => Some(view.handle),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-
-                    let Some(indices_handle) = indices_handle else {
-                        return cmd;
-                    };
-
-                    let (terrain_draw_list, terrain_draw_count) = self
-                        .subrender
-                        .environment
-                        .terrain_draw_builder()
-                        .map(|builder| (builder.draw_list(), builder.draw_count()))
-                        .unwrap_or((Handle::default(), 0));
-
-                    let cascade_count = cascade_data.count.max(1);
-                    let main_per_draw = self.proc.draw_builder.per_draw_data();
-                    self.shadow.set_per_draw_data(main_per_draw);
-                    for cascade_index in 0..cascade_count as usize {
-                        let tile_x = (cascade_index as u32) % grid_x;
-                        let tile_y = (cascade_index as u32) / grid_x;
-                        let cascade_viewport = Viewport {
-                            area: FRect2D {
-                                x: (tile_x * shadow_resolution) as f32,
-                                y: (tile_y * shadow_resolution) as f32,
-                                w: shadow_resolution as f32,
-                                h: shadow_resolution as f32,
-                            },
-                            scissor: Rect2D {
-                                x: tile_x * shadow_resolution,
-                                y: tile_y * shadow_resolution,
-                                w: shadow_resolution,
-                                h: shadow_resolution,
-                            },
-                            ..Default::default()
-                        };
-                        cmd = cmd.combine(self.shadow.record(
-                            &cascade_viewport,
-                            &mut self.data.dynamic,
-                            cascade_data.matrices[cascade_index],
-                            indices_handle,
-                            self.proc.draw_builder.draw_list(),
-                            self.proc.draw_builder.draw_count(),
-                        ));
-                        if terrain_draw_count > 0 {
-                            cmd = cmd.combine(self.terrain_shadow.record(
-                                &cascade_viewport,
-                                &mut self.data.dynamic,
-                                cascade_data.matrices[cascade_index],
-                                indices_handle,
-                                terrain_draw_list,
-                                terrain_draw_count,
-                            ));
-                        }
-                    }
-
-                    if let Some(terrain_draw_info) =
-                        self.subrender.environment.terrain_draw_info()
-                    {
-                        if terrain_draw_info.draw_count > 0 {
-                            self.shadow
-                                .set_per_draw_data(terrain_draw_info.per_draw_data);
-                            for cascade_index in 0..cascade_count as usize {
-                                let tile_x = (cascade_index as u32) % grid_x;
-                                let tile_y = (cascade_index as u32) / grid_x;
-                                let cascade_viewport = Viewport {
-                                    area: FRect2D {
-                                        x: (tile_x * shadow_resolution) as f32,
-                                        y: (tile_y * shadow_resolution) as f32,
-                                        w: shadow_resolution as f32,
-                                        h: shadow_resolution as f32,
-                                    },
-                                    scissor: Rect2D {
-                                        x: tile_x * shadow_resolution,
-                                        y: tile_y * shadow_resolution,
-                                        w: shadow_resolution,
-                                        h: shadow_resolution,
-                                    },
-                                    ..Default::default()
-                                };
-                                cmd = cmd.combine(self.shadow.record(
-                                    &cascade_viewport,
-                                    &mut self.data.dynamic,
-                                    cascade_data.matrices[cascade_index],
-                                    indices_handle,
-                                    terrain_draw_info.draw_list,
-                                    terrain_draw_info.draw_count,
-                                ));
-                            }
-                            self.shadow.set_per_draw_data(main_per_draw);
-                        }
-                    }
-
-                    cmd
-                },
+            let shadow_result = self.shadows.process(
+                &mut self.graph,
+                self.state.as_ref(),
+                &mut self.data.dynamic,
+                &mut self.proc.draw_builder,
+                &mut self.subrender.environment,
+                &camera_data,
+                view_idx as u32,
             );
-
-            ///////////////////////////////////////////////////////////////////
-            ///////////////////////////////////////////////////////////////////
-            // Spot shadow map pass.                                          //
-            ///////////////////////////////////////////////////////////////////
-            ///////////////////////////////////////////////////////////////////
-            if let Some(spot_shadow_map) = spot_shadow_map.as_ref() {
-                let spot_shadow_viewport = Viewport {
-                    area: FRect2D {
-                        x: 0.0,
-                        y: 0.0,
-                        w: spot_shadow_resolution as f32,
-                        h: spot_shadow_resolution as f32,
-                    },
-                    scissor: Rect2D {
-                        x: 0,
-                        y: 0,
-                        w: spot_shadow_resolution,
-                        h: spot_shadow_resolution,
-                    },
-                    ..Default::default()
-                };
-
-                self.graph.add_subpass(
-                    &SubpassInfo {
-                        viewport: spot_shadow_viewport,
-                        color_attachments: [None; 8],
-                        depth_attachment: Some(spot_shadow_map.view),
-                        clear_values: shadow_clear,
-                        depth_clear: Some(self.shadow.depth_clear_value()),
-                    },
-                    |mut cmd| {
-                        let indices = self
-                            .state
-                            .binding("meshi_bindless_indices")
-                            .unwrap()
-                            .binding();
-
-                        let indices_handle = match indices {
-                            ReservedBinding::TableBinding {
-                                binding: _,
-                                resources,
-                            } => match resources[0].resource {
-                                ShaderResource::StorageBuffer(view) => Some(view.handle),
-                                _ => None,
-                            },
-                        _ => None,
-                    };
-
-                    let Some(indices_handle) = indices_handle else {
-                        return cmd;
-                    };
-
-                    let (terrain_draw_list, terrain_draw_count) = self
-                        .subrender
-                        .environment
-                        .terrain_draw_builder()
-                        .map(|builder| (builder.draw_list(), builder.draw_count()))
-                        .unwrap_or((Handle::default(), 0));
-
-                    cmd = cmd.combine(self.shadow.record(
-                        &spot_shadow_viewport,
-                        &mut self.data.dynamic,
-                        spot_shadow_matrix,
-                        indices_handle,
-                        self.proc.draw_builder.draw_list(),
-                        self.proc.draw_builder.draw_count(),
-                    ));
-                    if terrain_draw_count > 0 {
-                        cmd = cmd.combine(self.terrain_shadow.record(
-                            &spot_shadow_viewport,
-                            &mut self.data.dynamic,
-                            spot_shadow_matrix,
-                            indices_handle,
-                            terrain_draw_list,
-                            terrain_draw_count,
-                        ));
-                    }
-
-                    cmd
-                },
-            );
-            }
+            let shadow_map = shadow_result.cascaded.shadow_map;
+            let shadow_resolution = shadow_result.cascaded.shadow_resolution;
+            let cascade_data = shadow_result.cascaded.cascade_data;
+            let spot_shadow_bindless_id = shadow_result.spot.shadow_bindless_id;
+            let spot_shadow_resolution = shadow_result.spot.shadow_resolution;
+            let spot_shadow_matrix = shadow_result.spot.shadow_matrix;
 
             self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
@@ -2159,11 +1741,11 @@ impl DeferredRenderer {
                         spot_shadow_padding1: u32,
                         spot_shadow_matrix: Mat4,
                     }
-                    
+
                     let per_obj = &mut alloc.slice::<PerObj>()[0];
                     per_obj.pos = position.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.diff = diffuse.bindless_id.unwrap_or(u16::MAX) as u32;
-                    per_obj.norm = normal.bindless_id.unwrap_or(u16::MAX ) as u32;
+                    per_obj.norm = normal.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.mat = material_code.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.shadow = shadow_map.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.shadow_cascade_count = cascade_data.count;
@@ -2177,7 +1759,7 @@ impl DeferredRenderer {
                     per_obj.spot_shadow_matrix = spot_shadow_matrix;
 
                     cmd = cmd
-                        .combine(self.shadow_cascade_buffer.sync_up())
+                        .combine(self.shadows.cascade_buffer().sync_up())
                         .bind_graphics_pipeline(self.psos.combine_pso.handle)
                         .update_viewport(&self.data.viewport)
                         .draw(&Draw {
@@ -2242,8 +1824,11 @@ impl DeferredRenderer {
                 transform: Mat4,
             }
 
-            let mut billboard_draws = Vec::new();
-            let handles = self.data.objects.entries.clone();
+            let s = self as *mut Self;
+            let mut billboard_draws = BumpVec::new_in(&self.frame_bump);
+            let mut handles =
+                BumpVec::with_capacity_in(self.data.objects.entries.len(), &self.frame_bump);
+            handles.extend(self.data.objects.entries.iter().copied());
             for handle in handles {
                 let (scene_handle, billboard) = {
                     let obj = self.data.objects.get_ref(handle);
@@ -2255,7 +1840,9 @@ impl DeferredRenderer {
 
                 if let Some(material) = billboard.info.material {
                     let transform = self.proc.scene.get_object_transform(scene_handle);
-                    self.update_billboard_vertices(&billboard, transform, camera_handle);
+                    unsafe {
+                        (*s).update_billboard_vertices(&billboard, transform, camera_handle);
+                    }
                     billboard_draws.push(BillboardDraw {
                         vertex_buffer: billboard.vertex_buffer,
                         material,
@@ -2278,21 +1865,17 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    cmd = cmd.combine(
-                        self.subrender
-                            .environment
-                            .render(
-                                &self.data.viewport,
-                                camera_handle,
-                                Some(scene_color.view),
-                                Some(depth),
-                                Some(shadow_map.view),
-                                cascade_data.count,
-                                shadow_resolution,
-                                Vec4::from_array(cascade_data.splits),
-                                cascade_data.matrices,
-                            ),
-                    );
+                    cmd = cmd.combine(self.subrender.environment.render(
+                        &self.data.viewport,
+                        camera_handle,
+                        Some(scene_color.view),
+                        Some(depth),
+                        Some(shadow_map.view),
+                        cascade_data.count,
+                        shadow_resolution,
+                        Vec4::from_array(cascade_data.splits),
+                        cascade_data.matrices,
+                    ));
 
                     if !billboard_draws.is_empty() {
                         let mut c = cmd
@@ -2344,8 +1927,8 @@ impl DeferredRenderer {
             });
         }
 
-        let mut wait_sems = Vec::with_capacity(sems.len() + 1);
-        wait_sems.extend_from_slice(sems);
+        let mut wait_sems = BumpVec::with_capacity_in(sems.len() + 1, &self.frame_bump);
+        wait_sems.extend(sems.iter().copied());
         if let Some(semaphore) = skinning_complete {
             wait_sems.push(semaphore);
         }
@@ -2414,7 +1997,7 @@ impl Renderer for DeferredRenderer {
     }
 
     fn set_spot_shadow_light(&mut self, light: Option<super::SpotShadowLight>) {
-        let previous_handle = self.spot_shadow_light.map(|entry| entry.handle);
+        let previous_handle = self.shadows.spot_light_handle();
         let next_handle = light.map(|entry| entry.handle);
         if previous_handle != next_handle {
             self.state
@@ -2435,7 +2018,7 @@ impl Renderer for DeferredRenderer {
                 )
                 .ok();
         }
-        self.spot_shadow_light = light;
+        self.shadows.set_spot_light(light);
     }
 
     fn register_object(

@@ -1,4 +1,4 @@
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::PendingGraphics;
 use dashi::driver::command::DrawIndexedIndirect;
@@ -8,9 +8,10 @@ use dashi::{
 };
 use furikake::PSOBuilderFurikakeExt;
 
-use crate::ShadowCascadeSettings;
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use crate::ShadowCascadeSettings;
 
+#[derive(Clone, Copy)]
 pub struct ShadowPassInfo {
     pub resolution: u32,
     pub sample_count: SampleCount,
@@ -96,7 +97,7 @@ impl ShadowPass {
                 samples: info.sample_count,
             })
             .set_details(GraphicsPipelineDetails {
-                color_blend_states: Vec::new(),
+                color_blend_states: vec![Default::default(); 1],
                 sample_count: info.sample_count,
                 depth_test: Some(DepthInfo {
                     should_test: true,

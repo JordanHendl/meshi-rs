@@ -8,12 +8,12 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{BindlessState, types::Camera};
+use furikake::{types::Camera, BindlessState};
 use glam::{Mat4, Vec3, Vec4};
 use noren::DB;
 
-use crate::CloudSettings;
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use crate::CloudSettings;
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
@@ -115,6 +115,8 @@ impl EnvironmentRenderer {
     }
 
     pub fn update(&mut self, settings: EnvironmentFrameSettings) {
+        let bump = crate::render::global_bump().get();
+        let _frame_marker = bump.alloc(0u8);
         let previous_time = self.time;
         self.time_scale = settings.time_scale;
         self.paused = settings.paused;
@@ -316,15 +318,8 @@ impl EnvironmentRenderer {
                 info.shadow_cascade_offsets,
             );
         } else {
-            self.ocean.set_cloud_shadow_map(
-                None,
-                0,
-                0,
-                Vec4::ZERO,
-                [0.0; 4],
-                [0; 4],
-                [0; 4],
-            );
+            self.ocean
+                .set_cloud_shadow_map(None, 0, 0, Vec4::ZERO, [0.0; 4], [0; 4], [0; 4]);
         }
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(

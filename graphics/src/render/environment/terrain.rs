@@ -389,6 +389,8 @@ impl TerrainRenderer {
     }
 
     pub fn update(&mut self, settings: TerrainFrameSettings) {
+        let bump = crate::render::global_bump().get();
+        let _frame_marker = bump.alloc(0u8);
         self.camera_position = settings.camera_position;
     }
 
@@ -401,7 +403,9 @@ impl TerrainRenderer {
     }
 
     pub fn draw_builder(&self) -> Option<&GPUDrawBuilder> {
-        self.deferred.as_ref().map(|deferred| &deferred.draw_builder)
+        self.deferred
+            .as_ref()
+            .map(|deferred| &deferred.draw_builder)
     }
 
     pub fn draw_info(&self) -> Option<TerrainDrawInfo> {

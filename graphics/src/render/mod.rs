@@ -13,6 +13,7 @@ use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
     ShadowCascadeSettings, TextInfo, TextObject,
 };
+use bumpalo_herd::Herd;
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{types::Camera, types::Light, types::Material, BindlessState};
 use glam::Mat4;
@@ -20,6 +21,7 @@ use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::DB;
 use std::collections::VecDeque;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 pub struct RendererInfo {
@@ -48,6 +50,11 @@ pub struct FrameTimer {
     frames: u64,
     report_every: u64,
     last_frame: Option<Instant>,
+}
+
+pub fn global_bump() -> &'static Herd {
+    static HERD: OnceLock<Herd> = OnceLock::new();
+    HERD.get_or_init(Herd::new)
 }
 
 impl FrameTimer {

@@ -10,6 +10,8 @@ use crate::{
     RenderObject, RenderObjectInfo, TextInfo, TextObject,
 };
 use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
+use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
 use driver::command::{DrawIndexedIndirect, DrawIndirect};
@@ -60,6 +62,7 @@ pub struct ForwardRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
+    frame_bump: Bump,
 }
 
 struct RenderObjectData {
@@ -480,6 +483,7 @@ impl ForwardRenderer {
         views: &[Handle<Camera>],
         delta_time: f32,
     ) -> Vec<ViewOutput> {
+        self.frame_bump.reset();
         if views.is_empty() {
             return Vec::new();
         }
@@ -588,9 +592,11 @@ impl ForwardRenderer {
                 total_transform: Mat4,
                 draw_index: u32,
             }
-            let mut billboard_draws = Vec::new();
+            let mut billboard_draws = BumpVec::new_in(&self.frame_bump);
             {
-                let handles = self.objects.entries.clone();
+                let mut handles =
+                    BumpVec::with_capacity_in(self.objects.entries.len(), &self.frame_bump);
+                handles.extend(self.objects.entries.iter().copied());
                 for handle in handles {
                     let (scene_handle, draw_range, billboard) = {
                         let obj = self.objects.get_ref(handle);
@@ -669,8 +675,8 @@ impl ForwardRenderer {
             });
         }
 
-        let mut wait_sems = Vec::with_capacity(sems.len() + 1);
-        wait_sems.extend_from_slice(sems);
+        let mut wait_sems = BumpVec::with_capacity_in(sems.len() + 1, &self.frame_bump);
+        wait_sems.extend(sems.iter().copied());
         if let Some(semaphore) = self.skinning_complete {
             wait_sems.push(semaphore);
         }
