@@ -12,7 +12,8 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::debug::{
     DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
-    debug_register_radial_with_description, debug_register_with_description,
+    debug_register_radial_with_description, debug_register_radial_with_description_and_conflicts,
+    debug_register_with_description,
 };
 use crate::gui::{GuiFrame, Slider};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
@@ -153,6 +154,47 @@ struct DeferredExecution {
     cull_queue: CommandRing,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeferredFramebufferDebugView {
+    None = 0,
+    Position = 1,
+    Diffuse = 2,
+    Normal = 3,
+    Material = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeferredShadowDebugView {
+    None = 0,
+    Cascaded = 1,
+    Spot = 2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeferredDepthDebugView {
+    Off = 0,
+    On = 1,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DeferredDebugViews {
+    cloud_debug_view: CloudDebugView,
+    deferred_framebuffer: u32,
+    shadow_map: u32,
+    depth: u32,
+}
+
+impl Default for DeferredDebugViews {
+    fn default() -> Self {
+        Self {
+            cloud_debug_view: CloudDebugView::None,
+            deferred_framebuffer: DeferredFramebufferDebugView::None as u32,
+            shadow_map: DeferredShadowDebugView::None as u32,
+            depth: DeferredDepthDebugView::Off as u32,
+        }
+    }
+}
+
 pub struct DeferredRenderer {
     ctx: Box<Context>,
     data: RendererData,
@@ -171,6 +213,7 @@ pub struct DeferredRenderer {
     shadows: ShadowSystem,
     frame_count: usize,
     frame_bump: Bump,
+    debug_views: DeferredDebugViews,
 }
 
 struct RenderObjectData {
@@ -523,6 +566,7 @@ impl DeferredRenderer {
             shadows,
             frame_count: 0,
             frame_bump: Bump::new(),
+            debug_views: DeferredDebugViews::default(),
         }
     }
 
@@ -909,6 +953,7 @@ impl DeferredRenderer {
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.subrender.environment.initialize_database(db);
         self.register_shadow_debug();
+        self.register_debug_views();
         self.text.initialize_database(db);
     }
 
@@ -1026,6 +1071,171 @@ impl DeferredRenderer {
                 shadows.spot_resolution_mut() as *mut u32,
                 "Spot Shadow Resolution",
                 Some("Controls the resolution of the spot light shadow map."),
+            );
+        }
+    }
+
+    fn register_debug_views(&mut self) {
+        let cloud_view = DebugRegistryValue::CloudDebugView(&mut self.debug_views.cloud_debug_view);
+        let deferred_view = DebugRegistryValue::U32(&mut self.debug_views.deferred_framebuffer);
+        let shadow_view = DebugRegistryValue::U32(&mut self.debug_views.shadow_map);
+        let depth_view = DebugRegistryValue::U32(&mut self.debug_views.depth);
+        let cloud_conflicts = [deferred_view.clone(), shadow_view.clone(), depth_view.clone()];
+        let deferred_conflicts = [cloud_view.clone(), shadow_view.clone(), depth_view.clone()];
+        let shadow_conflicts = [cloud_view.clone(), deferred_view.clone(), depth_view.clone()];
+        let depth_conflicts = [cloud_view.clone(), deferred_view.clone(), shadow_view.clone()];
+        unsafe {
+            debug_register_radial_with_description_and_conflicts(
+                PageType::DebugViews,
+                "Cloud Debug Views",
+                cloud_view,
+                &[
+                    DebugRadialOption {
+                        label: "None",
+                        value: CloudDebugView::None as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Weather Map",
+                        value: CloudDebugView::WeatherMap as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Shadow Map",
+                        value: CloudDebugView::ShadowMap as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Transmittance",
+                        value: CloudDebugView::Transmittance as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Step Heatmap",
+                        value: CloudDebugView::StepHeatmap as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Temporal Weight",
+                        value: CloudDebugView::TemporalWeight as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Stats",
+                        value: CloudDebugView::Stats as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Layer A",
+                        value: CloudDebugView::LayerA as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Layer B",
+                        value: CloudDebugView::LayerB as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Single Scatter",
+                        value: CloudDebugView::SingleScatter as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Multi Scatter",
+                        value: CloudDebugView::MultiScatter as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Cloud Cascade 0",
+                        value: CloudDebugView::ShadowCascade0 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Cloud Cascade 1",
+                        value: CloudDebugView::ShadowCascade1 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Cloud Cascade 2",
+                        value: CloudDebugView::ShadowCascade2 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Cloud Cascade 3",
+                        value: CloudDebugView::ShadowCascade3 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Cascade 0",
+                        value: CloudDebugView::OpaqueShadowCascade0 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Cascade 1",
+                        value: CloudDebugView::OpaqueShadowCascade1 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Cascade 2",
+                        value: CloudDebugView::OpaqueShadowCascade2 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Cascade 3",
+                        value: CloudDebugView::OpaqueShadowCascade3 as u32 as f32,
+                    },
+                ],
+                Some("Selects a cloud rendering debug view to display."),
+                Some(&cloud_conflicts),
+            );
+            debug_register_radial_with_description_and_conflicts(
+                PageType::DebugViews,
+                "Deferred Framebuffers",
+                deferred_view,
+                &[
+                    DebugRadialOption {
+                        label: "None",
+                        value: DeferredFramebufferDebugView::None as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Position",
+                        value: DeferredFramebufferDebugView::Position as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Diffuse",
+                        value: DeferredFramebufferDebugView::Diffuse as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Normal",
+                        value: DeferredFramebufferDebugView::Normal as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Material",
+                        value: DeferredFramebufferDebugView::Material as u32 as f32,
+                    },
+                ],
+                Some("Selects a deferred GBuffer attachment to display."),
+                Some(&deferred_conflicts),
+            );
+            debug_register_radial_with_description_and_conflicts(
+                PageType::DebugViews,
+                "Shadow Maps",
+                shadow_view,
+                &[
+                    DebugRadialOption {
+                        label: "None",
+                        value: DeferredShadowDebugView::None as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Cascaded Atlas",
+                        value: DeferredShadowDebugView::Cascaded as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Spot Shadow",
+                        value: DeferredShadowDebugView::Spot as u32 as f32,
+                    },
+                ],
+                Some("Selects a shadow map to return from the renderer."),
+                Some(&shadow_conflicts),
+            );
+            debug_register_radial_with_description_and_conflicts(
+                PageType::DebugViews,
+                "Depth Buffer",
+                depth_view,
+                &[
+                    DebugRadialOption {
+                        label: "Off",
+                        value: DeferredDepthDebugView::Off as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "On",
+                        value: DeferredDepthDebugView::On as u32 as f32,
+                    },
+                ],
+                Some("Displays the main depth buffer as the renderer output."),
+                Some(&depth_conflicts),
             );
         }
     }
@@ -1505,6 +1715,11 @@ impl DeferredRenderer {
         self.proc.scene.set_active_cameras(views);
         let primary_camera = views.first().copied().unwrap_or_default();
         self.record_frame_compute(delta_time, primary_camera);
+        let mut cloud_settings = self.subrender.environment.cloud_settings();
+        if cloud_settings.debug_view != self.debug_views.cloud_debug_view {
+            cloud_settings.debug_view = self.debug_views.cloud_debug_view;
+            self.subrender.environment.set_cloud_settings(cloud_settings);
+        }
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
@@ -1615,6 +1830,7 @@ impl DeferredRenderer {
             let spot_shadow_bindless_id = shadow_result.spot.shadow_bindless_id;
             let spot_shadow_resolution = shadow_result.spot.shadow_resolution;
             let spot_shadow_matrix = shadow_result.spot.shadow_matrix;
+            let spot_shadow_map = shadow_result.spot.shadow_map;
 
             self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
@@ -1920,9 +2136,43 @@ impl DeferredRenderer {
                 },
             );
 
+            let deferred_debug_output = match self.debug_views.deferred_framebuffer {
+                value if value == DeferredFramebufferDebugView::Position as u32 => {
+                    Some(position.view)
+                }
+                value if value == DeferredFramebufferDebugView::Diffuse as u32 => {
+                    Some(diffuse.view)
+                }
+                value if value == DeferredFramebufferDebugView::Normal as u32 => {
+                    Some(normal.view)
+                }
+                value if value == DeferredFramebufferDebugView::Material as u32 => {
+                    Some(material_code.view)
+                }
+                _ => None,
+            };
+            let shadow_debug_output = match self.debug_views.shadow_map {
+                value if value == DeferredShadowDebugView::Cascaded as u32 => {
+                    Some(shadow_map.view)
+                }
+                value if value == DeferredShadowDebugView::Spot as u32 => {
+                    spot_shadow_map.as_ref().map(|map| map.view)
+                }
+                _ => None,
+            };
+            let depth_debug_output = if self.debug_views.depth == DeferredDepthDebugView::On as u32
+            {
+                Some(depth)
+            } else {
+                None
+            };
+            let output_image = deferred_debug_output
+                .or(shadow_debug_output)
+                .or(depth_debug_output)
+                .unwrap_or(final_combine.view);
             outputs.push(ViewOutput {
                 camera: *camera,
-                image: final_combine.view,
+                image: output_image,
                 semaphore: semaphores[0],
             });
         }

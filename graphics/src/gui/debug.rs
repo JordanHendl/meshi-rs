@@ -28,6 +28,7 @@ enum DebugGraphicsTab {
     Ocean,
     Clouds,
     Shadow,
+    DebugViews,
     Lighting,
 }
 
@@ -37,6 +38,7 @@ pub enum PageType {
     Ocean,
     Clouds,
     Shadow,
+    DebugViews,
     Lighting,
     Physics,
     Audio,
@@ -170,6 +172,7 @@ struct DebugRegistryItem {
     description: Option<String>,
     control: DebugRegistryControl,
     value: DebugRegistryValue,
+    conflicts: Vec<DebugRegistryValue>,
 }
 
 unsafe impl Send for DebugRegistryItem {}
@@ -288,6 +291,7 @@ pub unsafe fn debug_register_slider_with_description(
             value_format: slider.value_format,
         },
         value,
+        conflicts: Vec::new(),
     });
     id
 }
@@ -308,8 +312,29 @@ pub unsafe fn debug_register_radial_with_description(
     options: &[DebugRadialOption],
     description: Option<&str>,
 ) -> u32 {
+    debug_register_radial_with_description_and_conflicts(
+        page,
+        label,
+        value,
+        options,
+        description,
+        None,
+    )
+}
+
+pub unsafe fn debug_register_radial_with_description_and_conflicts(
+    page: PageType,
+    label: &str,
+    value: DebugRegistryValue,
+    options: &[DebugRadialOption],
+    description: Option<&str>,
+    conflicts: Option<&[DebugRegistryValue]>,
+) -> u32 {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
+    let conflicts = conflicts
+        .map(|values| values.to_vec())
+        .unwrap_or_default();
     if let Some(entry) = registry
         .iter_mut()
         .find(|entry| entry.page == page && entry.value.matches(&value) && entry.label == label)
@@ -321,6 +346,7 @@ pub unsafe fn debug_register_radial_with_description(
             if let DebugRegistryControl::Radial { options: existing } = &mut entry.control {
                 *existing = build_radial_options(options);
             }
+            entry.conflicts = conflicts;
             return entry.id;
         };
 
@@ -335,6 +361,7 @@ pub unsafe fn debug_register_radial_with_description(
         if let Some(description) = description {
             entry.description = Some(description.to_string());
         }
+        entry.conflicts = conflicts;
         return entry.id;
     }
 
@@ -357,8 +384,15 @@ pub unsafe fn debug_register_radial_with_description(
             options: radial_options,
         },
         value,
+        conflicts,
     });
     base_id
+}
+
+pub unsafe fn debug_registry_radial_enabled(value: &DebugRegistryValue) -> bool {
+    debug_registry_radial_value(value)
+        .map(|value| value >= 0.5)
+        .unwrap_or(false)
 }
 
 fn build_radial_options(options: &[DebugRadialOption]) -> Vec<DebugRegistryRadialOption> {
@@ -487,22 +521,79 @@ unsafe fn debug_registry_update_value(id: u32, value: f32) -> Option<PageType> {
 unsafe fn debug_registry_update_radial(id: u32) -> Option<PageType> {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
-    for entry in registry.iter_mut() {
-        let DebugRegistryControl::Radial { options } = &entry.control else {
-            continue;
+    for index in 0..registry.len() {
+        let option_value = {
+            let entry = &registry[index];
+            let DebugRegistryControl::Radial { options } = &entry.control else {
+                continue;
+            };
+            let Some(option) = options.iter().find(|option| option.id == id) else {
+                continue;
+            };
+            option.value
         };
-        if let Some(option) = options.iter().find(|option| option.id == id) {
-            unsafe {
-                let previous = entry.value.get();
-                if (previous - option.value).abs() > f32::EPSILON {
-                    entry.value.set(option.value);
-                    return Some(entry.page);
+        let (entry_id, page, conflicts, updated) = {
+            let entry = &mut registry[index];
+            let previous = unsafe { entry.value.get() };
+            let updated = (previous - option_value).abs() > f32::EPSILON;
+            if updated {
+                unsafe {
+                    entry.value.set(option_value);
                 }
             }
-            return None;
+            (entry.id, entry.page, entry.conflicts.clone(), updated)
+        };
+        if updated && option_value.abs() > f32::EPSILON {
+            apply_radial_conflicts(&mut registry, entry_id, &conflicts);
+            return Some(page);
         }
+        return if updated { Some(page) } else { None };
     }
     None
+}
+
+fn apply_radial_conflicts(
+    registry: &mut [DebugRegistryItem],
+    active_id: u32,
+    conflicts: &[DebugRegistryValue],
+) {
+    if conflicts.is_empty() {
+        return;
+    }
+    for conflict in conflicts {
+        if let Some(entry) = registry
+            .iter_mut()
+            .find(|entry| entry.id != active_id && entry.value.matches(conflict))
+        {
+            let DebugRegistryControl::Radial { options } = &entry.control else {
+                continue;
+            };
+            let default_value = radial_default_value(options);
+            unsafe {
+                entry.value.set(default_value);
+            }
+        }
+    }
+}
+
+unsafe fn debug_registry_radial_value(value: &DebugRegistryValue) -> Option<f32> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    registry
+        .iter()
+        .find(|entry| {
+            matches!(entry.control, DebugRegistryControl::Radial { .. })
+                && entry.value.matches(value)
+        })
+        .map(|entry| unsafe { entry.value.get() })
+}
+
+fn radial_default_value(options: &[DebugRegistryRadialOption]) -> f32 {
+    options
+        .iter()
+        .find(|option| option.value.abs() <= f32::EPSILON)
+        .map(|option| option.value)
+        .unwrap_or_else(|| options.first().map(|option| option.value).unwrap_or(0.0))
 }
 
 fn mark_page_dirty(
@@ -523,7 +614,10 @@ fn mark_page_dirty(
         PageType::Clouds | PageType::Shadow => {
             *cloud_dirty = true;
         }
-        PageType::Lighting | PageType::Physics | PageType::Audio => {}
+        PageType::DebugViews
+        | PageType::Lighting
+        | PageType::Physics
+        | PageType::Audio => {}
     }
 }
 
@@ -777,6 +871,7 @@ impl DebugGui {
                 DebugGraphicsTab::Ocean,
                 DebugGraphicsTab::Clouds,
                 DebugGraphicsTab::Shadow,
+                DebugGraphicsTab::DebugViews,
                 DebugGraphicsTab::Lighting,
             ];
             let subtab_width =
@@ -959,6 +1054,7 @@ impl DebugGui {
                 (DebugGraphicsTab::Ocean, "Ocean"),
                 (DebugGraphicsTab::Clouds, "Clouds"),
                 (DebugGraphicsTab::Shadow, "Shadow"),
+                (DebugGraphicsTab::DebugViews, "Debug Views"),
                 (DebugGraphicsTab::Lighting, "Lighting"),
             ];
             let subtab_width =
@@ -1025,6 +1121,7 @@ impl DebugGui {
                 DebugGraphicsTab::Ocean => PageType::Ocean,
                 DebugGraphicsTab::Clouds => PageType::Clouds,
                 DebugGraphicsTab::Shadow => PageType::Shadow,
+                DebugGraphicsTab::DebugViews => PageType::DebugViews,
                 DebugGraphicsTab::Lighting => PageType::Lighting,
             }
         } else {
