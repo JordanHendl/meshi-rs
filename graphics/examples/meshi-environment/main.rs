@@ -30,7 +30,8 @@ fn main() {
         [1280, 720],
         common_setup::CameraSetup {
             transform: Mat4::from_translation(Vec3::new(0.0, 6.0, 8.0)),
-            far: 50_000.0,
+            near:  0.5,
+            far: 1000.0,
             ..Default::default()
         },
         renderer,
