@@ -247,22 +247,23 @@ impl CascadedShadows {
             min.y = center_xy.y - half_xy.y;
             max.y = center_xy.y + half_xy.y;
 
-            let mut min_z = 0.0; // min.z;
+            let mut min_z = min.z;
             let mut max_z = max.z;
             if min_z > max_z {
                 std::mem::swap(&mut min_z, &mut max_z);
             }
 
-            let mut near = min.z;
-            let mut far = max.z;
-            if near > far {
-                std::mem::swap(&mut near, &mut far);
+            let mut near = (-max_z).max(0.1);
+            let mut far = (-min_z).max(near + 0.001);
+            if !near.is_finite() || !far.is_finite() {
+                near = 0.1;
+                far = 5000.0;
             }
             if (far - near).abs() < 0.001 {
                 far = near + 0.001;
             }
 
-            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, 0.1, 5000.0);
+            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, near, far);
             matrices[cascade_index] = Self::clip_space_fixup() * light_proj * light_view;
         }
 

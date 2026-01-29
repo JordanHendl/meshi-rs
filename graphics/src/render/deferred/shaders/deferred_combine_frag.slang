@@ -172,12 +172,12 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    return 1.0;
+    return 0.0;
   }
 
   float depth = shadow_pos.z;
   if (depth < 0.0 || depth > 1.0) {
-    return 1.0;
+    return 0.0;
   }
 
   uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
@@ -200,6 +200,10 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
       float map_depth = meshi_bindless_textures[shadow_id].Load(coord, 0).x;
       shadow += (depth - bias) <= map_depth ? 1.0 : 0.0;
     }
+  }
+  
+  if(shadow_pos.z > 1.0) {
+    return 0.5;
   }
 
   return shadow / 9.0;
@@ -347,7 +351,7 @@ FSOutput main(FSInput input) {
       uint light_flags = asuint(light.extra.x);
       bool casts_shadows = (light_flags & 1u) != 0u;
       if (casts_shadows) {
-        float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
+        float bias = max(0.005, 0.05 * (1.0 - n_dot_l));
         shadow_factor = sample_shadow(per_obj.shadow_texture_id, position.xyz, cascade_index, cascade_count, bias);
       }
     } else if (light_type == LIGHT_TYPE_SPOT && per_obj.spot_shadow_texture_id != INVALID_BINDLESS_ID) {
@@ -355,7 +359,8 @@ FSOutput main(FSInput input) {
       bool casts_shadows = (light_flags & 1u) != 0u;
       bool spot_shadow_enabled = light.extra.y > 0.5;
       if (casts_shadows && spot_shadow_enabled) {
-        float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
+//        float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
+        float bias = max(0.005, 0.05 * (1.0 - n_dot_l));
         shadow_factor = sample_spot_shadow(per_obj.spot_shadow_matrix, per_obj.spot_shadow_texture_id, position.xyz, bias);
       }
     }
