@@ -10,7 +10,7 @@ use dashi::{
 };
 use furikake::BindlessState;
 use furikake::reservations::ReservedBinding;
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3};
 use meshi_ffi_structs::LightInfo;
 use tare::graph::*;
 use tare::transient::TransientImage;
@@ -61,15 +61,6 @@ pub struct SpotShadowResult {
 pub struct ShadowResult {
     pub cascaded: CascadedShadowResult,
     pub spot: SpotShadowResult,
-}
-
-fn vulkan_depth_correction() -> Mat4 {
-    Mat4::from_cols(
-        Vec4::new(1.0, 0.0, 0.0, 0.0),
-        Vec4::new(0.0, 1.0, 0.0, 0.0),
-        Vec4::new(0.0, 0.0, 0.5, 0.0),
-        Vec4::new(0.0, 0.0, 0.5, 1.0),
-    )
 }
 
 pub struct CascadedShadows {
@@ -191,6 +182,12 @@ impl CascadedShadows {
         splits
     }
 
+    fn clip_space_fixup() -> Mat4 {
+        Mat4::from_cols_array(&[
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
+        ])
+    }
+
     fn compute_shadow_cascade_data(
         &self,
         camera: &furikake::types::Camera,
@@ -229,7 +226,7 @@ impl CascadedShadows {
             };
             let mut min = Vec3::splat(f32::MAX);
             let mut max = Vec3::splat(f32::MIN);
-            let depth = 100.0;
+            let depth = 1.0;
             let eye = center - light_dir * depth;
             let light_view = Mat4::look_at_rh(eye, center, up);
 
@@ -250,15 +247,23 @@ impl CascadedShadows {
             min.y = center_xy.y - half_xy.y;
             max.y = center_xy.y + half_xy.y;
 
-            let z_padding = 10.0;
-            let mut min_z = min.z - z_padding;
-            let mut max_z = max.z + z_padding;
-            if (max_z - min_z).abs() < 0.001 {
-                max_z = min_z + 0.001;
+            let mut min_z = 0.0; // min.z;
+            let mut max_z = max.z;
+            if min_z > max_z {
+                std::mem::swap(&mut min_z, &mut max_z);
             }
 
-            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, min_z, max_z);
-            matrices[cascade_index] = vulkan_depth_correction() * light_proj * light_view;
+            let mut near = min.z;
+            let mut far = max.z;
+            if near > far {
+                std::mem::swap(&mut near, &mut far);
+            }
+            if (far - near).abs() < 0.001 {
+                far = near + 0.001;
+            }
+
+            let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, 0.1, 5000.0);
+            matrices[cascade_index] = Self::clip_space_fixup() * light_proj * light_view;
         }
 
         let bump = crate::render::global_bump().get();
@@ -511,6 +516,11 @@ impl SpotShadows {
             },
         );
     }
+    fn clip_space_fixup() -> Mat4 {
+        Mat4::from_cols_array(&[
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
+        ])
+    }
 
     fn spot_shadow_matrix(light: &LightInfo) -> Mat4 {
         let position = Vec3::new(light.pos_x, light.pos_y, light.pos_z);
@@ -535,7 +545,7 @@ impl SpotShadows {
             1000.0
         };
         let proj = Mat4::perspective_rh(fov, 1.0, near, far);
-        vulkan_depth_correction() * proj * view
+        Self::clip_space_fixup() * proj * view
     }
 
     pub fn process(
