@@ -279,9 +279,9 @@ pub struct ShadowCascadeSettings {
 impl Default for ShadowCascadeSettings {
     fn default() -> Self {
         Self {
-            cascade_count: 1,
+            cascade_count: 4,
             split_lambda: 0.5,
-            cascade_splits: [0.25, 0.5, 0.75, 1.0],
+            cascade_splits: [0.1, 0.25, 0.5, 1.0],
             cascade_extents: [50000.0; 4],
             cascade_resolutions: [256; 4],
             cascade_strengths: [1.0; 4],

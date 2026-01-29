@@ -966,7 +966,7 @@ impl SkyRenderer {
 
     pub fn sun_direction(&self) -> Vec3 {
         resolve_celestial_direction(
-            self.sky_settings.sun_direction,
+            explicit_celestial_direction(&self.sky_settings, false),
             self.sky_settings.effective_time_of_day(),
             self.sky_settings.latitude_degrees,
             self.sky_settings.longitude_degrees,
@@ -1390,6 +1390,16 @@ impl SkyRenderer {
     }
 }
 
+fn explicit_celestial_direction(settings: &SkyFrameSettings, is_moon: bool) -> Option<Vec3> {
+    if settings.auto_sun_enabled {
+        None
+    } else if is_moon {
+        settings.moon_direction
+    } else {
+        settings.sun_direction
+    }
+}
+
 fn resolve_celestial_direction(
     explicit: Option<Vec3>,
     time_of_day: Option<f32>,
@@ -1426,14 +1436,14 @@ fn resolve_celestial_direction(
 fn compute_celestial_lighting(settings: &SkyFrameSettings) -> CelestialLighting {
     let time_of_day = settings.effective_time_of_day();
     let sun_dir = resolve_celestial_direction(
-        settings.sun_direction,
+        explicit_celestial_direction(settings, false),
         time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         false,
     );
     let moon_dir = resolve_celestial_direction(
-        settings.moon_direction,
+        explicit_celestial_direction(settings, true),
         time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,

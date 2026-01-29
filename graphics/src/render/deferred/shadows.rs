@@ -10,7 +10,7 @@ use dashi::{
 };
 use furikake::BindlessState;
 use furikake::reservations::ReservedBinding;
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_ffi_structs::LightInfo;
 use tare::graph::*;
 use tare::transient::TransientImage;
@@ -61,6 +61,15 @@ pub struct SpotShadowResult {
 pub struct ShadowResult {
     pub cascaded: CascadedShadowResult,
     pub spot: SpotShadowResult,
+}
+
+fn vulkan_depth_correction() -> Mat4 {
+    Mat4::from_cols(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.5, 0.0),
+        Vec4::new(0.0, 0.0, 0.5, 1.0),
+    )
 }
 
 pub struct CascadedShadows {
@@ -241,14 +250,15 @@ impl CascadedShadows {
             min.y = center_xy.y - half_xy.y;
             max.y = center_xy.y + half_xy.y;
 
-            let mut min_z = 0.0 ; // min.z;
-            let mut max_z = max.z;
+            let z_padding = 10.0;
+            let mut min_z = min.z - z_padding;
+            let mut max_z = max.z + z_padding;
             if (max_z - min_z).abs() < 0.001 {
                 max_z = min_z + 0.001;
             }
 
             let light_proj = Mat4::orthographic_rh(min.x, max.x, min.y, max.y, min_z, max_z);
-            matrices[cascade_index] = light_proj * light_view;
+            matrices[cascade_index] = vulkan_depth_correction() * light_proj * light_view;
         }
 
         let bump = crate::render::global_bump().get();
@@ -525,7 +535,7 @@ impl SpotShadows {
             1000.0
         };
         let proj = Mat4::perspective_rh(fov, 1.0, near, far);
-        proj * view
+        vulkan_depth_correction() * proj * view
     }
 
     pub fn process(

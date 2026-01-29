@@ -33,6 +33,7 @@ static const uint DEBUG_VIEW_OPAQUE_SHADOW_0 = 20u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_1 = 21u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_2 = 22u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_3 = 23u;
+static const uint INVALID_BINDLESS_ID = 0xFFFFu;
 
 struct Camera {
   column_major float4x4 world_from_camera;
@@ -342,14 +343,14 @@ FSOutput main(FSInput input) {
     float3 diffuse = kd * albedo.rgb / 3.14159265;
 
     float shadow_factor = 1.0;
-    if (light_type == LIGHT_TYPE_DIRECTIONAL && per_obj.shadow_texture_id != 0u) {
+    if (light_type == LIGHT_TYPE_DIRECTIONAL && per_obj.shadow_texture_id != INVALID_BINDLESS_ID) {
       uint light_flags = asuint(light.extra.x);
       bool casts_shadows = (light_flags & 1u) != 0u;
       if (casts_shadows) {
         float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
         shadow_factor = sample_shadow(per_obj.shadow_texture_id, position.xyz, cascade_index, cascade_count, bias);
       }
-    } else if (light_type == LIGHT_TYPE_SPOT && per_obj.spot_shadow_texture_id != 0u) {
+    } else if (light_type == LIGHT_TYPE_SPOT && per_obj.spot_shadow_texture_id != INVALID_BINDLESS_ID) {
       uint light_flags = asuint(light.extra.x);
       bool casts_shadows = (light_flags & 1u) != 0u;
       bool spot_shadow_enabled = light.extra.y > 0.5;

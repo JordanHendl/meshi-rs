@@ -615,54 +615,6 @@ pub fn register_debug(settings: &mut CloudSettings) {
             ],
             Some("Selects a diagnostic view of cloud rendering buffers."),
         );
-        debug_register_radial_with_description(
-            PageType::Shadow,
-            "Shadow Debug View",
-            DebugRegistryValue::CloudDebugView(&mut settings.debug_view),
-            &[
-                DebugRadialOption {
-                    label: "None",
-                    value: 0.0,
-                },
-                DebugRadialOption {
-                    label: "Shadow Map",
-                    value: 2.0,
-                },
-                DebugRadialOption {
-                    label: "Cloud Cascade 0",
-                    value: 11.0,
-                },
-                DebugRadialOption {
-                    label: "Cloud Cascade 1",
-                    value: 12.0,
-                },
-                DebugRadialOption {
-                    label: "Cloud Cascade 2",
-                    value: 13.0,
-                },
-                DebugRadialOption {
-                    label: "Cloud Cascade 3",
-                    value: 14.0,
-                },
-                DebugRadialOption {
-                    label: "Opaque Cascade 0",
-                    value: 20.0,
-                },
-                DebugRadialOption {
-                    label: "Opaque Cascade 1",
-                    value: 21.0,
-                },
-                DebugRadialOption {
-                    label: "Opaque Cascade 2",
-                    value: 22.0,
-                },
-                DebugRadialOption {
-                    label: "Opaque Cascade 3",
-                    value: 23.0,
-                },
-            ],
-            Some("Selects a diagnostic view of cloud shadow cascades."),
-        );
         debug_register_with_description(
             PageType::Clouds,
             Slider::new(0, "Budget (ms)", 0.1, 20.0, 0.0),

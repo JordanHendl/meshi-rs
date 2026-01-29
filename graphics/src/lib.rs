@@ -1257,15 +1257,20 @@ fn directional_light_info(direction: Vec3, color: Vec3, intensity: f32) -> Light
 
 fn resolve_sun_moon_direction(settings: &SkyFrameSettings) -> (Vec3, Vec3) {
     let time_of_day = settings.effective_time_of_day();
+    let (sun_explicit, moon_explicit) = if settings.auto_sun_enabled {
+        (None, None)
+    } else {
+        (settings.sun_direction, settings.moon_direction)
+    };
     let sun_dir = resolve_celestial_direction(
-        settings.sun_direction,
+        sun_explicit,
         time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,
         false,
     );
     let moon_dir = resolve_celestial_direction(
-        settings.moon_direction,
+        moon_explicit,
         time_of_day,
         settings.latitude_degrees,
         settings.longitude_degrees,

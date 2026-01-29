@@ -1991,10 +1991,70 @@ impl DeferredRenderer {
                 },
             );
 
+            let deferred_debug_output = match self.debug_views.deferred_framebuffer {
+                value if value == DeferredFramebufferDebugView::Position as u32 => {
+                    Some(position.view)
+                }
+                value if value == DeferredFramebufferDebugView::Diffuse as u32 => {
+                    Some(diffuse.view)
+                }
+                value if value == DeferredFramebufferDebugView::Normal as u32 => {
+                    Some(normal.view)
+                }
+                value if value == DeferredFramebufferDebugView::Material as u32 => {
+                    Some(material_code.view)
+                }
+                _ => None,
+            };
+            let shadow_debug_output = match self.debug_views.shadow_map {
+                value if value == DeferredShadowDebugView::Cascaded as u32 => {
+                    Some(shadow_map.view)
+                }
+                value if value == DeferredShadowDebugView::Spot as u32 => {
+                    spot_shadow_map.as_ref().map(|map| map.view)
+                }
+                _ => None,
+            };
+            let depth_debug_output = if self.debug_views.depth == DeferredDepthDebugView::On as u32
+            {
+                Some(depth)
+            } else {
+                None
+            };
+            let debug_output = deferred_debug_output
+                .or(shadow_debug_output)
+                .or(depth_debug_output);
+            let debug_output_active = debug_output.is_some();
+
             let scene_color_view = scene_color.view;
             let final_combine_view = final_combine.view;
             let scene_width = self.data.viewport.area.w as u32;
             let scene_height = self.data.viewport.area.h as u32;
+
+            if let Some(debug_output_view) = debug_output {
+                self.graph.add_compute_pass(move |mut cmd| {
+                    cmd = cmd.blit_images(&BlitImage {
+                        src: debug_output_view.img,
+                        dst: final_combine_view.img,
+                        src_range: SubresourceRange::new(0, 1, 0, 1),
+                        dst_range: SubresourceRange::new(0, 1, 0, 1),
+                        filter: Filter::Linear,
+                        src_region: Rect2D {
+                            x: 0,
+                            y: 0,
+                            w: scene_width,
+                            h: scene_height,
+                        },
+                        dst_region: Rect2D {
+                            x: 0,
+                            y: 0,
+                            w: scene_width,
+                            h: scene_height,
+                        },
+                    });
+                    cmd.end()
+                });
+            }
             self.graph.add_compute_pass(move |mut cmd| {
                 cmd = cmd.blit_images(&BlitImage {
                     src: final_combine_view.img,
@@ -2081,48 +2141,50 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    cmd = cmd.combine(self.subrender.environment.render(
-                        &self.data.viewport,
-                        camera_handle,
-                        Some(scene_color.view),
-                        Some(depth),
-                        Some(shadow_map.view),
-                        cascade_data.count,
-                        shadow_resolution,
-                        Vec4::from_array(cascade_data.splits),
-                        cascade_data.matrices,
-                    ));
+                    if !debug_output_active {
+                        cmd = cmd.combine(self.subrender.environment.render(
+                            &self.data.viewport,
+                            camera_handle,
+                            Some(scene_color.view),
+                            Some(depth),
+                            Some(shadow_map.view),
+                            cascade_data.count,
+                            shadow_resolution,
+                            Vec4::from_array(cascade_data.splits),
+                            cascade_data.matrices,
+                        ));
 
-                    if !billboard_draws.is_empty() {
-                        let mut c = cmd
-                            .bind_graphics_pipeline(self.psos.billboard.handle)
-                            .update_viewport(&self.data.viewport);
+                        if !billboard_draws.is_empty() {
+                            let mut c = cmd
+                                .bind_graphics_pipeline(self.psos.billboard.handle)
+                                .update_viewport(&self.data.viewport);
 
-                        for draw in billboard_draws.iter() {
-                            let mut alloc = self
-                                .data
-                                .dynamic
-                                .bump()
-                                .expect("Failed to allocate billboard draw buffer!");
-                            let per_obj = &mut alloc.slice::<PerObjectInfo>()[0];
-                            per_obj.transform = draw.transform;
-                            per_obj.scene_id = draw.scene_handle;
-                            per_obj.material_id = draw.material;
-                            per_obj.camera_id = camera_handle;
-                            per_obj.skeleton_id = Handle::default();
-                            per_obj.animation_state_id = Handle::default();
-                            per_obj.per_obj_joints_id = Handle::default();
+                            for draw in billboard_draws.iter() {
+                                let mut alloc = self
+                                    .data
+                                    .dynamic
+                                    .bump()
+                                    .expect("Failed to allocate billboard draw buffer!");
+                                let per_obj = &mut alloc.slice::<PerObjectInfo>()[0];
+                                per_obj.transform = draw.transform;
+                                per_obj.scene_id = draw.scene_handle;
+                                per_obj.material_id = draw.material;
+                                per_obj.camera_id = camera_handle;
+                                per_obj.skeleton_id = Handle::default();
+                                per_obj.animation_state_id = Handle::default();
+                                per_obj.per_obj_joints_id = Handle::default();
 
-                            c = c.draw(&Draw {
-                                vertices: draw.vertex_buffer,
-                                bind_tables: self.psos.billboard.tables(),
-                                dynamic_buffers: [None, Some(alloc), None, None],
-                                instance_count: 1,
-                                count: 6,
-                            });
+                                c = c.draw(&Draw {
+                                    vertices: draw.vertex_buffer,
+                                    bind_tables: self.psos.billboard.tables(),
+                                    dynamic_buffers: [None, Some(alloc), None, None],
+                                    instance_count: 1,
+                                    count: 6,
+                                });
+                            }
+
+                            cmd = c.unbind_graphics_pipeline();
                         }
-
-                        cmd = c.unbind_graphics_pipeline();
                     }
 
                     cmd = cmd.combine(
@@ -2136,40 +2198,7 @@ impl DeferredRenderer {
                 },
             );
 
-            let deferred_debug_output = match self.debug_views.deferred_framebuffer {
-                value if value == DeferredFramebufferDebugView::Position as u32 => {
-                    Some(position.view)
-                }
-                value if value == DeferredFramebufferDebugView::Diffuse as u32 => {
-                    Some(diffuse.view)
-                }
-                value if value == DeferredFramebufferDebugView::Normal as u32 => {
-                    Some(normal.view)
-                }
-                value if value == DeferredFramebufferDebugView::Material as u32 => {
-                    Some(material_code.view)
-                }
-                _ => None,
-            };
-            let shadow_debug_output = match self.debug_views.shadow_map {
-                value if value == DeferredShadowDebugView::Cascaded as u32 => {
-                    Some(shadow_map.view)
-                }
-                value if value == DeferredShadowDebugView::Spot as u32 => {
-                    spot_shadow_map.as_ref().map(|map| map.view)
-                }
-                _ => None,
-            };
-            let depth_debug_output = if self.debug_views.depth == DeferredDepthDebugView::On as u32
-            {
-                Some(depth)
-            } else {
-                None
-            };
-            let output_image = deferred_debug_output
-                .or(shadow_debug_output)
-                .or(depth_debug_output)
-                .unwrap_or(final_combine.view);
+            let output_image = final_combine.view;
             outputs.push(ViewOutput {
                 camera: *camera,
                 image: output_image,

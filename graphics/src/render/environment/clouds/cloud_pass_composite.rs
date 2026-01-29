@@ -219,7 +219,7 @@ impl CloudCompositePass {
                 }],
                 sample_count,
                 depth_test: Some(DepthInfo {
-                    should_test: false,
+                    should_test: true,
                     should_write: false,
                 }),
                 ..Default::default()
