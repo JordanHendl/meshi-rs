@@ -350,6 +350,14 @@ impl TerrainRenderer {
         }
     }
 
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
     pub fn initialize_deferred(
         &mut self,
         ctx: &mut Context,

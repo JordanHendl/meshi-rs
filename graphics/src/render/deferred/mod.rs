@@ -4,6 +4,7 @@ use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
     terrain::TerrainFrameSettings,
 };
+use dashi::cmd::Executable;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
 use super::scene::GPUScene;
@@ -152,6 +153,22 @@ struct DeferredPSO {
 
 struct DeferredExecution {
     cull_queue: CommandRing,
+}
+
+struct DeferredFrameBlitter;
+
+impl DeferredFrameBlitter {
+    fn pre_compute() -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
+    fn post_compute(blits: &[BlitImage]) -> CommandStream<Executable> {
+        let mut cmd = CommandStream::new().begin();
+        for blit in blits {
+            cmd = cmd.blit_images(blit);
+        }
+        cmd.end()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1684,21 +1701,25 @@ impl DeferredRenderer {
             .update_terrain(TerrainFrameSettings { camera_position });
 
         self.graph.add_compute_pass(|mut cmd| {
-            let c = CommandStream::new()
-                .begin()
-                .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads);
-
             let state_update = self
                 .state
                 .update()
                 .expect("Failed to update furikake state")
-                .combine(c)
                 .combine(self.proc.scene.cull());
 
-            cmd.combine(state_update)
+            cmd = cmd
+                .combine(self.proc.scene.pre_compute())
+                .combine(self.proc.draw_builder.pre_compute())
+                .combine(self.subrender.environment.pre_compute(self.ctx.as_mut()))
+                .combine(self.shadows.pre_compute())
+                .combine(self.gui.pre_compute())
+                .combine(self.text.pre_compute())
+                .combine(DeferredFrameBlitter::pre_compute())
+                .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads)
+                .combine(state_update)
                 .combine(self.subrender.environment.record_compute(self.ctx.as_mut()))
-                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
-                .end()
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
+            cmd.end()
         });
     }
 
@@ -1996,7 +2017,6 @@ impl DeferredRenderer {
                     per_obj.spot_shadow_matrix = spot_shadow_matrix;
 
                     cmd = cmd
-                        .combine(self.shadows.cascade_buffer().sync_up())
                         .bind_graphics_pipeline(self.psos.combine_pso.handle)
                         .update_viewport(&self.data.viewport)
                         .draw(&Draw {
@@ -2053,33 +2073,9 @@ impl DeferredRenderer {
             let scene_height = self.data.viewport.area.h as u32;
 
             if let Some(debug_output_view) = debug_output {
-                self.graph.add_compute_pass(move |mut cmd| {
-                    cmd = cmd.blit_images(&BlitImage {
-                        src: debug_output_view.img,
-                        dst: final_combine_view.img,
-                        src_range: SubresourceRange::new(0, 1, 0, 1),
-                        dst_range: SubresourceRange::new(0, 1, 0, 1),
-                        filter: Filter::Linear,
-                        src_region: Rect2D {
-                            x: 0,
-                            y: 0,
-                            w: scene_width,
-                            h: scene_height,
-                        },
-                        dst_region: Rect2D {
-                            x: 0,
-                            y: 0,
-                            w: scene_width,
-                            h: scene_height,
-                        },
-                    });
-                    cmd.end()
-                });
-            }
-            self.graph.add_compute_pass(move |mut cmd| {
-                cmd = cmd.blit_images(&BlitImage {
-                    src: final_combine_view.img,
-                    dst: scene_color_view.img,
+                let debug_blits = vec![BlitImage {
+                    src: debug_output_view.img,
+                    dst: final_combine_view.img,
                     src_range: SubresourceRange::new(0, 1, 0, 1),
                     dst_range: SubresourceRange::new(0, 1, 0, 1),
                     filter: Filter::Linear,
@@ -2095,7 +2091,33 @@ impl DeferredRenderer {
                         w: scene_width,
                         h: scene_height,
                     },
+                }];
+                self.graph.add_compute_pass(move |mut cmd| {
+                    cmd = cmd.combine(DeferredFrameBlitter::post_compute(&debug_blits));
+                    cmd.end()
                 });
+            }
+            let scene_blits = vec![BlitImage {
+                src: final_combine_view.img,
+                dst: scene_color_view.img,
+                src_range: SubresourceRange::new(0, 1, 0, 1),
+                dst_range: SubresourceRange::new(0, 1, 0, 1),
+                filter: Filter::Linear,
+                src_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: scene_width,
+                    h: scene_height,
+                },
+                dst_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: scene_width,
+                    h: scene_height,
+                },
+            }];
+            self.graph.add_compute_pass(move |mut cmd| {
+                cmd = cmd.combine(DeferredFrameBlitter::post_compute(&scene_blits));
                 cmd.end()
             });
 
@@ -2226,6 +2248,19 @@ impl DeferredRenderer {
                 semaphore: semaphores[0],
             });
         }
+
+        self.graph.add_compute_pass(|mut cmd| {
+            cmd = cmd
+                .combine(self.proc.scene.post_compute())
+                .combine(self.proc.draw_builder.post_compute())
+                .combine(self.subrender.environment.post_compute())
+                .combine(self.shadows.post_compute())
+                .combine(self.gui.post_compute())
+                .combine(self.text.post_compute())
+                .combine(DeferredFrameBlitter::post_compute(&[]))
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
+            cmd.end()
+        });
 
         let mut wait_sems = BumpVec::with_capacity_in(sems.len() + 1, &self.frame_bump);
         wait_sems.extend(sems.iter().copied());

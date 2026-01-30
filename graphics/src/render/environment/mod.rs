@@ -114,6 +114,24 @@ impl EnvironmentRenderer {
         self.dynamic.reset();
     }
 
+    pub fn pre_compute(&mut self, ctx: &mut Context) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.sky.pre_compute(ctx))
+            .combine(self.ocean.pre_compute())
+            .combine(self.terrain.pre_compute())
+            .end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.sky.post_compute())
+            .combine(self.ocean.post_compute())
+            .combine(self.terrain.post_compute())
+            .end()
+    }
+
     pub fn update(&mut self, settings: EnvironmentFrameSettings) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);
@@ -363,7 +381,12 @@ impl EnvironmentRenderer {
         delta_time: f32,
     ) -> CommandStream<Executable> {
         if let Some(clouds) = self.clouds.as_mut() {
-            clouds.update(ctx, state, viewport, camera, delta_time)
+            CommandStream::new()
+                .begin()
+                .combine(clouds.pre_compute())
+                .combine(clouds.update(ctx, state, viewport, camera, delta_time))
+                .combine(clouds.post_compute())
+                .end()
         } else {
             CommandStream::new().begin().end()
         }

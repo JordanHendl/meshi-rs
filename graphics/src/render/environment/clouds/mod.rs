@@ -746,29 +746,6 @@ impl CloudRenderer {
         let _frame_marker = bump.alloc(0u8);
         let mut cmd = CommandStream::new().begin();
 
-        if let Some(view) = self.pending_weather_map.as_ref() {
-            let size = self.assets.weather_map_size;
-            cmd = cmd.blit_images(&BlitImage {
-                src: view.img,
-                dst: self.assets.weather_map.img,
-                src_range: SubresourceRange::new(0, 1, 0, 1),
-                dst_range: SubresourceRange::new(0, 1, 0, 1),
-                filter: Filter::Linear,
-                src_region: Rect2D {
-                    x: 0,
-                    y: 0,
-                    w: size,
-                    h: size,
-                },
-                dst_region: Rect2D {
-                    x: 0,
-                    y: 0,
-                    w: size,
-                    h: size,
-                },
-            });
-        }
-
         if !self.settings.enabled || !self.weather_map_configured {
             self.timings = CloudTimingResult::default();
             self.shadow_map_info = None;
@@ -943,6 +920,41 @@ impl CloudRenderer {
             .unwrap_or(0.0);
 
         cmd.end()
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        let mut cmd = CommandStream::new().begin();
+        if let Some(view) = self.pending_weather_map.as_ref() {
+            let size = self.assets.weather_map_size;
+            cmd = cmd.blit_images(&BlitImage {
+                src: view.img,
+                dst: self.assets.weather_map.img,
+                src_range: SubresourceRange::new(0, 1, 0, 1),
+                dst_range: SubresourceRange::new(0, 1, 0, 1),
+                filter: Filter::Linear,
+                src_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: size,
+                    h: size,
+                },
+                dst_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: size,
+                    h: size,
+                },
+            });
+        }
+        cmd.combine(self.shadow_pass.pre_compute())
+            .combine(self.raymarch_pass.pre_compute())
+            .combine(self.temporal_pass.pre_compute())
+            .combine(self.composite_pass.pre_compute())
+            .end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
     }
 
     pub fn record_composite(

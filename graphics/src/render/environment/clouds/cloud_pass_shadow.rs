@@ -214,7 +214,6 @@ impl CloudShadowPass {
         let cascade_count = self.shadow_cascade_count.max(1);
         CommandStream::new()
             .begin()
-            .combine(self.params.sync_up())
             .prepare_buffer(self.shadow_buffer, UsageBits::COMPUTE_SHADER)
             .gpu_timer_begin(self.timer_index)
             .dispatch(&Dispatch {
@@ -228,6 +227,10 @@ impl CloudShadowPass {
             .gpu_timer_end(self.timer_index)
             .unbind_pipeline()
             .end()
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().combine(self.params.sync_up()).end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

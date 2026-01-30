@@ -280,7 +280,6 @@ impl CloudCompositePass {
         timer_index: u32,
     ) -> CommandStream<PendingGraphics> {
         CommandStream::<PendingGraphics>::subdraw()
-            .combine(self.params.sync_up())
             .gpu_timer_begin(timer_index)
             .bind_graphics_pipeline(self.pipeline.handle)
             .update_viewport(viewport)
@@ -292,6 +291,10 @@ impl CloudCompositePass {
             })
             .unbind_graphics_pipeline()
             .gpu_timer_end(timer_index)
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().combine(self.params.sync_up()).end()
     }
 
     pub fn pipeline(&self) -> &PSO {

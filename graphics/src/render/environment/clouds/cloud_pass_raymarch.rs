@@ -354,7 +354,6 @@ impl CloudRaymarchPass {
         let output_resolution = self.output_resolution;
         CommandStream::new()
             .begin()
-            .combine(self.params.sync_up())
             .prepare_buffer(self.color_buffer, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.transmittance_buffer, UsageBits::COMPUTE_SHADER)
             .prepare_buffer(self.depth_buffer, UsageBits::COMPUTE_SHADER)
@@ -371,6 +370,10 @@ impl CloudRaymarchPass {
             .gpu_timer_end(self.timer_index)
             .unbind_pipeline()
             .end()
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().combine(self.params.sync_up()).end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

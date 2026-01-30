@@ -1,9 +1,6 @@
-mod cloud;
-
 use super::EnvironmentRendererInfo;
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use cloud::CloudSimulation;
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{BlitImage, Draw};
 use dashi::structs::*;
@@ -418,7 +415,6 @@ pub struct SkyRenderer {
     pending_cubemap_swap: Option<noren::rdb::imagery::DeviceCubemap>,
     cubemap_format: Format,
     sky_settings: SkyFrameSettings,
-    clouds: CloudSimulation,
     cfg: StagedBuffer,
     enabled: bool,
 }
@@ -563,7 +559,6 @@ impl SkyRenderer {
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
-        let clouds = CloudSimulation::new(ctx);
         let shaders = compile_sky_shaders();
         let skybox_shaders = compile_skybox_shaders();
 
@@ -730,7 +725,6 @@ impl SkyRenderer {
             pending_cubemap_swap: info.skybox.cubemap.clone(),
             cubemap_format: info.color_format,
             sky_settings: SkyFrameSettings::default(),
-            clouds,
             cfg,
             enabled: true,
         }
@@ -1042,8 +1036,6 @@ impl SkyRenderer {
         dynamic: &mut DynamicAllocator,
         face_index: usize,
     ) -> CommandStream<PendingGraphics> {
-        self.update_sky_config();
-
         let mut alloc = dynamic.bump().expect("Failed to allocate sky draw params");
 
         let params = &mut alloc.slice::<SkyDrawParams>()[0];
@@ -1055,7 +1047,6 @@ impl SkyRenderer {
         params._padding = [0; 3];
 
         CommandStream::<PendingGraphics>::subdraw()
-            .combine(self.cfg.sync_up())
             .bind_graphics_pipeline(self.pipeline.handle)
             .update_viewport(viewport)
             .draw(&Draw {
@@ -1081,8 +1072,6 @@ impl SkyRenderer {
         }
 
         if self.use_procedural_cubemap {
-            self.update_sky_config();
-
             let mut alloc = dynamic
                 .bump()
                 .expect("Failed to allocate sky dynamic buffer");
@@ -1092,7 +1081,6 @@ impl SkyRenderer {
             params._padding = [0; 3];
 
             CommandStream::<PendingGraphics>::subdraw()
-                .combine(self.cfg.sync_up())
                 .bind_graphics_pipeline(self.pipeline.handle)
                 .update_viewport(viewport)
                 .draw(&Draw {
@@ -1116,7 +1104,6 @@ impl SkyRenderer {
             params._padding = [0.0; 2];
 
             CommandStream::<PendingGraphics>::subdraw()
-                .combine(self.cfg.sync_up())
                 .bind_graphics_pipeline(self.skybox_pipeline.handle)
                 .update_viewport(viewport)
                 .draw(&Draw {
@@ -1138,6 +1125,20 @@ impl SkyRenderer {
     ) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
 
+        stream.end()
+    }
+}
+
+fn cubemap_size_from_viewport(viewport: &Viewport) -> u32 {
+    let size = viewport.area.w.min(viewport.area.h).max(1.0);
+    size.round() as u32
+}
+
+impl SkyRenderer {
+    pub fn pre_compute(&mut self, ctx: &mut dashi::Context) -> CommandStream<Executable> {
+        let mut stream = CommandStream::new().begin();
+        self.update_sky_config();
+        stream = stream.combine(self.cfg.sync_up());
         if let Some(cubemap) = self.pending_cubemap_swap.take() {
             let target_info = self.ensure_skybox_swap_target(ctx, &cubemap.info);
             let src_range =
@@ -1165,21 +1166,13 @@ impl SkyRenderer {
             });
             self.apply_skybox_binding();
         }
-
-        if self.enabled {
-            stream = stream.combine(self.clouds.record_compute(time, delta_time));
-        }
-
         stream.end()
     }
-}
 
-fn cubemap_size_from_viewport(viewport: &Viewport) -> u32 {
-    let size = viewport.area.w.min(viewport.area.h).max(1.0);
-    size.round() as u32
-}
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
 
-impl SkyRenderer {
     fn apply_skybox_binding(&mut self) {
         let view = if self.use_procedural_cubemap {
             self.procedural_cubemap

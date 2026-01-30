@@ -197,6 +197,25 @@ impl GPUScene {
             .expect("release bindless transform");
     }
 
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.data.objects_to_process.sync_up().unwrap())
+            .combine(self.data.dispatch.sync_up())
+            .combine(self.data.bin_counts.sync_up())
+            .combine(self.camera.sync_up())
+            .end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.data.draw_bins.sync_down().expect("sync culled bins"))
+            .combine(self.data.bin_counts.sync_down())
+            .combine(self.data.dispatch.sync_down())
+            .end()
+    }
+
     fn make_pipelines(&mut self) -> Result<SceneComputePipelines, bento::BentoError> {
         let mut ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let state: &mut BindlessState = unsafe { self.state.as_mut() };
@@ -610,10 +629,6 @@ impl GPUScene {
         assert!(cull_state.tables()[0].is_some());
         assert!(cull_state.tables()[1].is_some());
         stream
-            .combine(self.data.objects_to_process.sync_up().unwrap())
-            .combine(self.data.dispatch.sync_up())
-            .combine(self.data.bin_counts.sync_up())
-            .combine(self.camera.sync_up())
             .prepare_buffer(
                 self.data.bin_counts.device().handle,
                 UsageBits::COMPUTE_SHADER,
@@ -655,10 +670,9 @@ impl GPUScene {
     pub fn cull_and_sync(&mut self) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
+            .combine(self.pre_compute())
             .combine(self.cull())
-            .combine(self.data.draw_bins.sync_down().expect("sync culled bins"))
-            .combine(self.data.bin_counts.sync_down())
-            .combine(self.data.dispatch.sync_down())
+            .combine(self.post_compute())
             .end()
     }
 
@@ -903,7 +917,11 @@ mod tests {
 
         // Record the GPU commands for culling to ensure the pipelines and bindings are
         // properly constructed.
-        let commands = scene.cull();
+        let commands = CommandStream::new()
+            .begin()
+            .combine(scene.pre_compute())
+            .combine(scene.cull())
+            .end();
 
         let mut readback = CommandStream::new()
             .begin()

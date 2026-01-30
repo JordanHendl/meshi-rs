@@ -109,6 +109,14 @@ impl TextRenderer {
         }
     }
 
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
     pub fn initialize_database(&mut self, db: &mut DB) {
         self.db = Some(NonNull::new(db).expect("lmao"));
         let fonts = db.enumerate_sdf_fonts();

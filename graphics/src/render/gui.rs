@@ -1,7 +1,7 @@
 use bento::builder::{AttachmentDesc, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use bytemuck::{cast_slice, Pod, Zeroable};
-use dashi::cmd::{PendingGraphics, Recording};
+use dashi::cmd::{Executable, PendingGraphics, Recording};
 use dashi::driver::command::Draw;
 use dashi::{
     BlendFactor, BlendOp, BufferInfo, BufferUsage, ColorBlendState, CommandStream, Context,
@@ -91,6 +91,14 @@ impl GuiRenderer {
             last_single_batch_hash: None,
             last_single_batch_range: GuiMeshRange::default(),
         }
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
     }
 
     pub fn initialize_renderer(

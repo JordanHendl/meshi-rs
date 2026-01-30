@@ -1146,6 +1146,14 @@ impl OceanRenderer {
         }
     }
 
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
     pub fn update(&mut self, settings: OceanFrameSettings) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);

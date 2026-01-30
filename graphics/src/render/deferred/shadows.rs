@@ -3,10 +3,11 @@ use crate::render::SpotShadowLight;
 use crate::render::deferred::shadow::{ShadowPass, ShadowPassInfo};
 use crate::render::environment::EnvironmentRenderer;
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use dashi::cmd::Executable;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::{
-    AspectMask, ClearValue, Context, DynamicAllocator, Format, Handle, ImageInfo, Rect2D,
-    ShaderResource, Viewport,
+    AspectMask, ClearValue, CommandStream, Context, DynamicAllocator, Format, Handle, ImageInfo,
+    Rect2D, ShaderResource, Viewport,
 };
 use furikake::BindlessState;
 use furikake::reservations::ReservedBinding;
@@ -668,6 +669,17 @@ impl ShadowSystem {
             mode,
         );
         Self { cascaded, spot }
+    }
+
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.cascaded.cascade_buffer().sync_up())
+            .end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
     }
 
     pub fn cascades(&self) -> ShadowCascadeSettings {

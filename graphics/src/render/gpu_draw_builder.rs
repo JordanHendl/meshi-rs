@@ -178,6 +178,17 @@ impl GPUDrawBuilder {
         self.data.alloc.reset();
     }
 
+    pub fn pre_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new()
+            .begin()
+            .combine(self.data.draw_objects.sync_up().unwrap())
+            .end()
+    }
+
+    pub fn post_compute(&mut self) -> CommandStream<Executable> {
+        CommandStream::new().begin().end()
+    }
+
     pub fn build_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
         let stream = CommandStream::new().begin();
         let workgroup_size = 64u32;
@@ -208,7 +219,6 @@ impl GPUDrawBuilder {
         per_dispatch._padding = [0; 3];
 
         stream
-            .combine(self.data.draw_objects.sync_up().unwrap())
             .dispatch(&Dispatch {
                 x: dispatch_x,
                 y: 1,
