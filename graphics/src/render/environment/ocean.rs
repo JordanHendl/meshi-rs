@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
@@ -8,17 +8,17 @@ use dashi::{
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, Sampler, SamplerInfo,
     ShaderResource, SubresourceRange, UsageBits, Viewport,
 };
-use furikake::types::Camera;
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
+use furikake::types::Camera;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use tracing::warn;
 
-use crate::gui::debug::{
-    debug_register_int_with_description, debug_register_radial_with_description,
-    debug_register_with_description, DebugRadialOption, DebugRegistryValue, PageType,
-};
 use crate::gui::Slider;
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    debug_register_radial_with_description, debug_register_with_description,
+};
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -1063,6 +1063,7 @@ impl OceanRenderer {
             Some(dashi::DepthInfo {
                 should_test: true,
                 should_write: false,
+                ..Default::default()
             })
         } else {
             None

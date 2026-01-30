@@ -257,7 +257,7 @@ impl CascadedShadows {
             let mut far = (-min_z).max(near + 0.001);
             if !near.is_finite() || !far.is_finite() {
                 near = 0.1;
-                far = 5000.0;
+                far = 1.0;
             }
             if (far - near).abs() < 0.001 {
                 far = near + 0.001;
@@ -413,41 +413,6 @@ impl CascadedShadows {
                             terrain_draw_list,
                             terrain_draw_count,
                         ));
-                    }
-                }
-
-                if let Some(terrain_draw_info) = environment.terrain_draw_info() {
-                    if terrain_draw_info.draw_count > 0 {
-                        self.main_pass
-                            .set_per_draw_data(terrain_draw_info.per_draw_data);
-                        for cascade_index in 0..cascade_count as usize {
-                            let tile_x = (cascade_index as u32) % *grid_x;
-                            let tile_y = (cascade_index as u32) / *grid_x;
-                            let cascade_viewport = Viewport {
-                                area: dashi::FRect2D {
-                                    x: (tile_x * *shadow_resolution) as f32,
-                                    y: (tile_y * *shadow_resolution) as f32,
-                                    w: *shadow_resolution as f32,
-                                    h: *shadow_resolution as f32,
-                                },
-                                scissor: Rect2D {
-                                    x: tile_x * *shadow_resolution,
-                                    y: tile_y * *shadow_resolution,
-                                    w: *shadow_resolution,
-                                    h: *shadow_resolution,
-                                },
-                                ..Default::default()
-                            };
-                            cmd = cmd.combine(self.main_pass.record(
-                                &cascade_viewport,
-                                dynamic,
-                                cascade_data.matrices[cascade_index],
-                                indices_handle,
-                                terrain_draw_info.draw_list,
-                                terrain_draw_info.draw_count,
-                            ));
-                        }
-                        self.main_pass.set_per_draw_data(main_per_draw);
                     }
                 }
 

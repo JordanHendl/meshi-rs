@@ -8,12 +8,16 @@ meshi-ffi-structs = {path = "../ffi_structs"}
 meshi-utils = {path = "../utils"}
 resource_pool = {git = "https://github.com/JordanHendl/ResourcePool"}
 dashi = {git = "https://github.com/JordanHendl/dashi", features = ["dashi-serde"]}
-#noren = {git = "https://github.com/JordanHendl/noren", rev = "c29f312"}
 noren = {git = "https://github.com/JordanHendl/noren"}
 bento = {git = "https://github.com/JordanHendl/gohan"}
-miso =  {git = "https://github.com/JordanHendl/gohan"}
 tare =  {git = "https://github.com/JordanHendl/gohan"}
-furikake = {git = "https://github.com/JordanHendl/gohan"}
+miso =  {git = "https://github.com/JordanHendl/gohan"}
+furikake =  {git = "https://github.com/JordanHendl/gohan"}
+#bento = {path = "C:/Program Files/Git/wksp/git/gohan/bento"}
+#miso = {path = "C:/Program Files/Git/wksp/git/gohan/miso"}
+#tare = {path = "C:/Program Files/Git/wksp/git/gohan/tare"}
+#furikake = {path = "C:/Program Files/Git/wksp/git/gohan/furikake"}
+#noren = {path = "C:/Program Files/Git/wksp/git/noren"}
 
 arrayvec = "0.7.6"
 bitflags = "2.10.0"

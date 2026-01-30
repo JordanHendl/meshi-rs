@@ -134,6 +134,8 @@ The pipeline follows the Nubis pattern of a lightweight weather map + 3D noise s
 10. **MultiScatter** – visualize the multi-scatter boost alone.
 11. **Cloud Shadow Cascade 0-3** – view packed cloud shadow cascades individually.
 12. **Opaque Shadow Cascade 0-3** – view the deferred opaque shadow atlas per cascade.
+13. **Opaque Shadow Atlas** – view the full opaque cascaded shadow atlas.
+14. **Opaque Shadow Sample UV** – visualize the atlas UVs sampled by the opaque shadow pass.
 
 ## Determinism
 

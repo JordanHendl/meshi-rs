@@ -21,7 +21,7 @@ pub struct ShadowPassInfo {
 impl Default for ShadowPassInfo {
     fn default() -> Self {
         Self {
-            resolution: 2048,
+            resolution: 4098,
             sample_count: SampleCount::S1,
             cascades: ShadowCascadeSettings::default(),
         }
@@ -102,6 +102,7 @@ impl ShadowPass {
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: true,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })

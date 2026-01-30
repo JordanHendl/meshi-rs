@@ -220,6 +220,7 @@ impl GuiRenderer {
                 depth_test: Some(DepthInfo {
                     should_test: false,
                     should_write: false,
+                    ..Default::default()
                 }),
                 dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
                 ..Default::default()

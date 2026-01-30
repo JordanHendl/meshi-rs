@@ -605,6 +605,9 @@ impl DeferredRenderer {
             )
             .add_reserved_table_variables(state)
             .unwrap()
+            .set_attachment_format(0, Format::RGBA32F)
+            .set_attachment_format(1, Format::RGBA8)
+            .set_attachment_format(2, Format::RGBA32F)
             .add_depth_target(AttachmentDesc {
                 format: Format::D24S8,
                 samples: sample_count,
@@ -615,6 +618,7 @@ impl DeferredRenderer {
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: true,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })
@@ -665,6 +669,7 @@ impl DeferredRenderer {
                 depth_test: Some(DepthInfo {
                     should_test: true,
                     should_write: false,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })
@@ -1051,7 +1056,7 @@ impl DeferredRenderer {
             );
             debug_register_radial_with_description(
                 PageType::Shadow,
-                "Spot Shadow Enabled",
+                "Opaque Spot Shadow Enabled",
                 DebugRegistryValue::Bool(shadows.spot_enabled_mut()),
                 &[
                     DebugRadialOption {
@@ -1063,14 +1068,14 @@ impl DeferredRenderer {
                         value: 1.0,
                     },
                 ],
-                Some("Toggle rendering the active spot light shadow map."),
+                Some("Toggle rendering the active opaque spot light shadow map."),
             );
             debug_register_int_with_description(
                 PageType::Shadow,
-                Slider::new_int(0, "Spot Shadow Resolution", 128.0, 4096.0, 0.0),
+                Slider::new_int(0, "Opaque Spot Shadow Resolution", 128.0, 4096.0, 0.0),
                 shadows.spot_resolution_mut() as *mut u32,
-                "Spot Shadow Resolution",
-                Some("Controls the resolution of the spot light shadow map."),
+                "Opaque Spot Shadow Resolution",
+                Some("Controls the resolution of the opaque spot light shadow map."),
             );
         }
     }
@@ -1165,6 +1170,14 @@ impl DeferredRenderer {
                     DebugRadialOption {
                         label: "Opaque Cascade 3",
                         value: CloudDebugView::OpaqueShadowCascade3 as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Cascaded Atlas",
+                        value: CloudDebugView::OpaqueShadowAtlas as u32 as f32,
+                    },
+                    DebugRadialOption {
+                        label: "Opaque Sample UV",
+                        value: CloudDebugView::OpaqueShadowSampleUV as u32 as f32,
                     },
                 ],
                 Some("Selects a cloud rendering debug view to display."),
@@ -1744,6 +1757,7 @@ impl DeferredRenderer {
         for (view_idx, camera) in views.iter().enumerate() {
             let position = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Position Framebuffer View {view_idx}"),
+                format: Format::RGBA32F,
                 ..default_framebuffer_info
             });
 
@@ -1754,6 +1768,7 @@ impl DeferredRenderer {
 
             let normal = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Normal Framebuffer View {view_idx}"),
+                format: Format::RGBA32F,
                 ..default_framebuffer_info
             });
 
@@ -1785,14 +1800,20 @@ impl DeferredRenderer {
                     Camera::default()
                 }
             };
+
+            assert!(self.ctx.image_info(normal.view.img).format == Format::RGBA32F);
+            assert!(self.ctx.image_info(position.view.img).format == Format::RGBA32F);
+            assert!(self.ctx.image_info(diffuse.view.img).format == Format::RGBA8);
+            assert!(self.ctx.image_info(material_code.view.img).format == Format::RGBA8);
+
             let mut deferred_pass_attachments: [Option<ImageView>; 8] = [None; 8];
-            deferred_pass_attachments[3] = Some(position.view);
-            deferred_pass_attachments[2] = Some(diffuse.view);
-            deferred_pass_attachments[1] = Some(normal.view);
-            deferred_pass_attachments[0] = Some(material_code.view);
+            deferred_pass_attachments[0] = Some(position.view);
+            deferred_pass_attachments[1] = Some(diffuse.view);
+            deferred_pass_attachments[2] = Some(normal.view);
+            deferred_pass_attachments[3] = Some(material_code.view);
 
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
-            deferred_pass_clear[..4].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
+            deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
             let mut deferred_combine_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_combine_attachments[0] = Some(final_combine.view);

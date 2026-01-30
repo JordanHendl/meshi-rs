@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw, DrawIndexedIndirect};
@@ -10,11 +10,11 @@ use dashi::{
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use glam::{Mat4, Vec3};
+use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::TerrainChunkArtifact;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
-use noren::DB;
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
 use tracing::warn;
@@ -26,7 +26,7 @@ use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::{
-    Camera, Material, Transformation, VertexBufferSlot, MATERIAL_FLAG_VERTEX_COLOR,
+    Camera, MATERIAL_FLAG_VERTEX_COLOR, Material, Transformation, VertexBufferSlot,
 };
 
 #[derive(Clone, Copy)]
@@ -314,6 +314,7 @@ impl TerrainRenderer {
             Some(dashi::DepthInfo {
                 should_test: true,
                 should_write: false,
+                ..Default::default()
             })
         } else {
             None
@@ -609,6 +610,10 @@ impl TerrainRenderer {
             .set_debug_name("[MESHI] Deferred Terrain")
             .vertex_compiled(Some(shaders[0].clone()))
             .fragment_compiled(Some(shaders[1].clone()))
+            .set_attachment_format(0, Format::RGBA32F)
+            .set_attachment_format(1, Format::RGBA8)
+            .set_attachment_format(2, Format::RGBA32F)
+            .set_attachment_format(3, Format::RGBA8)
             .add_table_variable_with_resources(
                 "per_draw_ssbo",
                 vec![dashi::IndexedResource {
@@ -635,6 +640,7 @@ impl TerrainRenderer {
                 depth_test: Some(dashi::DepthInfo {
                     should_test: true,
                     should_write: true,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })

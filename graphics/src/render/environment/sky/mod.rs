@@ -21,11 +21,11 @@ use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo
 use tare::utils::StagedBuffer;
 use tracing::warn;
 
+use crate::gui::Slider;
 use crate::gui::debug::{
     DebugRadialOption, DebugRegistryValue, PageType, debug_register_int,
     debug_register_radial_with_description, debug_register_with_description,
 };
-use crate::gui::Slider;
 #[derive(Clone)]
 pub struct SkyboxInfo {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
@@ -634,6 +634,7 @@ impl SkyRenderer {
             Some(dashi::DepthInfo {
                 should_test: true,
                 should_write: false,
+                ..Default::default()
             })
         } else {
             None
@@ -692,6 +693,7 @@ impl SkyRenderer {
             Some(dashi::DepthInfo {
                 should_test: true,
                 should_write: false,
+                ..Default::default()
             })
         } else {
             None

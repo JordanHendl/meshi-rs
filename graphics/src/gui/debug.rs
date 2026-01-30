@@ -1552,7 +1552,7 @@ fn light_flags_label(flags: u32) -> String {
 }
 
 fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
-    match value.round().clamp(0.0, 23.0) as u32 {
+    match value.round().clamp(0.0, 25.0) as u32 {
         1 => CloudDebugView::WeatherMap,
         2 => CloudDebugView::ShadowMap,
         3 => CloudDebugView::Transmittance,
@@ -1571,6 +1571,8 @@ fn cloud_debug_view_from_value(value: f32) -> CloudDebugView {
         21 => CloudDebugView::OpaqueShadowCascade1,
         22 => CloudDebugView::OpaqueShadowCascade2,
         23 => CloudDebugView::OpaqueShadowCascade3,
+        24 => CloudDebugView::OpaqueShadowAtlas,
+        25 => CloudDebugView::OpaqueShadowSampleUV,
         _ => CloudDebugView::None,
     }
 }

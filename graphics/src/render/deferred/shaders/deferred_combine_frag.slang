@@ -33,6 +33,8 @@ static const uint DEBUG_VIEW_OPAQUE_SHADOW_0 = 20u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_1 = 21u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_2 = 22u;
 static const uint DEBUG_VIEW_OPAQUE_SHADOW_3 = 23u;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_ATLAS = 24u;
+static const uint DEBUG_VIEW_OPAQUE_SHADOW_SAMPLE_UV = 25u;
 static const uint INVALID_BINDLESS_ID = 0xFFFFu;
 
 struct Camera {
@@ -153,6 +155,15 @@ float sample_shadow_debug(uint shadow_id, float2 uv, uint cascade_index, uint ca
   return meshi_bindless_textures[shadow_id].Load(coord, 0).x;
 }
 
+float sample_shadow_atlas(uint shadow_id, float2 uv, uint cascade_count) {
+  uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
+  uint grid_y = (cascade_count + grid_x - 1u) / grid_x;
+  float2 atlas_size = float2(per_obj.shadow_resolution * grid_x, per_obj.shadow_resolution * grid_y);
+  float2 atlas_pos = uv * atlas_size;
+  int2 coord = int2(clamp(atlas_pos, float2(0.0, 0.0), atlas_size - 1.0));
+  return meshi_bindless_textures[shadow_id].Load(coord, 0).x;
+}
+
 uint select_cascade(float view_depth, float4 splits, uint cascade_count) {
   uint idx = 0;
   if (cascade_count > 1 && view_depth > splits.x) {
@@ -172,12 +183,12 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    return 0.0;
+    return 1.0;
   }
 
   float depth = shadow_pos.z;
   if (depth < 0.0 || depth > 1.0) {
-    return 0.0;
+    return 1.0;
   }
 
   uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
@@ -202,10 +213,6 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
     }
   }
   
-  if(shadow_pos.z > 1.0) {
-    return 0.5;
-  }
-
   return shadow / 9.0;
 }
 
@@ -238,10 +245,22 @@ float sample_spot_shadow(float4x4 spot_shadow_matrix, uint shadow_id, float3 wor
 FSOutput main(FSInput input) {
   FSOutput output;
   uint debug_view = per_obj.debug_view;
+  uint cascade_count = max(per_obj.shadow_cascade_count, 1u);
+  if (per_obj.shadow_texture_id == INVALID_BINDLESS_ID
+      && (debug_view >= DEBUG_VIEW_OPAQUE_SHADOW_0 && debug_view <= DEBUG_VIEW_OPAQUE_SHADOW_3
+          || debug_view == DEBUG_VIEW_OPAQUE_SHADOW_ATLAS
+          || debug_view == DEBUG_VIEW_OPAQUE_SHADOW_SAMPLE_UV)) {
+    output.color = float4(0.0, 0.0, 0.0, 1.0);
+    return output;
+  }
   if (debug_view >= DEBUG_VIEW_OPAQUE_SHADOW_0 && debug_view <= DEBUG_VIEW_OPAQUE_SHADOW_3) {
-    uint cascade_count = max(per_obj.shadow_cascade_count, 1u);
     uint cascade_index = min(debug_view - DEBUG_VIEW_OPAQUE_SHADOW_0, cascade_count - 1u);
     float shadow_depth = sample_shadow_debug(per_obj.shadow_texture_id, input.tex_coords, cascade_index, cascade_count);
+    output.color = float4(shadow_depth, shadow_depth, shadow_depth, 1.0);
+    return output;
+  }
+  if (debug_view == DEBUG_VIEW_OPAQUE_SHADOW_ATLAS) {
+    float shadow_depth = sample_shadow_atlas(per_obj.shadow_texture_id, input.tex_coords, cascade_count);
     output.color = float4(shadow_depth, shadow_depth, shadow_depth, 1.0);
     return output;
   }
@@ -275,8 +294,21 @@ FSOutput main(FSInput input) {
   float4x4 view = view_from_camera(camera);
   float4 view_pos = mul(view, float4(position.xyz, 1.0));
   float view_depth = -view_pos.z;
-  uint cascade_count = max(per_obj.shadow_cascade_count, 1u);
   uint cascade_index = select_cascade(view_depth, shadow_cascade.splits, cascade_count);
+
+  if (debug_view == DEBUG_VIEW_OPAQUE_SHADOW_SAMPLE_UV) {
+    float4 shadow_pos = mul(shadow_cascade.matrices[cascade_index], float4(position.xyz, 1.0));
+    shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
+    float2 uv = shadow_pos.xy * 0.5 + 0.5;
+    uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
+    uint grid_y = (cascade_count + grid_x - 1u) / grid_x;
+    uint tile_x = cascade_index % grid_x;
+    uint tile_y = cascade_index / grid_x;
+    float2 atlas_uv = (float2(tile_x, tile_y) + uv) / float2(grid_x, grid_y);
+    float cascade_hint = (cascade_count > 1u) ? (float(cascade_index) / float(cascade_count - 1u)) : 0.0;
+    output.color = float4(saturate(atlas_uv), cascade_hint, 1.0);
+    return output;
+  }
 
   float3 camera_pos = camera.world_from_camera[3].xyz;
   float3 view_dir = normalize(camera_pos - position.xyz);
