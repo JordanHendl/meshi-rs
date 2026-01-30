@@ -1,6 +1,6 @@
 #version 450
 #extension GL_EXT_samplerless_texture_functions : enable
-#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_scalar_block_layout : disable
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -15,52 +15,29 @@ struct Camera {
     float _padding;
 };
 
-layout(set = 0, binding = 0, scalar) uniform CloudRaymarchParams {
-    uvec2 output_resolution;
-    uvec3 base_noise_size;
-    uvec3 detail_noise_size;
-    uint weather_map_size;
-    uint frame_index;
-    uint shadow_resolution;
-    uint shadow_cascade_count;
-    float shadow_cascade_splits[4];
-    float shadow_cascade_extents[4];
-    uint shadow_cascade_resolutions[4];
-    uint shadow_cascade_offsets[4];
-    float shadow_cascade_strengths[4];
-    uint camera_index;
-    uvec3 weather_channels_a;
-    uint debug_view;
-    float cloud_base_a;
-    float cloud_top_a;
-    float density_scale_a;
-    float noise_scale_a;
-    vec2 wind_a;
-    float cloud_base_b;
-    float cloud_top_b;
-    float density_scale_b;
-    float noise_scale_b;
-    vec2 wind_b;
-    uvec3 weather_channels_b;
-    uint step_count;
-    uint light_step_count;
-    float phase_g;
-    float multi_scatter_strength;
-    uint multi_scatter_respects_shadow;
-    vec3 sun_radiance;
-    float shadow_strength;
-    float time;
-    float coverage_power;
-    float detail_strength;
-    float curl_strength;
-    float jitter_strength;
-    float epsilon;
-    vec3 sun_direction;
-    uint use_shadow_map;
-    float shadow_extent;
-    float atmosphere_view_strength;
-    float atmosphere_view_extinction;
-    float atmosphere_light_transmittance;
+layout(set = 0, binding = 0, std140) uniform CloudRaymarchParams {
+    uvec4 output_info;
+    uvec4 base_noise_size;
+    uvec4 detail_noise_size;
+    uvec4 shadow_info;
+    vec4 shadow_cascade_splits;
+    vec4 shadow_cascade_extents;
+    uvec4 shadow_cascade_resolutions;
+    uvec4 shadow_cascade_offsets;
+    vec4 shadow_cascade_strengths;
+    uvec4 weather_channels_a;
+    uvec4 weather_channels_b;
+    vec4 layer_a;
+    vec4 wind_a;
+    vec4 layer_b;
+    vec4 wind_b;
+    uvec4 step_info;
+    vec4 scatter_params;
+    vec4 sun_radiance;
+    vec4 time_params;
+    vec4 jitter_params;
+    vec4 sun_direction;
+    vec4 atmosphere_params;
 } params;
 
 layout(set = 0, binding = 1) uniform texture2D cloud_weather_map;
@@ -161,7 +138,7 @@ float phase_hg(float cos_theta, float g) {
 }
 
 uint select_shadow_cascade(float view_depth) {
-    uint count = max(params.shadow_cascade_count, 1u);
+    uint count = max(params.shadow_info.y, 1u);
     for (uint i = 0u; i < count; ++i) {
         if (view_depth <= params.shadow_cascade_splits[i]) {
             return i;
@@ -175,7 +152,7 @@ float sample_shadow(vec3 world_pos, float view_depth) {
     float shadow_extent = params.shadow_cascade_extents[cascade_index];
     uint cascade_resolution = params.shadow_cascade_resolutions[cascade_index];
     if (cascade_resolution == 0u) {
-        cascade_resolution = params.shadow_resolution;
+        cascade_resolution = params.shadow_info.x;
     }
     vec2 uv = (world_pos.xz / shadow_extent) * 0.5 + 0.5;
     uv = clamp(uv, vec2(0.0), vec2(1.0));
@@ -212,8 +189,8 @@ float atmosphere_light_distance(vec3 sample_pos, vec3 light_dir, float max_dist,
 
 float atmosphere_light_transmittance(vec3 sample_pos, vec3 light_dir, float max_dist, float light_type) {
     float distance = atmosphere_light_distance(sample_pos, light_dir, max_dist, light_type);
-    float transmittance = exp(-params.atmosphere_view_extinction * distance);
-    return mix(1.0, transmittance, params.atmosphere_light_transmittance);
+    float transmittance = exp(-params.jitter_params.w * distance);
+    return mix(1.0, transmittance, params.atmosphere_params.x);
 }
 
 vec3 sample_environment(vec3 direction) {
@@ -294,11 +271,11 @@ LayerResult march_layer(
 
     float start = max(t0, 0.0);
     float end = t1;
-    float step_count = float(max(params.step_count, 1));
+    float step_count = float(max(params.step_info.x, 1u));
     float step_size = (end - start) / step_count;
-    vec2 blue_uv = (vec2(gid) + vec2(params.frame_index % 64u)) / 128.0;
+    vec2 blue_uv = (vec2(gid) + vec2(params.output_info.w % 64u)) / 128.0;
     vec2 jitter = texture(sampler2D(cloud_blue_noise, cloud_blue_sampler), blue_uv).rg;
-    float jitter_offset = (jitter.x + jitter.y) * 0.5 * params.jitter_strength;
+    float jitter_offset = (jitter.x + jitter.y) * 0.5 * params.jitter_params.x;
     float t = start + jitter_offset * step_size;
 
     float transmittance = 1.0;
@@ -307,26 +284,26 @@ LayerResult march_layer(
     float weight_accum = 0.0;
     float steps_used = 0.0;
 
-    for (uint i = 0; i < params.step_count; ++i) {
+    for (uint i = 0; i < params.step_info.x; ++i) {
         vec3 sample_pos = camera_position + ray_dir * t;
         float height_frac = clamp((sample_pos.y - cloud_base) / (cloud_top - cloud_base), 0.0, 1.0);
 
         float weather_scale = 0.0001 * noise_scale;
-        vec2 weather_uv = sample_pos.xz * weather_scale + wind * params.time * weather_scale;
+        vec2 weather_uv = sample_pos.xz * weather_scale + wind * params.time_params.x * weather_scale;
         vec4 weather = sample_weather(weather_uv);
-        float coverage = pow(weather_channel(weather, weather_channels.x), params.coverage_power);
+        float coverage = pow(weather_channel(weather, weather_channels.x), params.time_params.y);
         float type = weather_channel(weather, weather_channels.y);
         float thickness = weather_channel(weather, weather_channels.z);
 
-        vec3 base_pos = sample_pos * (0.00025 * noise_scale) + vec3(wind * params.time * 0.01, 0.0);
-        if (params.curl_strength > 0.0) {
-            vec3 curl = curl_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
-            base_pos += curl * params.curl_strength;
+        vec3 base_pos = sample_pos * (0.00025 * noise_scale) + vec3(wind * params.time_params.x * 0.01, 0.0);
+        if (params.time_params.w > 0.0) {
+            vec3 curl = curl_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size.xyz);
+            base_pos += curl * params.time_params.w;
         }
-        float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
-        float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
+        float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size.xyz);
+        float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size.xyz);
         float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
-        density *= mix(1.0, detail_noise, params.detail_strength);
+        density *= mix(1.0, detail_noise, params.time_params.z);
         density *= mix(1.0, type, 0.5);
 
         if (density > 0.001) {
@@ -335,20 +312,20 @@ LayerResult march_layer(
             vec3 scatter_single = vec3(0.0);
             vec3 scatter_multi = vec3(0.0);
             int light_count = meshi_bindless_lights.lights.length();
-            float multi_strength = params.multi_scatter_strength;
-            bool show_single = params.debug_view == 9u;
-            bool show_multi = params.debug_view == 10u;
+            float multi_strength = params.scatter_params.y;
+            bool show_single = params.shadow_info.w == 9u;
+            bool show_multi = params.shadow_info.w == 10u;
             if (show_single) {
                 multi_strength = 0.0;
             }
             if (light_count == 0) {
-                vec3 sun_dir = normalize(params.sun_direction);
+                vec3 sun_dir = normalize(params.sun_direction.xyz);
                 vec3 env_tint = sample_environment(sun_dir);
-                float phase = phase_hg(dot(ray_dir, sun_dir), params.phase_g);
-                float light_trans = light_march(sample_pos, sun_dir, 5000.0, params.light_step_count, sigma_t, params.shadow_strength);
+                float phase = phase_hg(dot(ray_dir, sun_dir), params.scatter_params.x);
+                float light_trans = light_march(sample_pos, sun_dir, 5000.0, params.step_info.y, sigma_t, params.scatter_params.z);
                 float atmosphere_trans = atmosphere_light_transmittance(sample_pos, sun_dir, 5000.0, LIGHT_TYPE_DIRECTIONAL);
-                vec3 base = params.sun_radiance * env_tint * phase * light_trans * atmosphere_trans;
-                float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
+                vec3 base = params.sun_radiance.xyz * env_tint * phase * light_trans * atmosphere_trans;
+                float shadow_gate = (params.step_info.z == 1u) ? light_trans : 1.0;
                 float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
                 scatter_single += base;
                 scatter_multi += base * (multi_gain - 1.0);
@@ -364,23 +341,23 @@ LayerResult march_layer(
                     float spot_factor;
                     vec3 light_dir = light_direction(light, sample_pos, attenuation, max_dist, spot_factor);
                     float light_trans = 1.0;
-                    vec3 sun_dir = normalize(params.sun_direction);
-                    if (params.use_shadow_map == 1u && light_type == LIGHT_TYPE_DIRECTIONAL && dot(light_dir, sun_dir) > 0.95) {
+                    vec3 sun_dir = normalize(params.sun_direction.xyz);
+                    if (params.step_info.w == 1u && light_type == LIGHT_TYPE_DIRECTIONAL && dot(light_dir, sun_dir) > 0.95) {
                         float view_depth = -(view * vec4(sample_pos, 1.0)).z;
                         uint cascade_index = select_shadow_cascade(view_depth);
                         float cascade_strength = params.shadow_cascade_strengths[cascade_index];
                         light_trans = sample_shadow(sample_pos, view_depth) * cascade_strength;
                     } else {
-                        light_trans = light_march(sample_pos, light_dir, max_dist, params.light_step_count, sigma_t, params.shadow_strength);
+                        light_trans = light_march(sample_pos, light_dir, max_dist, params.step_info.y, sigma_t, params.scatter_params.z);
                     }
-                    float phase = phase_hg(dot(ray_dir, light_dir), params.phase_g);
+                    float phase = phase_hg(dot(ray_dir, light_dir), params.scatter_params.x);
                     vec3 light_color = light.color_intensity.rgb * light.color_intensity.w;
                     if (light_type == LIGHT_TYPE_DIRECTIONAL) {
                         light_color *= sample_environment(light_dir);
                     }
                     float atmosphere_trans = atmosphere_light_transmittance(sample_pos, light_dir, max_dist, light_type);
                     vec3 base = light_color * phase * light_trans * attenuation * spot_factor * atmosphere_trans;
-                    float shadow_gate = (params.multi_scatter_respects_shadow == 1u) ? light_trans : 1.0;
+                    float shadow_gate = (params.step_info.z == 1u) ? light_trans : 1.0;
                     float multi_gain = 1.0 + multi_strength * (1.0 - step_trans) * shadow_gate;
                     scatter_single += base;
                     scatter_multi += base * (multi_gain - 1.0);
@@ -400,7 +377,7 @@ LayerResult march_layer(
 
         steps_used += 1.0;
         t += step_size;
-        if (transmittance < params.epsilon) {
+        if (transmittance < params.scatter_params.w) {
             break;
         }
     }
@@ -415,20 +392,20 @@ LayerResult march_layer(
 
 void main() {
     uvec2 gid = gl_GlobalInvocationID.xy;
-    if (gid.x >= params.output_resolution.x || gid.y >= params.output_resolution.y) {
+    if (gid.x >= params.output_info.x || gid.y >= params.output_info.y) {
         return;
     }
 
-    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    Camera camera = meshi_bindless_cameras.cameras[params.shadow_info.z];
     vec3 camera_position = camera.world_from_camera[3].xyz;
     vec3 camera_forward = normalize(-camera.world_from_camera[2].xyz);
     mat4 view = inverse(camera.world_from_camera);
     mat4 view_proj = camera.projection * view;
     mat4 inv_view_proj = inverse(view_proj);
 
-    uint idx = gid.y * params.output_resolution.x + gid.x;
+    uint idx = gid.y * params.output_info.x + gid.x;
 
-    vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_resolution);
+    vec2 uv = (vec2(gid) + 0.5) / vec2(params.output_info.xy);
     uv.y = 1.0 - uv.y;
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 clip = vec4(ndc, 1.0, 1.0);
@@ -442,12 +419,12 @@ void main() {
         view,
         ray_dir,
         gid,
-        params.cloud_base_a,
-        params.cloud_top_a,
-        params.density_scale_a,
-        params.noise_scale_a,
-        params.wind_a,
-        params.weather_channels_a
+        params.layer_a.x,
+        params.layer_a.y,
+        params.layer_a.z,
+        params.layer_a.w,
+        params.wind_a.xy,
+        params.weather_channels_a.xyz
     );
 
     LayerResult layer_b = march_layer(
@@ -456,21 +433,21 @@ void main() {
         view,
         ray_dir,
         gid,
-        params.cloud_base_b,
-        params.cloud_top_b,
-        params.density_scale_b,
-        params.noise_scale_b,
-        params.wind_b,
-        params.weather_channels_b
+        params.layer_b.x,
+        params.layer_b.y,
+        params.layer_b.z,
+        params.layer_b.w,
+        params.wind_b.xy,
+        params.weather_channels_b.xyz
     );
 
-    if (params.debug_view == 7u) {
+    if (params.shadow_info.w == 7u) {
         layer_b.color = vec3(0.0);
         layer_b.trans = 1.0;
         layer_b.depth = 0.0;
         layer_b.weight = 0.0;
     }
-    if (params.debug_view == 8u) {
+    if (params.shadow_info.w == 8u) {
         layer_a.color = vec3(0.0);
         layer_a.trans = 1.0;
         layer_a.depth = 0.0;

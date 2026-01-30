@@ -1,6 +1,6 @@
 #version 450
 #extension GL_EXT_samplerless_texture_functions : enable
-#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_scalar_block_layout : disable
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -15,32 +15,20 @@ struct Camera {
     float _padding;
 };
 
-layout(set = 0, binding = 0, scalar) uniform CloudShadowParams {
-    uint shadow_resolution;
-    uint cascade_count;
-    uvec2 _padding_0;
-    uint cascade_resolutions[4];
-    uint cascade_offsets[4];
-    uvec3 base_noise_size;
-    uvec3 detail_noise_size;
-    uint weather_map_size;
-    uint camera_index;
-    float cloud_base_a;
-    float cloud_top_a;
-    float density_scale_a;
-    float noise_scale_a;
-    vec2 wind_a;
-    float cloud_base_b;
-    float cloud_top_b;
-    float density_scale_b;
-    float noise_scale_b;
-    vec2 wind_b;
-    uvec3 weather_channels_a;
-    uvec3 weather_channels_b;
-    float time;
-    float coverage_power;
-    vec3 sun_direction;
-    float shadow_strength;
+layout(set = 0, binding = 0, std140) uniform CloudShadowParams {
+    uvec4 shadow_info;
+    uvec4 cascade_resolutions;
+    uvec4 cascade_offsets;
+    uvec4 base_noise_size;
+    uvec4 detail_noise_size;
+    vec4 layer_a;
+    vec4 wind_a;
+    vec4 layer_b;
+    vec4 wind_b;
+    uvec4 weather_channels_a;
+    uvec4 weather_channels_b;
+    vec4 time_coverage;
+    vec4 sun_direction;
     vec4 cascade_extents;
     vec4 cascade_splits;
 } params;
@@ -95,26 +83,26 @@ float weather_channel(vec4 weather, uint channel) {
 void main() {
     uint cascade_index = gl_GlobalInvocationID.z;
     uvec2 gid = gl_GlobalInvocationID.xy;
-    if (cascade_index >= params.cascade_count) {
+    if (cascade_index >= params.shadow_info.y) {
         return;
     }
     uint cascade_resolution = params.cascade_resolutions[cascade_index];
     if (cascade_resolution == 0u) {
-        cascade_resolution = params.shadow_resolution;
+        cascade_resolution = params.shadow_info.x;
     }
     if (gid.x >= cascade_resolution || gid.y >= cascade_resolution) {
         return;
     }
 
-    Camera camera = meshi_bindless_cameras.cameras[params.camera_index];
+    Camera camera = meshi_bindless_cameras.cameras[params.shadow_info.w];
     vec3 camera_position = camera.world_from_camera[3].xyz;
     vec2 uv = (vec2(gid) + 0.5) / float(cascade_resolution);
     float cascade_extent = params.cascade_extents[cascade_index];
     vec2 centered = (uv * 2.0 - 1.0) * cascade_extent;
-    float max_top = max(params.cloud_top_a, params.cloud_top_b);
-    float min_base = min(params.cloud_base_a, params.cloud_base_b);
+    float max_top = max(params.layer_a.y, params.layer_b.y);
+    float min_base = min(params.layer_a.x, params.layer_b.x);
     vec3 origin = camera_position + vec3(centered.x, max_top, centered.y);
-    vec3 dir = normalize(params.sun_direction);
+    vec3 dir = normalize(params.sun_direction.xyz);
 
     float layer_depth = max_top - min_base;
     if (layer_depth <= 0.0) {
@@ -132,37 +120,37 @@ void main() {
         vec3 sample_pos = vec3(origin.x, h, origin.z) + dir * (float(i) * step_size);
         float sigma = 0.0;
 
-        if (h >= params.cloud_base_a && h <= params.cloud_top_a && params.density_scale_a > 0.0) {
-            float height_frac = clamp((h - params.cloud_base_a) / max(params.cloud_top_a - params.cloud_base_a, 1.0), 0.0, 1.0);
-            float weather_scale = 0.0001 * params.noise_scale_a;
-            vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_a * params.time * weather_scale;
-            vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
-            float coverage = pow(weather_channel(weather, params.weather_channels_a.x), params.coverage_power);
-            float thickness = weather_channel(weather, params.weather_channels_a.z);
-            vec3 base_pos = sample_pos * (0.00025 * params.noise_scale_a);
-            float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
-            float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
-            float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
-            density = mix(density, density * detail_noise, 0.5);
-            sigma += density * params.density_scale_a;
-        }
+    if (h >= params.layer_a.x && h <= params.layer_a.y && params.layer_a.z > 0.0) {
+        float height_frac = clamp((h - params.layer_a.x) / max(params.layer_a.y - params.layer_a.x, 1.0), 0.0, 1.0);
+        float weather_scale = 0.0001 * params.layer_a.w;
+        vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_a.xy * params.time_coverage.x * weather_scale;
+        vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
+        float coverage = pow(weather_channel(weather, params.weather_channels_a.x), params.time_coverage.y);
+        float thickness = weather_channel(weather, params.weather_channels_a.z);
+        vec3 base_pos = sample_pos * (0.00025 * params.layer_a.w);
+        float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size.xyz);
+        float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size.xyz);
+        float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
+        density = mix(density, density * detail_noise, 0.5);
+        sigma += density * params.layer_a.z;
+    }
 
-        if (h >= params.cloud_base_b && h <= params.cloud_top_b && params.density_scale_b > 0.0) {
-            float height_frac = clamp((h - params.cloud_base_b) / max(params.cloud_top_b - params.cloud_base_b, 1.0), 0.0, 1.0);
-            float weather_scale = 0.0001 * params.noise_scale_b;
-            vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_b * params.time * weather_scale;
-            vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
-            float coverage = pow(weather_channel(weather, params.weather_channels_b.x), params.coverage_power);
-            float thickness = weather_channel(weather, params.weather_channels_b.z);
-            vec3 base_pos = sample_pos * (0.00025 * params.noise_scale_b);
-            float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size);
-            float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size);
-            float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
-            density = mix(density, density * detail_noise, 0.5);
-            sigma += density * params.density_scale_b;
-        }
+    if (h >= params.layer_b.x && h <= params.layer_b.y && params.layer_b.z > 0.0) {
+        float height_frac = clamp((h - params.layer_b.x) / max(params.layer_b.y - params.layer_b.x, 1.0), 0.0, 1.0);
+        float weather_scale = 0.0001 * params.layer_b.w;
+        vec2 weather_uv = (sample_pos.xz * weather_scale) + params.wind_b.xy * params.time_coverage.x * weather_scale;
+        vec4 weather = texture(sampler2D(cloud_weather_map, cloud_weather_sampler), fract(weather_uv));
+        float coverage = pow(weather_channel(weather, params.weather_channels_b.x), params.time_coverage.y);
+        float thickness = weather_channel(weather, params.weather_channels_b.z);
+        vec3 base_pos = sample_pos * (0.00025 * params.layer_b.w);
+        float base_noise = sample_noise(cloud_base_noise, cloud_base_sampler, base_pos, params.base_noise_size.xyz);
+        float detail_noise = sample_noise(cloud_detail_noise, cloud_detail_sampler, base_pos * 4.0, params.detail_noise_size.xyz);
+        float density = max(base_noise * coverage - (1.0 - thickness) * (1.0 - height_frac), 0.0);
+        density = mix(density, density * detail_noise, 0.5);
+        sigma += density * params.layer_b.z;
+    }
 
-        transmittance *= exp(-sigma * step_size * params.shadow_strength);
+    transmittance *= exp(-sigma * step_size * params.time_coverage.z);
         if (transmittance < 0.01) {
             break;
         }

@@ -1813,7 +1813,7 @@ impl DeferredRenderer {
             deferred_pass_attachments[3] = Some(material_code.view);
 
             let mut deferred_pass_clear: [Option<ClearValue>; 8] = [None; 8];
-            deferred_pass_clear[..3].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
+            deferred_pass_clear[..4].fill(Some(ClearValue::Color([0.0, 0.0, 0.0, 0.0])));
 
             let mut deferred_combine_attachments: [Option<ImageView>; 8] = [None; 8];
             deferred_combine_attachments[0] = Some(final_combine.view);
@@ -1964,10 +1964,10 @@ impl DeferredRenderer {
 
                     #[repr(packed)]
                     struct PerObj {
-                        mat: u32,
-                        norm: u32,
-                        diff: u32,
                         pos: u32,
+                        diff: u32,
+                        norm: u32,
+                        mat: u32,
                         shadow: u32,
                         shadow_cascade_count: u32,
                         shadow_resolution: u32,

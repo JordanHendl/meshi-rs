@@ -239,7 +239,7 @@ pub enum CloudResolutionScale {
 
 impl Default for CloudResolutionScale {
     fn default() -> Self {
-        Self::Quarter
+        Self::Half
     }
 }
 
@@ -326,8 +326,8 @@ pub struct CloudShadowSettings {
 impl Default for CloudShadowSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
-            resolution: 128,
+            enabled: true,
+            resolution: 1024,
             extent: 50000.0,
             strength: 1.0,
             cascades: ShadowCascadeSettings::default(),
@@ -433,7 +433,7 @@ impl Default for CloudSettings {
             phase_g: 0.6,
             multi_scatter_strength: 0.35,
             multi_scatter_respects_shadow: true,
-            low_res_scale: CloudResolutionScale::Quarter,
+            low_res_scale: CloudResolutionScale::Half,
             coverage_power: 1.2,
             detail_strength: 0.6,
             curl_strength: 0.0,

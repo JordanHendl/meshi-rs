@@ -597,7 +597,7 @@ impl SkyRenderer {
                 debug_name: "[MESHI GFX SKY] Configuration",
                 byte_size: (std::mem::size_of::<SkyConfig>() as u32),
                 visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::UNIFORM,
+                usage: BufferUsage::STORAGE,
                 initial_data: unsafe { Some(&initial_config.align_to::<u8>().1) },
             },
         );

@@ -459,7 +459,7 @@ struct OceanFinalizeParams {
     _padding: [u32; 3],
 }
 
-#[repr(packed)]
+#[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
 struct OceanDrawParams {
     cascade_fft_sizes: [u32; 4],
@@ -1851,7 +1851,7 @@ impl OceanRenderer {
             .bump()
             .expect("Failed to allocate ocean draw params");
 
-        assert_eq!(std::mem::size_of::<OceanDrawParams>(), 252);
+        assert_eq!(std::mem::size_of::<OceanDrawParams>(), 256);
         let params = &mut alloc.slice::<OceanDrawParams>()[0];
         let mut cascade_fft_sizes = [0u32; 4];
         let mut cascade_patch_sizes = [0.0f32; 4];

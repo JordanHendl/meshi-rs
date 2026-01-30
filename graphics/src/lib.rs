@@ -190,7 +190,7 @@ impl RenderEngine {
     }
     pub fn new(info: &RenderEngineInfo) -> Result<Self, MeshiError> {
         let extent = info.canvas_extent.unwrap_or([1024, 1024]);
-        let sample_count = info.sample_count.unwrap_or(SampleCount::S4);
+        let sample_count = info.sample_count.unwrap_or(SampleCount::S1);
 
         let renderer_info = RendererInfo {
             headless: info.headless,

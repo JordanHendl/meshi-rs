@@ -17,20 +17,12 @@ use crate::render::environment::clouds::cloud_assets::CloudAssets;
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct CloudCompositeParams {
-    pub output_resolution: [u32; 2],
-    pub low_resolution: [u32; 2],
-    pub camera_near: f32,
-    pub camera_far: f32,
-    pub depth_sigma: f32,
-    pub debug_view: u32,
-    pub history_weight_scale: f32,
-    pub shadow_resolution: f32,
-    pub history_index: u32,
-    pub atmosphere_view_strength: f32,
-    pub atmosphere_view_extinction: f32,
-    pub atmosphere_haze_strength: f32,
+    pub resolution_info: [u32; 4],
+    pub camera_params: [f32; 4],
+    pub history_info: [u32; 4],
+    pub shadow_params: [f32; 4],
+    pub atmosphere_view: [f32; 4],
     pub atmosphere_haze_color: [f32; 4],
-    pub shadow_cascade_count: u32,
     pub shadow_cascade_resolutions: [u32; 4],
     pub shadow_cascade_offsets: [u32; 4],
 }
@@ -256,20 +248,27 @@ impl CloudCompositePass {
     ) {
         let params = &mut self.params.as_slice_mut::<CloudCompositeParams>()[0];
         *params = CloudCompositeParams {
-            output_resolution,
-            low_resolution,
-            camera_near,
-            camera_far,
-            depth_sigma,
-            debug_view: debug_view as u32,
-            history_weight_scale,
-            shadow_resolution: shadow_resolution as f32,
-            history_index,
-            atmosphere_view_strength,
-            atmosphere_view_extinction,
-            atmosphere_haze_strength,
+            resolution_info: [
+                output_resolution[0],
+                output_resolution[1],
+                low_resolution[0],
+                low_resolution[1],
+            ],
+            camera_params: [camera_near, camera_far, depth_sigma, history_weight_scale],
+            history_info: [
+                debug_view as u32,
+                history_index,
+                shadow_cascade_count,
+                0,
+            ],
+            shadow_params: [shadow_resolution as f32, 0.0, 0.0, 0.0],
+            atmosphere_view: [
+                atmosphere_view_strength,
+                atmosphere_view_extinction,
+                atmosphere_haze_strength,
+                0.0,
+            ],
             atmosphere_haze_color,
-            shadow_cascade_count,
             shadow_cascade_resolutions,
             shadow_cascade_offsets,
         };

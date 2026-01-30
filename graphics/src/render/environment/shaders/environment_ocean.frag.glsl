@@ -1,6 +1,6 @@
 #version 450
 
-#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_scalar_block_layout : disable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_samplerless_texture_functions : enable
 layout(location = 0) in vec2 v_uv;
@@ -11,7 +11,7 @@ layout(location = 4) in float v_velocity;
 layout(location = 5) in vec2 v_flow;
 layout(location = 0) out vec4 out_color;
 
-layout(scalar, set = 0, binding = 0) readonly buffer OceanParams {
+layout(std430, set = 0, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -51,7 +51,7 @@ layout(scalar, set = 0, binding = 0) readonly buffer OceanParams {
 } params;
 
 
-layout(scalar, set = 1, binding = 10) readonly buffer OceanShadowParams {
+layout(std430, set = 1, binding = 10) readonly buffer OceanShadowParams {
     uint shadow_cascade_count;
     uint shadow_resolution;
     uint shadow_padding0;
@@ -59,11 +59,11 @@ layout(scalar, set = 1, binding = 10) readonly buffer OceanShadowParams {
     vec4 shadow_splits;
 } shadow_params;
 
-layout(scalar, set = 2, binding = 0) readonly buffer OceanShadowMatrices {
+layout(std430, set = 2, binding = 0) readonly buffer OceanShadowMatrices {
     mat4 shadow_matrices[4];
 } shadow_matrices;
 
-layout(scalar, set = 3, binding = 11) readonly buffer OceanCloudShadowParams {
+layout(std430, set = 3, binding = 11) readonly buffer OceanCloudShadowParams {
     uint shadow_enabled;
     uint shadow_cascade_count;
     uint shadow_resolution;

@@ -19,31 +19,19 @@ const SHADOW_WORKGROUP_SIZE: u32 = 8;
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct CloudShadowParams {
-    pub shadow_resolution: u32,
-    pub cascade_count: u32,
-    pub _padding_0: [u32; 2],
+    pub shadow_info: [u32; 4],
     pub cascade_resolutions: [u32; 4],
     pub cascade_offsets: [u32; 4],
-    pub base_noise_size: [u32; 3],
-    pub detail_noise_size: [u32; 3],
-    pub weather_map_size: u32,
-    pub camera_index: u32,
-    pub cloud_base_a: f32,
-    pub cloud_top_a: f32,
-    pub density_scale_a: f32,
-    pub noise_scale_a: f32,
-    pub wind_a: [f32; 2],
-    pub cloud_base_b: f32,
-    pub cloud_top_b: f32,
-    pub density_scale_b: f32,
-    pub noise_scale_b: f32,
-    pub wind_b: [f32; 2],
-    pub weather_channels_a: [u32; 3],
-    pub weather_channels_b: [u32; 3],
-    pub time: f32,
-    pub coverage_power: f32,
-    pub sun_direction: [f32; 3],
-    pub shadow_strength: f32,
+    pub base_noise_size: [u32; 4],
+    pub detail_noise_size: [u32; 4],
+    pub layer_a: [f32; 4],
+    pub wind_a: [f32; 4],
+    pub layer_b: [f32; 4],
+    pub wind_b: [f32; 4],
+    pub weather_channels_a: [u32; 4],
+    pub weather_channels_b: [u32; 4],
+    pub time_coverage: [f32; 4],
+    pub sun_direction: [f32; 4],
     pub cascade_extents: [f32; 4],
     pub cascade_splits: [f32; 4],
 }
@@ -165,38 +153,54 @@ impl CloudShadowPass {
         }
         self.shadow_resolution = max_resolution;
         let params = &mut self.params.as_slice_mut::<CloudShadowParams>()[0];
-        params.shadow_resolution = self.shadow_resolution;
-        params.cascade_count = self.shadow_cascade_count;
+        params.shadow_info = [
+            self.shadow_resolution,
+            self.shadow_cascade_count,
+            settings.weather_map_size,
+            settings.camera_index,
+        ];
         params.cascade_resolutions = settings.shadow_cascade_resolutions;
         params.cascade_offsets = settings.shadow_cascade_offsets;
         params.base_noise_size = [
             settings.base_noise_dims.x,
             settings.base_noise_dims.y,
             settings.base_noise_dims.z,
+            0,
         ];
         params.detail_noise_size = [
             settings.detail_noise_dims.x,
             settings.detail_noise_dims.y,
             settings.detail_noise_dims.z,
+            0,
         ];
-        params.weather_map_size = settings.weather_map_size;
-        params.camera_index = settings.camera_index;
-        params.cloud_base_a = settings.layer_a.cloud_base;
-        params.cloud_top_a = settings.layer_a.cloud_top;
-        params.density_scale_a = settings.layer_a.density_scale;
-        params.noise_scale_a = settings.layer_a.noise_scale;
-        params.wind_a = [settings.layer_a.wind.x, settings.layer_a.wind.y];
-        params.cloud_base_b = settings.layer_b.cloud_base;
-        params.cloud_top_b = settings.layer_b.cloud_top;
-        params.density_scale_b = settings.layer_b.density_scale;
-        params.noise_scale_b = settings.layer_b.noise_scale;
-        params.wind_b = [settings.layer_b.wind.x, settings.layer_b.wind.y];
-        params.weather_channels_a = settings.layer_a.weather_channels;
-        params.weather_channels_b = settings.layer_b.weather_channels;
-        params.time = time;
-        params.coverage_power = settings.coverage_power;
-        params.sun_direction = [sun_direction.x, sun_direction.y, sun_direction.z];
-        params.shadow_strength = settings.shadow_strength;
+        params.layer_a = [
+            settings.layer_a.cloud_base,
+            settings.layer_a.cloud_top,
+            settings.layer_a.density_scale,
+            settings.layer_a.noise_scale,
+        ];
+        params.wind_a = [settings.layer_a.wind.x, settings.layer_a.wind.y, 0.0, 0.0];
+        params.layer_b = [
+            settings.layer_b.cloud_base,
+            settings.layer_b.cloud_top,
+            settings.layer_b.density_scale,
+            settings.layer_b.noise_scale,
+        ];
+        params.wind_b = [settings.layer_b.wind.x, settings.layer_b.wind.y, 0.0, 0.0];
+        params.weather_channels_a = [
+            settings.layer_a.weather_channels[0],
+            settings.layer_a.weather_channels[1],
+            settings.layer_a.weather_channels[2],
+            0,
+        ];
+        params.weather_channels_b = [
+            settings.layer_b.weather_channels[0],
+            settings.layer_b.weather_channels[1],
+            settings.layer_b.weather_channels[2],
+            0,
+        ];
+        params.time_coverage = [time, settings.coverage_power, settings.shadow_strength, 0.0];
+        params.sun_direction = [sun_direction.x, sun_direction.y, sun_direction.z, 0.0];
         params.cascade_extents = settings.shadow_cascade_extents;
         params.cascade_splits = settings.shadow_cascade_splits;
     }
