@@ -303,7 +303,7 @@ impl CascadedShadows {
 
         let shadow_atlas_width = *shadow_resolution * *grid_x;
         let shadow_atlas_height = *shadow_resolution * *grid_y;
-        let shadow_viewport = Viewport {
+        let shadow_viewport = bump.alloc(Viewport {
             area: dashi::FRect2D {
                 x: 0.0,
                 y: 0.0,
@@ -317,7 +317,7 @@ impl CascadedShadows {
                 h: shadow_atlas_height,
             },
             ..Default::default()
-        };
+        });
 
         let shadow_map = graph.make_image(&ImageInfo {
             debug_name: &format!("[MESHI {}] Shadow Map {view_idx}", self.mode.label()),
@@ -344,7 +344,7 @@ impl CascadedShadows {
         let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
         graph.add_subpass(
             &SubpassInfo {
-                viewport: shadow_viewport,
+                viewport: *shadow_viewport,
                 color_attachments: [None; 8],
                 depth_attachment: Some(shadow_map.view),
                 clear_values: shadow_clear,
@@ -524,6 +524,8 @@ impl SpotShadows {
         environment: &mut EnvironmentRenderer,
         view_idx: u32,
     ) -> SpotShadowResult {
+        let bump = crate::render::global_bump().get();
+
         let mut shadow_bindless_id = 0u32;
         let mut shadow_resolution = 0u32;
         let mut shadow_matrix = Mat4::IDENTITY;
@@ -554,7 +556,7 @@ impl SpotShadows {
         }
 
         if let Some(spot_shadow_map) = shadow_map.as_ref() {
-            let spot_shadow_viewport = Viewport {
+            let spot_shadow_viewport = bump.alloc(Viewport {
                 area: dashi::FRect2D {
                     x: 0.0,
                     y: 0.0,
@@ -568,12 +570,12 @@ impl SpotShadows {
                     h: shadow_resolution,
                 },
                 ..Default::default()
-            };
+            });
 
             let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
             graph.add_subpass(
                 &SubpassInfo {
-                    viewport: spot_shadow_viewport,
+                    viewport: *spot_shadow_viewport,
                     color_attachments: [None; 8],
                     depth_attachment: Some(spot_shadow_map.view),
                     clear_values: shadow_clear,
@@ -606,7 +608,7 @@ impl SpotShadows {
                         .unwrap_or((Handle::default(), 0));
 
                     cmd = cmd.combine(self.main_pass.record(
-                        &spot_shadow_viewport,
+                        spot_shadow_viewport,
                         dynamic,
                         shadow_matrix,
                         indices_handle,
@@ -615,7 +617,7 @@ impl SpotShadows {
                     ));
                     if terrain_draw_count > 0 {
                         cmd = cmd.combine(self.terrain_pass.record(
-                            &spot_shadow_viewport,
+                            spot_shadow_viewport,
                             dynamic,
                             shadow_matrix,
                             indices_handle,
