@@ -496,7 +496,7 @@ struct OceanDrawParams {
     ssr_max_distance: f32,
     ssr_thickness: f32,
     ssr_steps: u32,
-    debug_view: f32,
+    debug_view: u32,
     _padding2: Vec3,
 }
 
@@ -1927,7 +1927,7 @@ impl OceanRenderer {
             ssr_max_distance: self.ssr_max_distance,
             ssr_thickness: self.ssr_thickness,
             ssr_steps: self.ssr_steps,
-            debug_view: self.debug_view as u32 as f32,
+            debug_view: self.debug_view as u32,
             _padding2: Default::default(),
         };
         let mut shadow_alloc = dynamic

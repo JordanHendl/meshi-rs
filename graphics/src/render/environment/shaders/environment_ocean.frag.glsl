@@ -46,7 +46,7 @@ layout(std430, set = 0, binding = 0) readonly buffer OceanParams {
     float ssr_max_distance;
     float ssr_thickness;
     uint ssr_steps;
-    float debug_view;
+    uint debug_view;
     vec3 _padding2;
 } params;
 
@@ -391,7 +391,7 @@ void main() {
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
     float fresnel_bias = clamp(params.fresnel_bias, 0.0, 1.0);
     float fresnel_strength = max(params.fresnel_strength, 0.0);
-    int debug_view = int(params.debug_view + 0.5);
+    int debug_view = int(params.debug_view);
 
     float slope = 1.0 - clamp(abs(n.y), 0.0, 1.0);
     float foam_threshold = clamp(params.foam_threshold, 0.0, 1.0);

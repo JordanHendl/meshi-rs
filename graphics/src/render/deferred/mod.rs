@@ -2284,7 +2284,7 @@ impl DeferredRenderer {
                 .combine(self.shadows.post_compute())
                 .combine(self.gui.post_compute())
                 .combine(self.text.post_compute())
-                .combine(DeferredFrameBlitter::post_compute(&[]))
+//                .combine(DeferredFrameBlitter::post_compute(&[]))
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
             cmd.end()
         });
