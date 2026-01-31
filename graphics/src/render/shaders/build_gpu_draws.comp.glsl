@@ -105,7 +105,5 @@ void main() {
     if (visible) {
         cmd.instance_count = 1u;
     }
-
-    cmd.instance_count = 1u;
     draw_list.commands[idx] = cmd;
 }

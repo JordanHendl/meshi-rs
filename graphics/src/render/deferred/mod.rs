@@ -4,7 +4,6 @@ use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
     terrain::TerrainFrameSettings,
 };
-use dashi::cmd::Executable;
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
 use super::scene::GPUScene;
@@ -27,6 +26,7 @@ use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
 use bytemuck::cast_slice;
+use dashi::cmd::Executable;
 use dashi::gpu::cmd::{Scope, SyncPoint};
 use dashi::utils::gpupool::GPUPool;
 use dashi::*;
@@ -1102,10 +1102,22 @@ impl DeferredRenderer {
         let deferred_view = DebugRegistryValue::U32(&mut self.debug_views.deferred_framebuffer);
         let shadow_view = DebugRegistryValue::U32(&mut self.debug_views.shadow_map);
         let depth_view = DebugRegistryValue::U32(&mut self.debug_views.depth);
-        let cloud_conflicts = [deferred_view.clone(), shadow_view.clone(), depth_view.clone()];
+        let cloud_conflicts = [
+            deferred_view.clone(),
+            shadow_view.clone(),
+            depth_view.clone(),
+        ];
         let deferred_conflicts = [cloud_view.clone(), shadow_view.clone(), depth_view.clone()];
-        let shadow_conflicts = [cloud_view.clone(), deferred_view.clone(), depth_view.clone()];
-        let depth_conflicts = [cloud_view.clone(), deferred_view.clone(), shadow_view.clone()];
+        let shadow_conflicts = [
+            cloud_view.clone(),
+            deferred_view.clone(),
+            depth_view.clone(),
+        ];
+        let depth_conflicts = [
+            cloud_view.clone(),
+            deferred_view.clone(),
+            shadow_view.clone(),
+        ];
         unsafe {
             debug_register_radial_with_description_and_conflicts(
                 PageType::DebugViews,
@@ -1680,9 +1692,41 @@ impl DeferredRenderer {
         self.text.set_frame_draws(frame_draws);
     }
 
-    fn record_frame_compute(&mut self, delta_time: f32, camera: Handle<Camera>) {
+    fn prep_frame(&mut self, delta_time: f32, views: &[Handle<Camera>]) -> Vec<Handle<Semaphore>> {
+        let mut sems = Vec::new();
+
+        // Init gui...
+        self.gui.initialize_renderer(
+            self.ctx.as_mut(),
+            self.state.as_mut(),
+            &self.data.dynamic,
+            self.sample_count,
+        );
+
+        // Set active scene cameras..
+        self.proc.scene.set_active_cameras(views);
+
+        let mut cloud_settings = self.subrender.environment.cloud_settings();
+        if cloud_settings.debug_view != self.debug_views.cloud_debug_view {
+            cloud_settings.debug_view = self.debug_views.cloud_debug_view;
+            self.subrender
+                .environment
+                .set_cloud_settings(cloud_settings);
+        }
+
+        if let Some(s) = self.proc.skinning.update(delta_time) {
+            sems.push(s);
+        }
+
+        sems
+    }
+
+    fn pre_compute(&mut self, delta_time: f32, camera: Handle<Camera>) {
+        let bump = crate::render::global_bump().get();
+        let camera = bump.alloc(camera.clone());
+        let delta_time = bump.alloc(delta_time.clone());
         self.subrender.environment.update(EnvironmentFrameSettings {
-            delta_time,
+            delta_time: *delta_time,
             ..Default::default()
         });
         let mut camera_position = Vec3::ZERO;
@@ -1691,7 +1735,7 @@ impl DeferredRenderer {
                 .reserved_mut(
                     "meshi_bindless_cameras",
                     |a: &mut ReservedBindlessCamera| {
-                        camera_position = a.camera(camera).position();
+                        camera_position = a.camera(*camera).position();
                     },
                 )
                 .expect("Failed to read camera for terrain update");
@@ -1707,6 +1751,8 @@ impl DeferredRenderer {
                 .expect("Failed to update furikake state")
                 .combine(self.proc.scene.cull());
 
+            self.shadows.update_spot_light_state(self.state.as_mut());
+
             cmd = cmd
                 .combine(self.proc.scene.pre_compute())
                 .combine(self.proc.draw_builder.pre_compute())
@@ -1718,7 +1764,16 @@ impl DeferredRenderer {
                 .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads)
                 .combine(state_update)
                 .combine(self.subrender.environment.record_compute(self.ctx.as_mut()))
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
+                .combine(self.subrender.environment.record_clouds_update(
+                    self.ctx.as_mut(),
+                    self.state.as_mut(),
+                    &self.data.viewport,
+                    *camera,
+                    *delta_time,
+                ))
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
+
             cmd.end()
         });
     }
@@ -1736,24 +1791,12 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        self.shadows.update_spot_light_state(self.state.as_mut());
-        self.gui.initialize_renderer(
-            self.ctx.as_mut(),
-            self.state.as_mut(),
-            &self.data.dynamic,
-            self.sample_count,
-        );
-        let skinning_complete = self.proc.skinning.update(delta_time);
+        
 
-        // Set active scene cameras..
-        self.proc.scene.set_active_cameras(views);
-        let primary_camera = views.first().copied().unwrap_or_default();
-        self.record_frame_compute(delta_time, primary_camera);
-        let mut cloud_settings = self.subrender.environment.cloud_settings();
-        if cloud_settings.debug_view != self.debug_views.cloud_debug_view {
-            cloud_settings.debug_view = self.debug_views.cloud_debug_view;
-            self.subrender.environment.set_cloud_settings(cloud_settings);
-        }
+        // Prepare for frame... this does the following (not all encompassing):
+        // 1) Build skinning transformations
+        // 2) Syncs all cpu configto gpu
+        let prep_sems = self.prep_frame(delta_time, views);
 
         // Default framebuffer info.
         let default_framebuffer_info = ImageInfo {
@@ -1843,19 +1886,7 @@ impl DeferredRenderer {
 
             let camera_handle = *camera;
 
-            self.graph.add_compute_pass(|cmd| {
-                let cmd = cmd
-                    .combine(self.subrender.environment.record_clouds_update(
-                        self.ctx.as_mut(),
-                        self.state.as_mut(),
-                        &self.data.viewport,
-                        camera_handle,
-                        delta_time,
-                    ))
-                    .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
-
-                cmd.end()
-            });
+            self.pre_compute(delta_time, camera_handle);
 
             let shadow_result = self.shadows.process(
                 &mut self.graph,
@@ -2039,18 +2070,14 @@ impl DeferredRenderer {
                 value if value == DeferredFramebufferDebugView::Diffuse as u32 => {
                     Some(diffuse.view)
                 }
-                value if value == DeferredFramebufferDebugView::Normal as u32 => {
-                    Some(normal.view)
-                }
+                value if value == DeferredFramebufferDebugView::Normal as u32 => Some(normal.view),
                 value if value == DeferredFramebufferDebugView::Material as u32 => {
                     Some(material_code.view)
                 }
                 _ => None,
             };
             let shadow_debug_output = match self.debug_views.shadow_map {
-                value if value == DeferredShadowDebugView::Cascaded as u32 => {
-                    Some(shadow_map.view)
-                }
+                value if value == DeferredShadowDebugView::Cascaded as u32 => Some(shadow_map.view),
                 value if value == DeferredShadowDebugView::Spot as u32 => {
                     spot_shadow_map.as_ref().map(|map| map.view)
                 }
@@ -2264,9 +2291,7 @@ impl DeferredRenderer {
 
         let mut wait_sems = BumpVec::with_capacity_in(sems.len() + 1, &self.frame_bump);
         wait_sems.extend(sems.iter().copied());
-        if let Some(semaphore) = skinning_complete {
-            wait_sems.push(semaphore);
-        }
+        wait_sems.extend(prep_sems.iter().copied());
 
         self.graph.execute_with(&SubmitInfo {
             wait_sems: &wait_sems,
