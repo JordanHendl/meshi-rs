@@ -639,7 +639,8 @@ impl CloudRenderer {
         let assets = CloudAssets::new(ctx, CloudNoiseSizes::default());
         let settings = CloudSettings::default();
         let low_resolution = calc_low_res(viewport, settings.low_res_scale);
-
+        
+        tracing::info!("LOW RES: {:?}", low_resolution);
         let shadow_pass = CloudShadowPass::new(
             ctx,
             state,

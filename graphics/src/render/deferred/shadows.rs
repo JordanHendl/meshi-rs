@@ -344,6 +344,7 @@ impl CascadedShadows {
         let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
         graph.add_subpass(
             &SubpassInfo {
+                name: Some("[MESHI] SHADOW PASS".to_string()),
                 viewport: *shadow_viewport,
                 color_attachments: [None; 8],
                 depth_attachment: Some(shadow_map.view),
@@ -575,6 +576,7 @@ impl SpotShadows {
             let shadow_clear: [Option<ClearValue>; 8] = [None; 8];
             graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] SPOT SHADOW PASS".to_string()),
                     viewport: *spot_shadow_viewport,
                     color_attachments: [None; 8],
                     depth_attachment: Some(spot_shadow_map.view),

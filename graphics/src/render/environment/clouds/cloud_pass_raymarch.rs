@@ -15,7 +15,7 @@ use tare::utils::StagedBuffer;
 use super::cloud_assets::CloudAssets;
 use super::cloud_pass_shadow::CloudShadowPass;
 
-const RAYMARCH_WORKGROUP_SIZE: u32 = 8;
+const RAYMARCH_WORKGROUP_SIZE: u32 = 32;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -180,9 +180,7 @@ impl CloudRaymarchPass {
                 .shader(Some(
                     include_str!("shaders/cloud_raymarch.comp.glsl").as_bytes(),
                 ))
-                .add_reserved_table_variable(state, "meshi_bindless_cameras")
-                .unwrap()
-                .add_reserved_table_variable(state, "meshi_bindless_lights")
+                .add_reserved_table_variables(state)
                 .unwrap()
                 .add_variable(
                     "params",
@@ -351,6 +349,7 @@ impl CloudRaymarchPass {
         let Some(pipeline) = self.pipeline.as_ref() else {
             return CommandStream::new().begin().end();
         };
+
         let output_resolution = self.output_resolution;
         CommandStream::new()
             .begin()

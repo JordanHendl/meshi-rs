@@ -805,7 +805,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bento"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#bff1421fe4a6a432fc5b9639bc0d02a10e0a5830"
+source = "git+https://github.com/JordanHendl/gohan#51c813dbea6029ae4d3b469f81e723d4712a7bf3"
 dependencies = [
  "bincode",
  "clap",
@@ -998,9 +998,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck"
-version = "1.24.0"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
+checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
 dependencies = [
  "bytemuck_derive",
 ]
@@ -2260,7 +2260,7 @@ dependencies = [
 [[package]]
 name = "furikake"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#bff1421fe4a6a432fc5b9639bc0d02a10e0a5830"
+source = "git+https://github.com/JordanHendl/gohan#51c813dbea6029ae4d3b469f81e723d4712a7bf3"
 dependencies = [
  "bento",
  "dashi",
@@ -3452,7 +3452,7 @@ dependencies = [
 [[package]]
 name = "miso"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#bff1421fe4a6a432fc5b9639bc0d02a10e0a5830"
+source = "git+https://github.com/JordanHendl/gohan#51c813dbea6029ae4d3b469f81e723d4712a7bf3"
 dependencies = [
  "bento",
  "dashi",
@@ -5081,9 +5081,9 @@ checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
 name = "slab"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
+checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slotmap"
@@ -5350,7 +5350,7 @@ dependencies = [
 [[package]]
 name = "tare"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/gohan#bff1421fe4a6a432fc5b9639bc0d02a10e0a5830"
+source = "git+https://github.com/JordanHendl/gohan#51c813dbea6029ae4d3b469f81e723d4712a7bf3"
 dependencies = [
  "bento",
  "dashi",

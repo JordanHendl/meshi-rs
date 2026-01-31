@@ -5,13 +5,13 @@ use meshi_ffi_structs::{LightFlags, LightInfo, LightType};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use crate::Light;
 use crate::gui::{
     GuiClipRect, GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, MenuRect, RadialButton,
     RadialButtonColors, RadialButtonLayout, RadialButtonMetrics, RadialButtonRenderOptions,
     RadialButtonState, Slider, SliderColors, SliderLayout, SliderMetrics, SliderRenderOptions,
     SliderState, SliderValueFormat,
 };
-use crate::Light;
 use crate::render::environment::ocean::OceanDebugView;
 use crate::structs::{CloudDebugView, CloudResolutionScale};
 
@@ -50,6 +50,23 @@ pub struct DebugRadialOption {
     pub value: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct DebugIntInput {
+    pub min: u32,
+    pub max: u32,
+    pub enabled: bool,
+}
+
+impl Default for DebugIntInput {
+    fn default() -> Self {
+        Self {
+            min: 0,
+            max: u32::MAX,
+            enabled: true,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct DebugRegistryRadialOption {
     id: u32,
@@ -65,6 +82,11 @@ enum DebugRegistryControl {
         enabled: bool,
         show_value: bool,
         value_format: SliderValueFormat,
+    },
+    IntInput {
+        min: u32,
+        max: u32,
+        enabled: bool,
     },
     Radial {
         options: Vec<DebugRegistryRadialOption>,
@@ -185,13 +207,15 @@ pub unsafe fn debug_register(
     value_ptr: *mut f32,
     label: &str,
 ) -> u32 {
-    debug_register_slider_with_description(
-        page,
-        slider,
-        DebugRegistryValue::Float(value_ptr),
-        label,
-        None,
-    )
+    unsafe {
+        debug_register_slider_with_description(
+            page,
+            slider,
+            DebugRegistryValue::Float(value_ptr),
+            label,
+            None,
+        )
+    }
 }
 
 pub unsafe fn debug_register_int(
@@ -201,13 +225,15 @@ pub unsafe fn debug_register_int(
     label: &str,
 ) -> u32 {
     slider.value_format = SliderValueFormat::Integer;
-    debug_register_slider_with_description(
-        page,
-        slider,
-        DebugRegistryValue::U32(value_ptr),
-        label,
-        None,
-    )
+    unsafe {
+        debug_register_slider_with_description(
+            page,
+            slider,
+            DebugRegistryValue::U32(value_ptr),
+            label,
+            None,
+        )
+    }
 }
 
 pub unsafe fn debug_register_with_description(
@@ -217,13 +243,15 @@ pub unsafe fn debug_register_with_description(
     label: &str,
     description: Option<&str>,
 ) -> u32 {
-    debug_register_slider_with_description(
-        page,
-        slider,
-        DebugRegistryValue::Float(value_ptr),
-        label,
-        description,
-    )
+    unsafe {
+        debug_register_slider_with_description(
+            page,
+            slider,
+            DebugRegistryValue::Float(value_ptr),
+            label,
+            description,
+        )
+    }
 }
 
 pub unsafe fn debug_register_int_with_description(
@@ -234,13 +262,65 @@ pub unsafe fn debug_register_int_with_description(
     description: Option<&str>,
 ) -> u32 {
     slider.value_format = SliderValueFormat::Integer;
-    debug_register_slider_with_description(
+    unsafe {
+        debug_register_slider_with_description(
+            page,
+            slider,
+            DebugRegistryValue::U32(value_ptr),
+            label,
+            description,
+        )
+    }
+}
+
+pub unsafe fn debug_register_int_input(
+    page: PageType,
+    input: DebugIntInput,
+    value_ptr: *mut u32,
+    label: &str,
+) -> u32 {
+    unsafe { debug_register_int_input_with_description(page, input, value_ptr, label, None) }
+}
+
+pub unsafe fn debug_register_int_input_with_description(
+    page: PageType,
+    input: DebugIntInput,
+    value_ptr: *mut u32,
+    label: &str,
+    description: Option<&str>,
+) -> u32 {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    let value = DebugRegistryValue::U32(value_ptr);
+    if let Some(entry) = registry
+        .iter_mut()
+        .find(|entry| entry.page == page && entry.value.matches(&value) && entry.label == label)
+    {
+        entry.control = DebugRegistryControl::IntInput {
+            min: input.min,
+            max: input.max,
+            enabled: input.enabled,
+        };
+        if let Some(description) = description {
+            entry.description = Some(description.to_string());
+        }
+        return entry.id;
+    }
+    let id = DEBUG_REGISTRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    registry.push(DebugRegistryItem {
+        id,
         page,
-        slider,
-        DebugRegistryValue::U32(value_ptr),
-        label,
-        description,
-    )
+        label: label.to_string(),
+        description: description.map(str::to_string),
+        control: DebugRegistryControl::IntInput {
+            min: input.min,
+            max: input.max,
+            enabled: input.enabled,
+        },
+        value,
+        conflicts: Vec::new(),
+    });
+    id
 }
 
 pub unsafe fn debug_register_slider(
@@ -249,7 +329,7 @@ pub unsafe fn debug_register_slider(
     value: DebugRegistryValue,
     label: &str,
 ) -> u32 {
-    debug_register_slider_with_description(page, slider, value, label, None)
+    unsafe { debug_register_slider_with_description(page, slider, value, label, None) }
 }
 
 pub unsafe fn debug_register_slider_with_description(
@@ -302,7 +382,7 @@ pub unsafe fn debug_register_radial(
     value: DebugRegistryValue,
     options: &[DebugRadialOption],
 ) -> u32 {
-    debug_register_radial_with_description(page, label, value, options, None)
+    unsafe { debug_register_radial_with_description(page, label, value, options, None) }
 }
 
 pub unsafe fn debug_register_radial_with_description(
@@ -312,14 +392,16 @@ pub unsafe fn debug_register_radial_with_description(
     options: &[DebugRadialOption],
     description: Option<&str>,
 ) -> u32 {
-    debug_register_radial_with_description_and_conflicts(
-        page,
-        label,
-        value,
-        options,
-        description,
-        None,
-    )
+    unsafe {
+        debug_register_radial_with_description_and_conflicts(
+            page,
+            label,
+            value,
+            options,
+            description,
+            None,
+        )
+    }
 }
 
 pub unsafe fn debug_register_radial_with_description_and_conflicts(
@@ -332,9 +414,7 @@ pub unsafe fn debug_register_radial_with_description_and_conflicts(
 ) -> u32 {
     let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
     let mut registry = registry.lock().expect("debug registry poisoned");
-    let conflicts = conflicts
-        .map(|values| values.to_vec())
-        .unwrap_or_default();
+    let conflicts = conflicts.map(|values| values.to_vec()).unwrap_or_default();
     if let Some(entry) = registry
         .iter_mut()
         .find(|entry| entry.page == page && entry.value.matches(&value) && entry.label == label)
@@ -390,7 +470,7 @@ pub unsafe fn debug_register_radial_with_description_and_conflicts(
 }
 
 pub unsafe fn debug_registry_radial_enabled(value: &DebugRegistryValue) -> bool {
-    debug_registry_radial_value(value)
+    unsafe { debug_registry_radial_value(value) }
         .map(|value| value >= 0.5)
         .unwrap_or(false)
 }
@@ -431,7 +511,37 @@ unsafe fn debug_registry_sliders(page: PageType) -> Vec<Slider> {
                 show_value: *show_value,
                 value_format: *value_format,
             }),
-            DebugRegistryControl::Radial { .. } => None,
+            DebugRegistryControl::Radial { .. } | DebugRegistryControl::IntInput { .. } => None,
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct DebugRegistryIntInput {
+    id: u32,
+    label: String,
+    value: u32,
+    min: u32,
+    max: u32,
+    enabled: bool,
+}
+
+unsafe fn debug_registry_int_inputs(page: PageType) -> Vec<DebugRegistryIntInput> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    registry
+        .iter()
+        .filter(|entry| entry.page == page)
+        .filter_map(|entry| match &entry.control {
+            DebugRegistryControl::IntInput { min, max, enabled } => Some(DebugRegistryIntInput {
+                id: entry.id,
+                label: entry.label.clone(),
+                value: unsafe { entry.value.get() }.round().max(0.0) as u32,
+                min: *min,
+                max: *max,
+                enabled: *enabled,
+            }),
+            DebugRegistryControl::Radial { .. } | DebugRegistryControl::Slider { .. } => None,
         })
         .collect()
 }
@@ -441,6 +551,18 @@ struct DebugRegistryRadialGroup {
     label: String,
     options: Vec<DebugRegistryRadialOption>,
     value: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DebugIntInputLayoutItem {
+    id: u32,
+    rect: MenuRect,
+    enabled: bool,
+}
+
+#[derive(Clone, Default)]
+struct DebugIntInputLayout {
+    items: Vec<DebugIntInputLayoutItem>,
 }
 
 unsafe fn debug_registry_radials(page: PageType) -> Vec<DebugRegistryRadialGroup> {
@@ -455,7 +577,7 @@ unsafe fn debug_registry_radials(page: PageType) -> Vec<DebugRegistryRadialGroup
                 options: options.clone(),
                 value: unsafe { entry.value.get() },
             }),
-            DebugRegistryControl::Slider { .. } => None,
+            DebugRegistryControl::Slider { .. } | DebugRegistryControl::IntInput { .. } => None,
         })
         .collect()
 }
@@ -465,7 +587,10 @@ unsafe fn debug_registry_tooltip_for_id(id: u32) -> Option<String> {
     let registry = registry.lock().expect("debug registry poisoned");
     for entry in registry.iter() {
         if entry.id == id {
-            if matches!(entry.control, DebugRegistryControl::Slider { .. }) {
+            if matches!(
+                entry.control,
+                DebugRegistryControl::Slider { .. } | DebugRegistryControl::IntInput { .. }
+            ) {
                 return Some(build_slider_tooltip(
                     &entry.label,
                     entry.description.as_deref(),
@@ -491,7 +616,11 @@ fn build_slider_tooltip(label: &str, description: Option<&str>) -> String {
         .unwrap_or_else(|| format!("Adjust {label}."))
 }
 
-fn build_radial_tooltip(group_label: &str, option_label: &str, description: Option<&str>) -> String {
+fn build_radial_tooltip(
+    group_label: &str,
+    option_label: &str,
+    description: Option<&str>,
+) -> String {
     description
         .map(|text| format!("{text} ({option_label})."))
         .unwrap_or_else(|| format!("Set {group_label} to {option_label}."))
@@ -503,9 +632,34 @@ unsafe fn debug_registry_update_value(id: u32, value: f32) -> Option<PageType> {
     if let Some(entry) = registry.iter_mut().find(|entry| entry.id == id) {
         let (min, max) = match &entry.control {
             DebugRegistryControl::Slider { min, max, .. } => (*min, *max),
-            DebugRegistryControl::Radial { .. } => return None,
+            DebugRegistryControl::Radial { .. } | DebugRegistryControl::IntInput { .. } => {
+                return None;
+            }
         };
         let clamped = value.clamp(min, max);
+        unsafe {
+            let previous = entry.value.get();
+            if (previous - clamped).abs() > f32::EPSILON {
+                entry.value.set(clamped);
+                return Some(entry.page);
+            }
+        }
+        return None;
+    }
+    None
+}
+
+unsafe fn debug_registry_update_int_input(id: u32, value: u32) -> Option<PageType> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = registry.lock().expect("debug registry poisoned");
+    if let Some(entry) = registry.iter_mut().find(|entry| entry.id == id) {
+        let (min, max) = match &entry.control {
+            DebugRegistryControl::IntInput { min, max, .. } => (*min, *max),
+            DebugRegistryControl::Slider { .. } | DebugRegistryControl::Radial { .. } => {
+                return None;
+            }
+        };
+        let clamped = value.clamp(min, max) as f32;
         unsafe {
             let previous = entry.value.get();
             if (previous - clamped).abs() > f32::EPSILON {
@@ -588,6 +742,19 @@ unsafe fn debug_registry_radial_value(value: &DebugRegistryValue) -> Option<f32>
         .map(|entry| unsafe { entry.value.get() })
 }
 
+unsafe fn debug_registry_int_input_value(id: u32) -> Option<u32> {
+    let registry = DEBUG_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let registry = registry.lock().expect("debug registry poisoned");
+    registry.iter().find_map(|entry| {
+        if entry.id == id {
+            if matches!(entry.control, DebugRegistryControl::IntInput { .. }) {
+                return Some(entry.value.get().round().max(0.0) as u32);
+            }
+        }
+        None
+    })
+}
+
 fn radial_default_value(options: &[DebugRegistryRadialOption]) -> f32 {
     options
         .iter()
@@ -614,10 +781,7 @@ fn mark_page_dirty(
         PageType::Clouds | PageType::Shadow => {
             *cloud_dirty = true;
         }
-        PageType::DebugViews
-        | PageType::Lighting
-        | PageType::Physics
-        | PageType::Audio => {}
+        PageType::DebugViews | PageType::Lighting | PageType::Physics | PageType::Audio => {}
     }
 }
 
@@ -652,6 +816,11 @@ pub struct DebugGui {
     debug_slider_layout: SliderLayout,
     debug_param_radial_state: RadialButtonState,
     debug_param_radial_layouts: Vec<RadialButtonLayout>,
+    debug_int_input_layout: DebugIntInputLayout,
+    debug_int_input_active: Option<u32>,
+    debug_int_input_buffer: String,
+    debug_int_input_commit: bool,
+    debug_int_input_cancel: bool,
     debug_panel_position: Vec2,
     drag_target: Option<DragTarget>,
     drag_offset: Vec2,
@@ -674,6 +843,11 @@ impl DebugGui {
             debug_slider_layout: SliderLayout::default(),
             debug_param_radial_state: RadialButtonState::default(),
             debug_param_radial_layouts: Vec::new(),
+            debug_int_input_layout: DebugIntInputLayout::default(),
+            debug_int_input_active: None,
+            debug_int_input_buffer: String::new(),
+            debug_int_input_commit: false,
+            debug_int_input_cancel: false,
             debug_panel_position: vec2(560.0, 60.0),
             drag_target: None,
             drag_offset: Vec2::ZERO,
@@ -705,6 +879,27 @@ impl DebugGui {
             }
             if event.source() == EventSource::Key {
                 if event.event_type() == EventType::Pressed {
+                    if self.debug_int_input_active.is_some() {
+                        if let Some(digit) = keycode_digit(event.key()) {
+                            self.debug_int_input_buffer.push(digit);
+                        } else {
+                            match event.key() {
+                                KeyCode::Backspace => {
+                                    self.debug_int_input_buffer.pop();
+                                }
+                                KeyCode::Delete => {
+                                    self.debug_int_input_buffer.clear();
+                                }
+                                KeyCode::Enter | KeyCode::NumpadEnter => {
+                                    self.debug_int_input_commit = true;
+                                }
+                                KeyCode::Escape => {
+                                    self.debug_int_input_cancel = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     match event.key() {
                         KeyCode::Control => {
                             self.control_down = true;
@@ -850,6 +1045,11 @@ impl DebugGui {
                     self.debug_slider_state.active = None;
                     self.debug_param_radial_state = RadialButtonState::default();
                     self.debug_param_radial_layouts.clear();
+                    self.debug_int_input_layout = DebugIntInputLayout::default();
+                    self.debug_int_input_active = None;
+                    self.debug_int_input_buffer.clear();
+                    self.debug_int_input_commit = false;
+                    self.debug_int_input_cancel = false;
                     self.scroll_offset = 0.0;
                 }
             }
@@ -874,8 +1074,7 @@ impl DebugGui {
                 DebugGraphicsTab::DebugViews,
                 DebugGraphicsTab::Lighting,
             ];
-            let subtab_width =
-                (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
+            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
             for (index, tab) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
                 let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
@@ -884,6 +1083,11 @@ impl DebugGui {
                     self.debug_slider_state.active = None;
                     self.debug_param_radial_state = RadialButtonState::default();
                     self.debug_param_radial_layouts.clear();
+                    self.debug_int_input_layout = DebugIntInputLayout::default();
+                    self.debug_int_input_active = None;
+                    self.debug_int_input_buffer.clear();
+                    self.debug_int_input_commit = false;
+                    self.debug_int_input_cancel = false;
                     self.scroll_offset = 0.0;
                 }
             }
@@ -895,6 +1099,13 @@ impl DebugGui {
                     || point_in_menu_rect(self.cursor, item.knob_rect))
         });
         self.debug_slider_state.hovered = hovered_debug_slider.map(|item| item.id);
+
+        let hovered_int_input = self
+            .debug_int_input_layout
+            .items
+            .iter()
+            .find(|item| item.enabled && point_in_menu_rect(self.cursor, item.rect));
+        let hovered_int_input_id = hovered_int_input.map(|item| item.id);
 
         let hovered_param_radial = self
             .debug_param_radial_layouts
@@ -909,11 +1120,85 @@ impl DebugGui {
         let tooltip_text = hovered_debug_slider
             .and_then(|item| unsafe { debug_registry_tooltip_for_id(item.id) })
             .or_else(|| {
+                hovered_int_input_id.and_then(|item| unsafe { debug_registry_tooltip_for_id(item) })
+            })
+            .or_else(|| {
                 hovered_param_radial
                     .and_then(|item| unsafe { debug_registry_tooltip_for_id(item.id) })
             });
 
+        if self.debug_int_input_cancel {
+            self.debug_int_input_cancel = false;
+            self.debug_int_input_active = None;
+            self.debug_int_input_buffer.clear();
+        }
+
+        if self.debug_int_input_commit {
+            self.debug_int_input_commit = false;
+            if let Some(active_id) = self.debug_int_input_active {
+                if let Some(value) = parse_int_input_buffer(&self.debug_int_input_buffer) {
+                    unsafe {
+                        if let Some(page) = debug_registry_update_int_input(active_id, value) {
+                            mark_page_dirty(
+                                page,
+                                &mut skybox_dirty,
+                                &mut sky_dirty,
+                                &mut ocean_dirty,
+                                &mut cloud_dirty,
+                            );
+                        }
+                    }
+                }
+            }
+            self.debug_int_input_active = None;
+            self.debug_int_input_buffer.clear();
+        }
+
         if self.mouse_pressed {
+            if let Some(hovered_id) = hovered_int_input_id {
+                if self.debug_int_input_active != Some(hovered_id) {
+                    if let Some(active_id) = self.debug_int_input_active {
+                        if let Some(value) = parse_int_input_buffer(&self.debug_int_input_buffer) {
+                            unsafe {
+                                if let Some(page) =
+                                    debug_registry_update_int_input(active_id, value)
+                                {
+                                    mark_page_dirty(
+                                        page,
+                                        &mut skybox_dirty,
+                                        &mut sky_dirty,
+                                        &mut ocean_dirty,
+                                        &mut cloud_dirty,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                self.debug_int_input_active = Some(hovered_id);
+                self.debug_int_input_buffer = unsafe {
+                    debug_registry_int_input_value(hovered_id)
+                        .map(|value| value.to_string())
+                        .unwrap_or_default()
+                };
+            } else if let Some(active_id) = self.debug_int_input_active {
+                if let Some(value) = parse_int_input_buffer(&self.debug_int_input_buffer) {
+                    unsafe {
+                        if let Some(page) = debug_registry_update_int_input(active_id, value) {
+                            mark_page_dirty(
+                                page,
+                                &mut skybox_dirty,
+                                &mut sky_dirty,
+                                &mut ocean_dirty,
+                                &mut cloud_dirty,
+                            );
+                        }
+                    }
+                }
+                self.debug_int_input_active = None;
+                self.debug_int_input_buffer.clear();
+            }
+
             if let Some(item) = hovered_debug_slider {
                 self.debug_slider_state.active = Some(item.id);
             }
@@ -921,7 +1206,13 @@ impl DebugGui {
                 self.debug_param_radial_state.active = Some(item.id);
                 unsafe {
                     if let Some(page) = debug_registry_update_radial(item.id) {
-                        mark_page_dirty(page, &mut skybox_dirty, &mut sky_dirty, &mut ocean_dirty, &mut cloud_dirty);
+                        mark_page_dirty(
+                            page,
+                            &mut skybox_dirty,
+                            &mut sky_dirty,
+                            &mut ocean_dirty,
+                            &mut cloud_dirty,
+                        );
                     }
                 }
             }
@@ -1057,8 +1348,7 @@ impl DebugGui {
                 (DebugGraphicsTab::DebugViews, "Debug Views"),
                 (DebugGraphicsTab::Lighting, "Lighting"),
             ];
-            let subtab_width =
-                (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
+            let subtab_width = (debug_panel_size.x - subtab_padding * 2.0) / subtabs.len() as f32;
             for (index, (tab, label)) in subtabs.iter().enumerate() {
                 let tab_pos = vec2(subtab_x + subtab_width * index as f32, subtab_y);
                 let tab_size = vec2(subtab_width - subtab_gap, subtab_height);
@@ -1131,12 +1421,13 @@ impl DebugGui {
                 DebugTab::Graphics => PageType::Sky,
             }
         };
-        let (debug_radials, debug_sliders) = if page_type == PageType::Lighting {
-            (Vec::new(), Vec::new())
+        let (debug_radials, debug_sliders, debug_int_inputs) = if page_type == PageType::Lighting {
+            (Vec::new(), Vec::new(), Vec::new())
         } else {
             (
                 unsafe { debug_registry_radials(page_type) },
                 unsafe { debug_registry_sliders(page_type) },
+                unsafe { debug_registry_int_inputs(page_type) },
             )
         };
         let content_top = text_start.y;
@@ -1194,8 +1485,18 @@ impl DebugGui {
                 + debug_sliders.len() as f32 * slider_metrics.item_height
                 + debug_sliders.len().saturating_sub(1) as f32 * slider_metrics.item_gap;
             content_height_total += slider_total_height;
-        } else if debug_radials.is_empty() {
+        } else if debug_radials.is_empty() && debug_int_inputs.is_empty() {
             content_height_total += line_height;
+        }
+        let mut int_input_total_height = 0.0;
+        let int_input_item_height = (24.0 * ui_scale).clamp(20.0, 30.0);
+        let int_input_item_gap = (8.0 * ui_scale).clamp(4.0, 12.0);
+        let int_input_padding = vec2(12.0 * ui_scale, 6.0 * ui_scale);
+        if !debug_int_inputs.is_empty() {
+            int_input_total_height = int_input_padding.y * 2.0
+                + debug_int_inputs.len() as f32 * int_input_item_height
+                + debug_int_inputs.len().saturating_sub(1) as f32 * int_input_item_gap;
+            content_height_total += int_input_total_height;
         }
         let max_scroll = (content_height_total - content_height).max(0.0);
         if max_scroll <= 0.0 {
@@ -1209,8 +1510,8 @@ impl DebugGui {
             vec2(debug_panel_size.x, content_height),
         );
         if content_area_hovered && self.scroll_delta.abs() > 0.0 && max_scroll > 0.0 {
-            self.scroll_offset = (self.scroll_offset - self.scroll_delta * 18.0 * ui_scale)
-                .clamp(0.0, max_scroll);
+            self.scroll_offset =
+                (self.scroll_offset - self.scroll_delta * 18.0 * ui_scale).clamp(0.0, max_scroll);
         }
         self.scroll_delta = 0.0;
         let content_scroll = -self.scroll_offset;
@@ -1258,7 +1559,10 @@ impl DebugGui {
                     + buttons.len().saturating_sub(1) as f32 * radial_metrics.item_gap;
                 let radial_options = RadialButtonRenderOptions {
                     viewport: [viewport.x, viewport.y],
-                    position: [debug_panel_position.x, slider_start_y + title_height + content_scroll],
+                    position: [
+                        debug_panel_position.x,
+                        slider_start_y + title_height + content_scroll,
+                    ],
                     size: [content_width, options_height],
                     layer: GuiLayer::Overlay,
                     metrics: radial_metrics,
@@ -1273,7 +1577,8 @@ impl DebugGui {
         }
 
         let mut debug_slider_layout = SliderLayout::default();
-        if debug_sliders.is_empty() && debug_radials.is_empty() {
+        let mut debug_int_input_layout = DebugIntInputLayout::default();
+        if debug_sliders.is_empty() && debug_radials.is_empty() && debug_int_inputs.is_empty() {
             let empty_y = slider_start_y + content_scroll;
             if page_type != PageType::Lighting
                 && empty_y + line_height >= content_top
@@ -1298,6 +1603,95 @@ impl DebugGui {
                 clip_rect: Some(content_clip_rect),
             };
             debug_slider_layout = gui.submit_sliders(&debug_sliders, &debug_slider_options);
+        }
+
+        if !debug_int_inputs.is_empty() {
+            let mut input_start_y = slider_start_y;
+            if !debug_sliders.is_empty() {
+                input_start_y += slider_total_height + 10.0 * ui_scale;
+            }
+            let input_box_width = (120.0 * ui_scale).clamp(90.0, 180.0);
+            let input_box_height = (18.0 * ui_scale).clamp(16.0, 26.0);
+            let label_color = Vec4::new(0.78, 0.82, 0.9, 1.0);
+            let input_text_color = Vec4::new(0.9, 0.93, 0.98, 1.0);
+            let input_box_color = Vec4::new(0.12, 0.16, 0.22, 0.95);
+            let input_box_hover = Vec4::new(0.18, 0.24, 0.32, 0.96);
+            let input_box_active = Vec4::new(0.22, 0.3, 0.4, 0.98);
+            let input_box_disabled = Vec4::new(0.08, 0.1, 0.14, 0.75);
+            for (index, input) in debug_int_inputs.iter().enumerate() {
+                let item_y = input_start_y
+                    + int_input_padding.y
+                    + index as f32 * (int_input_item_height + int_input_item_gap)
+                    + content_scroll;
+                if item_y + int_input_item_height < content_top || item_y > content_bottom {
+                    continue;
+                }
+                let label_pos = [
+                    text_start.x,
+                    item_y + int_input_item_height * 0.5 - 6.0 * ui_scale,
+                ];
+                gui.submit_text(GuiTextDraw {
+                    text: input.label.clone(),
+                    position: label_pos,
+                    color: label_color.to_array(),
+                    scale: 0.82 * ui_scale,
+                });
+
+                let input_pos = vec2(
+                    debug_panel_position.x + content_width - input_box_width - int_input_padding.x,
+                    item_y + (int_input_item_height - input_box_height) * 0.5,
+                );
+                let input_rect = MenuRect::from_position_size(
+                    [input_pos.x, input_pos.y],
+                    [input_box_width, input_box_height],
+                );
+                let is_active = self.debug_int_input_active == Some(input.id);
+                let is_hovered = hovered_int_input_id == Some(input.id);
+                let box_color = if !input.enabled {
+                    input_box_disabled
+                } else if is_active {
+                    input_box_active
+                } else if is_hovered {
+                    input_box_hover
+                } else {
+                    input_box_color
+                };
+                gui.submit_draw(GuiDraw::with_clip_rect(
+                    GuiLayer::Overlay,
+                    None,
+                    quad_from_pixels(
+                        vec2(input_rect.min[0], input_rect.min[1]),
+                        vec2(
+                            input_rect.max[0] - input_rect.min[0],
+                            input_rect.max[1] - input_rect.min[1],
+                        ),
+                        box_color,
+                        viewport,
+                    ),
+                    content_clip_rect,
+                ));
+
+                let display_text = if is_active {
+                    self.debug_int_input_buffer.clone()
+                } else {
+                    input.value.to_string()
+                };
+                gui.submit_text(GuiTextDraw {
+                    text: display_text,
+                    position: [
+                        input_rect.min[0] + 8.0 * ui_scale,
+                        input_rect.min[1] + 4.0 * ui_scale,
+                    ],
+                    color: input_text_color.to_array(),
+                    scale: 0.8 * ui_scale,
+                });
+
+                debug_int_input_layout.items.push(DebugIntInputLayoutItem {
+                    id: input.id,
+                    rect: input_rect,
+                    enabled: input.enabled,
+                });
+            }
         }
 
         if max_scroll > 0.0 && content_height > 0.0 {
@@ -1439,6 +1833,7 @@ impl DebugGui {
 
         self.debug_slider_layout = debug_slider_layout;
         self.debug_param_radial_layouts = debug_param_radial_layouts;
+        self.debug_int_input_layout = debug_int_input_layout;
         self.mouse_pressed = false;
 
         DebugGuiOutput {
@@ -1458,6 +1853,11 @@ impl DebugGui {
         self.debug_slider_layout = SliderLayout::default();
         self.debug_param_radial_state = RadialButtonState::default();
         self.debug_param_radial_layouts.clear();
+        self.debug_int_input_layout = DebugIntInputLayout::default();
+        self.debug_int_input_active = None;
+        self.debug_int_input_buffer.clear();
+        self.debug_int_input_commit = false;
+        self.debug_int_input_cancel = false;
         self.scroll_offset = 0.0;
         self.scroll_delta = 0.0;
     }
@@ -1627,6 +2027,30 @@ fn point_in_menu_rect(point: Vec2, rect: MenuRect) -> bool {
         && point.x <= rect.max[0]
         && point.y >= rect.min[1]
         && point.y <= rect.max[1]
+}
+
+fn keycode_digit(key: KeyCode) -> Option<char> {
+    match key {
+        KeyCode::Digit0 | KeyCode::Numpad0 => Some('0'),
+        KeyCode::Digit1 | KeyCode::Numpad1 => Some('1'),
+        KeyCode::Digit2 | KeyCode::Numpad2 => Some('2'),
+        KeyCode::Digit3 | KeyCode::Numpad3 => Some('3'),
+        KeyCode::Digit4 | KeyCode::Numpad4 => Some('4'),
+        KeyCode::Digit5 | KeyCode::Numpad5 => Some('5'),
+        KeyCode::Digit6 | KeyCode::Numpad6 => Some('6'),
+        KeyCode::Digit7 | KeyCode::Numpad7 => Some('7'),
+        KeyCode::Digit8 | KeyCode::Numpad8 => Some('8'),
+        KeyCode::Digit9 | KeyCode::Numpad9 => Some('9'),
+        _ => None,
+    }
+}
+
+fn parse_int_input_buffer(buffer: &str) -> Option<u32> {
+    let trimmed = buffer.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<u32>().ok()
 }
 
 fn slider_value_from_cursor(cursor: Vec2, rect: MenuRect, min: f32, max: f32) -> f32 {

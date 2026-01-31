@@ -557,6 +557,7 @@ impl ForwardRenderer {
                 let cubemap_viewport = pass.viewport;
                 self.graph.add_subpass(
                     &SubpassInfo {
+                        name: Some("[MESHI] FORWARD CUBE".to_string()),
                         viewport: cubemap_viewport,
                         color_attachments: attachments,
                         depth_attachment: None,
@@ -624,6 +625,7 @@ impl ForwardRenderer {
             // 1) Color
             self.graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] FORWARD MAIN PASS".to_string()),
                     viewport: self.viewport,
                     color_attachments: forward_pass_attachments,
                     depth_attachment: Some(depth.view),
@@ -654,6 +656,7 @@ impl ForwardRenderer {
 
             self.graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] GUI PASS".to_string()),
                     viewport: self.viewport,
                     color_attachments: gui_attachments,
                     depth_attachment: Some(depth.view),

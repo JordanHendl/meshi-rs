@@ -326,7 +326,7 @@ pub struct CloudShadowSettings {
 impl Default for CloudShadowSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             resolution: 1024,
             extent: 50000.0,
             strength: 1.0,
@@ -428,12 +428,12 @@ impl Default for CloudSettings {
                 wind: Vec2::new(-0.4, 0.2),
                 wind_speed: 0.35,
             },
-            step_count: 64,
-            light_step_count: 12,
+            step_count: 12,
+            light_step_count: 8,
             phase_g: 0.6,
             multi_scatter_strength: 0.35,
             multi_scatter_respects_shadow: true,
-            low_res_scale: CloudResolutionScale::Half,
+            low_res_scale: CloudResolutionScale::Quarter,
             coverage_power: 1.2,
             detail_strength: 0.6,
             curl_strength: 0.0,

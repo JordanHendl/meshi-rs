@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use super::debug_layer::DebugLayer;
 use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
     terrain::TerrainFrameSettings,
@@ -48,6 +47,7 @@ use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use resource_pool::resource_list::ResourceList;
+use std::collections::HashMap;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
 use tare::utils::StagedBuffer;
@@ -142,6 +142,7 @@ struct DataProcessors {
 
 struct Renderers {
     environment: EnvironmentRenderer,
+    debug: DebugLayer,
 }
 
 struct DeferredPSO {
@@ -283,6 +284,11 @@ impl DeferredRenderer {
             .unwrap()
             .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
             .unwrap();
+        info!(
+            "Initialing Deferred Renderer using device {} with main viewport dimensions [{}, {}]",
+            device, info.initial_viewport.area.w, info.initial_viewport.area.h
+        );
+
         let mut ctx = if info.headless {
             Box::new(
                 Context::headless(&ContextInfo {
@@ -391,6 +397,7 @@ impl DeferredRenderer {
             },
         );
 
+        let debug = DebugLayer::new(ctx.as_mut());
         let graph = RenderGraph::new_with_transient_allocator(&mut ctx, &mut alloc);
 
         let cull_queue = ctx
@@ -464,10 +471,6 @@ impl DeferredRenderer {
             .expect("Failed to make deferred combine pso!");
 
         state.register_pso_tables(&pso);
-        info!(
-            "Initialized Deferred Renderer with dimensions [{}, {}]",
-            info.initial_viewport.area.w, info.initial_viewport.area.h
-        );
 
         let data = RendererData {
             viewport: info.initial_viewport,
@@ -506,7 +509,7 @@ impl DeferredRenderer {
             ),
         };
 
-        let mut subrender = Renderers { environment };
+        let mut subrender = Renderers { environment, debug };
 
         subrender.environment.initialize_terrain_deferred(
             ctx.as_mut(),
@@ -1791,7 +1794,6 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-        
 
         // Prepare for frame... this does the following (not all encompassing):
         // 1) Build skinning transformations
@@ -1929,6 +1931,7 @@ impl DeferredRenderer {
             // 4) Material Code
             self.graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] DEFERRED SPLIT".to_string()),
                     viewport: self.data.viewport,
                     color_attachments: deferred_pass_attachments,
                     depth_attachment: Some(depth),
@@ -2001,6 +2004,7 @@ impl DeferredRenderer {
             ///////////////////////////////////////////////////////////////////
             self.graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] DEFERRED COMBINE".to_string()),
                     viewport: self.data.viewport,
                     color_attachments: deferred_combine_attachments,
                     depth_attachment: None,
@@ -2204,6 +2208,7 @@ impl DeferredRenderer {
 
             self.graph.add_subpass(
                 &SubpassInfo {
+                    name: Some("[MESHI] TRANSPARENT".to_string()),
                     viewport: self.data.viewport,
                     color_attachments: transparent_attachments,
                     depth_attachment: Some(depth),
@@ -2277,16 +2282,15 @@ impl DeferredRenderer {
         }
 
         self.graph.add_compute_pass(|mut cmd| {
-            cmd = cmd
-                .combine(self.proc.scene.post_compute())
+            cmd.combine(self.proc.scene.post_compute())
                 .combine(self.proc.draw_builder.post_compute())
                 .combine(self.subrender.environment.post_compute())
                 .combine(self.shadows.post_compute())
                 .combine(self.gui.post_compute())
                 .combine(self.text.post_compute())
-//                .combine(DeferredFrameBlitter::post_compute(&[]))
-                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
-            cmd.end()
+                .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
+                //                .combine(self.subrender.debug.record(self.ctx.as_mut(), self.state.as_ref(), outputs[0].image, [self.data.viewport.area.w as u32, self.data.viewport.area.h as u32]));
+                .end()
         });
 
         let mut wait_sems = BumpVec::with_capacity_in(sems.len() + 1, &self.frame_bump);
