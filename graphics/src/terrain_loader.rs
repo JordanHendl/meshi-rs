@@ -165,8 +165,21 @@ fn estimate_chunk_normal(chunk: &TerrainChunk, x: u32, y: u32, tile_size: f32) -
     let h_r = chunk_height_sample(chunk, right, y);
     let h_d = chunk_height_sample(chunk, x, down);
     let h_u = chunk_height_sample(chunk, x, up);
-    let dx = (h_r - h_l) / (2.0 * tile_size);
-    let dy = (h_u - h_d) / (2.0 * tile_size);
+    let h_c = chunk_height_sample(chunk, x, y);
+    let dx = if x == 0 {
+        (h_r - h_c) / tile_size
+    } else if x == grid_x.saturating_sub(1) {
+        (h_c - h_l) / tile_size
+    } else {
+        (h_r - h_l) / (2.0 * tile_size)
+    };
+    let dy = if y == 0 {
+        (h_u - h_c) / tile_size
+    } else if y == grid_y.saturating_sub(1) {
+        (h_c - h_d) / tile_size
+    } else {
+        (h_u - h_d) / (2.0 * tile_size)
+    };
     let normal = glam::Vec3::new(-dx, -dy, 1.0).normalize_or_zero();
     [normal.x, normal.y, normal.z]
 }
