@@ -257,15 +257,16 @@ uint select_cloud_shadow_cascade(float view_depth) {
 
 float sample_shadow(vec3 world_pos, float view_depth, float bias) {
     uint cascade_count = max(shadow_params.shadow_cascade_count, 1u);
-    uint shadow_res = max(shadow_params.shadow_resolution, 1u);
-    if (shadow_res == 0u) {
+    if (shadow_params.shadow_resolution == 0u || shadow_params.shadow_cascade_count == 0u) {
         return 1.0;
     }
+    uint shadow_res = max(shadow_params.shadow_resolution, 1u);
 
     uint cascade_index = select_shadow_cascade(view_depth);
     vec4 shadow_pos = shadow_matrices.shadow_matrices[cascade_index] * vec4(world_pos, 1.0);
     shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
     vec2 uv = shadow_pos.xy * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;
     }
@@ -282,6 +283,9 @@ float sample_shadow(vec3 world_pos, float view_depth, float bias) {
 
     float shadow = 0.0;
     float depth = shadow_pos.z;
+    if (depth < 0.0 || depth > 1.0) {
+        return 1.0;
+    }
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
             vec2 offset = vec2(x, y) * texel;
@@ -317,12 +321,14 @@ float sample_cloud_shadow(vec3 world_pos, float view_depth) {
     return cloud_shadow_buffer.values[idx];
 }
 
-vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float view_depth, float roughness, vec3 f0) {
+vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, float view_depth, float roughness, vec3 f0, out float shadow_visibility) {
     if (meshi_bindless_lights.lights.length() == 0) {
+        shadow_visibility = 1.0;
         return base_color * 0.1;
     }
 
     vec3 gain = vec3(0.0);
+    shadow_visibility = 1.0;
     for(int i = 0; i < meshi_bindless_lights.lights.length(); ++i) {
     Light light = meshi_bindless_lights.lights[i];
     float light_type = light.position_type.w;
@@ -367,12 +373,15 @@ vec3 apply_light(vec3 base_color, vec3 normal, vec3 view_dir, vec3 world_pos, fl
         uint light_flags = floatBitsToUint(light.extra.x);
         bool casts_shadows = (light_flags & 1u) != 0u;
         if (casts_shadows) {
-            float bias = max(0.0005, 0.002 * (1.0 - ndotl));
+            float shadow_res = max(float(shadow_params.shadow_resolution), 1.0);
+            float texel_bias = 1.5 / shadow_res;
+            float bias = max(0.001, texel_bias) + 0.002 * (1.0 - ndotl);
             shadow_factor = sample_shadow(world_pos, view_depth, bias);
         }
     }
     if (light_type == LIGHT_TYPE_DIRECTIONAL) {
         shadow_factor *= sample_cloud_shadow(world_pos, view_depth);
+        shadow_visibility = min(shadow_visibility, shadow_factor);
     }
 
     vec3 radiance = light_color * attenuation;
@@ -466,11 +475,12 @@ void main() {
     vec3 specular_ibl = reflection_color * mix(fresnel, vec3(1.0), roughness * 0.2);
     vec3 diffuse_ibl = base_color * (1.0 - fresnel) * 0.08;
 
-    vec3 surface = apply_light(base_color, n, v, v_world_pos, view_depth, roughness, f0);
+    float shadow_visibility = 1.0;
+    vec3 surface = apply_light(base_color, n, v, v_world_pos, view_depth, roughness, f0, shadow_visibility);
     surface += diffuse_ibl * fresnel_strength;
     surface += specular_ibl * fresnel_strength;
     float reflect_factor = clamp(fresnel_strength * fresnel.r, 0.0, 1.0);
-    vec3 color = mix(refracted, surface, reflect_factor);
+    vec3 color = mix(refracted * shadow_visibility, surface, reflect_factor);
     color += foam_color;
     float depth_opacity = clamp(thickness / turbidity_depth, 0.0, 1.0);
     float transparency = mix(0.2, 0.85, reflect_factor) + depth_opacity * 0.2 + foam_mask * 0.15;

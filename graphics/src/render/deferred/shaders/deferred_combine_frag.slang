@@ -182,6 +182,7 @@ float sample_shadow(uint shadow_id, float3 world_pos, uint cascade_index, uint c
   float4 shadow_pos = mul(shadow_cascade.matrices[cascade_index], float4(world_pos, 1.0));
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
+  uv.y = 1.0 - uv.y;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     return 1.0;
   }
@@ -220,6 +221,7 @@ float sample_spot_shadow(float4x4 spot_shadow_matrix, uint shadow_id, float3 wor
   float4 shadow_pos = mul(spot_shadow_matrix, float4(world_pos, 1.0));
   shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
   float2 uv = shadow_pos.xy * 0.5 + 0.5;
+  uv.y = 1.0 - uv.y;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     return 1.0;
   }
@@ -300,6 +302,7 @@ FSOutput main(FSInput input) {
     float4 shadow_pos = mul(shadow_cascade.matrices[cascade_index], float4(position.xyz, 1.0));
     shadow_pos.xyz /= max(shadow_pos.w, 0.0001);
     float2 uv = shadow_pos.xy * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y;
     uint grid_x = (cascade_count > 2) ? 2u : max(cascade_count, 1u);
     uint grid_y = (cascade_count + grid_x - 1u) / grid_x;
     uint tile_x = cascade_index % grid_x;
@@ -383,7 +386,9 @@ FSOutput main(FSInput input) {
       uint light_flags = asuint(light.extra.x);
       bool casts_shadows = (light_flags & 1u) != 0u;
       if (casts_shadows) {
-        float bias = max(0.005, 0.05 * (1.0 - n_dot_l));
+        float shadow_res = max(float(per_obj.shadow_resolution), 1.0);
+        float texel_bias = 1.5 / shadow_res;
+        float bias = max(0.001, texel_bias) + 0.002 * (1.0 - n_dot_l);
         shadow_factor = sample_shadow(per_obj.shadow_texture_id, position.xyz, cascade_index, cascade_count, bias);
       }
     } else if (light_type == LIGHT_TYPE_SPOT && per_obj.spot_shadow_texture_id != INVALID_BINDLESS_ID) {
@@ -391,8 +396,9 @@ FSOutput main(FSInput input) {
       bool casts_shadows = (light_flags & 1u) != 0u;
       bool spot_shadow_enabled = light.extra.y > 0.5;
       if (casts_shadows && spot_shadow_enabled) {
-//        float bias = max(0.0005, 0.002 * (1.0 - n_dot_l));
-        float bias = max(0.005, 0.05 * (1.0 - n_dot_l));
+        float shadow_res = max(float(per_obj.spot_shadow_resolution), 1.0);
+        float texel_bias = 1.5 / shadow_res;
+        float bias = max(0.001, texel_bias) + 0.002 * (1.0 - n_dot_l);
         shadow_factor = sample_spot_shadow(per_obj.spot_shadow_matrix, per_obj.spot_shadow_texture_id, position.xyz, bias);
       }
     }
