@@ -203,13 +203,30 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
     }
 }
 
+// The environment demo uses meters for world units.
+const WORLD_UNITS_PER_METER: f32 = 1.0;
+const TERRAIN_TILE_SIZE_METERS: f32 = 4.0;
+const TERRAIN_TILES_PER_CHUNK: [u32; 2] = [64, 64];
+const TERRAIN_GRID_RADIUS: i32 = 1;
+
 fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
     let project_key = "default";
     let mut rdb = RDBFile::new();
-    let settings = TerrainProjectSettings::default();
+    let mut settings = TerrainProjectSettings::default();
+    settings.tile_size = TERRAIN_TILE_SIZE_METERS * WORLD_UNITS_PER_METER;
+    settings.tiles_per_chunk = TERRAIN_TILES_PER_CHUNK;
+    let chunk_size_x = settings.tile_size * settings.tiles_per_chunk[0] as f32;
+    let chunk_size_z = settings.tile_size * settings.tiles_per_chunk[1] as f32;
+    let world_chunk_count = (TERRAIN_GRID_RADIUS * 2 + 1) as f32;
+    settings.world_bounds_min = [0.0, 0.0, 0.0];
+    settings.world_bounds_max = [
+        chunk_size_x * world_chunk_count,
+        chunk_size_z * world_chunk_count,
+        0.0,
+    ];
     let mut generator = TerrainGeneratorDefinition::default();
-    generator.amplitude = 2.0;
-    generator.frequency = 0.01;
+    generator.amplitude = 18.0;
+    generator.frequency = 0.0025;
     let mutation_layer = TerrainMutationLayer::new("layer-1", "Layer 1", 0);
 
     if rdb
@@ -246,11 +263,11 @@ fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
         Err(_) => return Vec::new(),
     };
 
-    let grid_radius = 1;
+    let chunk_stride_z = settings.tile_size * settings.tiles_per_chunk[1] as f32;
     let mut objects = Vec::new();
 
-    for x in -grid_radius..=grid_radius {
-        for z in -grid_radius..=grid_radius {
+    for x in -TERRAIN_GRID_RADIUS..=TERRAIN_GRID_RADIUS {
+        for z in -TERRAIN_GRID_RADIUS..=TERRAIN_GRID_RADIUS {
             let request = TerrainChunkBuildRequest {
                 chunk_coords: [x, z],
                 lod: 0,
@@ -275,8 +292,13 @@ fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
                 continue;
             };
 
-            let offset =
-                terrain_chunk_transform(&settings, artifact.chunk_coords, artifact.bounds_min);
+            let base_transform =
+                terrain_chunk_transform(&settings, [x, 0], artifact.bounds_min);
+            let offset = Mat4::from_translation(Vec3::new(
+                0.0,
+                0.0,
+                chunk_stride_z * z as f32,
+            )) * base_transform;
             objects.push(TerrainRenderObject {
                 key: format!("terrain-{x}-{z}"),
                 artifact,
