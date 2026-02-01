@@ -43,13 +43,13 @@ pub struct OceanInfo {
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            patch_size: 200.0,
+            patch_size: 32.0,
             vertex_resolution: 128,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
-            max_tile_radius: 8,
-            far_tile_radius: 8,
+            max_tile_radius: 12,
+            far_tile_radius: 12,
             tile_height_step: 1.0,
         }
     }
