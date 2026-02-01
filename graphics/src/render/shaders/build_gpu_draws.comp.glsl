@@ -79,6 +79,7 @@ void main() {
     cmd.first_instance = idx;
 
     if (params.num_bins == 0u) {
+        cmd.instance_count = 1u;
         draw_list.commands[idx] = cmd;
         return;
     }

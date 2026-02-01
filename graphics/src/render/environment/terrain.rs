@@ -21,7 +21,7 @@ use tracing::warn;
 
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
-use crate::render::scene::{GPUScene, SceneNodeType, SceneObject, SceneObjectInfo};
+use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
@@ -36,6 +36,8 @@ pub struct TerrainInfo {
     pub clipmap_resolution: u32,
     pub max_tiles: u32,
 }
+
+pub const TERRAIN_DRAW_BIN: u32 = 0;
 
 impl Default for TerrainInfo {
     fn default() -> Self {
@@ -119,7 +121,7 @@ pub struct TerrainRenderer {
 
 #[derive(Clone)]
 struct TerrainObjectEntry {
-    scene_handle: Handle<SceneObject>,
+    transform_handle: Handle<Transformation>,
     draws: Vec<Handle<PerDrawData>>,
     content_hash: u64,
     geometry_entry: String,
@@ -351,11 +353,19 @@ impl TerrainRenderer {
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().end()
+        let mut stream = CommandStream::new().begin();
+        if let Some(deferred) = &mut self.deferred {
+            stream = stream.combine(deferred.draw_builder.pre_compute());
+        }
+        stream.end()
     }
 
     pub fn post_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().end()
+        let mut stream = CommandStream::new().begin();
+        if let Some(deferred) = &mut self.deferred {
+            stream = stream.combine(deferred.draw_builder.post_compute());
+        }
+        stream.end()
     }
 
     pub fn initialize_deferred(
@@ -365,7 +375,7 @@ impl TerrainRenderer {
         sample_count: SampleCount,
         cull_results: Handle<Buffer>,
         bin_counts: Handle<Buffer>,
-        num_bins: u32,
+        _num_bins: u32,
         dynamic: &DynamicAllocator,
     ) {
         let draw_builder = GPUDrawBuilder::new(
@@ -374,7 +384,7 @@ impl TerrainRenderer {
                 ctx,
                 cull_results,
                 bin_counts,
-                num_bins,
+                num_bins: 0,
                 ..Default::default()
             },
             state,
@@ -428,7 +438,6 @@ impl TerrainRenderer {
     pub fn set_render_objects(
         &mut self,
         objects: &[TerrainRenderObject],
-        scene: &mut GPUScene,
         state: &mut BindlessState,
     ) {
         let Some(mut deferred) = self.deferred.take() else {
@@ -448,18 +457,18 @@ impl TerrainRenderer {
         }
 
         for (key, entry) in removals {
-            self.release_terrain_entry(&entry, &mut deferred, scene, state);
+            self.release_terrain_entry(&entry, &mut deferred, state);
             deferred.objects.remove(&key);
         }
 
         for object in objects {
             if let Some(entry) = deferred.objects.get(&object.key).cloned() {
                 if entry.content_hash == object.artifact.content_hash {
-                    scene.set_object_transform(entry.scene_handle, &object.transform);
+                    self.update_terrain_transform(entry.transform_handle, object.transform, state);
                     continue;
                 }
 
-                self.release_terrain_entry(&entry, &mut deferred, scene, state);
+                self.release_terrain_entry(&entry, &mut deferred, state);
                 deferred.objects.remove(&object.key);
             }
 
@@ -470,23 +479,13 @@ impl TerrainRenderer {
                 continue;
             };
 
-            let (scene_handle, transform_handle) = scene.register_object(&SceneObjectInfo {
-                local: Default::default(),
-                global: Default::default(),
-                scene_mask: crate::render::deferred::PassMask::OPAQUE_GEOMETRY as u32
-                    | crate::render::deferred::PassMask::SHADOW as u32,
-                scene_type: SceneNodeType::Renderable,
-            });
-
-            scene.set_object_transform(scene_handle, &object.transform);
-
-            let draws =
-                self.register_terrain_draws(&model, scene_handle, transform_handle, &mut deferred);
+            let transform_handle = self.allocate_terrain_transform(object.transform, state);
+            let draws = self.register_terrain_draws(&model, transform_handle, &mut deferred);
 
             deferred.objects.insert(
                 object.key.clone(),
                 TerrainObjectEntry {
-                    scene_handle,
+                    transform_handle,
                     draws,
                     content_hash: object.artifact.content_hash,
                     geometry_entry,
@@ -663,10 +662,9 @@ impl TerrainRenderer {
         &mut self,
         entry: &TerrainObjectEntry,
         deferred: &mut TerrainDeferredResources,
-        scene: &mut GPUScene,
         state: &mut BindlessState,
     ) {
-        scene.release_object(entry.scene_handle);
+        self.release_terrain_transform(entry.transform_handle, state);
         for draw in &entry.draws {
             deferred.draw_builder.release_draw(*draw);
         }
@@ -697,7 +695,6 @@ impl TerrainRenderer {
     fn register_terrain_draws(
         &mut self,
         model: &DeviceModel,
-        scene_handle: Handle<SceneObject>,
         transform_handle: Handle<Transformation>,
         deferred: &mut TerrainDeferredResources,
     ) -> Vec<Handle<PerDrawData>> {
@@ -708,7 +705,7 @@ impl TerrainRenderer {
                 deferred
                     .draw_builder
                     .register_draw(&PerDrawData::terrain_draw(
-                        scene_handle,
+                        Handle::default(),
                         transform_handle,
                         mesh.material
                             .as_ref()
@@ -833,6 +830,61 @@ impl TerrainRenderer {
         }
 
         true
+    }
+
+    fn allocate_terrain_transform(
+        &self,
+        transform: Mat4,
+        state: &mut BindlessState,
+    ) -> Handle<Transformation> {
+        let mut handle = Handle::default();
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    handle = transforms.add_transform();
+                    transforms.transform_mut(handle).transform = transform;
+                },
+            )
+            .expect("allocate terrain transform");
+        handle
+    }
+
+    fn update_terrain_transform(
+        &self,
+        handle: Handle<Transformation>,
+        transform: Mat4,
+        state: &mut BindlessState,
+    ) {
+        if !handle.valid() {
+            return;
+        }
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    transforms.transform_mut(handle).transform = transform;
+                },
+            )
+            .expect("update terrain transform");
+    }
+
+    fn release_terrain_transform(
+        &self,
+        handle: Handle<Transformation>,
+        state: &mut BindlessState,
+    ) {
+        if !handle.valid() {
+            return;
+        }
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    transforms.remove_transform(handle);
+                },
+            )
+            .expect("release terrain transform");
     }
 
     fn register_furikake_geometry_layer(

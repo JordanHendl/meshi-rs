@@ -1,7 +1,7 @@
 use super::debug_layer::DebugLayer;
 use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
-    terrain::TerrainFrameSettings,
+    terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
 };
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -1917,7 +1917,7 @@ impl DeferredRenderer {
                     .combine(
                         self.subrender
                             .environment
-                            .build_terrain_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
+                            .build_terrain_draws(TERRAIN_DRAW_BIN, view_idx as u32),
                     )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
@@ -2313,11 +2313,9 @@ impl DeferredRenderer {
         &mut self,
         objects: &[super::environment::terrain::TerrainRenderObject],
     ) {
-        self.subrender.environment.set_terrain_render_objects(
-            objects,
-            &mut self.proc.scene,
-            self.state.as_mut(),
-        );
+        self.subrender
+            .environment
+            .set_terrain_render_objects(objects, self.state.as_mut());
     }
 }
 

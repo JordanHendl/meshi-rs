@@ -1,7 +1,7 @@
 use crate::ShadowCascadeSettings;
 use crate::render::SpotShadowLight;
 use crate::render::deferred::shadow::{ShadowPass, ShadowPassInfo};
-use crate::render::environment::EnvironmentRenderer;
+use crate::render::environment::{EnvironmentRenderer, terrain::TERRAIN_DRAW_BIN};
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use dashi::cmd::Executable;
 use dashi::gpu::cmd::{Scope, SyncPoint};
@@ -335,7 +335,7 @@ impl CascadedShadows {
         graph.add_compute_pass(|cmd| {
             let cmd = cmd
                 .combine(draw_builder.build_draws(super::BIN_SHADOW, view_idx))
-                .combine(environment.build_terrain_draws(super::BIN_SHADOW, view_idx))
+                .combine(environment.build_terrain_draws(TERRAIN_DRAW_BIN, view_idx))
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
             cmd.end()

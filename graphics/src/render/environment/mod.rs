@@ -242,10 +242,9 @@ impl EnvironmentRenderer {
     pub fn set_terrain_render_objects(
         &mut self,
         objects: &[terrain::TerrainRenderObject],
-        scene: &mut super::scene::GPUScene,
         state: &mut BindlessState,
     ) {
-        self.terrain.set_render_objects(objects, scene, state);
+        self.terrain.set_render_objects(objects, state);
     }
 
     pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
