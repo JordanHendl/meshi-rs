@@ -66,9 +66,9 @@ use shadows::{ShadowCascadeInfo, ShadowPipelineMode, ShadowSystem};
 #[repr(u32)]
 pub enum PassMask {
     PRE_Z = 0x00000001,
-    OPAQUE_GEOMETRY = 0x00000002,
-    SHADOW = 0x00000004,
-    TRANSPARENT = 0x00000008,
+    OPAQUE_GEOMETRY = 0x00000010,
+    SHADOW = 0x0000100,
+    TRANSPARENT = 0x00001000,
 }
 
 const BIN_PRE_Z: u32 = 0;
@@ -325,7 +325,7 @@ impl DeferredRenderer {
                     },
                     SceneBin {
                         id: BIN_SHADOW,
-                        mask: PassMask::SHADOW as u32,
+                        mask: PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32,
                     },
                     SceneBin {
                         id: BIN_TRANSPARENT,
@@ -1297,7 +1297,9 @@ impl DeferredRenderer {
                 PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
             }
             RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT as u32,
-            RenderObjectInfo::Empty => PassMask::OPAQUE_GEOMETRY as u32,
+            RenderObjectInfo::Empty => {
+                PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
+            }
         };
         let (scene_handle, transform_handle) = self.proc.scene.register_object(&SceneObjectInfo {
             local: Default::default(),

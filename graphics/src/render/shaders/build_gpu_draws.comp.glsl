@@ -89,7 +89,8 @@ void main() {
         return;
     }
 
-    uint bin_offset = params.view * params.num_bins + params.bin;
+    //uint bin_offset = params.view * params.num_bins + params.bin;
+    uint bin_offset = params.bin;
     uint bin_count = counts.counts[bin_offset];
     uint scene_slot = handle_slot(draw.scene_id);
 
