@@ -52,6 +52,7 @@ pub struct TerrainDbgen {
 }
 
 const DEFAULT_LAYER_ID: &str = "layer-1";
+const MIN_TILE_SIZE: f32 = 4.0;
 
 pub struct TerrainChunkResult {
     pub entry_key: String,
@@ -328,6 +329,7 @@ impl TerrainDbgen {
         if !generator_graph_id.is_empty() {
             settings.generator_graph_id = generator_graph_id.to_string();
         }
+        settings.tile_size = settings.tile_size.max(MIN_TILE_SIZE);
         let vertex_resolution = vertex_resolution.max(1);
         settings.tiles_per_chunk = [vertex_resolution, vertex_resolution];
         let world_chunks = [world_chunks[0].max(1), world_chunks[1].max(1)];

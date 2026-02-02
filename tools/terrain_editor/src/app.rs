@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -41,8 +42,9 @@ const EARTHLIKE_BIOME_FREQUENCY: f32 = 0.003;
 const EARTHLIKE_ALGORITHM: &str = "ridge-noise";
 const DEFAULT_CHUNK_KEY: &str = "terrain/chunk_0_0";
 const DEFAULT_WORLD_CHUNKS: [u32; 2] = [32, 32];
-const DEFAULT_VERTEX_RESOLUTION: u32 = 32;
+const DEFAULT_VERTEX_RESOLUTION: u32 = 16;
 const DEFAULT_VERTEX_COLOR: [f32; 3] = [0.8, 0.2, 0.2];
+const GENERATION_CHUNKS_PER_FRAME: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerrainMode {
@@ -133,6 +135,12 @@ pub struct TerrainEditorApp {
     ui_hovered: bool,
     last_world_cursor: Vec2,
     panel_visibility: PanelVisibility,
+    pending_generation: VecDeque<[u32; 2]>,
+    pending_request: Option<TerrainGenerationRequest>,
+    pending_generation_total: usize,
+    pending_generation_processed: usize,
+    pending_failures: Vec<String>,
+    pending_last_chunk_entry: Option<String>,
 }
 
 impl TerrainEditorApp {
@@ -302,6 +310,12 @@ impl TerrainEditorApp {
                 brush: false,
                 workflow: false,
             },
+            pending_generation: VecDeque::new(),
+            pending_request: None,
+            pending_generation_total: 0,
+            pending_generation_processed: 0,
+            pending_failures: Vec::new(),
+            pending_last_chunk_entry: None,
         };
 
         app.rdb_path_input = app.rdb_path.to_string_lossy().to_string();
@@ -526,6 +540,7 @@ impl TerrainEditorApp {
             self.refresh_terrain();
             self.needs_refresh = false;
         }
+        self.process_generation_queue();
 
         if self.terrain_mode == TerrainMode::Manual && !self.ui_hovered {
             self.handle_manual_brush();
@@ -538,9 +553,14 @@ impl TerrainEditorApp {
     }
 
     fn refresh_terrain(&mut self) {
-        let chunk_key = self.current_chunk_key();
+        if self.rdb_open.is_none() {
+            self.persistence_error = Some("No database open.".to_string());
+            self.update_status_text();
+            return;
+        }
+
         let request = TerrainGenerationRequest {
-            chunk_key: chunk_key.clone(),
+            chunk_key: self.current_chunk_key(),
             generator_graph_id: self.generation_graph_id.clone(),
             lod: self.generation_lod,
             generator_frequency: self.generator_frequency,
@@ -551,35 +571,118 @@ impl TerrainEditorApp {
             vertex_resolution: self.vertex_resolution,
         };
 
-        let Some(rdb) = self.rdb_open.as_mut() else {
-            self.persistence_error = Some("No database open.".to_string());
+        let total_chunks =
+            self.world_chunks[0].saturating_mul(self.world_chunks[1]) as usize;
+        if total_chunks == 0 {
+            self.status_note = Some("No chunks to generate.".to_string());
             self.update_status_text();
+            return;
+        }
+
+        let mut pending_generation = VecDeque::with_capacity(total_chunks);
+        for y in 0..self.world_chunks[1] {
+            for x in 0..self.world_chunks[0] {
+                pending_generation.push_back([x, y]);
+            }
+        }
+
+        self.pending_generation = pending_generation;
+        self.pending_request = Some(request);
+        self.pending_generation_total = total_chunks;
+        self.pending_generation_processed = 0;
+        self.pending_failures.clear();
+        self.pending_last_chunk_entry = None;
+        self.persistence_error = None;
+        self.status_note = Some("Terrain generation started.".to_string());
+        self.update_status_text();
+    }
+
+    fn process_generation_queue(&mut self) {
+        if self.pending_generation.is_empty() {
+            return;
+        }
+
+        let Some(request_template) = self.pending_request.clone() else {
+            self.pending_generation.clear();
             return;
         };
 
-        let entry_key = self
-            .dbgen
-            .chunk_entry_for_key(&request.chunk_key, request.lod);
-        match self.dbgen.generate_chunk(&request, rdb) {
-            Ok(result) => {
-                self.persistence_error = None;
-                self.db_dirty = true;
-                self.ensure_chunk_key(&result.chunk_entry);
-                self.status_note = Some("Terrain generated.".to_string());
-                self.update_rendered_chunk(result.chunk_entry.clone());
+        let remaining = self.pending_generation.len();
+        let batch_size = GENERATION_CHUNKS_PER_FRAME.min(remaining);
+        let mut batch = Vec::with_capacity(batch_size);
+        for _ in 0..batch_size {
+            if let Some(coords) = self.pending_generation.pop_front() {
+                batch.push(coords);
             }
-            Err(err) => {
-                warn!(
-                    error = %err,
-                    chunk_key = %request.chunk_key,
-                    entry_key = %entry_key,
-                    "Terrain generation failed."
-                );
-                self.persistence_error = Some(format!("Generation failed for {entry_key}: {err}"));
-                self.status_note =
-                    Some("Terrain generation failed. Check cache inputs.".to_string());
+        }
+
+        let (generated_entries, last_chunk_entry, failures) = {
+            let Some(rdb) = self.rdb_open.as_mut() else {
+                self.persistence_error = Some("No database open.".to_string());
                 self.update_status_text();
+                self.pending_generation.clear();
+                self.pending_request = None;
+                return;
+            };
+
+            let mut generated_entries = Vec::new();
+            let mut last_chunk_entry = None;
+            let mut failures = Vec::new();
+            for coords in batch {
+                let mut request = request_template.clone();
+                request.chunk_key = format!("terrain/chunk_{}_{}", coords[0], coords[1]);
+                let entry_key = self
+                    .dbgen
+                    .chunk_entry_for_key(&request.chunk_key, request.lod);
+                match self.dbgen.generate_chunk(&request, rdb) {
+                    Ok(result) => {
+                        generated_entries.push(result.chunk_entry.clone());
+                        last_chunk_entry = Some(result.chunk_entry);
+                    }
+                    Err(err) => {
+                        warn!(
+                            error = %err,
+                            chunk_key = %request.chunk_key,
+                            entry_key = %entry_key,
+                            "Terrain generation failed."
+                        );
+                        failures.push(format!("{entry_key}: {err}"));
+                    }
+                }
             }
+            (generated_entries, last_chunk_entry, failures)
+        };
+
+        if !generated_entries.is_empty() {
+            self.db_dirty = true;
+            for chunk_entry in &generated_entries {
+                self.ensure_chunk_key(chunk_entry);
+            }
+        }
+
+        self.pending_generation_processed =
+            self.pending_generation_processed.saturating_add(batch_size);
+        self.pending_failures.extend(failures);
+        if let Some(chunk_entry) = last_chunk_entry {
+            self.pending_last_chunk_entry = Some(chunk_entry);
+        }
+
+        if self.pending_generation.is_empty() {
+            self.pending_request = None;
+            if let Some(chunk_entry) = self.pending_last_chunk_entry.clone() {
+                self.status_note = Some("Terrain generated.".to_string());
+                self.update_rendered_chunk(chunk_entry);
+            }
+            if !self.pending_failures.is_empty() {
+                self.persistence_error = Some(format!(
+                    "Generation failed for {} chunks.",
+                    self.pending_failures.len()
+                ));
+                self.status_note = Some(
+                    "Terrain generation completed with errors. Check logs for details.".to_string(),
+                );
+            }
+            self.update_status_text();
         }
     }
 
