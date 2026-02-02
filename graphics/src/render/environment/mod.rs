@@ -202,8 +202,12 @@ impl EnvironmentRenderer {
             .record_cubemap_face(viewport, &mut self.dynamic, face_index)
     }
 
-    pub fn update_terrain(&mut self, settings: terrain::TerrainFrameSettings) {
-        self.terrain.update(settings);
+    pub fn update_terrain(
+        &mut self,
+        settings: terrain::TerrainFrameSettings,
+        state: &mut BindlessState,
+    ) {
+        self.terrain.update(settings, state);
     }
 
     pub fn initialize_terrain_deferred(

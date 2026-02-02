@@ -117,6 +117,8 @@ pub struct TerrainRenderer {
     camera_position: Vec3,
     use_depth: bool,
     deferred: Option<TerrainDeferredResources>,
+    lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
+    active_chunk_lods: HashMap<TerrainChunkKey, String>,
 }
 
 #[derive(Clone)]
@@ -133,6 +135,12 @@ struct TerrainDeferredResources {
     pipeline: PSO,
     objects: HashMap<String, TerrainObjectEntry>,
     db: Option<NonNull<DB>>,
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+struct TerrainChunkKey {
+    project_key: String,
+    coords: [i32; 2],
 }
 
 fn compile_terrain_shaders() -> [bento::CompilationResult; 2] {
@@ -349,6 +357,8 @@ impl TerrainRenderer {
             camera_position: Vec3::ZERO,
             use_depth: info.use_depth,
             deferred: None,
+            lod_sources: HashMap::new(),
+            active_chunk_lods: HashMap::new(),
         }
     }
 
@@ -407,10 +417,11 @@ impl TerrainRenderer {
         }
     }
 
-    pub fn update(&mut self, settings: TerrainFrameSettings) {
+    pub fn update(&mut self, settings: TerrainFrameSettings, state: &mut BindlessState) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);
         self.camera_position = settings.camera_position;
+        self.update_lod_selection(state);
     }
 
     pub fn build_deferred_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
@@ -444,6 +455,109 @@ impl TerrainRenderer {
             return;
         };
 
+        self.lod_sources = Self::group_lod_sources(objects);
+        let selection = self.select_lod_objects();
+        self.active_chunk_lods = Self::selection_key_map(&selection);
+        self.apply_render_objects(&selection, &mut deferred, state);
+
+        self.deferred = Some(deferred);
+    }
+
+    fn update_lod_selection(&mut self, state: &mut BindlessState) {
+        if self.lod_sources.is_empty() {
+            return;
+        }
+
+        let selection = self.select_lod_objects();
+        let selection_keys = Self::selection_key_map(&selection);
+        if selection_keys == self.active_chunk_lods {
+            return;
+        }
+        self.active_chunk_lods = selection_keys;
+
+        let Some(mut deferred) = self.deferred.take() else {
+            return;
+        };
+        self.apply_render_objects(&selection, &mut deferred, state);
+        self.deferred = Some(deferred);
+    }
+
+    fn group_lod_sources(
+        objects: &[TerrainRenderObject],
+    ) -> HashMap<TerrainChunkKey, Vec<TerrainRenderObject>> {
+        let mut sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>> = HashMap::new();
+        for object in objects {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            sources.entry(key).or_default().push(object.clone());
+        }
+        sources
+    }
+
+    fn select_lod_objects(&self) -> Vec<TerrainRenderObject> {
+        let mut selected = Vec::with_capacity(self.lod_sources.len());
+        for sources in self.lod_sources.values() {
+            if sources.is_empty() {
+                continue;
+            }
+            selected.push(self.select_lod_for_chunk(sources));
+        }
+        selected
+    }
+
+    fn select_lod_for_chunk(&self, sources: &[TerrainRenderObject]) -> TerrainRenderObject {
+        let reference = &sources[0];
+        let bounds_min = Vec3::from(reference.artifact.bounds_min);
+        let bounds_max = Vec3::from(reference.artifact.bounds_max);
+        let center_local = (bounds_min + bounds_max) * 0.5;
+        let center_world = reference.transform.transform_point3(center_local);
+        let distance = (center_world - self.camera_position).length();
+
+        let extent = (bounds_max - bounds_min).abs();
+        let chunk_extent = extent.x.max(extent.y).max(1.0);
+        let lod_step = (chunk_extent * 2.0).max(1.0);
+        let max_lod = sources
+            .iter()
+            .map(|source| source.artifact.lod)
+            .max()
+            .unwrap_or(0);
+        let target_lod = ((distance / lod_step).floor() as u8).min(max_lod);
+
+        let mut best = reference.clone();
+        let mut best_delta = reference.artifact.lod.abs_diff(target_lod);
+        for source in sources.iter().skip(1) {
+            let delta = source.artifact.lod.abs_diff(target_lod);
+            if delta < best_delta || (delta == best_delta && source.artifact.lod < best.artifact.lod)
+            {
+                best = source.clone();
+                best_delta = delta;
+            }
+        }
+        best
+    }
+
+    fn selection_key_map(
+        selection: &[TerrainRenderObject],
+    ) -> HashMap<TerrainChunkKey, String> {
+        let mut map = HashMap::with_capacity(selection.len());
+        for object in selection {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            map.insert(key, object.key.clone());
+        }
+        map
+    }
+
+    fn apply_render_objects(
+        &mut self,
+        objects: &[TerrainRenderObject],
+        deferred: &mut TerrainDeferredResources,
+        state: &mut BindlessState,
+    ) {
         let mut next_keys = HashSet::with_capacity(objects.len());
         for object in objects {
             next_keys.insert(object.key.clone());
@@ -457,7 +571,7 @@ impl TerrainRenderer {
         }
 
         for (key, entry) in removals {
-            self.release_terrain_entry(&entry, &mut deferred, state);
+            self.release_terrain_entry(&entry, deferred, state);
             deferred.objects.remove(&key);
         }
 
@@ -468,19 +582,19 @@ impl TerrainRenderer {
                     continue;
                 }
 
-                self.release_terrain_entry(&entry, &mut deferred, state);
+                self.release_terrain_entry(&entry, deferred, state);
                 deferred.objects.remove(&object.key);
             }
 
             let Some((model, geometry_entry, material_handle)) =
-                self.build_terrain_model(&object.key, &object.artifact, &mut deferred, state)
+                self.build_terrain_model(&object.key, &object.artifact, deferred, state)
             else {
                 warn!("Failed to build terrain render object '{}'.", object.key);
                 continue;
             };
 
             let transform_handle = self.allocate_terrain_transform(object.transform, state);
-            let draws = self.register_terrain_draws(&model, transform_handle, &mut deferred);
+            let draws = self.register_terrain_draws(&model, transform_handle, deferred);
 
             deferred.objects.insert(
                 object.key.clone(),
@@ -493,8 +607,6 @@ impl TerrainRenderer {
                 },
             );
         }
-
-        self.deferred = Some(deferred);
     }
 
     pub fn record_compute(&mut self, dynamic: &mut DynamicAllocator) -> CommandStream<Executable> {

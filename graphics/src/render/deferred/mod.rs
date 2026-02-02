@@ -1747,7 +1747,7 @@ impl DeferredRenderer {
         }
         self.subrender
             .environment
-            .update_terrain(TerrainFrameSettings { camera_position });
+            .update_terrain(TerrainFrameSettings { camera_position }, self.state.as_mut());
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self
