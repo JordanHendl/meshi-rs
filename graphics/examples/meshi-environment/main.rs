@@ -3,17 +3,11 @@ use std::ffi::c_void;
 use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::*;
 use meshi_ffi_structs::event::*;
-use meshi_graphics::rdb::terrain::{
-    TerrainChunkArtifact, TerrainGeneratorDefinition, TerrainMutationLayer, TerrainProjectSettings,
-    generator_entry, mutation_layer_entry, project_settings_entry,
-};
-use meshi_graphics::terrain::{
-    TerrainChunkBuildRequest, TerrainChunkBuildStatus, build_terrain_chunk_with_context,
-    prepare_terrain_build_context,
-};
-use meshi_graphics::terrain_loader::terrain_chunk_transform;
+use meshi_graphics::rdb::terrain::TerrainProjectSettings;
+use meshi_graphics::terrain_loader::terrain_render_object_from_chunk;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
+use noren::rdb::terrain::{TerrainChunk, TerrainTile};
 
 #[path = "../common/camera.rs"]
 mod common_camera;
@@ -30,7 +24,7 @@ fn main() {
         [1280, 720],
         common_setup::CameraSetup {
             transform: Mat4::from_translation(Vec3::new(0.0, 6.0, 8.0)),
-            near:  0.5,
+            near: 0.5,
             far: 1000.0,
             ..Default::default()
         },
@@ -206,106 +200,57 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
 // The environment demo uses meters for world units.
 const WORLD_UNITS_PER_METER: f32 = 1.0;
 const TERRAIN_TILE_SIZE_METERS: f32 = 4.0;
-const TERRAIN_TILES_PER_CHUNK: [u32; 2] = [64, 64];
-const TERRAIN_GRID_RADIUS: i32 = 1;
+const HEIGHTMAP_HEIGHT_SCALE: f32 = 80.0;
 
 fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
-    let project_key = "default";
-    let mut rdb = RDBFile::new();
     let mut settings = TerrainProjectSettings::default();
     settings.tile_size = TERRAIN_TILE_SIZE_METERS * WORLD_UNITS_PER_METER;
-    settings.tiles_per_chunk = TERRAIN_TILES_PER_CHUNK;
-    let chunk_size_x = settings.tile_size * settings.tiles_per_chunk[0] as f32;
-    let chunk_size_z = settings.tile_size * settings.tiles_per_chunk[1] as f32;
-    let world_chunk_count = (TERRAIN_GRID_RADIUS * 2 + 1) as f32;
+    let (heights, tiles_per_chunk) = load_iceland_heightmap();
+    settings.tiles_per_chunk = tiles_per_chunk;
     settings.world_bounds_min = [0.0, 0.0, 0.0];
     settings.world_bounds_max = [
-        chunk_size_x * world_chunk_count,
-        chunk_size_z * world_chunk_count,
-        0.0,
+        settings.tile_size * tiles_per_chunk[0] as f32,
+        settings.tile_size * tiles_per_chunk[1] as f32,
+        HEIGHTMAP_HEIGHT_SCALE,
     ];
-    let mut generator = TerrainGeneratorDefinition::default();
-    generator.amplitude = 18.0;
-    generator.frequency = 0.0025;
-    let mutation_layer = TerrainMutationLayer::new("layer-1", "Layer 1", 0);
 
-    if rdb
-        .add(&project_settings_entry(project_key), &settings)
-        .is_err()
-    {
-        return Vec::new();
-    }
-    if rdb
-        .add(
-            &generator_entry(project_key, settings.active_generator_version),
-            &generator,
-        )
-        .is_err()
-    {
-        return Vec::new();
-    }
-    if rdb
-        .add(
-            &mutation_layer_entry(
-                project_key,
-                &mutation_layer.layer_id,
-                settings.active_mutation_version,
-            ),
-            &mutation_layer,
-        )
-        .is_err()
-    {
-        return Vec::new();
-    }
+    let tiles = vec![
+        TerrainTile {
+            tile_id: 1,
+            flags: 0,
+        };
+        (tiles_per_chunk[0] * tiles_per_chunk[1]) as usize
+    ];
 
-    let context = match prepare_terrain_build_context(&mut rdb, project_key) {
-        Ok(context) => context,
-        Err(_) => return Vec::new(),
+    let chunk = TerrainChunk {
+        chunk_coords: [0, 0],
+        origin: [0.0, 0.0],
+        tile_size: settings.tile_size,
+        tiles_per_chunk,
+        tiles,
+        heights,
+        mesh_entry: "geometry/terrain_chunk".to_string(),
     };
 
-    let chunk_stride_z = settings.tile_size * settings.tiles_per_chunk[1] as f32;
-    let mut objects = Vec::new();
+    vec![terrain_render_object_from_chunk(
+        &settings,
+        "iceland",
+        "iceland-heightmap".to_string(),
+        &chunk,
+    )]
+}
 
-    for x in -TERRAIN_GRID_RADIUS..=TERRAIN_GRID_RADIUS {
-        for z in -TERRAIN_GRID_RADIUS..=TERRAIN_GRID_RADIUS {
-            let request = TerrainChunkBuildRequest {
-                chunk_coords: [x, z],
-                lod: 0,
-            };
-            let outcome = match build_terrain_chunk_with_context(
-                &mut rdb,
-                project_key,
-                &context,
-                request,
-                |_| {},
-                || false,
-            ) {
-                Ok(outcome) => outcome,
-                Err(_) => continue,
-            };
-
-            if !matches!(outcome.status, TerrainChunkBuildStatus::Built) {
-                continue;
-            }
-
-            let Some(artifact) = outcome.artifact else {
-                continue;
-            };
-
-            let base_transform =
-                terrain_chunk_transform(&settings, [x, 0], artifact.bounds_min);
-            let offset = Mat4::from_translation(Vec3::new(
-                0.0,
-                0.0,
-                chunk_stride_z * z as f32,
-            )) * base_transform;
-            objects.push(TerrainRenderObject {
-                key: format!("terrain-{x}-{z}"),
-                artifact,
-                transform: offset,
-            });
-        }
+fn load_iceland_heightmap() -> (Vec<f32>, [u32; 2]) {
+    let bytes = include_bytes!("iceland_heightmap.png");
+    let image = image::load_from_memory(bytes)
+        .expect("load iceland heightmap")
+        .to_luma8();
+    let (width, height) = image.dimensions();
+    let mut heights = Vec::with_capacity((width * height) as usize);
+    for pixel in image.pixels() {
+        let normalized = pixel[0] as f32 / 255.0;
+        heights.push(normalized * HEIGHTMAP_HEIGHT_SCALE);
     }
-
-    objects
+    let tiles_per_chunk = [width.saturating_sub(1), height.saturating_sub(1)];
+    (heights, tiles_per_chunk)
 }

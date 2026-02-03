@@ -13,6 +13,7 @@ bento = {git = "https://github.com/JordanHendl/gohan"}
 tare =  {git = "https://github.com/JordanHendl/gohan"}
 miso =  {git = "https://github.com/JordanHendl/gohan"}
 furikake =  {git = "https://github.com/JordanHendl/gohan"}
+image = "0.25.1"
 #bento = {path = "C:/Program Files/Git/wksp/git/gohan/bento"}
 #miso = {path = "C:/Program Files/Git/wksp/git/gohan/miso"}
 #tare = {path = "C:/Program Files/Git/wksp/git/gohan/tare"}
