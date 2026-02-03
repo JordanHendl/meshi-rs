@@ -1,4 +1,5 @@
 use std::ffi::c_void;
+use std::path::PathBuf;
 
 use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::*;
@@ -7,7 +8,8 @@ use meshi_graphics::rdb::terrain::TerrainProjectSettings;
 use meshi_graphics::terrain_loader::terrain_render_object_from_chunk;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use noren::rdb::terrain::{TerrainChunk, TerrainTile};
+use noren::rdb::terrain::{parse_chunk_artifact_entry, TerrainChunk, TerrainTile};
+use tracing::warn;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
@@ -104,9 +106,30 @@ fn main() {
         ..Default::default()
     });
 
-    let terrain_objects = build_terrain_chunk_grid();
-    if !terrain_objects.is_empty() {
-        setup.engine.set_terrain_render_objects(&terrain_objects);
+    let terrain_rdb_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("terrain.rdb");
+    let mut terrain_rdb = match RDBFile::load(&terrain_rdb_path) {
+        Ok(rdb) => rdb,
+        Err(err) => {
+            warn!(
+                "Failed to load terrain RDB at {}: {err:?}",
+                terrain_rdb_path.display()
+            );
+            RDBFile::new()
+        }
+    };
+    if let Some((project_key, terrain_chunks)) = terrain_chunks_from_rdb(&terrain_rdb) {
+        setup.engine.set_terrain_render_objects_from_rdb(
+            &mut terrain_rdb,
+            &project_key,
+            &terrain_chunks,
+        );
+    } else {
+        let terrain_objects = build_terrain_chunk_grid();
+        if !terrain_objects.is_empty() {
+            setup.engine.set_terrain_render_objects(&terrain_objects);
+        }
     }
 
     setup
@@ -253,4 +276,19 @@ fn load_iceland_heightmap() -> (Vec<f32>, [u32; 2]) {
     }
     let tiles_per_chunk = [width.saturating_sub(1), height.saturating_sub(1)];
     (heights, tiles_per_chunk)
+}
+
+fn terrain_chunks_from_rdb(rdb: &RDBFile) -> Option<(String, Vec<TerrainChunkRef>)> {
+    let mut project_key: Option<String> = None;
+    let mut chunks = Vec::new();
+
+    for entry in rdb.entries() {
+        let name = entry.name.clone();
+        if let Some(parsed) = parse_chunk_artifact_entry(&name) {
+            project_key.get_or_insert(parsed.project_key);
+            chunks.push(TerrainChunkRef::ArtifactEntry(name));
+        }
+    }
+
+    project_key.map(|key| (key, chunks))
 }
