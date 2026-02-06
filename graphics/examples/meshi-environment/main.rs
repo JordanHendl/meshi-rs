@@ -1,12 +1,11 @@
 use std::ffi::c_void;
-use std::path::PathBuf;
 
-use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
+use dashi::Handle;
 use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use noren::rdb::terrain::parse_chunk_artifact_entry;
+use noren::rdb::terrain::{parse_chunk_artifact_entry, project_settings_entry};
 use tracing::warn;
 
 #[path = "../common/camera.rs"]
@@ -44,11 +43,9 @@ fn main() {
         camera: CameraController,
         _instruction_text: Handle<TextObject>,
         environment_text: Handle<TextObject>,
-        _cloud_weather_map: ImageView,
     }
 
-    let cloud_weather_map = create_cloud_test_map(setup.engine.context(), 128);
-    setup.engine.set_cloud_weather_map(Some(cloud_weather_map));
+    setup.engine.set_cloud_weather_map(None);
 
     let mut data = AppData {
         running: true,
@@ -61,7 +58,6 @@ fn main() {
             scale: 1.2,
             render_mode: common_setup::text_render_mode(&setup.db),
         }),
-        _cloud_weather_map: cloud_weather_map,
     };
 
     extern "C" fn callback(event: *mut Event, data: *mut c_void) {
@@ -104,21 +100,42 @@ fn main() {
         ..Default::default()
     });
 
-    let terrain_rdb_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("sample_database/terrain.rdb");
-    let mut terrain_rdb = match RDBFile::load(&terrain_rdb_path) {
-        Ok(rdb) => rdb,
-        Err(err) => {
-            warn!(
-                "Failed to load terrain RDB at {}: {err:?}",
-                terrain_rdb_path.display()
-            );
-            RDBFile::new()
+    if let Some(project_key) = terrain_project_key_from_db(&setup.db) {
+        let settings_entry = project_settings_entry(&project_key);
+        match setup
+            .db
+            .terrain_mut()
+            .fetch_project_settings(&settings_entry)
+        {
+            Ok(settings) => {
+                let mut render_objects = Vec::new();
+                for entry in setup.db.enumerate_terrain_chunks() {
+                    match setup.db.terrain_mut().fetch_chunk_artifact(&entry) {
+                        Ok(artifact) => {
+                            render_objects.push(
+                                meshi_graphics::terrain_loader::terrain_render_object_from_artifact(
+                                    &settings,
+                                    "iceland".to_string(),
+                                    artifact,
+                                ),
+                            );
+                        }
+                        Err(err) => {
+                            warn!("Failed to load terrain artifact '{entry}': {err:?}");
+                        }
+                    }
+                }
+
+                if render_objects.is_empty() {
+                    warn!("No terrain artifacts found for project '{project_key}'.");
+                } else {
+                    setup.engine.set_terrain_render_objects(&render_objects);
+                }
+            }
+            Err(err) => {
+                warn!("Failed to load terrain settings '{settings_entry}': {err:?}");
+            }
         }
-    };
-    if let Some(project_key) = terrain_project_key_from_rdb(&terrain_rdb) {
-        setup.engine.set_terrain_rdb(&mut terrain_rdb, &project_key);
     }
 
     setup
@@ -167,58 +184,8 @@ fn main() {
     setup.engine.shut_down();
 }
 
-fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
-    let mut data = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let idx = ((y * size + x) * 4) as usize;
-            let nx = x as f32 / size as f32;
-            let ny = y as f32 / size as f32;
-            let base_variation = (0.5 + 0.5 * (nx * 6.5).sin() * (ny * 4.5).cos()).clamp(0.0, 1.0);
-            let overcast = (0.82 + 0.18 * base_variation).clamp(0.0, 1.0);
-            let split_width = 0.08;
-            let split_edge = ((nx - 0.5).abs() / split_width).clamp(0.0, 1.0);
-            let split_mask = split_edge * split_edge * (3.0 - 2.0 * split_edge);
-            let coverage = (overcast * (0.25 + 0.75 * split_mask)).clamp(0.0, 1.0);
-            let cloud_type = (0.6 + 0.4 * (nx * 2.5 + ny * 1.7).cos()).clamp(0.0, 1.0);
-            let thickness = (0.78 + 0.22 * (nx * 7.0 + ny * 3.5).sin()).clamp(0.0, 1.0);
-            data[idx] = (coverage * 255.0) as u8;
-            data[idx + 1] = (cloud_type * 255.0) as u8;
-            data[idx + 2] = (thickness * 255.0) as u8;
-            data[idx + 3] = 255;
-        }
-    }
-
-    let image = ctx
-        .make_image(&ImageInfo {
-            debug_name: "[MESHI ENV] Cloud Weather Map",
-            dim: [size, size, 1],
-            layers: 1,
-            format: Format::RGBA8,
-            mip_levels: 1,
-            initial_data: Some(&data),
-            ..Default::default()
-        })
-        .expect("create cloud weather map");
-
-    ImageView {
-        img: image,
-        aspect: AspectMask::Color,
-        view_type: ImageViewType::Type2D,
-        range: SubresourceRange::new(0, 1, 0, 1),
-    }
-}
-
-fn terrain_project_key_from_rdb(rdb: &RDBFile) -> Option<String> {
-    let mut project_key: Option<String> = None;
-
-    for entry in rdb.entries() {
-        let name = entry.name.clone();
-        if let Some(parsed) = parse_chunk_artifact_entry(&name) {
-            project_key.get_or_insert(parsed.project_key);
-            break;
-        }
-    }
-
-    project_key
+fn terrain_project_key_from_db(db: &DB) -> Option<String> {
+    db.enumerate_terrain_chunks()
+        .into_iter()
+        .find_map(|entry| parse_chunk_artifact_entry(&entry).map(|parsed| parsed.project_key))
 }

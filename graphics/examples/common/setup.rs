@@ -3,6 +3,7 @@ use glam::{Mat4, Vec2};
 use meshi_graphics::defaults::DEFAULT_CUBEMAP_ENTRY;
 use meshi_graphics::{Camera, DB, DBInfo, Display, DisplayInfo, RenderEngine, RenderEngineInfo};
 use meshi_graphics::{RendererSelect, TextRenderMode, WindowInfo};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy)]
 pub struct CameraSetup {
@@ -47,6 +48,12 @@ pub fn init(
     camera_setup: CameraSetup,
     renderer: RendererSelect,
 ) -> ExampleSetup {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("sample_database");
+    let layout_file = base_dir.join("layout.json");
+    let base_dir_str = base_dir.to_string_lossy().to_string();
+    let layout_file_str = layout_file.to_string_lossy().to_string();
     let mut engine = RenderEngine::new(&RenderEngineInfo {
         headless: false,
         canvas_extent: Some(window_size),
@@ -60,8 +67,8 @@ pub fn init(
 
     let mut db = Box::new(
         DB::new(&DBInfo {
-            base_dir: "",
-            layout_file: None,
+            base_dir: &base_dir_str,
+            layout_file: Some(&layout_file_str),
             pooled_geometry_uploads: false,
         })
         .expect("Unable to create database"),
