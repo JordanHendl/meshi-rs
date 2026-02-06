@@ -9,18 +9,23 @@ use dashi::{
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 use noren::DB;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
-use noren::rdb::terrain::TerrainChunkArtifact;
+use noren::rdb::terrain::{
+    TerrainChunkArtifact, TerrainProjectSettings, chunk_artifact_entry, chunk_coord_key, lod_key,
+    project_settings_entry,
+};
+use noren::RDBFile;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
+use crate::terrain_loader;
 use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
@@ -54,6 +59,8 @@ impl Default for TerrainInfo {
 #[derive(Clone, Copy, Default)]
 pub struct TerrainFrameSettings {
     pub camera_position: Vec3,
+    pub camera_far: f32,
+    pub view_projection: Option<Mat4>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,19 +122,37 @@ pub struct TerrainRenderer {
     clipmap_resolution: u32,
     max_tiles: u32,
     camera_position: Vec3,
+    camera_far: f32,
+    frustum_planes: Option<[Vec4; 6]>,
     use_depth: bool,
     deferred: Option<TerrainDeferredResources>,
     lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
     active_chunk_lods: HashMap<TerrainChunkKey, String>,
+    terrain_rdb: Option<NonNull<RDBFile>>,
+    terrain_project_key: Option<String>,
+    terrain_settings: Option<TerrainProjectSettings>,
+    terrain_chunk_hashes: HashMap<String, u64>,
+    terrain_render_objects: HashMap<String, TerrainRenderObject>,
+    last_refresh_center: Option<Vec2>,
 }
 
 #[derive(Clone)]
 struct TerrainObjectEntry {
     transform_handle: Handle<Transformation>,
     draws: Vec<Handle<PerDrawData>>,
+    draw_instances: Vec<TerrainDrawInstance>,
     content_hash: u64,
     geometry_entry: String,
     material_handle: Handle<Material>,
+}
+
+#[derive(Clone)]
+struct TerrainDrawInstance {
+    material: Handle<Material>,
+    vertex_id: u32,
+    vertex_count: u32,
+    index_id: u32,
+    index_count: u32,
 }
 
 struct TerrainDeferredResources {
@@ -355,10 +380,18 @@ impl TerrainRenderer {
             clipmap_resolution: terrain_info.clipmap_resolution,
             max_tiles: terrain_info.max_tiles,
             camera_position: Vec3::ZERO,
+            camera_far: 0.0,
+            frustum_planes: None,
             use_depth: info.use_depth,
             deferred: None,
             lod_sources: HashMap::new(),
             active_chunk_lods: HashMap::new(),
+            terrain_rdb: None,
+            terrain_project_key: None,
+            terrain_settings: None,
+            terrain_chunk_hashes: HashMap::new(),
+            terrain_render_objects: HashMap::new(),
+            last_refresh_center: None,
         }
     }
 
@@ -417,11 +450,48 @@ impl TerrainRenderer {
         }
     }
 
+    pub fn set_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
+        self.terrain_rdb = Some(NonNull::new(rdb).expect("terrain rdb"));
+        self.terrain_project_key = Some(project_key.to_string());
+        self.terrain_settings = None;
+        self.terrain_chunk_hashes.clear();
+        self.terrain_render_objects.clear();
+        self.lod_sources.clear();
+        self.active_chunk_lods.clear();
+        self.last_refresh_center = None;
+    }
+
     pub fn update(&mut self, settings: TerrainFrameSettings, state: &mut BindlessState) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);
         self.camera_position = settings.camera_position;
-        self.update_lod_selection(state);
+        self.camera_far = settings.camera_far;
+        self.frustum_planes =
+            settings
+                .view_projection
+                .map(Self::extract_frustum_planes);
+        if self.terrain_rdb.is_some() {
+            self.refresh_rdb_objects();
+        }
+        if self.lod_sources.is_empty() {
+            return;
+        }
+
+        let selection = self.select_lod_objects();
+        let selection_keys = Self::selection_key_map(&selection);
+
+        let Some(mut deferred) = self.deferred.take() else {
+            return;
+        };
+
+        if selection_keys != self.active_chunk_lods {
+            self.active_chunk_lods = selection_keys;
+            self.apply_render_objects(&selection, &mut deferred, state);
+        }
+
+        self.update_visibility(&selection, &mut deferred);
+
+        self.deferred = Some(deferred);
     }
 
     pub fn build_deferred_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
@@ -459,26 +529,8 @@ impl TerrainRenderer {
         let selection = self.select_lod_objects();
         self.active_chunk_lods = Self::selection_key_map(&selection);
         self.apply_render_objects(&selection, &mut deferred, state);
+        self.update_visibility(&selection, &mut deferred);
 
-        self.deferred = Some(deferred);
-    }
-
-    fn update_lod_selection(&mut self, state: &mut BindlessState) {
-        if self.lod_sources.is_empty() {
-            return;
-        }
-
-        let selection = self.select_lod_objects();
-        let selection_keys = Self::selection_key_map(&selection);
-        if selection_keys == self.active_chunk_lods {
-            return;
-        }
-        self.active_chunk_lods = selection_keys;
-
-        let Some(mut deferred) = self.deferred.take() else {
-            return;
-        };
-        self.apply_render_objects(&selection, &mut deferred, state);
         self.deferred = Some(deferred);
     }
 
@@ -496,6 +548,134 @@ impl TerrainRenderer {
         sources
     }
 
+    fn refresh_rdb_objects(&mut self) {
+        let Some(mut rdb_ptr) = self.terrain_rdb else {
+            return;
+        };
+        let Some(project_key) = self.terrain_project_key.clone() else {
+            return;
+        };
+        let Some(mut db_ptr) = self
+            .deferred
+            .as_ref()
+            .and_then(|deferred| deferred.db)
+        else {
+            warn!("Terrain refresh skipped: no terrain DB available.");
+            return;
+        };
+        if self.terrain_settings.is_none() {
+            let settings_entry = project_settings_entry(&project_key);
+            let settings = match unsafe { rdb_ptr.as_mut() }.fetch::<TerrainProjectSettings>(
+                &settings_entry,
+            ) {
+                Ok(settings) => settings,
+                Err(err) => {
+                    warn!(
+                        "Failed to load terrain project settings '{}': {err:?}",
+                        settings_entry
+                    );
+                    return;
+                }
+            };
+            info!(
+                "Loaded terrain settings for project '{}' (tile_size={}, tiles_per_chunk={:?})",
+                project_key, settings.tile_size, settings.tiles_per_chunk
+            );
+            self.terrain_settings = Some(settings);
+        }
+
+        let Some(settings) = self.terrain_settings.as_ref() else {
+            return;
+        };
+
+        let center_xy = Vec2::new(self.camera_position.x, self.camera_position.y);
+        let chunk_stride = Vec2::new(
+            settings.tile_size * settings.tiles_per_chunk[0] as f32,
+            settings.tile_size * settings.tiles_per_chunk[1] as f32,
+        );
+        let base_radius = chunk_stride.length() * self.clipmap_resolution as f32;
+        let refresh_threshold = chunk_stride.length() * 0.5;
+        if let Some(previous_center) = self.last_refresh_center {
+            if (center_xy - previous_center).length() < refresh_threshold {
+                return;
+            }
+        }
+        let mut next_objects = HashMap::new();
+        let mut ordered_objects = Vec::new();
+        let mut loaded_artifacts = 0usize;
+
+        for lod in 0..self.lod_levels {
+            let lod = lod as u8;
+            let radius = base_radius * 2.0_f32.powi(lod as i32);
+            let chunks = match unsafe { db_ptr.as_mut() }.fetch_terrain_chunks_around(
+                settings,
+                &project_key,
+                center_xy.into(),
+                radius,
+                0,
+            ) {
+                Ok(chunks) => chunks,
+                Err(err) => {
+                    warn!(
+                        "Terrain refresh: failed to fetch chunks (lod={}, radius={:.2}): {err:?}",
+                        lod, radius
+                    );
+                    continue;
+                }
+            };
+            info!(
+                "Terrain refresh: lod={} radius={:.2} -> {} chunks",
+                lod,
+                radius,
+                chunks.len()
+            );
+
+            for chunk in chunks {
+                let coord_key = chunk_coord_key(chunk.chunk_coords[0], chunk.chunk_coords[1]);
+                let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
+                let mut artifact =
+                    terrain_loader::terrain_chunk_artifact_from_chunk(settings, &project_key, &chunk);
+                artifact.lod = lod;
+
+                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                    if existing.artifact.content_hash == artifact.content_hash {
+                        let mut updated = existing.clone();
+                        updated.transform = terrain_loader::terrain_chunk_transform(
+                            settings,
+                            updated.artifact.chunk_coords,
+                            updated.artifact.bounds_min,
+                        );
+                        next_objects.insert(entry.clone(), updated.clone());
+                        ordered_objects.push(updated);
+                        self.terrain_chunk_hashes
+                            .insert(entry.clone(), existing.artifact.content_hash);
+                        continue;
+                    }
+                }
+
+                let object = terrain_loader::terrain_render_object_from_artifact(
+                    settings,
+                    entry.clone(),
+                    artifact,
+                );
+                self.terrain_chunk_hashes
+                    .insert(entry.clone(), object.artifact.content_hash);
+                next_objects.insert(entry.clone(), object.clone());
+                ordered_objects.push(object);
+                loaded_artifacts += 1;
+            }
+        }
+
+        self.terrain_render_objects = next_objects;
+        self.lod_sources = Self::group_lod_sources(&ordered_objects);
+        self.last_refresh_center = Some(center_xy);
+        info!(
+            "Terrain refresh: loaded_artifacts={}, total_objects={}",
+            loaded_artifacts,
+            self.terrain_render_objects.len()
+        );
+    }
+
     fn select_lod_objects(&self) -> Vec<TerrainRenderObject> {
         let mut selected = Vec::with_capacity(self.lod_sources.len());
         for sources in self.lod_sources.values() {
@@ -509,14 +689,10 @@ impl TerrainRenderer {
 
     fn select_lod_for_chunk(&self, sources: &[TerrainRenderObject]) -> TerrainRenderObject {
         let reference = &sources[0];
-        let bounds_min = Vec3::from(reference.artifact.bounds_min);
-        let bounds_max = Vec3::from(reference.artifact.bounds_max);
-        let center_local = (bounds_min + bounds_max) * 0.5;
-        let center_world = reference.transform.transform_point3(center_local);
+        let (center_world, extent_world) = Self::world_bounds(reference);
         let distance = (center_world - self.camera_position).length();
 
-        let extent = (bounds_max - bounds_min).abs();
-        let chunk_extent = extent.x.max(extent.y).max(1.0);
+        let chunk_extent = extent_world.x.max(extent_world.y).max(1.0);
         let lod_step = (chunk_extent * 2.0).max(1.0);
         let max_lod = sources
             .iter()
@@ -536,6 +712,77 @@ impl TerrainRenderer {
             }
         }
         best
+    }
+
+    fn world_bounds(object: &TerrainRenderObject) -> (Vec3, Vec3) {
+        let bounds_min = Vec3::from(object.artifact.bounds_min);
+        let bounds_max = Vec3::from(object.artifact.bounds_max);
+        let center_local = (bounds_min + bounds_max) * 0.5;
+        let extent_local = (bounds_max - bounds_min) * 0.5;
+        let world_center = object.transform.transform_point3(center_local);
+        let basis = Mat3::from_mat4(object.transform);
+        let abs_basis = Mat3::from_cols(
+            basis.x_axis.abs(),
+            basis.y_axis.abs(),
+            basis.z_axis.abs(),
+        );
+        let world_extent = abs_basis * extent_local;
+        (world_center, world_extent)
+    }
+
+    fn chunk_visible(&self, object: &TerrainRenderObject) -> bool {
+        let (center, extent) = Self::world_bounds(object);
+        let radius = extent.length();
+        if self.camera_far > 0.0
+            && (center - self.camera_position).length() - radius > self.camera_far
+        {
+            return false;
+        }
+
+        let Some(planes) = &self.frustum_planes else {
+            return true;
+        };
+
+        for plane in &planes[..4] {
+            let normal = Vec3::new(plane.x, plane.y, plane.z);
+            let distance = normal.dot(center) + plane.w;
+            let projection_radius = extent.dot(normal.abs());
+            if distance + projection_radius < 0.0 {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn extract_frustum_planes(view_projection: Mat4) -> [Vec4; 6] {
+        let cols = view_projection.to_cols_array_2d();
+        let row = |index: usize| {
+            Vec4::new(cols[0][index], cols[1][index], cols[2][index], cols[3][index])
+        };
+        let row0 = row(0);
+        let row1 = row(1);
+        let row2 = row(2);
+        let row3 = row(3);
+
+        let mut planes = [
+            row3 + row0,
+            row3 - row0,
+            row3 + row1,
+            row3 - row1,
+            row3 + row2,
+            row3 - row2,
+        ];
+
+        for plane in &mut planes {
+            let normal = Vec3::new(plane.x, plane.y, plane.z);
+            let length = normal.length();
+            if length > 0.0 {
+                *plane /= length;
+            }
+        }
+
+        planes
     }
 
     fn selection_key_map(
@@ -594,18 +841,71 @@ impl TerrainRenderer {
             };
 
             let transform_handle = self.allocate_terrain_transform(object.transform, state);
-            let draws = self.register_terrain_draws(&model, transform_handle, deferred);
+            let draw_instances = Self::build_draw_instances(&model);
+            let draws = self.register_draw_instances(
+                &draw_instances,
+                transform_handle,
+                &mut deferred.draw_builder,
+            );
 
             deferred.objects.insert(
                 object.key.clone(),
                 TerrainObjectEntry {
                     transform_handle,
                     draws,
+                    draw_instances,
                     content_hash: object.artifact.content_hash,
                     geometry_entry,
                     material_handle,
                 },
             );
+        }
+    }
+
+    fn update_visibility(
+        &mut self,
+        objects: &[TerrainRenderObject],
+        deferred: &mut TerrainDeferredResources,
+    ) {
+        let mut visible_keys = HashSet::with_capacity(objects.len());
+        let mut to_register = Vec::new();
+        for object in objects {
+            if !self.chunk_visible(object) {
+                continue;
+            }
+            visible_keys.insert(object.key.clone());
+            if let Some(entry) = deferred.objects.get(&object.key) {
+                if entry.draws.is_empty() {
+                    to_register.push(object.key.clone());
+                }
+            }
+        }
+
+        for key in to_register {
+            let Some(entry) = deferred.objects.get_mut(&key) else {
+                continue;
+            };
+            let instances = entry.draw_instances.clone();
+            let transform_handle = entry.transform_handle;
+            entry.draws = self.register_draw_instances(
+                &instances,
+                transform_handle,
+                &mut deferred.draw_builder,
+            );
+        }
+
+        let mut to_release = Vec::new();
+        for (key, entry) in deferred.objects.iter_mut() {
+            if !visible_keys.contains(key) && !entry.draws.is_empty() {
+                to_release.push(key.clone());
+            }
+        }
+
+        for key in to_release {
+            let Some(entry) = deferred.objects.get_mut(&key) else {
+                continue;
+            };
+            TerrainRenderer::release_terrain_draws(entry, &mut deferred.draw_builder);
         }
     }
 
@@ -804,30 +1104,51 @@ impl TerrainRenderer {
         }
     }
 
-    fn register_terrain_draws(
-        &mut self,
-        model: &DeviceModel,
-        transform_handle: Handle<Transformation>,
-        deferred: &mut TerrainDeferredResources,
-    ) -> Vec<Handle<PerDrawData>> {
+    fn release_terrain_draws(
+        entry: &mut TerrainObjectEntry,
+        draw_builder: &mut GPUDrawBuilder,
+    ) {
+        for draw in entry.draws.drain(..) {
+            draw_builder.release_draw(draw);
+        }
+    }
+
+    fn build_draw_instances(model: &DeviceModel) -> Vec<TerrainDrawInstance> {
         model
             .meshes
             .iter()
-            .map(|mesh| {
-                deferred
-                    .draw_builder
-                    .register_draw(&PerDrawData::terrain_draw(
-                        Handle::default(),
-                        transform_handle,
-                        mesh.material
-                            .as_ref()
-                            .and_then(|material| material.furikake_material_handle)
-                            .unwrap_or_default(),
-                        mesh.geometry.base.furikake_vertex_id.unwrap(),
-                        mesh.geometry.base.vertex_count,
-                        mesh.geometry.base.furikake_index_id.unwrap(),
-                        mesh.geometry.base.index_count.unwrap(),
-                    ))
+            .map(|mesh| TerrainDrawInstance {
+                material: mesh
+                    .material
+                    .as_ref()
+                    .and_then(|material| material.furikake_material_handle)
+                    .unwrap_or_default(),
+                vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
+                vertex_count: mesh.geometry.base.vertex_count,
+                index_id: mesh.geometry.base.furikake_index_id.unwrap(),
+                index_count: mesh.geometry.base.index_count.unwrap(),
+            })
+            .collect()
+    }
+
+    fn register_draw_instances(
+        &mut self,
+        instances: &[TerrainDrawInstance],
+        transform_handle: Handle<Transformation>,
+        draw_builder: &mut GPUDrawBuilder,
+    ) -> Vec<Handle<PerDrawData>> {
+        instances
+            .iter()
+            .map(|instance| {
+                draw_builder.register_draw(&PerDrawData::terrain_draw(
+                    Handle::default(),
+                    transform_handle,
+                    instance.material,
+                    instance.vertex_id,
+                    instance.vertex_count,
+                    instance.index_id,
+                    instance.index_count,
+                ))
             })
             .collect()
     }

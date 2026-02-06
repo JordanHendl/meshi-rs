@@ -37,7 +37,6 @@ public:
   }
 
   inline auto update() -> void {
-    apply_camera();
     m_dt = m_backend.update();
     m_world.update(m_dt);
   }
@@ -47,16 +46,6 @@ public:
   inline auto backend() -> EngineBackend & { return m_backend; }
 
 private:
-  inline auto apply_camera() -> void {
-    auto c = detail::world_camera;
-    if (c) {
-      auto v = c->view_matrix();
-      auto p = c->projection();
-      
-      m_backend.graphics().set_camera(v);
-      m_backend.graphics().set_projection(p);
-    }
-  }
   Engine(const EngineBackendInfo &info, MeshiSymbolLoader loader_fn)
       : m_backend(info, loader_fn),
         m_event(std::make_shared<EventHandler>(&m_backend)),

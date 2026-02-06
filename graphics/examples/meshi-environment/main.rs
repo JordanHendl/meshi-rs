@@ -4,11 +4,9 @@ use std::path::PathBuf;
 use dashi::{AspectMask, Format, Handle, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::*;
 use meshi_ffi_structs::event::*;
-use meshi_graphics::rdb::terrain::TerrainProjectSettings;
-use meshi_graphics::terrain_loader::terrain_render_object_from_chunk;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use noren::rdb::terrain::{parse_chunk_artifact_entry, TerrainChunk, TerrainTile};
+use noren::rdb::terrain::parse_chunk_artifact_entry;
 use tracing::warn;
 
 #[path = "../common/camera.rs"]
@@ -119,17 +117,8 @@ fn main() {
             RDBFile::new()
         }
     };
-    if let Some((project_key, terrain_chunks)) = terrain_chunks_from_rdb(&terrain_rdb) {
-        setup.engine.set_terrain_render_objects_from_rdb(
-            &mut terrain_rdb,
-            &project_key,
-            &terrain_chunks,
-        );
-    } else {
-        let terrain_objects = build_terrain_chunk_grid();
-        if !terrain_objects.is_empty() {
-            setup.engine.set_terrain_render_objects(&terrain_objects);
-        }
+    if let Some(project_key) = terrain_project_key_from_rdb(&terrain_rdb) {
+        setup.engine.set_terrain_rdb(&mut terrain_rdb, &project_key);
     }
 
     setup
@@ -220,75 +209,16 @@ fn create_cloud_test_map(ctx: &mut dashi::Context, size: u32) -> ImageView {
     }
 }
 
-// The environment demo uses meters for world units.
-const WORLD_UNITS_PER_METER: f32 = 1.0;
-const TERRAIN_TILE_SIZE_METERS: f32 = 4.0;
-const HEIGHTMAP_HEIGHT_SCALE: f32 = 80.0;
-
-fn build_terrain_chunk_grid() -> Vec<TerrainRenderObject> {
-    let mut settings = TerrainProjectSettings::default();
-    settings.tile_size = TERRAIN_TILE_SIZE_METERS * WORLD_UNITS_PER_METER;
-    let (heights, tiles_per_chunk) = load_iceland_heightmap();
-    settings.tiles_per_chunk = tiles_per_chunk;
-    settings.world_bounds_min = [0.0, 0.0, 0.0];
-    settings.world_bounds_max = [
-        settings.tile_size * tiles_per_chunk[0] as f32,
-        settings.tile_size * tiles_per_chunk[1] as f32,
-        HEIGHTMAP_HEIGHT_SCALE,
-    ];
-
-    let tiles = vec![
-        TerrainTile {
-            tile_id: 1,
-            flags: 0,
-        };
-        (tiles_per_chunk[0] * tiles_per_chunk[1]) as usize
-    ];
-
-    let chunk = TerrainChunk {
-        chunk_coords: [0, 0],
-        origin: [0.0, 0.0],
-        tile_size: settings.tile_size,
-        tiles_per_chunk,
-        tiles,
-        heights,
-        mesh_entry: "geometry/terrain_chunk".to_string(),
-    };
-
-    vec![terrain_render_object_from_chunk(
-        &settings,
-        "iceland",
-        "iceland-heightmap".to_string(),
-        &chunk,
-    )]
-}
-
-fn load_iceland_heightmap() -> (Vec<f32>, [u32; 2]) {
-    let bytes = include_bytes!("iceland_heightmap.png");
-    let image = image::load_from_memory(bytes)
-        .expect("load iceland heightmap")
-        .to_luma8();
-    let (width, height) = image.dimensions();
-    let mut heights = Vec::with_capacity((width * height) as usize);
-    for pixel in image.pixels() {
-        let normalized = pixel[0] as f32 / 255.0;
-        heights.push(normalized * HEIGHTMAP_HEIGHT_SCALE);
-    }
-    let tiles_per_chunk = [width.saturating_sub(1), height.saturating_sub(1)];
-    (heights, tiles_per_chunk)
-}
-
-fn terrain_chunks_from_rdb(rdb: &RDBFile) -> Option<(String, Vec<TerrainChunkRef>)> {
+fn terrain_project_key_from_rdb(rdb: &RDBFile) -> Option<String> {
     let mut project_key: Option<String> = None;
-    let mut chunks = Vec::new();
 
     for entry in rdb.entries() {
         let name = entry.name.clone();
         if let Some(parsed) = parse_chunk_artifact_entry(&name) {
             project_key.get_or_insert(parsed.project_key);
-            chunks.push(TerrainChunkRef::ArtifactEntry(name));
+            break;
         }
     }
 
-    project_key.map(|key| (key, chunks))
+    project_key
 }

@@ -75,8 +75,6 @@ pub struct RenderEngine {
     skybox_settings: SkyboxFrameSettings,
     ocean_settings: OceanFrameSettings,
     cloud_settings: CloudSettings,
-    terrain_chunk_hashes: HashMap<String, u64>,
-    terrain_render_objects: HashMap<String, TerrainRenderObject>,
     light_cache: Vec<CachedLightEntry>,
     spot_shadow_light: Option<render::SpotShadowLight>,
 }
@@ -254,8 +252,6 @@ impl RenderEngine {
             skybox_settings: SkyboxFrameSettings::default(),
             ocean_settings: OceanFrameSettings::default(),
             cloud_settings,
-            terrain_chunk_hashes: HashMap::new(),
-            terrain_render_objects: HashMap::new(),
             light_cache: Vec::new(),
             spot_shadow_light: None,
         })
@@ -521,141 +517,8 @@ impl RenderEngine {
         self.renderer.set_terrain_render_objects(objects);
     }
 
-    pub fn set_terrain_render_objects_from_rdb(
-        &mut self,
-        rdb: &mut RDBFile,
-        project_key: &str,
-        chunks: &[TerrainChunkRef],
-    ) {
-        use noren::rdb::terrain::{
-            TerrainChunk, TerrainChunkArtifact, TerrainChunkState, chunk_artifact_entry,
-            chunk_coord_key, chunk_state_entry, lod_key, parse_chunk_artifact_entry,
-            project_settings_entry,
-        };
-
-        let settings_entry = project_settings_entry(project_key);
-        let settings =
-            match rdb.fetch::<noren::rdb::terrain::TerrainProjectSettings>(&settings_entry) {
-                Ok(settings) => settings,
-                Err(err) => {
-                    warn!(
-                        "Failed to load terrain project settings '{}': {err:?}",
-                        settings_entry
-                    );
-                    return;
-                }
-            };
-
-        let mut next_objects = HashMap::with_capacity(chunks.len());
-        let mut ordered_objects = Vec::with_capacity(chunks.len());
-
-        for chunk in chunks {
-            let (entry, coords, lod, is_chunk_entry) = match chunk {
-                TerrainChunkRef::Coords { coords, lod } => {
-                    let coord_key = chunk_coord_key(coords[0], coords[1]);
-                    let entry = chunk_artifact_entry(project_key, &coord_key, &lod_key(*lod));
-                    (entry, Some(*coords), Some(*lod), false)
-                }
-                TerrainChunkRef::ArtifactEntry(entry) => {
-                    let parsed = parse_chunk_artifact_entry(entry);
-                    let coords = parsed.as_ref().map(|key| key.chunk_coords);
-                    let lod = parsed.as_ref().map(|key| key.lod);
-                    (entry.clone(), coords, lod, false)
-                }
-                TerrainChunkRef::ChunkEntry(entry) => (entry.clone(), None, None, true),
-            };
-
-            if is_chunk_entry {
-                let chunk = match rdb.fetch::<TerrainChunk>(&entry) {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        warn!("Failed to load terrain chunk '{entry}': {err:?}");
-                        continue;
-                    }
-                };
-                let content_hash = terrain_loader::terrain_chunk_content_hash(&chunk);
-                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
-                    if existing.artifact.content_hash == content_hash {
-                        let mut updated = existing.clone();
-                        updated.transform = terrain_loader::terrain_chunk_transform(
-                            &settings,
-                            existing.artifact.chunk_coords,
-                            existing.artifact.bounds_min,
-                        );
-                        next_objects.insert(entry.clone(), updated.clone());
-                        ordered_objects.push(updated);
-                        self.terrain_chunk_hashes
-                            .insert(entry.clone(), content_hash);
-                        continue;
-                    }
-                }
-
-                let object = terrain_loader::terrain_render_object_from_chunk(
-                    &settings,
-                    project_key,
-                    entry.clone(),
-                    &chunk,
-                );
-                self.terrain_chunk_hashes
-                    .insert(entry.clone(), object.artifact.content_hash);
-                next_objects.insert(entry.clone(), object.clone());
-                ordered_objects.push(object);
-                continue;
-            }
-
-            let mut content_hash = None;
-            if let (Some(coords), Some(lod)) = (coords, lod) {
-                let coord_key = chunk_coord_key(coords[0], coords[1]);
-                let state_key = chunk_state_entry(project_key, &coord_key);
-                if let Ok(state) = rdb.fetch::<TerrainChunkState>(&state_key) {
-                    content_hash = state
-                        .last_built_hashes
-                        .iter()
-                        .find(|hash| hash.lod == lod)
-                        .map(|hash| hash.hash);
-                }
-            }
-
-            if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
-                let matches_hash = content_hash
-                    .map(|hash| hash == existing.artifact.content_hash)
-                    .unwrap_or(true);
-                if matches_hash {
-                    let mut updated = existing.clone();
-                    updated.transform = terrain_loader::terrain_chunk_transform(
-                        &settings,
-                        existing.artifact.chunk_coords,
-                        existing.artifact.bounds_min,
-                    );
-                    next_objects.insert(entry.clone(), updated.clone());
-                    ordered_objects.push(updated);
-                    self.terrain_chunk_hashes
-                        .insert(entry.clone(), existing.artifact.content_hash);
-                    continue;
-                }
-            }
-
-            let artifact = match rdb.fetch::<TerrainChunkArtifact>(&entry) {
-                Ok(artifact) => artifact,
-                Err(err) => {
-                    warn!("Failed to load terrain artifact '{entry}': {err:?}");
-                    continue;
-                }
-            };
-
-            let object = terrain_loader::terrain_render_object_from_artifact(
-                &settings,
-                entry.clone(),
-                artifact,
-            );
-            self.terrain_chunk_hashes
-                .insert(entry.clone(), object.artifact.content_hash);
-            next_objects.insert(entry.clone(), object.clone());
-            ordered_objects.push(object);
-        }
-
-        self.terrain_render_objects = next_objects;
-        self.set_terrain_render_objects(&ordered_objects);
+    pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
+        self.renderer.set_terrain_rdb(rdb, project_key);
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {

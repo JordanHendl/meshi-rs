@@ -20,6 +20,15 @@ struct RenderableCreateInfo {
   const char *material = "";
   glm::mat4 transform = glm::mat4(1.0f);
 };
+using Display = MeshiDisplayHandle;
+struct DisplayInfo {
+  const char *title = "";
+  std::uint32_t width = 1280;
+  std::uint32_t height = 720;
+  bool resizable = false;
+  bool vsync = false;
+};
+using Camera = MeshiCameraHandle;
 using DirectionalLight = MeshiLightHandle;
 struct DirectionalLightInfo {
   glm::vec4 direction{0.0f};

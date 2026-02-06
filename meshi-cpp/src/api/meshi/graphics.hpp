@@ -2,6 +2,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <cstdint>
 #include <cstring>
 #include <meshi.h>
 #include "meshi/types.hpp"
@@ -42,14 +43,37 @@ public:
     api_->gfx_set_transform(m_gfx, renderable, &t);
   }
 
-  void set_camera(const glm::mat4 &view_matrix) {
-    MeshiMat4 t = to_meshi_mat4(view_matrix);
-    api_->gfx_set_camera_transform(m_gfx, &t);
+  auto register_display(const gfx::DisplayInfo &info) -> Handle<gfx::Display> {
+    MeshiDisplayInfo ffi_info{};
+    ffi_info.vsync = static_cast<int32_t>(info.vsync);
+    ffi_info.window.title = info.title;
+    ffi_info.window.width = info.width;
+    ffi_info.window.height = info.height;
+    ffi_info.window.resizable = static_cast<int32_t>(info.resizable);
+    return api_->gfx_register_display(m_gfx, &ffi_info);
   }
 
-  void set_projection(const glm::mat4 &projection_matrix) {
+  void attach_camera_to_display(Handle<gfx::Display> &display,
+                                Handle<gfx::Camera> &camera) {
+    api_->gfx_attach_camera_to_display(m_gfx, display, camera);
+  }
+
+  auto register_camera(const glm::mat4 &initial_transform)
+      -> Handle<gfx::Camera> {
+    MeshiMat4 t = to_meshi_mat4(initial_transform);
+    return api_->gfx_register_camera(m_gfx, &t);
+  }
+
+  void set_camera_transform(Handle<gfx::Camera> &camera,
+                            const glm::mat4 &transform) {
+    MeshiMat4 t = to_meshi_mat4(transform);
+    api_->gfx_set_camera_transform(m_gfx, camera, &t);
+  }
+
+  void set_camera_projection(Handle<gfx::Camera> &camera,
+                             const glm::mat4 &projection_matrix) {
     MeshiMat4 t = to_meshi_mat4(projection_matrix);
-    api_->gfx_set_camera_projection(m_gfx, &t);
+    api_->gfx_set_camera_projection(m_gfx, camera, &t);
   }
   
   inline auto capture_mouse(bool value) -> void {

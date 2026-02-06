@@ -17,6 +17,7 @@ use crate::{
 use bumpalo_herd::Herd;
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
 use furikake::{types::Camera, types::Light, types::Material, BindlessState};
+use noren::RDBFile;
 use glam::Mat4;
 use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
@@ -159,5 +160,6 @@ pub trait Renderer {
     fn set_cloud_settings(&mut self, settings: CloudSettings);
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>);
     fn set_terrain_render_objects(&mut self, objects: &[environment::terrain::TerrainRenderObject]);
+    fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str);
     fn shut_down(self: Box<Self>);
 }

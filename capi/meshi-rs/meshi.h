@@ -35,9 +35,20 @@ typedef struct MeshiPluginApi {
     void (*gfx_release_light)(struct MeshiEngine* render, const MeshiLightHandle* h);
     void (*gfx_set_light_transform)(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
     void (*gfx_set_light_info)(struct MeshiEngine* render, MeshiLightHandle h, const MeshiLightInfo* info);
-    void (*gfx_set_camera_transform)(struct MeshiEngine* render, const MeshiMat4* transform);
+    MeshiDisplayHandle (*gfx_register_display)(struct MeshiEngine* render, const MeshiDisplayInfo* info);
+    void (*gfx_attach_camera_to_display)(
+        struct MeshiEngine* render,
+        MeshiDisplayHandle display_handle,
+        MeshiCameraHandle camera_handle);
     MeshiCameraHandle (*gfx_register_camera)(struct MeshiEngine* render, const MeshiMat4* initial_transform);
-    void (*gfx_set_camera_projection)(struct MeshiEngine* render, const MeshiMat4* transform);
+    void (*gfx_set_camera_transform)(
+        struct MeshiEngine* render,
+        MeshiCameraHandle camera_handle,
+        const MeshiMat4* transform);
+    void (*gfx_set_camera_projection)(
+        struct MeshiEngine* render,
+        MeshiCameraHandle camera_handle,
+        const MeshiMat4* transform);
     void (*gfx_capture_mouse)(struct MeshiEngine* render, int32_t value);
     MeshiAudioSourceHandle (*audio_create_source)(struct MeshiEngine* engine, const char* path);
     void (*audio_destroy_source)(struct MeshiEngine* engine, MeshiAudioSourceHandle h);
@@ -137,9 +148,20 @@ MeshiLightHandle meshi_gfx_create_light(struct MeshiEngine* render, const MeshiL
 void meshi_gfx_release_light(struct MeshiEngine* render, const MeshiLightHandle* h);
 void meshi_gfx_set_light_transform(struct MeshiEngine* render, MeshiLightHandle h, const MeshiMat4* transform);
 void meshi_gfx_set_light_info(struct MeshiEngine* render, MeshiLightHandle h, const MeshiLightInfo* info);
-void meshi_gfx_set_camera_transform(struct MeshiEngine* render, const MeshiMat4* transform);
+MeshiDisplayHandle meshi_gfx_register_display(struct MeshiEngine* render, const MeshiDisplayInfo* info);
+void meshi_gfx_attach_camera_to_display(
+    struct MeshiEngine* render,
+    MeshiDisplayHandle display_handle,
+    MeshiCameraHandle camera_handle);
 MeshiCameraHandle meshi_gfx_register_camera(struct MeshiEngine* render, const MeshiMat4* initial_transform);
-void meshi_gfx_set_camera_projection(struct MeshiEngine* render, const MeshiMat4* transform);
+void meshi_gfx_set_camera_transform(
+    struct MeshiEngine* render,
+    MeshiCameraHandle camera_handle,
+    const MeshiMat4* transform);
+void meshi_gfx_set_camera_projection(
+    struct MeshiEngine* render,
+    MeshiCameraHandle camera_handle,
+    const MeshiMat4* transform);
 void meshi_gfx_capture_mouse(struct MeshiEngine* render, int32_t value);
 
 

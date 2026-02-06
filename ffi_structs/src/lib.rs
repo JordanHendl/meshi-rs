@@ -11,6 +11,22 @@ pub struct RenderObjectInfo {
     pub transform: glam::Mat4,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WindowInfo {
+    pub title: *const c_char,
+    pub width: u32,
+    pub height: u32,
+    pub resizable: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct DisplayInfo {
+    pub vsync: i32,
+    pub window: WindowInfo,
+}
+
 #[deprecated(note = "Use RenderObjectInfo instead.")]
 pub type MeshObjectInfo = RenderObjectInfo;
 

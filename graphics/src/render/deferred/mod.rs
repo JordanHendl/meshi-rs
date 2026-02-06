@@ -42,7 +42,7 @@ use furikake::types::*;
 use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
-use noren::DB;
+use noren::{DB, RDBFile};
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
@@ -1735,19 +1735,32 @@ impl DeferredRenderer {
             ..Default::default()
         });
         let mut camera_position = Vec3::ZERO;
+        let mut camera_far = 0.0f32;
+        let mut view_projection = None;
         if camera.valid() {
             self.state
                 .reserved_mut(
                     "meshi_bindless_cameras",
                     |a: &mut ReservedBindlessCamera| {
-                        camera_position = a.camera(*camera).position();
+                        let data = a.camera(*camera);
+                        camera_position = data.position();
+                        camera_far = data.far;
+                        let view = data.world_from_camera.inverse();
+                        view_projection = Some(data.projection * view);
                     },
                 )
                 .expect("Failed to read camera for terrain update");
         }
         self.subrender
             .environment
-            .update_terrain(TerrainFrameSettings { camera_position }, self.state.as_mut());
+            .update_terrain(
+                TerrainFrameSettings {
+                    camera_position,
+                    camera_far,
+                    view_projection,
+                },
+                self.state.as_mut(),
+            );
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self
@@ -2319,6 +2332,10 @@ impl DeferredRenderer {
             .environment
             .set_terrain_render_objects(objects, self.state.as_mut());
     }
+
+    pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
+        self.subrender.environment.set_terrain_rdb(rdb, project_key);
+    }
 }
 
 impl Renderer for DeferredRenderer {
@@ -2482,6 +2499,10 @@ impl Renderer for DeferredRenderer {
         objects: &[super::environment::terrain::TerrainRenderObject],
     ) {
         DeferredRenderer::set_terrain_render_objects(self, objects);
+    }
+
+    fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
+        DeferredRenderer::set_terrain_rdb(self, rdb, project_key);
     }
 
     fn shut_down(self: Box<Self>) {

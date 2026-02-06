@@ -6,7 +6,8 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{
-    Camera, Light, RenderEngineInfo, RenderObject, RenderObjectInfo as GfxRenderObjectInfo,
+    Camera, Display, DisplayInfo as GfxDisplayInfo, Light, RenderEngineInfo, RenderObject,
+    RenderObjectInfo as GfxRenderObjectInfo, WindowInfo as GfxWindowInfo,
 };
 use meshi_physics::SimulationInfo;
 pub use meshi_physics::PhysicsSimulation;
@@ -52,9 +53,12 @@ pub struct MeshiPluginApi {
     pub gfx_release_light: extern "C" fn(*mut MeshiEngine, *const Handle<Light>),
     pub gfx_set_light_transform: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const Mat4),
     pub gfx_set_light_info: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const LightInfo),
-    pub gfx_set_camera_transform: extern "C" fn(*mut MeshiEngine, *const Mat4),
+    pub gfx_register_display: extern "C" fn(*mut MeshiEngine, *const DisplayInfo) -> Handle<Display>,
+    pub gfx_attach_camera_to_display:
+        extern "C" fn(*mut MeshiEngine, Handle<Display>, Handle<Camera>),
     pub gfx_register_camera: extern "C" fn(*mut MeshiEngine, *const Mat4) -> Handle<Camera>,
-    pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, *const Mat4),
+    pub gfx_set_camera_transform: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
+    pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
     pub gfx_capture_mouse: extern "C" fn(*mut MeshiEngine, i32),
     pub audio_create_source:
         extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<AudioSource>,
@@ -126,8 +130,10 @@ pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
     gfx_release_light: meshi_gfx_release_light,
     gfx_set_light_transform: meshi_gfx_set_light_transform,
     gfx_set_light_info: meshi_gfx_set_light_info,
-    gfx_set_camera_transform: meshi_gfx_set_camera_transform,
+    gfx_register_display: meshi_gfx_register_display,
+    gfx_attach_camera_to_display: meshi_gfx_attach_camera_to_display,
     gfx_register_camera: meshi_gfx_register_camera,
+    gfx_set_camera_transform: meshi_gfx_set_camera_transform,
     gfx_set_camera_projection: meshi_gfx_set_camera_projection,
     gfx_capture_mouse: meshi_gfx_capture_mouse,
     audio_create_source: meshi_audio_create_source,
@@ -197,7 +203,6 @@ pub struct MeshiEngine {
     database: Box<noren::DB>,
     audio: AudioEngine,
     frame_timer: Timer,
-    primary_camera: Option<Handle<Camera>>,
     render_physics_pairs: Vec<RenderPhysicsPair>,
 }
 
@@ -261,7 +266,6 @@ impl MeshiEngine {
             audio,
             frame_timer: Timer::new(),
             name: appname.to_string(),
-            primary_camera: None,
             render_physics_pairs: Vec::new(),
         }))
     }
@@ -667,26 +671,59 @@ pub extern "C" fn meshi_gfx_set_light_info(
     engine.render.set_light_info(h, unsafe { &*info });
 }
 
-/// Set the world-to-camera transform used for rendering.
+/// Create a window display for rendering output.
 ///
 /// # Safety
-/// `render` and `transform` must be valid pointers.
+/// `render` and `info` must be valid pointers.
 #[no_mangle]
-pub extern "C" fn meshi_gfx_set_camera_transform(render: *mut MeshiEngine, transform: *const Mat4) {
-    if render.is_null() || transform.is_null() {
+pub extern "C" fn meshi_gfx_register_display(
+    render: *mut MeshiEngine,
+    info: *const DisplayInfo,
+) -> Handle<Display> {
+    if render.is_null() || info.is_null() {
+        return Handle::default();
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+    let title = if info.window.title.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(info.window.title) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let display_info = GfxDisplayInfo {
+        vsync: info.vsync != 0,
+        window: GfxWindowInfo {
+            title,
+            size: [info.window.width, info.window.height],
+            resizable: info.window.resizable != 0,
+        },
+        ..Default::default()
+    };
+    engine.render.register_window_display(display_info)
+}
+
+/// Attach a camera to a display for rendering output.
+///
+/// # Safety
+/// `render` must be valid.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_attach_camera_to_display(
+    render: *mut MeshiEngine,
+    display: Handle<Display>,
+    camera: Handle<Camera>,
+) {
+    if render.is_null() {
         return;
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    let Some(camera) = engine.primary_camera else {
-        return;
-    };
-    engine
-        .render
-        .set_camera_transform(camera, unsafe { &*transform });
+    engine.render.attach_camera_to_display(display, camera);
 }
 
-/// Set the projection matrix used for rendering.
+/// Register a camera for rendering.
 ///
 /// # Safety
 /// `render` and `transform` must be valid pointers.
@@ -700,11 +737,29 @@ pub extern "C" fn meshi_gfx_register_camera(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    let handle = engine
+    engine
         .render
-        .register_camera(unsafe { &*initial_transform });
-    engine.primary_camera = Some(handle);
-    handle
+        .register_camera(unsafe { &*initial_transform })
+}
+
+/// Set the world-to-camera transform used for rendering.
+///
+/// # Safety
+/// `render` and `transform` must be valid pointers.
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_camera_transform(
+    render: *mut MeshiEngine,
+    camera: Handle<Camera>,
+    transform: *const Mat4,
+) {
+    if render.is_null() || transform.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    engine
+        .render
+        .set_camera_transform(camera, unsafe { &*transform });
 }
 
 /// Set the projection matrix used for rendering.
@@ -714,6 +769,7 @@ pub extern "C" fn meshi_gfx_register_camera(
 #[no_mangle]
 pub extern "C" fn meshi_gfx_set_camera_projection(
     render: *mut MeshiEngine,
+    camera: Handle<Camera>,
     transform: *const Mat4,
 ) {
     if render.is_null() || transform.is_null() {
@@ -721,9 +777,6 @@ pub extern "C" fn meshi_gfx_set_camera_projection(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    let Some(camera) = engine.primary_camera else {
-        return;
-    };
     engine
         .render
         .set_camera_projection(camera, unsafe { &*transform });

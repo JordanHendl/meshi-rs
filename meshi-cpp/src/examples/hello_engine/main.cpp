@@ -3,57 +3,22 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <meshi/bits/components/camera_component.hpp>
-#include <meshi/bits/components/cube_mesh_component.hpp>
+#include <meshi/bits/components/model_component.hpp>
 #include <meshi/bits/objects/denizen.hpp>
 #include <meshi/meshi.hpp>
 
 #include "example_helper.hpp"
 #include "meshi/bits/components/editor_camera_component.hpp"
 
-class Cube : public meshi::Actor {
+class ModelObject : public meshi::Actor {
 public:
-  Cube() {
-    add_subobject<meshi::MeshComponent>(meshi::MeshComponent::CreateInfo{
-                                            .render_info =
-                                                {
-                                                    .mesh = "witch.body",
-                                                },
+  ModelObject() {
+    add_subobject<meshi::ModelComponent>(meshi::ModelComponent::CreateInfo{
+                                            .model = "model/witch",
                                             .rigid_body_info = {},
                                         })
         ->attach_to(root_component());
-
-    add_subobject<meshi::MeshComponent>(meshi::MeshComponent::CreateInfo{
-                                            .render_info =
-                                                {
-                                                    .mesh = "witch.hair",
-                                                },
-                                            .rigid_body_info = {},
-                                        })
-        ->attach_to(root_component());
-
-    add_subobject<meshi::MeshComponent>(meshi::MeshComponent::CreateInfo{
-                                            .render_info =
-                                                {
-                                                    .mesh = "witch.clothes",
-                                                },
-                                            .rigid_body_info = {},
-                                        })
-        ->attach_to(root_component());
-
-    m_cube =
-        add_subobject<meshi::MeshComponent>(meshi::MeshComponent::CreateInfo{
-            .render_info =
-                {
-                    .mesh = "witch.hat",
-                },
-            .rigid_body_info = {},
-        });
-
-    m_cube->attach_to(root_component());
   }
-
-private:
-  meshi::MeshComponent *m_cube = nullptr;
 };
 
 class MyObject : public meshi::Denizen {
@@ -66,7 +31,6 @@ public:
     m_camera = add_subobject<meshi::EditorCameraComponent>();
     // Attach components to our root.
     m_camera->attach_to(root_component());
-    m_camera->apply_to_world();
 
     auto initial_transform =
         glm::translate(glm::mat4(1.0), glm::vec3(0.0, 5.0, 30.0));
@@ -76,6 +40,12 @@ public:
   }
 
   auto update(float dt) -> void override { meshi::Denizen::update(dt); }
+  inline auto attach_to_display(meshi::Handle<meshi::gfx::Display> display)
+      -> void {
+    if (m_camera) {
+      m_camera->attach_to_display(display);
+    }
+  }
 
 private:
   std::shared_ptr<meshi::ActionRegister<MyObject>> m_event;
@@ -93,6 +63,15 @@ public:
         [this](auto &event) {
           std::cout << "QUITTING" << std::endl;
           m_running = false;
+        });
+
+    m_display = meshi::engine()->backend().graphics().register_display(
+        meshi::gfx::DisplayInfo{
+            .title = "Hello Engine!",
+            .width = 1280,
+            .height = 720,
+            .resizable = false,
+            .vsync = true,
         });
 
     // Register Actions to enable reacting to input.
@@ -192,8 +171,10 @@ public:
         });
 
     // Spawn our object, and activate it.
-    meshi::engine()->world().spawn_object<Cube>()->activate();
-    meshi::engine()->world().spawn_object<MyObject>()->activate();
+    meshi::engine()->world().spawn_object<ModelObject>()->activate();
+    auto camera_actor = meshi::engine()->world().spawn_object<MyObject>();
+    camera_actor->attach_to_display(m_display);
+    camera_actor->activate();
   }
 
   auto run() -> void {
@@ -204,6 +185,7 @@ public:
 
 private:
   bool m_running = true;
+  meshi::Handle<meshi::gfx::Display> m_display{};
   meshi::EventRegister<Application> m_event;
 };
 

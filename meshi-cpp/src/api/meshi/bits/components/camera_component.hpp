@@ -4,12 +4,9 @@
 #include "glm/ext/matrix_clip_space.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <meshi/engine.hpp>
 #include <meshi/bits/components/actor_component.hpp>
 namespace meshi { 
-class CameraComponent;
-namespace detail {
-static CameraComponent *world_camera = nullptr;
-}
 class CameraComponent : public ActorComponent {
 public:
   CameraComponent() {
@@ -18,22 +15,26 @@ public:
     constexpr auto near = 0.1;
     constexpr auto far = 200000.0;
     m_projection = glm::perspective(glm::radians(fov), aspect, near, far);
+    m_camera = engine()->backend().graphics().register_camera(glm::mat4(1.0f));
   };
-  virtual ~CameraComponent() {
-    if(detail::world_camera == this) detail::world_camera = nullptr;
-  };
+  virtual ~CameraComponent() = default;
   inline auto view_matrix() -> glm::mat4 {
     return (glm::inverse(this->world_transform()));
   }
 
-  virtual auto update(float dt) -> void override {}
+  virtual auto update(float dt) -> void override {
+    auto transform = this->world_transform();
+    engine()->backend().graphics().set_camera_transform(m_camera, transform);
+    engine()->backend().graphics().set_camera_projection(m_camera, m_projection);
+  }
   inline auto projection() -> glm::mat4 { return this->m_projection; }
 
-  inline auto apply_to_world() -> void {
-    detail::world_camera = this;
+  inline auto attach_to_display(Handle<gfx::Display> display) -> void {
+    engine()->backend().graphics().attach_camera_to_display(display, m_camera);
   }
 
 private:
   glm::mat4 m_projection;
+  Handle<gfx::Camera> m_camera;
 };
 } // namespace meshi

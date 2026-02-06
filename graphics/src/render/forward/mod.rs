@@ -25,7 +25,7 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
     meta::{DeviceModel, HostMaterial},
-    DB,
+    DB, RDBFile,
 };
 use resource_pool::resource_list::ResourceList;
 use std::{collections::HashMap, ptr::NonNull};
@@ -834,6 +834,9 @@ impl Renderer for ForwardRenderer {
         &mut self,
         _objects: &[super::environment::terrain::TerrainRenderObject],
     ) {
+    }
+
+    fn set_terrain_rdb(&mut self, _rdb: &mut RDBFile, _project_key: &str) {
     }
 
     fn shut_down(self: Box<Self>) {

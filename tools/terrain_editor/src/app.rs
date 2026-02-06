@@ -30,7 +30,6 @@ use crate::ui::{
     MENU_ACTION_TOGGLE_CHUNK_PANEL, MENU_ACTION_TOGGLE_DB_PANEL,
     MENU_ACTION_TOGGLE_GENERATION_PANEL, MENU_ACTION_TOGGLE_WORKFLOW_PANEL,
 };
-use meshi_graphics::TerrainChunkRef;
 
 const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
 const DEFAULT_BRUSH_RADIUS: f32 = 8.0;
@@ -99,7 +98,6 @@ pub struct TerrainEditorApp {
     status_text: dashi::Handle<meshi_graphics::TextObject>,
     window_size: Vec2,
     terrain_mode: TerrainMode,
-    terrain_chunks: Vec<TerrainChunkRef>,
     dbgen: TerrainDbgen,
     ui: TerrainEditorUi,
     event_state: Box<EventState>,
@@ -268,7 +266,6 @@ impl TerrainEditorApp {
             status_text,
             window_size: window_size_vec,
             terrain_mode: TerrainMode::Procedural,
-            terrain_chunks: Vec::new(),
             dbgen: TerrainDbgen::new(0),
             ui: TerrainEditorUi::new(window_size_vec),
             event_state,
@@ -959,24 +956,7 @@ impl TerrainEditorApp {
         };
 
         let project_key = self.dbgen.project_key_for_chunk(&chunk_entry);
-        let mut entries = if self.chunk_keys.is_empty() {
-            vec![chunk_entry.clone()]
-        } else {
-            self.chunk_keys.clone()
-        };
-        if !entries.iter().any(|key| key == &chunk_entry) {
-            entries.push(chunk_entry.clone());
-            entries.sort();
-        }
-
-        let lod = self.generation_lod;
-        self.terrain_chunks.clear();
-        self.terrain_chunks.extend(entries.into_iter().map(|entry| {
-            let artifact_entry = self.dbgen.chunk_entry_for_key(&entry, lod);
-            TerrainChunkRef::artifact_entry(artifact_entry)
-        }));
-        self.engine
-            .set_terrain_render_objects_from_rdb(rdb, &project_key, &self.terrain_chunks);
+        self.engine.set_terrain_rdb(rdb, &project_key);
     }
 
     fn shutdown(self) {

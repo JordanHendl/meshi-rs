@@ -10,7 +10,7 @@ use dashi::{
 };
 use furikake::{types::Camera, BindlessState};
 use glam::{Mat4, Vec3, Vec4};
-use noren::DB;
+use noren::{DB, RDBFile};
 
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::CloudSettings;
@@ -249,6 +249,10 @@ impl EnvironmentRenderer {
         state: &mut BindlessState,
     ) {
         self.terrain.set_render_objects(objects, state);
+    }
+
+    pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
+        self.terrain.set_rdb(rdb, project_key);
     }
 
     pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {

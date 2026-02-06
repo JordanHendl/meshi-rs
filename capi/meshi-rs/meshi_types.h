@@ -55,6 +55,18 @@ struct MeshiEngineInfo {
     std::int32_t debug_mode = 0;
 };
 
+struct MeshiWindowInfo {
+    const char* title = nullptr;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::int32_t resizable = 0;
+};
+
+struct MeshiDisplayInfo {
+    std::int32_t vsync = 0;
+    MeshiWindowInfo window;
+};
+
 struct MeshiRenderObjectInfo {
     const char* mesh = nullptr;
     const char* material = nullptr;
@@ -329,6 +341,7 @@ using MeshiMeshObjectHandle MESHI_DEPRECATED = MeshiRenderObjectHandle;
 typedef MeshiRenderObjectHandle MeshiMeshObjectHandle MESHI_DEPRECATED;
 #endif
 using MeshiLightHandle = MeshiHandle;
+using MeshiDisplayHandle = MeshiHandle;
 using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;
