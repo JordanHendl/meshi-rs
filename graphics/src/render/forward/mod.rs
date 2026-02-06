@@ -6,26 +6,26 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::{
-    render::scene::*, AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject,
-    RenderObject, RenderObjectInfo, TextInfo, TextObject,
+    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
+    RenderObjectInfo, TextInfo, TextObject, render::scene::*,
 };
-use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
-use bumpalo::collections::Vec as BumpVec;
+use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bumpalo::Bump;
+use bumpalo::collections::Vec as BumpVec;
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
 use driver::command::{DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    reservations::bindless_materials::ReservedBindlessMaterials, types::Material, types::*,
-    BindlessState,
+    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
+    types::*,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
-    meta::{DeviceModel, HostMaterial},
     DB, RDBFile,
+    meta::{DeviceModel, HostMaterial},
 };
 use resource_pool::resource_list::ResourceList;
 use std::{collections::HashMap, ptr::NonNull};
@@ -830,14 +830,9 @@ impl Renderer for ForwardRenderer {
         self.environment.set_cloud_weather_map(view);
     }
 
-    fn set_terrain_render_objects(
-        &mut self,
-        _objects: &[super::environment::terrain::TerrainRenderObject],
-    ) {
-    }
+    fn set_terrain_rdb(&mut self, _rdb: &mut RDBFile, _project_key: &str) {}
 
-    fn set_terrain_rdb(&mut self, _rdb: &mut RDBFile, _project_key: &str) {
-    }
+    fn set_terrain_project_key(&mut self, _project_key: &str) {}
 
     fn shut_down(self: Box<Self>) {
         self.ctx.destroy();

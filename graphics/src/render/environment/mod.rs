@@ -8,12 +8,12 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{types::Camera, BindlessState};
+use furikake::{BindlessState, types::Camera};
 use glam::{Mat4, Vec3, Vec4};
 use noren::{DB, RDBFile};
 
-use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::CloudSettings;
+use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
@@ -243,16 +243,12 @@ impl EnvironmentRenderer {
         self.ocean.register_debug();
     }
 
-    pub fn set_terrain_render_objects(
-        &mut self,
-        objects: &[terrain::TerrainRenderObject],
-        state: &mut BindlessState,
-    ) {
-        self.terrain.set_render_objects(objects, state);
-    }
-
     pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
         self.terrain.set_rdb(rdb, project_key);
+    }
+
+    pub fn set_terrain_project_key(&mut self, project_key: &str) {
+        self.terrain.set_project_key(project_key);
     }
 
     pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {

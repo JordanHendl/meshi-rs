@@ -1,12 +1,9 @@
-use std::ffi::c_void;
-
 use dashi::Handle;
 use glam::*;
 use meshi_ffi_structs::event::*;
 use meshi_graphics::*;
 use meshi_utils::timer::Timer;
-use noren::rdb::terrain::{parse_chunk_artifact_entry, project_settings_entry};
-use tracing::warn;
+use std::ffi::c_void;
 
 #[path = "../common/camera.rs"]
 mod common_camera;
@@ -46,6 +43,9 @@ fn main() {
     }
 
     setup.engine.set_cloud_weather_map(None);
+
+    let project_key = "iceland";
+    setup.engine.set_terrain_project_key(project_key);
 
     let mut data = AppData {
         running: true,
@@ -100,44 +100,6 @@ fn main() {
         ..Default::default()
     });
 
-    if let Some(project_key) = terrain_project_key_from_db(&setup.db) {
-        let settings_entry = project_settings_entry(&project_key);
-        match setup
-            .db
-            .terrain_mut()
-            .fetch_project_settings(&settings_entry)
-        {
-            Ok(settings) => {
-                let mut render_objects = Vec::new();
-                for entry in setup.db.enumerate_terrain_chunks() {
-                    match setup.db.terrain_mut().fetch_chunk_artifact(&entry) {
-                        Ok(artifact) => {
-                            render_objects.push(
-                                meshi_graphics::terrain_loader::terrain_render_object_from_artifact(
-                                    &settings,
-                                    "iceland".to_string(),
-                                    artifact,
-                                ),
-                            );
-                        }
-                        Err(err) => {
-                            warn!("Failed to load terrain artifact '{entry}': {err:?}");
-                        }
-                    }
-                }
-
-                if render_objects.is_empty() {
-                    warn!("No terrain artifacts found for project '{project_key}'.");
-                } else {
-                    setup.engine.set_terrain_render_objects(&render_objects);
-                }
-            }
-            Err(err) => {
-                warn!("Failed to load terrain settings '{settings_entry}': {err:?}");
-            }
-        }
-    }
-
     setup
         .engine
         .set_environment_lighting(EnvironmentLightingSettings {
@@ -182,10 +144,4 @@ fn main() {
     }
 
     setup.engine.shut_down();
-}
-
-fn terrain_project_key_from_db(db: &DB) -> Option<String> {
-    db.enumerate_terrain_chunks()
-        .into_iter()
-        .find_map(|entry| parse_chunk_artifact_entry(&entry).map(|parsed| parsed.project_key))
 }

@@ -1,7 +1,7 @@
 use super::debug_layer::DebugLayer;
 use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
-    terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
+    terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
 };
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -42,10 +42,10 @@ use furikake::types::*;
 use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
-use noren::{DB, RDBFile};
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
+use noren::{DB, RDBFile};
 use resource_pool::resource_list::ResourceList;
 use std::collections::HashMap;
 use tare::graph::*;
@@ -1297,9 +1297,7 @@ impl DeferredRenderer {
                 PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
             }
             RenderObjectInfo::Billboard(_) => PassMask::TRANSPARENT as u32,
-            RenderObjectInfo::Empty => {
-                PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32
-            }
+            RenderObjectInfo::Empty => PassMask::OPAQUE_GEOMETRY as u32 | PassMask::SHADOW as u32,
         };
         let (scene_handle, transform_handle) = self.proc.scene.register_object(&SceneObjectInfo {
             local: Default::default(),
@@ -1751,16 +1749,14 @@ impl DeferredRenderer {
                 )
                 .expect("Failed to read camera for terrain update");
         }
-        self.subrender
-            .environment
-            .update_terrain(
-                TerrainFrameSettings {
-                    camera_position,
-                    camera_far,
-                    view_projection,
-                },
-                self.state.as_mut(),
-            );
+        self.subrender.environment.update_terrain(
+            TerrainFrameSettings {
+                camera_position,
+                camera_far,
+                view_projection,
+            },
+            self.state.as_mut(),
+        );
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self
@@ -2324,17 +2320,14 @@ impl DeferredRenderer {
         self.ctx.destroy();
     }
 
-    pub fn set_terrain_render_objects(
-        &mut self,
-        objects: &[super::environment::terrain::TerrainRenderObject],
-    ) {
-        self.subrender
-            .environment
-            .set_terrain_render_objects(objects, self.state.as_mut());
-    }
-
     pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
         self.subrender.environment.set_terrain_rdb(rdb, project_key);
+    }
+
+    pub fn set_terrain_project_key(&mut self, project_key: &str) {
+        self.subrender
+            .environment
+            .set_terrain_project_key(project_key);
     }
 }
 
@@ -2494,15 +2487,12 @@ impl Renderer for DeferredRenderer {
         self.subrender.environment.set_cloud_weather_map(view);
     }
 
-    fn set_terrain_render_objects(
-        &mut self,
-        objects: &[super::environment::terrain::TerrainRenderObject],
-    ) {
-        DeferredRenderer::set_terrain_render_objects(self, objects);
-    }
-
     fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
         DeferredRenderer::set_terrain_rdb(self, rdb, project_key);
+    }
+
+    fn set_terrain_project_key(&mut self, project_key: &str) {
+        DeferredRenderer::set_terrain_project_key(self, project_key);
     }
 
     fn shut_down(self: Box<Self>) {

@@ -1,10 +1,10 @@
+mod debug_layer;
 pub mod deferred;
 pub mod environment;
 pub mod forward;
 mod gpu_draw_builder;
 pub mod gui;
 mod particle_system;
-mod debug_layer;
 mod scene;
 mod skinning;
 pub mod text;
@@ -16,12 +16,12 @@ use crate::{
 };
 use bumpalo_herd::Herd;
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{types::Camera, types::Light, types::Material, BindlessState};
-use noren::RDBFile;
+use furikake::{BindlessState, types::Camera, types::Light, types::Material};
 use glam::Mat4;
 use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::DB;
+use noren::RDBFile;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -159,7 +159,7 @@ pub trait Renderer {
     fn cloud_settings(&self) -> CloudSettings;
     fn set_cloud_settings(&mut self, settings: CloudSettings);
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>);
-    fn set_terrain_render_objects(&mut self, objects: &[environment::terrain::TerrainRenderObject]);
+    fn set_terrain_project_key(&mut self, project_key: &str);
     fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str);
     fn shut_down(self: Box<Self>);
 }

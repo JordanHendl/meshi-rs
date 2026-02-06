@@ -510,11 +510,8 @@ impl RenderEngine {
         self.renderer.set_cloud_weather_map(view);
     }
 
-    pub fn set_terrain_render_objects(
-        &mut self,
-        objects: &[render::environment::terrain::TerrainRenderObject],
-    ) {
-        self.renderer.set_terrain_render_objects(objects);
+    pub fn set_terrain_project_key(&mut self, project_key: &str) {
+        self.renderer.set_terrain_project_key(project_key);
     }
 
     pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {

@@ -11,13 +11,13 @@ use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 use noren::DB;
+use noren::RDBFile;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{
-    TerrainChunkArtifact, TerrainProjectSettings, chunk_artifact_entry, chunk_coord_key, lod_key,
-    project_settings_entry,
+    TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainFrustum, TerrainProjectSettings,
+    chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
 };
-use noren::RDBFile;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
@@ -26,9 +26,9 @@ use tracing::{info, warn};
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
 use crate::terrain_loader;
-use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
+use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::{
     Camera, MATERIAL_FLAG_VERTEX_COLOR, Material, Transformation, VertexBufferSlot,
@@ -124,6 +124,7 @@ pub struct TerrainRenderer {
     camera_position: Vec3,
     camera_far: f32,
     frustum_planes: Option<[Vec4; 6]>,
+    view_projection: Option<Mat4>,
     use_depth: bool,
     deferred: Option<TerrainDeferredResources>,
     lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
@@ -131,9 +132,7 @@ pub struct TerrainRenderer {
     terrain_rdb: Option<NonNull<RDBFile>>,
     terrain_project_key: Option<String>,
     terrain_settings: Option<TerrainProjectSettings>,
-    terrain_chunk_hashes: HashMap<String, u64>,
     terrain_render_objects: HashMap<String, TerrainRenderObject>,
-    last_refresh_center: Option<Vec2>,
 }
 
 #[derive(Clone)]
@@ -382,6 +381,7 @@ impl TerrainRenderer {
             camera_position: Vec3::ZERO,
             camera_far: 0.0,
             frustum_planes: None,
+            view_projection: None,
             use_depth: info.use_depth,
             deferred: None,
             lod_sources: HashMap::new(),
@@ -389,9 +389,7 @@ impl TerrainRenderer {
             terrain_rdb: None,
             terrain_project_key: None,
             terrain_settings: None,
-            terrain_chunk_hashes: HashMap::new(),
             terrain_render_objects: HashMap::new(),
-            last_refresh_center: None,
         }
     }
 
@@ -454,11 +452,17 @@ impl TerrainRenderer {
         self.terrain_rdb = Some(NonNull::new(rdb).expect("terrain rdb"));
         self.terrain_project_key = Some(project_key.to_string());
         self.terrain_settings = None;
-        self.terrain_chunk_hashes.clear();
         self.terrain_render_objects.clear();
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
-        self.last_refresh_center = None;
+    }
+
+    pub fn set_project_key(&mut self, project_key: &str) {
+        self.terrain_project_key = Some(project_key.to_string());
+        self.terrain_settings = None;
+        self.terrain_render_objects.clear();
+        self.lod_sources.clear();
+        self.active_chunk_lods.clear();
     }
 
     pub fn update(&mut self, settings: TerrainFrameSettings, state: &mut BindlessState) {
@@ -466,11 +470,9 @@ impl TerrainRenderer {
         let _frame_marker = bump.alloc(0u8);
         self.camera_position = settings.camera_position;
         self.camera_far = settings.camera_far;
-        self.frustum_planes =
-            settings
-                .view_projection
-                .map(Self::extract_frustum_planes);
-        if self.terrain_rdb.is_some() {
+        self.view_projection = settings.view_projection;
+        self.frustum_planes = settings.view_projection.map(Self::extract_frustum_planes);
+        if self.terrain_project_key.is_some() {
             self.refresh_rdb_objects();
         }
         if self.lod_sources.is_empty() {
@@ -516,24 +518,6 @@ impl TerrainRenderer {
         })
     }
 
-    pub fn set_render_objects(
-        &mut self,
-        objects: &[TerrainRenderObject],
-        state: &mut BindlessState,
-    ) {
-        let Some(mut deferred) = self.deferred.take() else {
-            return;
-        };
-
-        self.lod_sources = Self::group_lod_sources(objects);
-        let selection = self.select_lod_objects();
-        self.active_chunk_lods = Self::selection_key_map(&selection);
-        self.apply_render_objects(&selection, &mut deferred, state);
-        self.update_visibility(&selection, &mut deferred);
-
-        self.deferred = Some(deferred);
-    }
-
     fn group_lod_sources(
         objects: &[TerrainRenderObject],
     ) -> HashMap<TerrainChunkKey, Vec<TerrainRenderObject>> {
@@ -549,131 +533,221 @@ impl TerrainRenderer {
     }
 
     fn refresh_rdb_objects(&mut self) {
-        let Some(mut rdb_ptr) = self.terrain_rdb else {
-            return;
-        };
         let Some(project_key) = self.terrain_project_key.clone() else {
             return;
         };
-        let Some(mut db_ptr) = self
-            .deferred
-            .as_ref()
-            .and_then(|deferred| deferred.db)
-        else {
+        let Some(mut db_ptr) = self.deferred.as_ref().and_then(|deferred| deferred.db) else {
             warn!("Terrain refresh skipped: no terrain DB available.");
             return;
         };
-        if self.terrain_settings.is_none() {
-            let settings_entry = project_settings_entry(&project_key);
-            let settings = match unsafe { rdb_ptr.as_mut() }.fetch::<TerrainProjectSettings>(
-                &settings_entry,
-            ) {
-                Ok(settings) => settings,
-                Err(err) => {
-                    warn!(
-                        "Failed to load terrain project settings '{}': {err:?}",
-                        settings_entry
-                    );
+
+        let settings_entry = project_settings_entry(&project_key);
+        let db = unsafe { db_ptr.as_mut() };
+        let settings = match db.terrain_mut().fetch_project_settings(&settings_entry) {
+            Ok(settings) => settings,
+            Err(err) => {
+                warn!(
+                    "Failed to load terrain project settings '{}': {err:?}",
+                    settings_entry
+                );
+                if let Some(mut rdb_ptr) = self.terrain_rdb {
+                    if let Ok(settings) =
+                        unsafe { rdb_ptr.as_mut() }.fetch::<TerrainProjectSettings>(&settings_entry)
+                    {
+                        settings
+                    } else {
+                        return;
+                    }
+                } else {
                     return;
                 }
-            };
+            }
+        };
+
+        let settings_changed = self
+            .terrain_settings
+            .as_ref()
+            .map(|cached| cached != &settings)
+            .unwrap_or(true);
+        if settings_changed {
             info!(
                 "Loaded terrain settings for project '{}' (tile_size={}, tiles_per_chunk={:?})",
                 project_key, settings.tile_size, settings.tiles_per_chunk
             );
-            self.terrain_settings = Some(settings);
+            self.terrain_settings = Some(settings.clone());
         }
 
-        let Some(settings) = self.terrain_settings.as_ref() else {
-            return;
+        let mut frustum = self
+            .terrain_frustum(settings.world_bounds_min[2])
+            .unwrap_or_else(|| {
+                let extent = if self.camera_far > 0.0 {
+                    self.camera_far
+                } else {
+                    1.0
+                };
+                Self::fallback_frustum(self.camera_position, extent)
+            });
+        Self::clamp_frustum_to_bounds(&mut frustum, &settings);
+        let camera_info = TerrainCameraInfo {
+            frustum,
+            position: self.camera_position.into(),
+            curve: 1.0,
+            falloff: 0.0,
+            max_dist: if self.camera_far > 0.0 {
+                self.camera_far
+            } else {
+                let world_extent = Vec2::new(
+                    settings.world_bounds_max[0] - settings.world_bounds_min[0],
+                    settings.world_bounds_max[1] - settings.world_bounds_min[1],
+                );
+                world_extent.length()
+            },
         };
 
-        let center_xy = Vec2::new(self.camera_position.x, self.camera_position.y);
-        let chunk_stride = Vec2::new(
-            settings.tile_size * settings.tiles_per_chunk[0] as f32,
-            settings.tile_size * settings.tiles_per_chunk[1] as f32,
-        );
-        let base_radius = chunk_stride.length() * self.clipmap_resolution as f32;
-        let refresh_threshold = chunk_stride.length() * 0.5;
-        if let Some(previous_center) = self.last_refresh_center {
-            if (center_xy - previous_center).length() < refresh_threshold {
+        let chunks = match db.fetch_terrain_chunks_for_camera(&settings, &project_key, &camera_info)
+        {
+            Ok(chunks) => chunks,
+            Err(err) => {
+                warn!("Terrain refresh: failed to fetch chunks: {err:?}");
                 return;
             }
-        }
+        };
+
         let mut next_objects = HashMap::new();
         let mut ordered_objects = Vec::new();
         let mut loaded_artifacts = 0usize;
+        let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
-        for lod in 0..self.lod_levels {
-            let lod = lod as u8;
-            let radius = base_radius * 2.0_f32.powi(lod as i32);
-            let chunks = match unsafe { db_ptr.as_mut() }.fetch_terrain_chunks_around(
-                settings,
-                &project_key,
-                center_xy.into(),
-                radius,
-                lod,
-            ) {
-                Ok(chunks) => chunks,
-                Err(err) => {
-                    warn!(
-                        "Terrain refresh: failed to fetch chunks (lod={}, radius={:.2}): {err:?}",
-                        lod, radius
+        for chunk in chunks {
+            let lod = Self::lod_for_chunk(&settings, &camera_info, &chunk);
+            let coord_key = chunk_coord_key(chunk.chunk_coords[0], chunk.chunk_coords[1]);
+            let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
+            let mut artifact =
+                terrain_loader::terrain_chunk_artifact_from_chunk(&settings, &project_key, &chunk);
+            artifact.lod = lod;
+
+            if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                if existing.artifact.content_hash == artifact.content_hash {
+                    let mut updated = existing.clone();
+                    updated.transform = terrain_loader::terrain_chunk_transform(
+                        &settings,
+                        updated.artifact.chunk_coords,
+                        updated.artifact.bounds_min,
                     );
+                    next_objects.insert(entry.clone(), updated.clone());
+                    ordered_objects.push(updated);
                     continue;
                 }
-            };
-            info!(
-                "Terrain refresh: lod={} radius={:.2} -> {} chunks",
-                lod,
-                radius,
-                chunks.len()
-            );
-
-            for chunk in chunks {
-                let coord_key = chunk_coord_key(chunk.chunk_coords[0], chunk.chunk_coords[1]);
-                let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
-                let mut artifact =
-                    terrain_loader::terrain_chunk_artifact_from_chunk(settings, &project_key, &chunk);
-                artifact.lod = lod;
-
-                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
-                    if existing.artifact.content_hash == artifact.content_hash {
-                        let mut updated = existing.clone();
-                        updated.transform = terrain_loader::terrain_chunk_transform(
-                            settings,
-                            updated.artifact.chunk_coords,
-                            updated.artifact.bounds_min,
-                        );
-                        next_objects.insert(entry.clone(), updated.clone());
-                        ordered_objects.push(updated);
-                        self.terrain_chunk_hashes
-                            .insert(entry.clone(), existing.artifact.content_hash);
-                        continue;
-                    }
-                }
-
-                let object = terrain_loader::terrain_render_object_from_artifact(
-                    settings,
-                    entry.clone(),
-                    artifact,
-                );
-                self.terrain_chunk_hashes
-                    .insert(entry.clone(), object.artifact.content_hash);
-                next_objects.insert(entry.clone(), object.clone());
-                ordered_objects.push(object);
-                loaded_artifacts += 1;
             }
+
+            if !changed {
+                changed = self
+                    .terrain_render_objects
+                    .get(&entry)
+                    .map(|existing| existing.artifact.content_hash != artifact.content_hash)
+                    .unwrap_or(true);
+            }
+            let object = terrain_loader::terrain_render_object_from_artifact(
+                &settings,
+                entry.clone(),
+                artifact,
+            );
+            next_objects.insert(entry.clone(), object.clone());
+            ordered_objects.push(object);
+            loaded_artifacts += 1;
+        }
+
+        if !changed {
+            changed = self
+                .terrain_render_objects
+                .keys()
+                .any(|key| !next_objects.contains_key(key));
+        }
+
+        if !changed {
+            return;
         }
 
         self.terrain_render_objects = next_objects;
         self.lod_sources = Self::group_lod_sources(&ordered_objects);
-        self.last_refresh_center = Some(center_xy);
         info!(
             "Terrain refresh: loaded_artifacts={}, total_objects={}",
             loaded_artifacts,
             self.terrain_render_objects.len()
         );
+    }
+
+    fn terrain_frustum(&self, plane_z: f32) -> Option<TerrainFrustum> {
+        let view_projection = self.view_projection?;
+        let inverse = view_projection.inverse();
+        let ndc_corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+        let mut frustum = [[0.0; 2]; 4];
+
+        for (idx, (x, y)) in ndc_corners.iter().enumerate() {
+            let clip = Vec4::new(*x, *y, 1.0, 1.0);
+            let mut world = inverse * clip;
+            if world.w.abs() > f32::EPSILON {
+                world /= world.w;
+            }
+            let point = Vec3::new(world.x, world.y, world.z);
+            let dir = point - self.camera_position;
+            let projected = if dir.z.abs() > 1e-4 {
+                let t = (plane_z - self.camera_position.z) / dir.z;
+                if t.is_finite() && t > 0.0 {
+                    self.camera_position + dir * t
+                } else {
+                    point
+                }
+            } else {
+                point
+            };
+            frustum[idx] = [projected.x, projected.y];
+        }
+
+        Some(frustum)
+    }
+
+    fn fallback_frustum(camera_position: Vec3, extent: f32) -> TerrainFrustum {
+        [
+            [camera_position.x - extent, camera_position.y - extent],
+            [camera_position.x + extent, camera_position.y - extent],
+            [camera_position.x + extent, camera_position.y + extent],
+            [camera_position.x - extent, camera_position.y + extent],
+        ]
+    }
+
+    fn clamp_frustum_to_bounds(frustum: &mut TerrainFrustum, settings: &TerrainProjectSettings) {
+        let min_x = settings.world_bounds_min[0];
+        let min_y = settings.world_bounds_min[1];
+        let max_x = settings.world_bounds_max[0];
+        let max_y = settings.world_bounds_max[1];
+        for corner in frustum.iter_mut() {
+            corner[0] = corner[0].clamp(min_x, max_x);
+            corner[1] = corner[1].clamp(min_y, max_y);
+        }
+    }
+
+    fn lod_for_chunk(
+        settings: &TerrainProjectSettings,
+        camera: &TerrainCameraInfo,
+        chunk: &TerrainChunk,
+    ) -> u8 {
+        let center = Self::chunk_center_world(settings, chunk.chunk_coords);
+        let distance = (center - Vec3::from(camera.position)).length();
+        camera.lod_for_distance(settings, distance)
+    }
+
+    fn chunk_center_world(settings: &TerrainProjectSettings, coords: [i32; 2]) -> Vec3 {
+        let chunk_size_x = settings.tiles_per_chunk[0] as f32 * settings.tile_size;
+        let chunk_size_y = settings.tiles_per_chunk[1] as f32 * settings.tile_size;
+        let origin_x = settings.world_bounds_min[0] + coords[0] as f32 * chunk_size_x;
+        let origin_y = settings.world_bounds_min[1] + coords[1] as f32 * chunk_size_y;
+        let center_z = (settings.world_bounds_min[2] + settings.world_bounds_max[2]) * 0.5;
+        Vec3::new(
+            origin_x + chunk_size_x * 0.5,
+            origin_y + chunk_size_y * 0.5,
+            center_z,
+        )
     }
 
     fn select_lod_objects(&self) -> Vec<TerrainRenderObject> {
@@ -705,7 +779,8 @@ impl TerrainRenderer {
         let mut best_delta = reference.artifact.lod.abs_diff(target_lod);
         for source in sources.iter().skip(1) {
             let delta = source.artifact.lod.abs_diff(target_lod);
-            if delta < best_delta || (delta == best_delta && source.artifact.lod < best.artifact.lod)
+            if delta < best_delta
+                || (delta == best_delta && source.artifact.lod < best.artifact.lod)
             {
                 best = source.clone();
                 best_delta = delta;
@@ -721,11 +796,7 @@ impl TerrainRenderer {
         let extent_local = (bounds_max - bounds_min) * 0.5;
         let world_center = object.transform.transform_point3(center_local);
         let basis = Mat3::from_mat4(object.transform);
-        let abs_basis = Mat3::from_cols(
-            basis.x_axis.abs(),
-            basis.y_axis.abs(),
-            basis.z_axis.abs(),
-        );
+        let abs_basis = Mat3::from_cols(basis.x_axis.abs(), basis.y_axis.abs(), basis.z_axis.abs());
         let world_extent = abs_basis * extent_local;
         (world_center, world_extent)
     }
@@ -758,7 +829,12 @@ impl TerrainRenderer {
     fn extract_frustum_planes(view_projection: Mat4) -> [Vec4; 6] {
         let cols = view_projection.to_cols_array_2d();
         let row = |index: usize| {
-            Vec4::new(cols[0][index], cols[1][index], cols[2][index], cols[3][index])
+            Vec4::new(
+                cols[0][index],
+                cols[1][index],
+                cols[2][index],
+                cols[3][index],
+            )
         };
         let row0 = row(0);
         let row1 = row(1);
@@ -785,9 +861,7 @@ impl TerrainRenderer {
         planes
     }
 
-    fn selection_key_map(
-        selection: &[TerrainRenderObject],
-    ) -> HashMap<TerrainChunkKey, String> {
+    fn selection_key_map(selection: &[TerrainRenderObject]) -> HashMap<TerrainChunkKey, String> {
         let mut map = HashMap::with_capacity(selection.len());
         for object in selection {
             let key = TerrainChunkKey {
@@ -1104,10 +1178,7 @@ impl TerrainRenderer {
         }
     }
 
-    fn release_terrain_draws(
-        entry: &mut TerrainObjectEntry,
-        draw_builder: &mut GPUDrawBuilder,
-    ) {
+    fn release_terrain_draws(entry: &mut TerrainObjectEntry, draw_builder: &mut GPUDrawBuilder) {
         for draw in entry.draws.drain(..) {
             draw_builder.release_draw(draw);
         }
@@ -1302,11 +1373,7 @@ impl TerrainRenderer {
             .expect("update terrain transform");
     }
 
-    fn release_terrain_transform(
-        &self,
-        handle: Handle<Transformation>,
-        state: &mut BindlessState,
-    ) {
+    fn release_terrain_transform(&self, handle: Handle<Transformation>, state: &mut BindlessState) {
         if !handle.valid() {
             return;
         }
