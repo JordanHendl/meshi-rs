@@ -106,7 +106,7 @@ fn main() {
 
     let terrain_rdb_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("terrain.rdb");
+        .join("sample_database/terrain.rdb");
     let mut terrain_rdb = match RDBFile::load(&terrain_rdb_path) {
         Ok(rdb) => rdb,
         Err(err) => {

@@ -612,7 +612,7 @@ impl TerrainRenderer {
                 &project_key,
                 center_xy.into(),
                 radius,
-                0,
+                lod,
             ) {
                 Ok(chunks) => chunks,
                 Err(err) => {
