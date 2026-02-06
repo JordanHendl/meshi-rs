@@ -5,7 +5,6 @@
 #include <cassert>
 #include <meshi/backend.hpp>
 #include <meshi/bits/action.hpp>
-#include <meshi/bits/components/camera_component.hpp>
 #include <meshi/bits/error.hpp>
 #include <meshi/bits/event.hpp>
 #include <string>
