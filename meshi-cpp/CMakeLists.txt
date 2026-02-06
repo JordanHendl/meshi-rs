@@ -8,7 +8,13 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-FILE(COPY ${CMAKE_SOURCE_DIR}/defaults/db.json DESTINATION ${CMAKE_BINARY_DIR}/database/)
+set(SAMPLE_DATABASE_SOURCE ${CMAKE_SOURCE_DIR}/../sample_database)
+set(SAMPLE_DATABASE_DIR ${CMAKE_BINARY_DIR}/sample_database)
+if(EXISTS ${SAMPLE_DATABASE_SOURCE})
+  FILE(COPY ${SAMPLE_DATABASE_SOURCE} DESTINATION ${CMAKE_BINARY_DIR})
+else()
+  message(FATAL_ERROR "Sample database not found at ${SAMPLE_DATABASE_SOURCE}")
+endif()
 include(meshi_rs)
 
 include(FetchContent)
@@ -20,5 +26,5 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(glm)
 
-set(SAMPLE_APP_DIR ${CMAKE_SOURCE_DIR}/sample_app_dir)
+set(SAMPLE_APP_DIR ${SAMPLE_DATABASE_DIR})
 add_subdirectory(src)
