@@ -618,12 +618,10 @@ impl TerrainRenderer {
         let mut loaded_artifacts = 0usize;
         let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
-        for chunk in chunks {
-            let lod = Self::lod_for_chunk(&settings, &camera_info, &chunk);
-            let coord_key = chunk_coord_key(chunk.chunk_coords[0], chunk.chunk_coords[1]);
+        for mut artifact in chunks {
+            let lod = Self::lod_for_chunk(&settings, &camera_info, artifact.chunk_coords);
+            let coord_key = chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]);
             let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
-            let mut artifact =
-                terrain_loader::terrain_chunk_artifact_from_chunk(&settings, &project_key, &chunk);
             artifact.lod = lod;
 
             if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
@@ -730,9 +728,9 @@ impl TerrainRenderer {
     fn lod_for_chunk(
         settings: &TerrainProjectSettings,
         camera: &TerrainCameraInfo,
-        chunk: &TerrainChunk,
+        chunk_coords: [i32; 2],
     ) -> u8 {
-        let center = Self::chunk_center_world(settings, chunk.chunk_coords);
+        let center = Self::chunk_center_world(settings, chunk_coords);
         let distance = (center - Vec3::from(camera.position)).length();
         camera.lod_for_distance(settings, distance)
     }
