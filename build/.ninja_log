@@ -1,0 +1,12 @@
+# ninja log v5
+5	2644	7921310165367435	_deps/glm-build/glm/CMakeFiles/glm.dir/detail/glm.cpp.obj	ef8bec0ee039c1ad
+2647	2748	7921310166278136	bin/glm.lib	eacec7bfa28664f9
+10	3728	7921310176161355	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	55b2f62c3f2f1755
+22	3645	7921310175309869	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	2909fa49a46887f5
+3665	3822	7921310176810319	bin/hello_lights.exe	45bf2ec1afb30fc9
+17	3665	7921310175309869	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	1eeca9eee4fecce5
+3647	3811	7921310176699498	bin/hello_animation.exe	4537f781f3c40da7
+3729	3889	7921310177488251	bin/hello_engine.exe	5077c7212e36978
+46	3979	7921334924302467	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	2909fa49a46887f5
+41	4020	7921334924437907	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	1eeca9eee4fecce5
+26	4056	7921334924894693	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	55b2f62c3f2f1755
