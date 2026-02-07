@@ -465,15 +465,11 @@ impl TerrainRenderer {
         self.active_chunk_lods.clear();
     }
 
-    pub fn update(&mut self, settings: TerrainFrameSettings, state: &mut BindlessState) {
+    pub fn update(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);
-        self.camera_position = settings.camera_position;
-        self.camera_far = settings.camera_far;
-        self.view_projection = settings.view_projection;
-        self.frustum_planes = settings.view_projection.map(Self::extract_frustum_planes);
         if self.terrain_project_key.is_some() {
-            self.refresh_rdb_objects();
+            self.refresh_rdb_objects(camera);
         }
         if self.lod_sources.is_empty() {
             return;
@@ -532,7 +528,7 @@ impl TerrainRenderer {
         sources
     }
 
-    fn refresh_rdb_objects(&mut self) {
+    fn refresh_rdb_objects(&mut self, camera: Handle<Camera>) {
         let Some(project_key) = self.terrain_project_key.clone() else {
             return;
         };
@@ -577,34 +573,7 @@ impl TerrainRenderer {
             self.terrain_settings = Some(settings.clone());
         }
 
-        let mut frustum = self
-            .terrain_frustum(settings.world_bounds_min[2])
-            .unwrap_or_else(|| {
-                let extent = if self.camera_far > 0.0 {
-                    self.camera_far
-                } else {
-                    1.0
-                };
-                Self::fallback_frustum(self.camera_position, extent)
-            });
-        Self::clamp_frustum_to_bounds(&mut frustum, &settings);
-        let camera_info = TerrainCameraInfo {
-            frustum,
-            position: self.camera_position.into(),
-            curve: 1.0,
-            falloff: 0.0,
-            max_dist: if self.camera_far > 0.0 {
-                self.camera_far
-            } else {
-                let world_extent = Vec2::new(
-                    settings.world_bounds_max[0] - settings.world_bounds_min[0],
-                    settings.world_bounds_max[1] - settings.world_bounds_min[1],
-                );
-                world_extent.length()
-            },
-        };
-
-        let chunks = match db.fetch_terrain_chunks_for_camera(&settings, &project_key, &camera_info)
+        let chunks = match db.fetch_terrain_chunks_from_view(&settings, &project_key, camera)
         {
             Ok(chunks) => chunks,
             Err(err) => {
@@ -619,7 +588,7 @@ impl TerrainRenderer {
         let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
         for mut artifact in chunks {
-            let lod = Self::lod_for_chunk(&settings, &camera_info, artifact.chunk_coords);
+            let lod = 1;
             let coord_key = chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]);
             let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
             artifact.lod = lod;
@@ -725,15 +694,6 @@ impl TerrainRenderer {
         }
     }
 
-    fn lod_for_chunk(
-        settings: &TerrainProjectSettings,
-        camera: &TerrainCameraInfo,
-        chunk_coords: [i32; 2],
-    ) -> u8 {
-        let center = Self::chunk_center_world(settings, chunk_coords);
-        let distance = (center - Vec3::from(camera.position)).length();
-        camera.lod_for_distance(settings, distance)
-    }
 
     fn chunk_center_world(settings: &TerrainProjectSettings, coords: [i32; 2]) -> Vec3 {
         let chunk_size_x = settings.tiles_per_chunk[0] as f32 * settings.tile_size;

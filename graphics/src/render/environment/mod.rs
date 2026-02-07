@@ -204,10 +204,10 @@ impl EnvironmentRenderer {
 
     pub fn update_terrain(
         &mut self,
-        settings: terrain::TerrainFrameSettings,
+        camera: Handle<Camera>,
         state: &mut BindlessState,
     ) {
-        self.terrain.update(settings, state);
+        self.terrain.update(camera, state);
     }
 
     pub fn initialize_terrain_deferred(

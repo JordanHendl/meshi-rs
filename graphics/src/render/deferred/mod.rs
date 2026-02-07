@@ -1750,11 +1750,7 @@ impl DeferredRenderer {
                 .expect("Failed to read camera for terrain update");
         }
         self.subrender.environment.update_terrain(
-            TerrainFrameSettings {
-                camera_position,
-                camera_far,
-                view_projection,
-            },
+            *camera,
             self.state.as_mut(),
         );
 
