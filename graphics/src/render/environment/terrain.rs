@@ -588,7 +588,7 @@ impl TerrainRenderer {
         let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
         for mut artifact in chunks {
-            let lod = 1;
+            let lod = 0;
             let coord_key = chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]);
             let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
             artifact.lod = lod;

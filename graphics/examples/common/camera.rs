@@ -13,7 +13,7 @@ impl Default for CameraSettings {
     fn default() -> Self {
         Self {
             speed: 18.0,
-            fast_speed: 36.0,
+            fast_speed: 128.0,
             sensitivity: 0.006,
             pitch_limit: 1.54,
         }
