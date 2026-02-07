@@ -47,7 +47,7 @@ private:
     if (loader_fn) {
       return MESHI_PLUGIN_LOAD_API(loader_fn);
     }
-    return nullptr;
+    return meshi_plugin_get_api();
   }
 
   PhysicsSystem m_phys;

@@ -3498,9 +3498,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.7.6"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "memmap2"
@@ -3956,7 +3956,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#fb680a3f63ae06f82a8659ecabac109a7d34fce5"
+source = "git+https://github.com/JordanHendl/noren#08b988c4e936c1b3765ad9d5a2999f9cfa994042"
 dependencies = [
  "bento",
  "bincode",
