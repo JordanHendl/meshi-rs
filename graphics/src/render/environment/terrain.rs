@@ -200,6 +200,39 @@ fn compile_terrain_shaders() -> [bento::CompilationResult; 2] {
     [vertex, fragment]
 }
 
+fn compile_terrain_deferred_shaders() -> [bento::CompilationResult; 2] {
+    let compiler = Compiler::new().expect("Failed to create shader compiler");
+    let base_request = Request {
+        name: Some("environment_terrain_deferred".to_string()),
+        lang: ShaderLang::Slang,
+        optimization: OptimizationLevel::Performance,
+        debug_symbols: true,
+        ..Default::default()
+    };
+
+    let vertex = compiler
+        .compile(
+            include_str!("shaders/terrain_deferred_vert.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Vertex,
+                ..base_request.clone()
+            },
+        )
+        .expect("Failed to compile terrain deferred vertex shader");
+
+    let fragment = compiler
+        .compile(
+            include_str!("shaders/terrain_deferred_frag.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Fragment,
+                ..base_request
+            },
+        )
+        .expect("Failed to compile terrain deferred fragment shader");
+
+    [vertex, fragment]
+}
+
 impl TerrainRenderer {
     pub fn new(
         ctx: &mut Context,
@@ -1055,7 +1088,7 @@ impl TerrainRenderer {
         draw_builder: &GPUDrawBuilder,
         dynamic: &DynamicAllocator,
     ) -> PSO {
-        let shaders = miso::gpudeferred(&[]);
+        let shaders = compile_terrain_deferred_shaders();
 
         let s = PSOBuilder::new()
             .set_debug_name("[MESHI] Deferred Terrain")
@@ -1194,12 +1227,19 @@ impl TerrainRenderer {
             return None;
         }
 
+        let mut vertices = artifact.vertices.clone();
+        Self::apply_material_blends(
+            &mut vertices,
+            artifact.material_ids.as_deref(),
+            artifact.material_weights.as_deref(),
+        );
+
         let geometry_entry = format!(
             "terrain/runtime/{key}/lod{}-{:016x}",
             artifact.lod, artifact.content_hash
         );
         let host_geometry = HostGeometry {
-            vertices: artifact.vertices.clone(),
+            vertices,
             indices: Some(artifact.indices.clone()),
             ..Default::default()
         }
@@ -1400,15 +1440,38 @@ impl TerrainRenderer {
     }
 
     fn vertex_buffer_slot(vertices: &[Vertex]) -> VertexBufferSlot {
-        let uses_skinning = vertices.iter().any(|vertex| {
-            vertex.joint_weights.iter().any(|weight| *weight != 0.0)
-                || vertex.joint_indices.iter().any(|index| *index != 0)
-        });
+        let _ = vertices;
+        VertexBufferSlot::Skeleton
+    }
 
-        if uses_skinning {
-            VertexBufferSlot::Skeleton
-        } else {
-            VertexBufferSlot::Skeleton
+    fn apply_material_blends(
+        vertices: &mut [Vertex],
+        material_ids: Option<&[u32]>,
+        material_weights: Option<&[[f32; 4]]>,
+    ) {
+        let (Some(material_ids), Some(material_weights)) = (material_ids, material_weights) else {
+            return;
+        };
+
+        if material_ids.len() != vertices.len() * 4 || material_weights.len() != vertices.len() {
+            warn!(
+                "Terrain material blend data mismatch (ids={}, weights={}, vertices={}).",
+                material_ids.len(),
+                material_weights.len(),
+                vertices.len()
+            );
+            return;
+        }
+
+        for (index, vertex) in vertices.iter_mut().enumerate() {
+            let base = index * 4;
+            vertex.joint_indices = [
+                material_ids[base],
+                material_ids[base + 1],
+                material_ids[base + 2],
+                material_ids[base + 3],
+            ];
+            vertex.joint_weights = material_weights[index];
         }
     }
 }

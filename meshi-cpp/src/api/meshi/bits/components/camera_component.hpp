@@ -12,9 +12,9 @@ public:
   CameraComponent() {
     constexpr auto fov = 20.0;
     constexpr auto aspect = 16.0/9.0;
-    constexpr auto near = 0.1;
-    constexpr auto far = 200000.0;
-    m_projection = glm::perspective(glm::radians(fov), aspect, near, far);
+    constexpr auto near_plane = 0.1;
+    constexpr auto far_plane = 200000.0;
+    m_projection = glm::perspective(glm::radians(fov), aspect, near_plane, far_plane);
     m_camera = engine()->backend().graphics().register_camera(glm::mat4(1.0f));
   };
   virtual ~CameraComponent() = default;

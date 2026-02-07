@@ -18,6 +18,7 @@ target_compile_options(meshi INTERFACE -Wno-return-type-c-linkage)
 
 # Optional: Add any dependencies for the interface target
 target_link_libraries(meshi INTERFACE glm meshi-rs)
+target_compile_definitions(meshi INTERFACE MESHI_PLUGIN_PATH=\"${MESHI_RS_PLUGIN_PATH}\")
 # Optional: If you want to install the library
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION include

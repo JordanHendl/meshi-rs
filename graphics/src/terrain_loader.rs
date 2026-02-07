@@ -80,6 +80,7 @@ pub fn terrain_chunk_artifact_from_chunk(
     chunk: &TerrainChunk,
 ) -> TerrainChunkArtifact {
     let (vertices, indices, bounds_min, bounds_max) = terrain_chunk_mesh(chunk);
+    let (material_ids, material_weights) = terrain_chunk_material_blends(chunk);
     let content_hash = terrain_chunk_content_hash(chunk);
     TerrainChunkArtifact {
         project_key: project_key.to_string(),
@@ -90,8 +91,8 @@ pub fn terrain_chunk_artifact_from_chunk(
         vertex_layout: settings.vertex_layout.clone(),
         vertices,
         indices,
-        material_ids: None,
-        material_weights: None,
+        material_ids,
+        material_weights,
         content_hash,
         mesh_entry: chunk.mesh_entry.clone(),
     }
@@ -108,9 +109,9 @@ fn terrain_chunk_mesh(chunk: &TerrainChunk) -> (Vec<Vertex>, Vec<u32>, [f32; 3],
     for y in 0..grid_y {
         for x in 0..grid_x {
             let position = [
-                x as f32 * tile_size,
-                y as f32 * tile_size,
+                chunk.origin[0] + x as f32 * tile_size,
                 chunk_height_sample(chunk, x, y),
+                chunk.origin[1] + y as f32 * tile_size,
             ];
             let normal = estimate_chunk_normal(chunk, x, y, tile_size);
             let uv = [
@@ -180,7 +181,7 @@ fn estimate_chunk_normal(chunk: &TerrainChunk, x: u32, y: u32, tile_size: f32) -
     } else {
         (h_u - h_d) / (2.0 * tile_size)
     };
-    let normal = glam::Vec3::new(-dx, -dy, 1.0).normalize_or_zero();
+    let normal = glam::Vec3::new(-dx, 1.0, -dy).normalize_or_zero();
     [normal.x, normal.y, normal.z]
 }
 
@@ -197,8 +198,43 @@ pub fn terrain_chunk_content_hash(chunk: &TerrainChunk) -> u64 {
     chunk.chunk_coords.hash(&mut hasher);
     chunk.tiles_per_chunk.hash(&mut hasher);
     chunk.tile_size.to_bits().hash(&mut hasher);
+    for tile in &chunk.tiles {
+        tile.tile_id.hash(&mut hasher);
+        tile.flags.hash(&mut hasher);
+    }
     for height in &chunk.heights {
         height.to_bits().hash(&mut hasher);
     }
     hasher.finish()
+}
+
+fn terrain_chunk_material_blends(
+    chunk: &TerrainChunk,
+) -> (Option<Vec<u32>>, Option<Vec<[f32; 4]>>) {
+    let grid_x = chunk.tiles_per_chunk[0].saturating_add(1).max(1);
+    let grid_y = chunk.tiles_per_chunk[1].saturating_add(1).max(1);
+    if grid_x == 0 || grid_y == 0 {
+        return (None, None);
+    }
+
+    let mut material_ids = Vec::with_capacity((grid_x * grid_y) as usize * 4);
+    let mut material_weights = Vec::with_capacity((grid_x * grid_y) as usize);
+
+    let max_tile_x = chunk.tiles_per_chunk[0].saturating_sub(1);
+    let max_tile_y = chunk.tiles_per_chunk[1].saturating_sub(1);
+
+    for y in 0..grid_y {
+        for x in 0..grid_x {
+            let tile_x = x.min(max_tile_x);
+            let tile_y = y.min(max_tile_y);
+            let tile_id = chunk
+                .tile_at(tile_x as i32, tile_y as i32)
+                .map(|tile| tile.tile_id)
+                .unwrap_or(0);
+            material_ids.extend_from_slice(&[tile_id, 0, 0, 0]);
+            material_weights.push([1.0, 0.0, 0.0, 0.0]);
+        }
+    }
+
+    (Some(material_ids), Some(material_weights))
 }

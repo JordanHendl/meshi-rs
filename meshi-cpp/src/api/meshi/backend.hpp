@@ -43,8 +43,20 @@ public:
   inline auto graphics() -> GraphicsSystem & { return m_gfx; }
 
 private:
+  static const char* plugin_path() {
+#ifdef MESHI_PLUGIN_PATH
+    return MESHI_PLUGIN_PATH;
+#elif defined(_WIN32)
+    return "meshi.dll";
+#elif defined(__APPLE__)
+    return "libmeshi.dylib";
+#else
+    return "libmeshi.so";
+#endif
+  }
+
   static const MeshiPluginApi *resolve_api() {
-    static void* dl =meshi::detail::loader_function("libmeshi-rs.so");
+    static void* dl = meshi::detail::loader_function(plugin_path());
     auto loader_fn = [](const char* name) {
       return meshi::detail::get_plugin_symbol(dl, name);
     };

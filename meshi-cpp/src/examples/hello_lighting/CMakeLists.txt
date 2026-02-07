@@ -1,2 +1,5 @@
 add_executable(hello_lights main.cpp)
 target_link_libraries(hello_lights PUBLIC meshi)
+if (TARGET meshi_rs_plugin_copy)
+  add_dependencies(hello_lights meshi_rs_plugin_copy)
+endif()

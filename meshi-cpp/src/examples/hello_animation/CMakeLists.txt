@@ -1,2 +1,5 @@
 add_executable(hello_animation main.cpp)
 target_link_libraries(hello_animation PUBLIC meshi)
+if (TARGET meshi_rs_plugin_copy)
+  add_dependencies(hello_animation meshi_rs_plugin_copy)
+endif()
