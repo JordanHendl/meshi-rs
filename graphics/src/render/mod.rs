@@ -4,6 +4,7 @@ pub mod environment;
 pub mod forward;
 mod gpu_draw_builder;
 pub mod gui;
+pub mod image_pager;
 mod particle_system;
 mod scene;
 mod skinning;

@@ -26,6 +26,7 @@ use tracing::{info, warn};
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
 use crate::terrain_loader;
+use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
@@ -43,6 +44,11 @@ pub struct TerrainInfo {
 }
 
 pub const TERRAIN_DRAW_BIN: u32 = 0;
+const TERRAIN_REFRESH_FRAME_INTERVAL: u64 = 4;
+const TERRAIN_SETTINGS_POLL_INTERVAL: u64 = 30;
+const TERRAIN_CAMERA_POSITION_EPSILON: f32 = 0.25;
+const TERRAIN_VIEW_PROJECTION_EPSILON: f32 = 1e-3;
+const TERRAIN_LOD_HYSTERESIS_RATIO: f32 = 0.25;
 
 impl Default for TerrainInfo {
     fn default() -> Self {
@@ -129,10 +135,17 @@ pub struct TerrainRenderer {
     deferred: Option<TerrainDeferredResources>,
     lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
     active_chunk_lods: HashMap<TerrainChunkKey, String>,
+    active_chunk_lod_levels: HashMap<TerrainChunkKey, u8>,
     terrain_rdb: Option<NonNull<RDBFile>>,
     terrain_project_key: Option<String>,
     terrain_settings: Option<TerrainProjectSettings>,
     terrain_render_objects: HashMap<String, TerrainRenderObject>,
+    terrain_dirty: bool,
+    refresh_frame_index: u64,
+    last_refresh_frame: u64,
+    last_settings_poll_frame: u64,
+    last_refresh_camera_position: Option<Vec3>,
+    last_refresh_view_projection: Option<Mat4>,
 }
 
 #[derive(Clone)]
@@ -419,10 +432,17 @@ impl TerrainRenderer {
             deferred: None,
             lod_sources: HashMap::new(),
             active_chunk_lods: HashMap::new(),
+            active_chunk_lod_levels: HashMap::new(),
             terrain_rdb: None,
             terrain_project_key: None,
             terrain_settings: None,
             terrain_render_objects: HashMap::new(),
+            terrain_dirty: true,
+            refresh_frame_index: 0,
+            last_refresh_frame: 0,
+            last_settings_poll_frame: 0,
+            last_refresh_camera_position: None,
+            last_refresh_view_projection: None,
         }
     }
 
@@ -488,6 +508,8 @@ impl TerrainRenderer {
         self.terrain_render_objects.clear();
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
+        self.active_chunk_lod_levels.clear();
+        self.terrain_dirty = true;
     }
 
     pub fn set_project_key(&mut self, project_key: &str) {
@@ -496,13 +518,22 @@ impl TerrainRenderer {
         self.terrain_render_objects.clear();
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
+        self.active_chunk_lod_levels.clear();
+        self.terrain_dirty = true;
     }
 
     pub fn update(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
         let bump = crate::render::global_bump().get();
         let _frame_marker = bump.alloc(0u8);
-        if self.terrain_project_key.is_some() {
+        self.refresh_frame_index = self.refresh_frame_index.saturating_add(1);
+        self.update_camera_state(camera, state);
+        if self.terrain_project_key.is_some() && self.should_refresh_terrain() {
             self.refresh_rdb_objects(camera);
+            self.last_refresh_frame = self.refresh_frame_index;
+            self.last_settings_poll_frame = self.refresh_frame_index;
+            self.last_refresh_camera_position = Some(self.camera_position);
+            self.last_refresh_view_projection = self.view_projection;
+            self.terrain_dirty = false;
         }
         if self.lod_sources.is_empty() {
             return;
@@ -517,6 +548,18 @@ impl TerrainRenderer {
 
         if selection_keys != self.active_chunk_lods {
             self.active_chunk_lods = selection_keys;
+            self.active_chunk_lod_levels = selection
+                .iter()
+                .map(|object| {
+                    (
+                        TerrainChunkKey {
+                            project_key: object.artifact.project_key.clone(),
+                            coords: object.artifact.chunk_coords,
+                        },
+                        object.artifact.lod,
+                    )
+                })
+                .collect();
             self.apply_render_objects(&selection, &mut deferred, state);
         }
 
@@ -557,6 +600,9 @@ impl TerrainRenderer {
                 coords: object.artifact.chunk_coords,
             };
             sources.entry(key).or_default().push(object.clone());
+        }
+        for values in sources.values_mut() {
+            values.sort_by_key(|source| source.artifact.lod);
         }
         sources
     }
@@ -606,8 +652,7 @@ impl TerrainRenderer {
             self.terrain_settings = Some(settings.clone());
         }
 
-        let chunks = match db.fetch_terrain_chunks_from_view(&settings, &project_key, camera)
-        {
+        let chunks = match db.fetch_terrain_chunks_from_view(&settings, &project_key, camera) {
             Ok(chunks) => chunks,
             Err(err) => {
                 warn!("Terrain refresh: failed to fetch chunks: {err:?}");
@@ -620,41 +665,54 @@ impl TerrainRenderer {
         let mut loaded_artifacts = 0usize;
         let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
-        for mut artifact in chunks {
-            let lod = 3;
-            let coord_key = chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]);
-            let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
-            artifact.lod = lod;
+        let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
 
-            if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
-                if existing.artifact.content_hash == artifact.content_hash {
-                    let mut updated = existing.clone();
-                    updated.transform = terrain_loader::terrain_chunk_transform(
-                        &settings,
-                        updated.artifact.chunk_coords,
-                        updated.artifact.bounds_min,
-                    );
-                    next_objects.insert(entry.clone(), updated.clone());
-                    ordered_objects.push(updated);
-                    continue;
+        for base_artifact in chunks {
+            let coord_key =
+                chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
+            for lod in 0..lod_levels {
+                let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
+                let mut artifact = if lod == base_artifact.lod {
+                    base_artifact.clone()
+                } else {
+                    self.fetch_lod_artifact(&entry).unwrap_or_else(|| {
+                        let mut fallback = base_artifact.clone();
+                        fallback.lod = lod;
+                        fallback
+                    })
+                };
+                artifact.lod = lod;
+
+                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                    if existing.artifact.content_hash == artifact.content_hash {
+                        let mut updated = existing.clone();
+                        updated.transform = terrain_loader::terrain_chunk_transform(
+                            &settings,
+                            updated.artifact.chunk_coords,
+                            updated.artifact.bounds_min,
+                        );
+                        next_objects.insert(entry.clone(), updated.clone());
+                        ordered_objects.push(updated);
+                        continue;
+                    }
                 }
-            }
 
-            if !changed {
-                changed = self
-                    .terrain_render_objects
-                    .get(&entry)
-                    .map(|existing| existing.artifact.content_hash != artifact.content_hash)
-                    .unwrap_or(true);
+                if !changed {
+                    changed = self
+                        .terrain_render_objects
+                        .get(&entry)
+                        .map(|existing| existing.artifact.content_hash != artifact.content_hash)
+                        .unwrap_or(true);
+                }
+                let object = terrain_loader::terrain_render_object_from_artifact(
+                    &settings,
+                    entry.clone(),
+                    artifact,
+                );
+                next_objects.insert(entry.clone(), object.clone());
+                ordered_objects.push(object);
+                loaded_artifacts += 1;
             }
-            let object = terrain_loader::terrain_render_object_from_artifact(
-                &settings,
-                entry.clone(),
-                artifact,
-            );
-            next_objects.insert(entry.clone(), object.clone());
-            ordered_objects.push(object);
-            loaded_artifacts += 1;
         }
 
         if !changed {
@@ -743,16 +801,21 @@ impl TerrainRenderer {
 
     fn select_lod_objects(&self) -> Vec<TerrainRenderObject> {
         let mut selected = Vec::with_capacity(self.lod_sources.len());
-        for sources in self.lod_sources.values() {
+        for (key, sources) in &self.lod_sources {
             if sources.is_empty() {
                 continue;
             }
-            selected.push(self.select_lod_for_chunk(sources));
+            let previous_lod = self.active_chunk_lod_levels.get(key).copied();
+            selected.push(self.select_lod_for_chunk(sources, previous_lod));
         }
         selected
     }
 
-    fn select_lod_for_chunk(&self, sources: &[TerrainRenderObject]) -> TerrainRenderObject {
+    fn select_lod_for_chunk(
+        &self,
+        sources: &[TerrainRenderObject],
+        previous_lod: Option<u8>,
+    ) -> TerrainRenderObject {
         let reference = &sources[0];
         let (center_world, extent_world) = Self::world_bounds(reference);
         let distance = (center_world - self.camera_position).length();
@@ -764,7 +827,15 @@ impl TerrainRenderer {
             .map(|source| source.artifact.lod)
             .max()
             .unwrap_or(0);
-        let target_lod = ((distance / lod_step).floor() as u8).min(max_lod);
+        let mut target_lod = ((distance / lod_step).floor() as u8).min(max_lod);
+        if let Some(previous_lod) = previous_lod {
+            let hysteresis = lod_step * TERRAIN_LOD_HYSTERESIS_RATIO;
+            let min_distance = previous_lod as f32 * lod_step - hysteresis;
+            let max_distance = (previous_lod as f32 + 1.0) * lod_step + hysteresis;
+            if (min_distance..=max_distance).contains(&distance) {
+                target_lod = previous_lod.min(max_lod);
+            }
+        }
 
         let mut best = reference.clone();
         let mut best_delta = reference.artifact.lod.abs_diff(target_lod);
@@ -778,6 +849,84 @@ impl TerrainRenderer {
             }
         }
         best
+    }
+
+    fn update_camera_state(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
+        if !camera.valid() {
+            return;
+        }
+
+        let mut camera_position = self.camera_position;
+        let mut camera_far = self.camera_far;
+        let mut view_projection = self.view_projection;
+
+        if let Ok(cameras) = state.reserved::<ReservedBindlessCamera>("meshi_bindless_cameras") {
+            let camera_data = cameras.camera(camera);
+            camera_position = camera_data.position();
+            camera_far = camera_data.far;
+            let view = camera_data.world_from_camera.inverse();
+            view_projection = Some(camera_data.projection * view);
+        } else {
+            warn!("TerrainRenderer failed to access bindless cameras for refresh state.");
+        }
+
+        self.camera_position = camera_position;
+        self.camera_far = camera_far;
+        self.view_projection = view_projection;
+        self.frustum_planes = view_projection.map(Self::extract_frustum_planes);
+    }
+
+    fn should_refresh_terrain(&self) -> bool {
+        if self.terrain_render_objects.is_empty() || self.terrain_dirty {
+            return true;
+        }
+
+        let refresh_due = self
+            .refresh_frame_index
+            .saturating_sub(self.last_refresh_frame)
+            >= TERRAIN_REFRESH_FRAME_INTERVAL;
+        let settings_poll_due = self
+            .refresh_frame_index
+            .saturating_sub(self.last_settings_poll_frame)
+            >= TERRAIN_SETTINGS_POLL_INTERVAL;
+
+        if settings_poll_due {
+            return true;
+        }
+
+        if !refresh_due {
+            return false;
+        }
+
+        let camera_moved = self.last_refresh_camera_position.map_or(true, |last| {
+            self.camera_position.distance(last) > TERRAIN_CAMERA_POSITION_EPSILON
+        });
+        let view_changed = match (self.last_refresh_view_projection, self.view_projection) {
+            (Some(last), Some(current)) => {
+                Self::mat4_max_delta(last, current) > TERRAIN_VIEW_PROJECTION_EPSILON
+            }
+            (None, Some(_)) | (Some(_), None) => true,
+            (None, None) => false,
+        };
+
+        camera_moved || view_changed
+    }
+
+    fn mat4_max_delta(a: Mat4, b: Mat4) -> f32 {
+        let a = a.to_cols_array();
+        let b = b.to_cols_array();
+        a.iter()
+            .zip(b.iter())
+            .map(|(left, right)| (left - right).abs())
+            .fold(0.0, f32::max)
+    }
+
+    fn fetch_lod_artifact(&mut self, entry: &str) -> Option<TerrainChunkArtifact> {
+        let Some(mut rdb_ptr) = self.terrain_rdb else {
+            return None;
+        };
+        let rdb = unsafe { rdb_ptr.as_mut() };
+        rdb.fetch::<TerrainChunkArtifact>(entry).ok()
     }
 
     fn world_bounds(object: &TerrainRenderObject) -> (Vec3, Vec3) {
