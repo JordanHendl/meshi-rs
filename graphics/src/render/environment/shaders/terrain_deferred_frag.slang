@@ -15,6 +15,7 @@ static const uint MATERIAL_FLAG_UNLIT = 1u << 2;
 static const uint MATERIAL_FLAG_TOON = 1u << 3;
 static const uint MATERIAL_FLAG_EMISSIVE_ONLY = 1u << 4;
 static const uint INVALID_BINDLESS_ID = 0xFFFFu;
+static const uint INVALID_TEXTURE_ID = 0xFFFFFFFFu;
 
 struct FSInput {
   [[vk::location(0)]] float3 world_pos : POSITION_WS;
@@ -22,8 +23,8 @@ struct FSInput {
   [[vk::location(2)]] float2 tex_coords : TEXCOORD0;
   [[vk::location(3)]] float4 color : COLOR0;
   [[vk::location(4)]] float4 world_tangent : TANGENT0;
-  [[vk::location(5)]] nointerpolation uint4 material_ids : MATERIAL_IDS;
-  [[vk::location(6)]] float4 material_weights : MATERIAL_WEIGHTS;
+  [[vk::location(5)]] nointerpolation uint blend_texture_id : TERRAIN_BLEND_TEXTURE;
+  [[vk::location(6)]] nointerpolation uint blend_ids_texture_id : TERRAIN_BLEND_IDS_TEXTURE;
 };
 
 struct FSOutput {
@@ -39,6 +40,13 @@ uniform StructuredBuffer<Material> meshi_bindless_materials : register(t4, space
 
 float4 sample_texture(uint idx, float2 coords) {
   return meshi_bindless_textures[idx].Sample(meshi_bindless_samplers[idx], coords);
+}
+
+float4 sample_bindless(uint idx, float2 coords, float4 fallback) {
+  if (idx == INVALID_TEXTURE_ID) {
+    return fallback;
+  }
+  return sample_texture(idx, coords);
 }
 
 bool valid_texture(uint texture_id) {
@@ -78,6 +86,17 @@ float4 resolve_base_color(Material material, FSInput input) {
 [shader("fragment")]
 FSOutput main(FSInput input) {
   FSOutput output;
+  const float4 blend_weights = sample_bindless(
+    input.blend_texture_id,
+    input.tex_coords,
+    float4(1.0, 0.0, 0.0, 0.0)
+  );
+  const float4 blend_ids = sample_bindless(
+    input.blend_ids_texture_id,
+    input.tex_coords,
+    float4(0.0, 0.0, 0.0, 0.0)
+  );
+  const uint4 material_ids = uint4(blend_ids + 0.5);
   float total_weight = 0.0;
   float3 blended_color = float3(0.0, 0.0, 0.0);
   float3 blended_normal = float3(0.0, 0.0, 0.0);
@@ -86,12 +105,12 @@ FSOutput main(FSInput input) {
   uint material_flags = 0u;
 
   for (int i = 0; i < 4; ++i) {
-    const float weight = input.material_weights[i];
+    const float weight = blend_weights[i];
     if (weight <= 0.0) {
       continue;
     }
 
-    const uint material_id = input.material_ids[i];
+    const uint material_id = material_ids[i];
     const Material material = meshi_bindless_materials[material_id];
     material_flags |= material.material_flags;
 

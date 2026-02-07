@@ -1,7 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
-
 use glam::{Mat4, Vec2, Vec3};
-use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{TerrainChunk, TerrainChunkArtifact, TerrainProjectSettings};
 
 use crate::render::environment::terrain::TerrainRenderObject;
@@ -41,9 +38,8 @@ pub fn terrain_chunk_transform(
         settings.world_bounds_min[1],
         settings.world_bounds_min[2] + chunk_coords[1] as f32 * chunk_stride.y,
     );
-    let bounds_min = Vec3::from(bounds_min);
-    Mat4::IDENTITY
-//    Mat4::from_translation(grid_origin) * Mat4::from_translation(-bounds_min)
+    let _ = Vec3::from(bounds_min);
+    Mat4::from_translation(Vec3::new(grid_origin.x, 0.0, grid_origin.z))
 }
 
 pub fn terrain_render_object_from_artifact(
@@ -79,70 +75,38 @@ pub fn terrain_chunk_artifact_from_chunk(
     project_key: &str,
     chunk: &TerrainChunk,
 ) -> TerrainChunkArtifact {
-    let (vertices, indices, bounds_min, bounds_max) = terrain_chunk_mesh(chunk);
+    let grid_x = chunk.tiles_per_chunk[0].saturating_add(1).max(1);
+    let grid_y = chunk.tiles_per_chunk[1].saturating_add(1).max(1);
+    let mut normals = Vec::with_capacity((grid_x * grid_y) as usize);
+    for y in 0..grid_y {
+        for x in 0..grid_x {
+            normals.push(estimate_chunk_normal(
+                chunk,
+                x,
+                y,
+                chunk.tile_size.max(0.0001),
+            ));
+        }
+    }
+    let hole_masks = vec![0u8; (grid_x * grid_y) as usize];
     let (material_ids, material_weights) = terrain_chunk_material_blends(chunk);
     let content_hash = terrain_chunk_content_hash(chunk);
     TerrainChunkArtifact {
         project_key: project_key.to_string(),
         chunk_coords: chunk.chunk_coords,
         lod: 0,
-        bounds_min,
-        bounds_max,
-        vertex_layout: settings.vertex_layout.clone(),
-        vertices,
-        indices,
+        bounds_min: chunk.bounds_min,
+        bounds_max: chunk.bounds_max,
+        grid_size: [grid_x, grid_y],
+        sample_spacing: settings.tile_size.max(0.0001),
+        heights: chunk.heights.clone(),
+        normals,
+        hole_masks,
         material_ids,
         material_weights,
         content_hash,
-        mesh_entry: chunk.mesh_entry.clone(),
+        material_blend_texture: Default::default(),
     }
-}
-
-fn terrain_chunk_mesh(chunk: &TerrainChunk) -> (Vec<Vertex>, Vec<u32>, [f32; 3], [f32; 3]) {
-    let grid_x = chunk.tiles_per_chunk[0].saturating_add(1).max(1);
-    let grid_y = chunk.tiles_per_chunk[1].saturating_add(1).max(1);
-    let tile_size = chunk.tile_size.max(0.0001);
-    let mut vertices = Vec::with_capacity((grid_x * grid_y) as usize);
-    let mut min_bounds = [f32::MAX; 3];
-    let mut max_bounds = [f32::MIN; 3];
-
-    for y in 0..grid_y {
-        for x in 0..grid_x {
-            let position = [
-                chunk.origin[0] + x as f32 * tile_size,
-                chunk_height_sample(chunk, x, y),
-                chunk.origin[1] + y as f32 * tile_size,
-            ];
-            let normal = estimate_chunk_normal(chunk, x, y, tile_size);
-            let uv = [
-                x as f32 / grid_x.saturating_sub(1).max(1) as f32,
-                y as f32 / grid_y.saturating_sub(1).max(1) as f32,
-            ];
-            update_bounds(&mut min_bounds, &mut max_bounds, &position);
-            vertices.push(Vertex {
-                position,
-                normal,
-                tangent: [1.0, 0.0, 0.0, 1.0],
-                uv,
-                color: [1.0, 1.0, 1.0, 1.0],
-                joint_indices: [0; 4],
-                joint_weights: [0.0; 4],
-            });
-        }
-    }
-
-    let mut indices = Vec::new();
-    for y in 0..grid_y.saturating_sub(1) {
-        for x in 0..grid_x.saturating_sub(1) {
-            let i0 = (y * grid_x + x) as u32;
-            let i1 = (y * grid_x + x + 1) as u32;
-            let i2 = ((y + 1) * grid_x + x) as u32;
-            let i3 = ((y + 1) * grid_x + x + 1) as u32;
-            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
-        }
-    }
-
-    (vertices, indices, min_bounds, max_bounds)
 }
 
 fn chunk_height_sample(chunk: &TerrainChunk, x: u32, y: u32) -> f32 {
@@ -185,19 +149,14 @@ fn estimate_chunk_normal(chunk: &TerrainChunk, x: u32, y: u32, tile_size: f32) -
     [normal.x, normal.y, normal.z]
 }
 
-fn update_bounds(min_bounds: &mut [f32; 3], max_bounds: &mut [f32; 3], position: &[f32; 3]) {
-    for i in 0..3 {
-        min_bounds[i] = min_bounds[i].min(position[i]);
-        max_bounds[i] = max_bounds[i].max(position[i]);
-    }
-}
-
 pub fn terrain_chunk_content_hash(chunk: &TerrainChunk) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     chunk.chunk_coords.hash(&mut hasher);
     chunk.tiles_per_chunk.hash(&mut hasher);
     chunk.tile_size.to_bits().hash(&mut hasher);
+    chunk.bounds_min.iter().for_each(|value| value.to_bits().hash(&mut hasher));
+    chunk.bounds_max.iter().for_each(|value| value.to_bits().hash(&mut hasher));
     for tile in &chunk.tiles {
         tile.tile_id.hash(&mut hasher);
         tile.flags.hash(&mut hasher);
@@ -210,14 +169,14 @@ pub fn terrain_chunk_content_hash(chunk: &TerrainChunk) -> u64 {
 
 fn terrain_chunk_material_blends(
     chunk: &TerrainChunk,
-) -> (Option<Vec<u32>>, Option<Vec<[f32; 4]>>) {
+) -> (Option<Vec<[u32; 4]>>, Option<Vec<[f32; 4]>>) {
     let grid_x = chunk.tiles_per_chunk[0].saturating_add(1).max(1);
     let grid_y = chunk.tiles_per_chunk[1].saturating_add(1).max(1);
     if grid_x == 0 || grid_y == 0 {
         return (None, None);
     }
 
-    let mut material_ids = Vec::with_capacity((grid_x * grid_y) as usize * 4);
+    let mut material_ids = Vec::with_capacity((grid_x * grid_y) as usize);
     let mut material_weights = Vec::with_capacity((grid_x * grid_y) as usize);
 
     let max_tile_x = chunk.tiles_per_chunk[0].saturating_sub(1);
@@ -231,7 +190,7 @@ fn terrain_chunk_material_blends(
                 .tile_at(tile_x as i32, tile_y as i32)
                 .map(|tile| tile.tile_id)
                 .unwrap_or(0);
-            material_ids.extend_from_slice(&[tile_id, 0, 0, 0]);
+            material_ids.push([tile_id, 0, 0, 0]);
             material_weights.push([1.0, 0.0, 0.0, 0.0]);
         }
     }

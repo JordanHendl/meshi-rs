@@ -4,31 +4,33 @@ use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw, DrawIndexedIndirect};
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
-    MemoryVisibility, SampleCount, ShaderResource, UsageBits, Viewport,
+    AspectMask, Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format,
+    Handle, ImageInfo, ImageViewType, MemoryVisibility, SampleCount, ShaderResource,
+    SubresourceRange, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
-use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use noren::DB;
 use noren::RDBFile;
-use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{
     TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainFrustum, TerrainProjectSettings,
     chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
 };
-use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
+use noren::rdb::DeviceGeometryLayer;
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
 use tracing::{info, warn};
 
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
+use crate::render::image_pager::{ImagePager, ImagePagerBackend, ImagePagerKey, InlineImageKey};
 use crate::terrain_loader;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
+use furikake::reservations::bindless_textures::ReservedBindlessTextures;
 use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::{
@@ -133,12 +135,16 @@ pub struct TerrainRenderer {
     view_projection: Option<Mat4>,
     use_depth: bool,
     deferred: Option<TerrainDeferredResources>,
+    static_geometry: Option<TerrainStaticGeometry>,
+    image_pager: ImagePager,
     lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
     active_chunk_lods: HashMap<TerrainChunkKey, String>,
     active_chunk_lod_levels: HashMap<TerrainChunkKey, u8>,
+    context: Option<NonNull<Context>>,
     terrain_rdb: Option<NonNull<RDBFile>>,
     terrain_project_key: Option<String>,
     terrain_settings: Option<TerrainProjectSettings>,
+    terrain_settings_dirty: bool,
     terrain_render_objects: HashMap<String, TerrainRenderObject>,
     terrain_dirty: bool,
     refresh_frame_index: u64,
@@ -154,8 +160,8 @@ struct TerrainObjectEntry {
     draws: Vec<Handle<PerDrawData>>,
     draw_instances: Vec<TerrainDrawInstance>,
     content_hash: u64,
-    geometry_entry: String,
     material_handle: Handle<Material>,
+    textures: TerrainTextureSet,
 }
 
 #[derive(Clone)]
@@ -165,6 +171,94 @@ struct TerrainDrawInstance {
     vertex_count: u32,
     index_id: u32,
     index_count: u32,
+}
+
+#[derive(Clone, Copy)]
+struct TerrainPlaneGeometry {
+    vertex_id: u32,
+    vertex_count: u32,
+    index_id: u32,
+    index_count: u32,
+}
+
+struct TerrainStaticGeometry {
+    lods: Vec<TerrainPlaneGeometry>,
+    settings_hash: u64,
+}
+
+#[derive(Clone)]
+struct TerrainTexture {
+    key: ImagePagerKey,
+    handle: u32,
+}
+
+#[derive(Clone, Default)]
+struct TerrainTextureSet {
+    height: Option<TerrainTexture>,
+    normal: Option<TerrainTexture>,
+    blend: Option<TerrainTexture>,
+    blend_ids: Option<TerrainTexture>,
+}
+
+impl TerrainTextureSet {
+    fn height_handle(&self) -> u32 {
+        self.height.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
+    }
+
+    fn normal_handle(&self) -> u32 {
+        self.normal.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
+    }
+
+    fn blend_handle(&self) -> u32 {
+        self.blend.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
+    }
+
+    fn blend_ids_handle(&self) -> u32 {
+        self.blend_ids
+            .as_ref()
+            .map(|tex| tex.handle)
+            .unwrap_or(u32::MAX)
+    }
+}
+
+struct TerrainEntryBuild {
+    draw_instances: Vec<TerrainDrawInstance>,
+    material_handle: Handle<Material>,
+    textures: TerrainTextureSet,
+}
+
+struct TerrainImageBackend<'a> {
+    state: &'a mut BindlessState,
+}
+
+impl ImagePagerBackend for TerrainImageBackend<'_> {
+    fn reserve_handle(&mut self) -> u32 {
+        u32::MAX
+    }
+
+    fn register_image(&mut self, _handle: u32, _view: dashi::ImageView) {}
+
+    fn register_image_immediate(&mut self, view: dashi::ImageView) -> u32 {
+        let mut handle = u32::MAX;
+        self.state
+            .reserved_mut::<ReservedBindlessTextures, _>("meshi_bindless_textures", |textures| {
+                handle = textures.add_texture(view) as u32;
+            })
+            .expect("register terrain texture");
+        handle
+    }
+
+    fn release_image(&mut self, handle: u32) {
+        if handle == u32::MAX {
+            return;
+        }
+        let _ = self.state.reserved_mut::<ReservedBindlessTextures, _>(
+            "meshi_bindless_textures",
+            |textures| {
+                textures.remove_texture(handle as u16);
+            },
+        );
+    }
 }
 
 struct TerrainDeferredResources {
@@ -430,12 +524,16 @@ impl TerrainRenderer {
             view_projection: None,
             use_depth: info.use_depth,
             deferred: None,
+            static_geometry: None,
+            image_pager: ImagePager::new(),
             lod_sources: HashMap::new(),
             active_chunk_lods: HashMap::new(),
             active_chunk_lod_levels: HashMap::new(),
+            context: NonNull::new(ctx),
             terrain_rdb: None,
             terrain_project_key: None,
             terrain_settings: None,
+            terrain_settings_dirty: true,
             terrain_render_objects: HashMap::new(),
             terrain_dirty: true,
             refresh_frame_index: 0,
@@ -505,6 +603,7 @@ impl TerrainRenderer {
         self.terrain_rdb = Some(NonNull::new(rdb).expect("terrain rdb"));
         self.terrain_project_key = Some(project_key.to_string());
         self.terrain_settings = None;
+        self.terrain_settings_dirty = true;
         self.terrain_render_objects.clear();
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
@@ -515,6 +614,7 @@ impl TerrainRenderer {
     pub fn set_project_key(&mut self, project_key: &str) {
         self.terrain_project_key = Some(project_key.to_string());
         self.terrain_settings = None;
+        self.terrain_settings_dirty = true;
         self.terrain_render_objects.clear();
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
@@ -534,6 +634,12 @@ impl TerrainRenderer {
             self.last_refresh_camera_position = Some(self.camera_position);
             self.last_refresh_view_projection = self.view_projection;
             self.terrain_dirty = false;
+        }
+        if self.terrain_settings_dirty {
+            if let Some(settings) = self.terrain_settings.clone() {
+                self.ensure_static_geometry(&settings, state);
+            }
+            self.terrain_settings_dirty = false;
         }
         if self.lod_sources.is_empty() {
             return;
@@ -650,6 +756,7 @@ impl TerrainRenderer {
                 project_key, settings
             );
             self.terrain_settings = Some(settings.clone());
+            self.terrain_settings_dirty = true;
         }
 
         let chunks = match db.fetch_terrain_chunks_from_view(&settings, &project_key, camera) {
@@ -932,13 +1039,9 @@ impl TerrainRenderer {
     fn world_bounds(object: &TerrainRenderObject) -> (Vec3, Vec3) {
         let bounds_min = Vec3::from(object.artifact.bounds_min);
         let bounds_max = Vec3::from(object.artifact.bounds_max);
-        let center_local = (bounds_min + bounds_max) * 0.5;
-        let extent_local = (bounds_max - bounds_min) * 0.5;
-        let world_center = object.transform.transform_point3(center_local);
-        let basis = Mat3::from_mat4(object.transform);
-        let abs_basis = Mat3::from_cols(basis.x_axis.abs(), basis.y_axis.abs(), basis.z_axis.abs());
-        let world_extent = abs_basis * extent_local;
-        (world_center, world_extent)
+        let center = (bounds_min + bounds_max) * 0.5;
+        let extent = (bounds_max - bounds_min) * 0.5;
+        (center, extent)
     }
 
     fn chunk_visible(&self, object: &TerrainRenderObject) -> bool {
@@ -1047,18 +1150,19 @@ impl TerrainRenderer {
                 deferred.objects.remove(&object.key);
             }
 
-            let Some((model, geometry_entry, material_handle)) =
-                self.build_terrain_model(&object.key, &object.artifact, deferred, state)
+            let Some(entry_build) =
+                self.build_terrain_entry(&object.key, &object.artifact, state)
             else {
                 warn!("Failed to build terrain render object '{}'.", object.key);
                 continue;
             };
 
             let transform_handle = self.allocate_terrain_transform(object.transform, state);
-            let draw_instances = Self::build_draw_instances(&model);
+            let draw_instances = entry_build.draw_instances.clone();
             let draws = self.register_draw_instances(
                 &draw_instances,
                 transform_handle,
+                &entry_build.textures,
                 &mut deferred.draw_builder,
             );
 
@@ -1069,8 +1173,8 @@ impl TerrainRenderer {
                     draws,
                     draw_instances,
                     content_hash: object.artifact.content_hash,
-                    geometry_entry,
-                    material_handle,
+                    material_handle: entry_build.material_handle,
+                    textures: entry_build.textures,
                 },
             );
         }
@@ -1104,6 +1208,7 @@ impl TerrainRenderer {
             entry.draws = self.register_draw_instances(
                 &instances,
                 transform_handle,
+                &entry.textures,
                 &mut deferred.draw_builder,
             );
         }
@@ -1294,6 +1399,7 @@ impl TerrainRenderer {
         for draw in &entry.draws {
             deferred.draw_builder.release_draw(*draw);
         }
+        self.release_terrain_textures(&entry.textures, state);
 
         if entry.material_handle.valid() {
             state
@@ -1303,19 +1409,6 @@ impl TerrainRenderer {
                 )
                 .expect("Failed to release terrain material");
         }
-
-        let Some(mut db) = deferred.db else {
-            return;
-        };
-        if let Err(err) = unsafe { db.as_mut() }
-            .geometry_mut()
-            .unref_entry(&entry.geometry_entry)
-        {
-            warn!(
-                "Failed to release terrain geometry '{}': {err:?}",
-                entry.geometry_entry
-            );
-        }
     }
 
     fn release_terrain_draws(entry: &mut TerrainObjectEntry, draw_builder: &mut GPUDrawBuilder) {
@@ -1324,28 +1417,11 @@ impl TerrainRenderer {
         }
     }
 
-    fn build_draw_instances(model: &DeviceModel) -> Vec<TerrainDrawInstance> {
-        model
-            .meshes
-            .iter()
-            .map(|mesh| TerrainDrawInstance {
-                material: mesh
-                    .material
-                    .as_ref()
-                    .and_then(|material| material.furikake_material_handle)
-                    .unwrap_or_default(),
-                vertex_id: mesh.geometry.base.furikake_vertex_id.unwrap(),
-                vertex_count: mesh.geometry.base.vertex_count,
-                index_id: mesh.geometry.base.furikake_index_id.unwrap(),
-                index_count: mesh.geometry.base.index_count.unwrap(),
-            })
-            .collect()
-    }
-
     fn register_draw_instances(
         &mut self,
         instances: &[TerrainDrawInstance],
         transform_handle: Handle<Transformation>,
+        textures: &TerrainTextureSet,
         draw_builder: &mut GPUDrawBuilder,
     ) -> Vec<Handle<PerDrawData>> {
         instances
@@ -1359,72 +1435,370 @@ impl TerrainRenderer {
                     instance.vertex_count,
                     instance.index_id,
                     instance.index_count,
+                    textures.height_handle(),
+                    textures.normal_handle(),
+                    textures.blend_handle(),
+                    textures.blend_ids_handle(),
                 ))
             })
             .collect()
     }
 
-    fn build_terrain_model(
+    fn build_terrain_entry(
         &mut self,
         key: &str,
         artifact: &TerrainChunkArtifact,
-        deferred: &mut TerrainDeferredResources,
         state: &mut BindlessState,
-    ) -> Option<(DeviceModel, String, Handle<Material>)> {
-        if artifact.vertices.is_empty() || artifact.indices.is_empty() {
-            warn!("Terrain artifact '{key}' has no geometry data.");
-            return None;
-        }
-
-        let mut vertices = artifact.vertices.clone();
-        Self::apply_material_blends(
-            &mut vertices,
-            artifact.material_ids.as_deref(),
-            artifact.material_weights.as_deref(),
-        );
-
-        let geometry_entry = format!(
-            "terrain/runtime/{key}/lod{}-{:016x}",
-            artifact.lod, artifact.content_hash
-        );
-        let host_geometry = HostGeometry {
-            vertices,
-            indices: Some(artifact.indices.clone()),
-            ..Default::default()
-        }
-        .with_counts();
-
-        let Some(mut db) = deferred.db else {
-            warn!("No database available for terrain upload.");
+    ) -> Option<TerrainEntryBuild> {
+        let Some(settings) = self.terrain_settings.clone() else {
             return None;
         };
-        let db = unsafe { db.as_mut() };
-        let geometry_store = db.geometry_mut();
-        let _ = geometry_store.unref_entry(&geometry_entry);
-        let mut geometry =
-            match geometry_store.enter_gpu_geometry(&geometry_entry, host_geometry.clone()) {
-                Ok(geometry) => geometry,
-                Err(err) => {
-                    warn!("Failed to upload terrain geometry '{geometry_entry}': {err:?}");
-                    return None;
+        self.ensure_static_geometry(&settings, state);
+        let static_geometry = self.static_geometry.as_ref()?;
+        let geometry = static_geometry
+            .lods
+            .get(artifact.lod as usize)
+            .copied()
+            .or_else(|| static_geometry.lods.last().copied())?;
+        let textures = self.load_terrain_textures(key, artifact, state);
+        let (material_handle, _material) = self.allocate_terrain_material(state);
+        let draw_instances = vec![TerrainDrawInstance {
+            material: material_handle,
+            vertex_id: geometry.vertex_id,
+            vertex_count: geometry.vertex_count,
+            index_id: geometry.index_id,
+            index_count: geometry.index_count,
+        }];
+
+        Some(TerrainEntryBuild {
+            draw_instances,
+            material_handle,
+            textures,
+        })
+    }
+
+    fn ensure_static_geometry(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        state: &mut BindlessState,
+    ) {
+        let settings_hash = Self::static_geometry_hash(settings, self.lod_levels);
+        if let Some(existing) = &self.static_geometry {
+            if existing.settings_hash == settings_hash {
+                return;
+            }
+        }
+
+        let lod_levels = self.lod_levels.max(1).min(u32::from(u8::MAX)) as u8;
+        let mut lods = Vec::with_capacity(lod_levels as usize);
+        for lod in 0..lod_levels {
+            if let Some(geometry) = self.build_plane_geometry(settings, state, lod, lod_levels) {
+                lods.push(geometry);
+            }
+        }
+
+        self.static_geometry = Some(TerrainStaticGeometry {
+            lods,
+            settings_hash,
+        });
+    }
+
+    fn static_geometry_hash(settings: &TerrainProjectSettings, lod_levels: u32) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        settings.tiles_per_chunk.hash(&mut hasher);
+        settings.tile_size.to_bits().hash(&mut hasher);
+        lod_levels.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn build_plane_geometry(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        state: &mut BindlessState,
+        lod: u8,
+        lod_levels: u8,
+    ) -> Option<TerrainPlaneGeometry> {
+        let tiles_x = settings.tiles_per_chunk[0].max(1);
+        let tiles_y = settings.tiles_per_chunk[1].max(1);
+        let base_step = 1u32.checked_shl(lod as u32).unwrap_or(1).max(1);
+        let max_step = tiles_x.max(tiles_y);
+        let step = if lod + 1 == lod_levels {
+            max_step
+        } else {
+            base_step.min(max_step)
+        };
+        let step_x = step.min(tiles_x).max(1);
+        let step_y = step.min(tiles_y).max(1);
+        let grid_x = (tiles_x / step_x).max(1) + 1;
+        let grid_y = (tiles_y / step_y).max(1) + 1;
+
+        let spacing_x = settings.tile_size * step_x as f32;
+        let spacing_y = settings.tile_size * step_y as f32;
+
+        let mut vertices = Vec::with_capacity((grid_x * grid_y) as usize);
+        for y in 0..grid_y {
+            for x in 0..grid_x {
+                let position = [x as f32 * spacing_x, 0.0, y as f32 * spacing_y];
+                let uv = [
+                    x as f32 / (grid_x.saturating_sub(1).max(1)) as f32,
+                    y as f32 / (grid_y.saturating_sub(1).max(1)) as f32,
+                ];
+                vertices.push(Vertex {
+                    position,
+                    normal: [0.0, 1.0, 0.0],
+                    tangent: [1.0, 0.0, 0.0, 1.0],
+                    uv,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    joint_indices: [0; 4],
+                    joint_weights: [0.0; 4],
+                });
+            }
+        }
+
+        let mut indices = Vec::new();
+        for y in 0..grid_y.saturating_sub(1) {
+            for x in 0..grid_x.saturating_sub(1) {
+                let i0 = (y * grid_x + x) as u32;
+                let i1 = (y * grid_x + x + 1) as u32;
+                let i2 = ((y + 1) * grid_x + x) as u32;
+                let i3 = ((y + 1) * grid_x + x + 1) as u32;
+                indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+            }
+        }
+
+        let mut layer = DeviceGeometryLayer::default();
+        if !self.register_furikake_geometry_layer(&mut layer, &vertices, Some(&indices), state) {
+            return None;
+        }
+
+        Some(TerrainPlaneGeometry {
+            vertex_id: layer.furikake_vertex_id?,
+            vertex_count: vertices.len() as u32,
+            index_id: layer.furikake_index_id?,
+            index_count: indices.len() as u32,
+        })
+    }
+
+    fn load_terrain_textures(
+        &mut self,
+        key: &str,
+        artifact: &TerrainChunkArtifact,
+        state: &mut BindlessState,
+    ) -> TerrainTextureSet {
+        let Some(mut ctx_ptr) = self.context else {
+            return TerrainTextureSet::default();
+        };
+        let ctx = unsafe { ctx_ptr.as_mut() };
+        let mut backend = TerrainImageBackend { state };
+
+        let grid_x = artifact.grid_size[0];
+        let grid_y = artifact.grid_size[1];
+        if grid_x == 0 || grid_y == 0 {
+            return TerrainTextureSet::default();
+        }
+
+        let mut textures = TerrainTextureSet::default();
+        if let Some(view) = self.build_heightmap_view(ctx, key, artifact, grid_x, grid_y) {
+            textures.height = Some(self.register_terrain_texture(
+                key,
+                "height",
+                artifact.content_hash,
+                view,
+                &mut backend,
+            ));
+        }
+
+        if let Some(view) = self.build_normalmap_view(ctx, key, artifact, grid_x, grid_y) {
+            textures.normal = Some(self.register_terrain_texture(
+                key,
+                "normal",
+                artifact.content_hash,
+                view,
+                &mut backend,
+            ));
+        }
+
+        if let Some(view) = self.build_blendmap_view(ctx, key, artifact, grid_x, grid_y) {
+            textures.blend = Some(self.register_terrain_texture(
+                key,
+                "blend",
+                artifact.content_hash,
+                view,
+                &mut backend,
+            ));
+        }
+
+        if let Some(view) = self.build_blend_ids_view(ctx, key, artifact, grid_x, grid_y) {
+            textures.blend_ids = Some(self.register_terrain_texture(
+                key,
+                "blend_ids",
+                artifact.content_hash,
+                view,
+                &mut backend,
+            ));
+        }
+
+        textures
+    }
+
+    fn register_terrain_texture(
+        &mut self,
+        key: &str,
+        kind: &str,
+        hash: u64,
+        view: dashi::ImageView,
+        backend: &mut TerrainImageBackend<'_>,
+    ) -> TerrainTexture {
+        let key = ImagePagerKey::Inline(InlineImageKey {
+            id: format!("terrain/{key}/{kind}/{hash:016x}"),
+        });
+        let handle = self
+            .image_pager
+            .register_inline_image(key.clone(), view, backend);
+        TerrainTexture { key, handle }
+    }
+
+    fn build_heightmap_view(
+        &self,
+        ctx: &mut Context,
+        key: &str,
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Option<dashi::ImageView> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        if artifact.heights.len() == (grid_x * grid_y) as usize {
+            for height in &artifact.heights {
+                data.extend_from_slice(&[*height, 0.0, 0.0, 1.0]);
+            }
+        } else {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+        }
+        self.build_texture_view(ctx, &format!("terrain_{key}_height"), grid_x, grid_y, &data)
+    }
+
+    fn build_normalmap_view(
+        &self,
+        ctx: &mut Context,
+        key: &str,
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Option<dashi::ImageView> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        if artifact.normals.len() == (grid_x * grid_y) as usize {
+            for normal in &artifact.normals {
+                data.extend_from_slice(&[normal[0], normal[1], normal[2], 1.0]);
+            }
+        } else {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+            for chunk in data.chunks_exact_mut(4) {
+                chunk[0] = 0.0;
+                chunk[1] = 1.0;
+                chunk[2] = 0.0;
+                chunk[3] = 1.0;
+            }
+        }
+        self.build_texture_view(ctx, &format!("terrain_{key}_normal"), grid_x, grid_y, &data)
+    }
+
+    fn build_blendmap_view(
+        &self,
+        ctx: &mut Context,
+        key: &str,
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Option<dashi::ImageView> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        let expected = (grid_x * grid_y) as usize;
+        if let Some(weights) = artifact.material_weights.as_deref() {
+            if weights.len() == expected {
+                for weight in weights {
+                    data.extend_from_slice(weight);
                 }
-            };
+            }
+        }
+        if data.is_empty() {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+            for chunk in data.chunks_exact_mut(4) {
+                chunk[0] = 1.0;
+            }
+        }
+        self.build_texture_view(ctx, &format!("terrain_{key}_blend"), grid_x, grid_y, &data)
+    }
 
-        if !self.register_furikake_geometry(&mut geometry, &host_geometry, state) {
-            warn!("Failed to register furikake geometry for terrain '{geometry_entry}'.");
+    fn build_blend_ids_view(
+        &self,
+        ctx: &mut Context,
+        key: &str,
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Option<dashi::ImageView> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        let expected = (grid_x * grid_y) as usize;
+        if let Some(ids) = artifact.material_ids.as_deref() {
+            if ids.len() == expected {
+                for id in ids {
+                    data.extend_from_slice(&[
+                        id[0] as f32,
+                        id[1] as f32,
+                        id[2] as f32,
+                        id[3] as f32,
+                    ]);
+                }
+            }
+        }
+        if data.is_empty() {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+        }
+        self.build_texture_view(ctx, &format!("terrain_{key}_blend_ids"), grid_x, grid_y, &data)
+    }
+
+    fn build_texture_view(
+        &self,
+        ctx: &mut Context,
+        name: &str,
+        width: u32,
+        height: u32,
+        data: &[f32],
+    ) -> Option<dashi::ImageView> {
+        if width == 0 || height == 0 || data.is_empty() {
             return None;
         }
-
-        let (material_handle, material) = self.allocate_terrain_material(state);
-        let device_material = DeviceMaterial::new(Vec::new(), material, Some(material_handle));
-        let mesh = DeviceMesh::new(geometry, Vec::new(), Some(device_material));
-        let model = DeviceModel {
-            name: format!("terrain/{key}"),
-            meshes: vec![mesh],
-            rig: None,
+        let info = ImageInfo {
+            debug_name: name,
+            dim: [width, height, 1],
+            layers: 1,
+            format: Format::RGBA32F,
+            mip_levels: 1,
+            initial_data: Some(bytemuck::cast_slice(data)),
+            ..Default::default()
         };
+        let image = ctx.make_image(&info).ok()?;
+        Some(dashi::ImageView {
+            img: image,
+            aspect: AspectMask::Color,
+            view_type: ImageViewType::Type2D,
+            range: SubresourceRange::new(0, 1, 0, 1),
+        })
+    }
 
-        Some((model, geometry_entry, material_handle))
+    fn release_terrain_textures(&mut self, textures: &TerrainTextureSet, state: &mut BindlessState) {
+        let mut backend = TerrainImageBackend { state };
+        for texture in [
+            textures.height.as_ref(),
+            textures.normal.as_ref(),
+            textures.blend.as_ref(),
+            textures.blend_ids.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.image_pager.release_by_key(&texture.key, &mut backend);
+        }
     }
 
     fn allocate_terrain_material(
@@ -1447,40 +1821,6 @@ impl TerrainRenderer {
             .expect("Failed to allocate terrain material");
 
         (material_handle, material)
-    }
-
-    fn register_furikake_geometry(
-        &mut self,
-        geometry: &mut DeviceGeometry,
-        host: &HostGeometry,
-        state: &mut BindlessState,
-    ) -> bool {
-        if !self.register_furikake_geometry_layer(
-            &mut geometry.base,
-            &host.vertices,
-            host.indices.as_deref(),
-            state,
-        ) {
-            return false;
-        }
-
-        if geometry.lods.len() != host.lods.len() {
-            warn!("Terrain geometry lod count mismatch.");
-            return false;
-        }
-
-        for (layer, source) in geometry.lods.iter_mut().zip(&host.lods) {
-            if !self.register_furikake_geometry_layer(
-                layer,
-                &source.vertices,
-                source.indices.as_deref(),
-                state,
-            ) {
-                return false;
-            }
-        }
-
-        true
     }
 
     fn allocate_terrain_transform(
@@ -1593,34 +1933,4 @@ impl TerrainRenderer {
         VertexBufferSlot::Skeleton
     }
 
-    fn apply_material_blends(
-        vertices: &mut [Vertex],
-        material_ids: Option<&[u32]>,
-        material_weights: Option<&[[f32; 4]]>,
-    ) {
-        let (Some(material_ids), Some(material_weights)) = (material_ids, material_weights) else {
-            return;
-        };
-
-        if material_ids.len() != vertices.len() * 4 || material_weights.len() != vertices.len() {
-            warn!(
-                "Terrain material blend data mismatch (ids={}, weights={}, vertices={}).",
-                material_ids.len(),
-                material_weights.len(),
-                vertices.len()
-            );
-            return;
-        }
-
-        for (index, vertex) in vertices.iter_mut().enumerate() {
-            let base = index * 4;
-            vertex.joint_indices = [
-                material_ids[base],
-                material_ids[base + 1],
-                material_ids[base + 2],
-                material_ids[base + 3],
-            ];
-            vertex.joint_weights = material_weights[index];
-        }
-    }
 }

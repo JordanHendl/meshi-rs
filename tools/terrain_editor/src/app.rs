@@ -7,7 +7,6 @@ use glam::{vec2, Mat4, Vec2, Vec3};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 use meshi_graphics::gui::GuiContext;
 use meshi_graphics::{
-    rdb::primitives::Vertex,
     rdb::terrain::{
         project_settings_entry, TerrainChunk, TerrainChunkArtifact, TerrainMutationOpKind,
         TerrainProjectSettings,
@@ -903,7 +902,7 @@ impl TerrainEditorApp {
             return;
         }
 
-        artifact.content_hash = hash_vertex_colors(&artifact.vertices);
+        artifact.content_hash = hash_terrain_maps(&artifact);
         if let Err(err) = rdb.upsert(&artifact_entry, &artifact) {
             self.rdb_open = Some(rdb);
             self.persistence_error = Some(format!("Vertex paint save failed: {err}"));
@@ -1379,43 +1378,35 @@ impl TerrainEditorApp {
 }
 
 fn paint_vertices_in_artifact(
-    artifact: &mut TerrainChunkArtifact,
-    world_pos: Vec3,
-    radius: f32,
-    strength: f32,
-    target_color: [f32; 3],
+    _artifact: &mut TerrainChunkArtifact,
+    _world_pos: Vec3,
+    _radius: f32,
+    _strength: f32,
+    _target_color: [f32; 3],
 ) -> bool {
-    if artifact.vertices.is_empty() {
-        return false;
-    }
-    let radius = radius.max(0.001);
-    let radius_sq = radius * radius;
-    let strength = strength.max(0.0);
-    let mut changed = false;
-    for vertex in &mut artifact.vertices {
-        let dx = vertex.position[0] - world_pos.x;
-        let dy = vertex.position[1] - world_pos.y;
-        let dist_sq = dx * dx + dy * dy;
-        if dist_sq <= radius_sq {
-            let dist = dist_sq.sqrt();
-            let falloff = (1.0 - dist / radius).clamp(0.0, 1.0);
-            let blend = (strength * falloff).clamp(0.0, 1.0);
-            for channel in 0..3 {
-                let current = vertex.color[channel];
-                vertex.color[channel] = current + (target_color[channel] - current) * blend;
-            }
-            vertex.color[3] = 1.0;
-            changed = true;
-        }
-    }
-    changed
+    false
 }
 
-fn hash_vertex_colors(vertices: &[Vertex]) -> u64 {
+fn hash_terrain_maps(artifact: &TerrainChunkArtifact) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for vertex in vertices {
-        for channel in vertex.color {
+    for height in &artifact.heights {
+        height.to_bits().hash(&mut hasher);
+    }
+    for normal in &artifact.normals {
+        for channel in normal {
             channel.to_bits().hash(&mut hasher);
+        }
+    }
+    if let Some(weights) = artifact.material_weights.as_deref() {
+        for weight in weights {
+            for channel in weight {
+                channel.to_bits().hash(&mut hasher);
+            }
+        }
+    }
+    if let Some(ids) = artifact.material_ids.as_deref() {
+        for id in ids {
+            id.hash(&mut hasher);
         }
     }
     hasher.finish()

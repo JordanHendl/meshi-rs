@@ -13,12 +13,18 @@ pub type BindlessImageHandle = u32;
 pub enum ImagePagerKey {
     Disk(PathBuf),
     Database(DatabaseImageKey),
+    Inline(InlineImageKey),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DatabaseImageKey {
     pub project: Option<String>,
     pub asset_key: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct InlineImageKey {
+    pub id: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,6 +43,11 @@ struct ImagePagerEntry {
 pub trait ImagePagerBackend {
     fn reserve_handle(&mut self) -> BindlessImageHandle;
     fn register_image(&mut self, handle: BindlessImageHandle, view: ImageView);
+    fn register_image_immediate(&mut self, view: ImageView) -> BindlessImageHandle {
+        let handle = self.reserve_handle();
+        self.register_image(handle, view);
+        handle
+    }
     fn release_image(&mut self, handle: BindlessImageHandle);
 }
 
@@ -163,6 +174,28 @@ impl ImagePager {
         self.entries.get(key).map(|entry| entry.status)
     }
 
+    pub fn register_inline_image(
+        &mut self,
+        key: ImagePagerKey,
+        view: ImageView,
+        backend: &mut impl ImagePagerBackend,
+    ) -> BindlessImageHandle {
+        if let Some(entry) = self.entries.get(&key) {
+            return entry.handle;
+        }
+
+        let handle = backend.register_image_immediate(view);
+        self.entries.insert(
+            key.clone(),
+            ImagePagerEntry {
+                handle,
+                status: ImagePagerStatus::Ready,
+            },
+        );
+        self.handle_to_key.insert(handle, key);
+        handle
+    }
+
     pub fn process_pending(
         &mut self,
         loader: &mut impl ImagePagerLoader,
@@ -185,6 +218,7 @@ impl ImagePager {
             let load_result = match &key {
                 ImagePagerKey::Disk(path) => loader.load_from_disk(path),
                 ImagePagerKey::Database(db_key) => loader.load_from_database(db_key),
+                ImagePagerKey::Inline(_) => Ok(ImageView::default()),
             };
 
             match load_result {

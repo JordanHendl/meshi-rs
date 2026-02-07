@@ -3956,7 +3956,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#e09dd0ae9ee9317a9676118c4b89a091b5bfa983"
+source = "git+https://github.com/JordanHendl/noren#86280daabd2277211fdd39dabd43c421196a34fc"
 dependencies = [
  "bento",
  "bincode",

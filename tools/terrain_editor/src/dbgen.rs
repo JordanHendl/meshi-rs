@@ -452,6 +452,18 @@ fn build_chunk_data(
         };
         (tiles_per_chunk[0] * tiles_per_chunk[1]) as usize
     ];
+    let (min_height, max_height) = heights
+        .iter()
+        .copied()
+        .fold((f32::MAX, f32::MIN), |(min_h, max_h), value| {
+            (min_h.min(value), max_h.max(value))
+        });
+    let bounds_min = [origin_x, min_height, origin_y];
+    let bounds_max = [
+        origin_x + tiles_per_chunk[0] as f32 * tile_size,
+        max_height,
+        origin_y + tiles_per_chunk[1] as f32 * tile_size,
+    ];
     TerrainChunk {
         chunk_coords,
         origin: [origin_x, origin_y],
@@ -459,6 +471,8 @@ fn build_chunk_data(
         tiles_per_chunk,
         tiles,
         heights,
+        bounds_min,
+        bounds_max,
         mesh_entry: "geometry/terrain_chunk".to_string(),
     }
 }

@@ -21,6 +21,10 @@ struct PerDrawData {
   uint vertex_count;
   uint index_id;
   uint index_count;
+  uint terrain_height_texture_id;
+  uint terrain_normal_texture_id;
+  uint terrain_blend_texture_id;
+  uint terrain_blend_ids_texture_id;
 };
 
 struct PerSceneData {
@@ -54,8 +58,8 @@ struct VSOutput {
   [[vk::location(2)]] float2 tex_coords : TEXCOORD0;
   [[vk::location(3)]] float4 color : COLOR0;
   [[vk::location(4)]] float4 world_tangent : TANGENT0;
-  [[vk::location(5)]] nointerpolation uint4 material_ids : MATERIAL_IDS;
-  [[vk::location(6)]] float4 material_weights : MATERIAL_WEIGHTS;
+  [[vk::location(5)]] nointerpolation uint blend_texture_id : TERRAIN_BLEND_TEXTURE;
+  [[vk::location(6)]] nointerpolation uint blend_ids_texture_id : TERRAIN_BLEND_IDS_TEXTURE;
 };
 
 struct VertexData {
@@ -74,9 +78,13 @@ uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t0, space1);
 uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t0, space2);
 static PerSceneData scene = per_scene_ssbo[0];
 
+uniform Texture2D meshi_bindless_textures[] : register(t0, space0);
+uniform SamplerState meshi_bindless_samplers[] : register(s1, space0);
 uniform StructuredBuffer<Camera> meshi_bindless_cameras : register(t2, space0);
 uniform StructuredBuffer<Transformation> meshi_bindless_transformations : register(t3, space0);
 uniform ByteAddressBuffer meshi_bindless_vertices : register(t12, space0);
+
+static const uint INVALID_BINDLESS_ID = 0xFFFFFFFFu;
 
 float4x4 inverse(float4x4 m) {
   float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
@@ -168,8 +176,20 @@ VSOutput main(VSInput input) {
   const float4x4 view_proj = mul(camera.projection, view);
   const float4x4 model = model_matrix(draw);
 
-  const float4 world_pos = mul(model, float4(vertex.position, 1.0));
-  const float3 world_normal = normalize(mul(model, float4(vertex.normal, 0.0)).xyz);
+  float3 local_pos = vertex.position;
+  float3 local_normal = vertex.normal;
+  if (draw.terrain_height_texture_id != INVALID_BINDLESS_ID) {
+    const float height = meshi_bindless_textures[draw.terrain_height_texture_id]
+      .Sample(meshi_bindless_samplers[draw.terrain_height_texture_id], vertex.tex_coords).x;
+    local_pos.y = height;
+  }
+  if (draw.terrain_normal_texture_id != INVALID_BINDLESS_ID) {
+    local_normal = meshi_bindless_textures[draw.terrain_normal_texture_id]
+      .Sample(meshi_bindless_samplers[draw.terrain_normal_texture_id], vertex.tex_coords).xyz;
+  }
+
+  const float4 world_pos = mul(model, float4(local_pos, 1.0));
+  const float3 world_normal = normalize(mul(model, float4(local_normal, 0.0)).xyz);
   const float3 world_tangent = normalize(mul(model, float4(vertex.tangent.xyz, 0.0)).xyz);
 
   output.position = mul(view_proj, world_pos);
@@ -178,8 +198,8 @@ VSOutput main(VSInput input) {
   output.tex_coords = vertex.tex_coords;
   output.color = vertex.color;
   output.world_tangent = float4(world_tangent, vertex.tangent.w);
-  output.material_ids = vertex.joints;
-  output.material_weights = vertex.weights;
+  output.blend_texture_id = draw.terrain_blend_texture_id;
+  output.blend_ids_texture_id = draw.terrain_blend_ids_texture_id;
 
   output.position.y = -output.position.y;
   return output;
