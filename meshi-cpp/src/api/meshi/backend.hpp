@@ -8,14 +8,14 @@
 #include "meshi/types.hpp"
 #include <meshi/graphics.hpp>
 #include <meshi/physics.hpp>
+#include "meshi/bits/util/loader.hpp"
 #include <cassert>
 namespace meshi {
 
 class EngineBackend {
 public:
-  explicit EngineBackend(const EngineBackendInfo &info,
-                         MeshiSymbolLoader loader_fn = nullptr)
-      : api_(resolve_api(loader_fn)) {
+  explicit EngineBackend(const EngineBackendInfo &info)
+      : api_(resolve_api()) {
     assert(api_ && "Meshi plugin API is required.");
     engine_ = api_->make_engine(&info);
 
@@ -43,11 +43,13 @@ public:
   inline auto graphics() -> GraphicsSystem & { return m_gfx; }
 
 private:
-  static const MeshiPluginApi *resolve_api(MeshiSymbolLoader loader_fn) {
-    if (loader_fn) {
-      return MESHI_PLUGIN_LOAD_API(loader_fn);
-    }
-    return meshi_plugin_get_api();
+  static const MeshiPluginApi *resolve_api() {
+    static void* dl =meshi::detail::loader_function("libmeshi-rs.so");
+    auto loader_fn = [](const char* name) {
+      return meshi::detail::get_plugin_symbol(dl, name);
+    };
+
+    return MESHI_PLUGIN_LOAD_API(loader_fn);
   }
 
   PhysicsSystem m_phys;

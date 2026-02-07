@@ -15,7 +15,6 @@ namespace meshi {
 struct EngineInfo {
   std::string application_name = std::string("MESHI APPLICATION");
   std::string application_root = std::string("");
-  MeshiSymbolLoader plugin_loader = nullptr;
 };
 class Engine {
 public:
@@ -27,7 +26,7 @@ public:
     };
 
     return make_result<Engine, Error>(
-        Engine(backend_info, info.plugin_loader));
+        Engine(backend_info));
   };
 
   inline auto world() -> World & { return m_world; }
@@ -45,8 +44,8 @@ public:
   inline auto backend() -> EngineBackend & { return m_backend; }
 
 private:
-  Engine(const EngineBackendInfo &info, MeshiSymbolLoader loader_fn)
-      : m_backend(info, loader_fn),
+  Engine(const EngineBackendInfo &info)
+      : m_backend(info),
         m_event(std::make_shared<EventHandler>(&m_backend)),
         m_action(std::make_shared<ActionHandler>(*m_event)){};
 
