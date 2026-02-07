@@ -567,8 +567,8 @@ impl TerrainRenderer {
             .unwrap_or(true);
         if settings_changed {
             info!(
-                "Loaded terrain settings for project '{}' (tile_size={}, tiles_per_chunk={:?})",
-                project_key, settings.tile_size, settings.tiles_per_chunk
+                "Loaded terrain settings for project '{}' ({:?})",
+                project_key, settings
             );
             self.terrain_settings = Some(settings.clone());
         }
@@ -588,7 +588,7 @@ impl TerrainRenderer {
         let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
 
         for mut artifact in chunks {
-            let lod = 0;
+            let lod = 3;
             let coord_key = chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]);
             let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
             artifact.lod = lod;
@@ -902,9 +902,9 @@ impl TerrainRenderer {
         let mut visible_keys = HashSet::with_capacity(objects.len());
         let mut to_register = Vec::new();
         for object in objects {
-            if !self.chunk_visible(object) {
-                continue;
-            }
+//            if !self.chunk_visible(object) {
+//                continue;
+//            }
             visible_keys.insert(object.key.clone());
             if let Some(entry) = deferred.objects.get(&object.key) {
                 if entry.draws.is_empty() {

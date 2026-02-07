@@ -2044,7 +2044,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "smithay-clipboard",
  "web-time 1.1.0",
- "webbrowser 1.0.6",
+ "webbrowser 1.1.0",
  "winit 0.30.12",
 ]
 
@@ -3956,7 +3956,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 [[package]]
 name = "noren"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/noren#f780747ba603e35e3687c80f5154c24ef2d33276"
+source = "git+https://github.com/JordanHendl/noren#e09dd0ae9ee9317a9676118c4b89a091b5bfa983"
 dependencies = [
  "bento",
  "bincode",
@@ -6640,9 +6640,9 @@ dependencies = [
 
 [[package]]
 name = "webbrowser"
-version = "1.0.6"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00f1243ef785213e3a32fa0396093424a3a6ea566f9948497e5a2309261a4c97"
+checksum = "3f00bb839c1cf1e3036066614cbdcd035ecf215206691ea646aa3c60a24f68f2"
 dependencies = [
  "core-foundation 0.10.1",
  "jni",
