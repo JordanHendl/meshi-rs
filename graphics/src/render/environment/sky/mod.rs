@@ -50,12 +50,27 @@ pub struct SkyFrameSettings {
     pub moon_color: Vec3,
     pub moon_intensity: f32,
     pub moon_angular_radius: f32,
+    pub fog_layers: [SkyFogLayer; 2],
+    pub fog_time: f32,
+    pub fog_time_scale: f32,
     pub time_of_day: Option<f32>,
     pub timer_speed: f32,
     pub current_time_of_day: f32,
     pub auto_sun_enabled: bool,
     pub latitude_degrees: Option<f32>,
     pub longitude_degrees: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SkyFogLayer {
+    pub enabled: bool,
+    pub color: Vec3,
+    pub density: f32,
+    pub height: f32,
+    pub falloff: f32,
+    pub noise_scale: f32,
+    pub noise_intensity: f32,
+    pub noise_speed: Vec2,
 }
 
 impl Default for SkyboxInfo {
@@ -92,12 +107,30 @@ impl Default for SkyFrameSettings {
             moon_color: Vec3::ONE,
             moon_intensity: 0.1,
             moon_angular_radius: 0.0045,
+            fog_layers: [SkyFogLayer::default(), SkyFogLayer::default()],
+            fog_time: 0.0,
+            fog_time_scale: 0.05,
             time_of_day: None,
             timer_speed: 1.0 / 3600.0,
             current_time_of_day: 12.0,
             auto_sun_enabled: true,
             latitude_degrees: None,
             longitude_degrees: None,
+        }
+    }
+}
+
+impl Default for SkyFogLayer {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            color: Vec3::new(0.7, 0.8, 0.95),
+            density: 0.35,
+            height: 0.15,
+            falloff: 6.0,
+            noise_scale: 1.5,
+            noise_intensity: 0.35,
+            noise_speed: Vec2::new(0.02, 0.01),
         }
     }
 }
@@ -163,6 +196,18 @@ impl SkyFrameSettings {
 
         self.current_time_of_day = (self.current_time_of_day + delta_hours).rem_euclid(24.0);
         self.time_of_day = Some(self.current_time_of_day);
+        true
+    }
+
+    pub fn advance_fog_time(&mut self, delta_time: f32) -> bool {
+        if !delta_time.is_finite() {
+            return false;
+        }
+        let delta = delta_time * self.fog_time_scale;
+        if delta == 0.0 {
+            return false;
+        }
+        self.fog_time = (self.fog_time + delta).rem_euclid(10000.0);
         true
     }
 
@@ -357,6 +402,121 @@ impl SkyFrameSettings {
                     Some("Longitude in degrees for time-of-day lighting."),
                 );
             }
+
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Fog Time Speed", 0.0, 2.0, 0.0),
+                &mut self.fog_time_scale as *mut f32,
+                "Fog Time Speed",
+                Some("Speed multiplier for animated fog noise."),
+            );
+            debug_register_with_description(
+                PageType::Sky,
+                Slider::new(0, "Fog Time", 0.0, 10000.0, 0.0),
+                &mut self.fog_time as *mut f32,
+                "Fog Time",
+                Some("Current time value driving fog animation."),
+            );
+
+            for (index, layer) in self.fog_layers.iter_mut().enumerate() {
+                let layer_label = format!("Fog Layer {} Enabled", index + 1);
+                debug_register_radial_with_description(
+                    PageType::Sky,
+                    &layer_label,
+                    DebugRegistryValue::Bool(&mut layer.enabled),
+                    &[
+                        DebugRadialOption {
+                            label: "On",
+                            value: 1.0,
+                        },
+                        DebugRadialOption {
+                            label: "Off",
+                            value: 0.0,
+                        },
+                    ],
+                    Some("Toggle this fog layer on or off."),
+                );
+                let density_label = format!("Fog Layer {} Density", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &density_label, 0.0, 2.0, 0.0),
+                    &mut layer.density as *mut f32,
+                    &density_label,
+                    Some("Overall density of the fog layer."),
+                );
+                let color_r_label = format!("Fog Layer {} Color R", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &color_r_label, 0.0, 2.0, 0.0),
+                    &mut layer.color.x as *mut f32,
+                    &color_r_label,
+                    Some("Red channel of the fog color."),
+                );
+                let color_g_label = format!("Fog Layer {} Color G", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &color_g_label, 0.0, 2.0, 0.0),
+                    &mut layer.color.y as *mut f32,
+                    &color_g_label,
+                    Some("Green channel of the fog color."),
+                );
+                let color_b_label = format!("Fog Layer {} Color B", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &color_b_label, 0.0, 2.0, 0.0),
+                    &mut layer.color.z as *mut f32,
+                    &color_b_label,
+                    Some("Blue channel of the fog color."),
+                );
+                let height_label = format!("Fog Layer {} Height", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &height_label, 0.0, 1.0, 0.0),
+                    &mut layer.height as *mut f32,
+                    &height_label,
+                    Some("Normalized height of the fog layer (0 = horizon, 1 = zenith)."),
+                );
+                let falloff_label = format!("Fog Layer {} Falloff", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &falloff_label, 0.1, 12.0, 0.0),
+                    &mut layer.falloff as *mut f32,
+                    &falloff_label,
+                    Some("Controls how quickly the fog fades from its center height."),
+                );
+                let noise_scale_label = format!("Fog Layer {} Noise Scale", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &noise_scale_label, 0.0, 6.0, 0.0),
+                    &mut layer.noise_scale as *mut f32,
+                    &noise_scale_label,
+                    Some("Scale of the animated fog noise pattern."),
+                );
+                let noise_intensity_label = format!("Fog Layer {} Noise Intensity", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &noise_intensity_label, 0.0, 1.0, 0.0),
+                    &mut layer.noise_intensity as *mut f32,
+                    &noise_intensity_label,
+                    Some("Strength of noise modulation for this fog layer."),
+                );
+                let noise_speed_x_label = format!("Fog Layer {} Noise Speed X", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &noise_speed_x_label, -1.0, 1.0, 0.0),
+                    &mut layer.noise_speed.x as *mut f32,
+                    &noise_speed_x_label,
+                    Some("Noise scroll speed along the X axis."),
+                );
+                let noise_speed_y_label = format!("Fog Layer {} Noise Speed Y", index + 1);
+                debug_register_with_description(
+                    PageType::Sky,
+                    Slider::new(0, &noise_speed_y_label, -1.0, 1.0, 0.0),
+                    &mut layer.noise_speed.y as *mut f32,
+                    &noise_speed_y_label,
+                    Some("Noise scroll speed along the Y axis."),
+                );
+            }
         }
     }
 }
@@ -376,6 +536,11 @@ struct SkyConfig {
     moon_intensity: f32,
     moon_color: Vec3,
     moon_angular_radius: f32,
+    fog_color_density: [Vec4; 2],
+    fog_height_falloff: [Vec4; 2],
+    fog_noise_speed: [Vec4; 2],
+    fog_time: f32,
+    _fog_padding: Vec3,
 }
 
 #[repr(C)]
@@ -1382,6 +1547,19 @@ impl SkyRenderer {
         config.moon_intensity = lighting.moon_intensity;
         config.moon_angular_radius = self.sky_settings.moon_angular_radius;
         config.intensity_scale = intensity_scale;
+        for (index, layer) in self.sky_settings.fog_layers.iter().enumerate() {
+            let density = if layer.enabled { layer.density } else { 0.0 };
+            config.fog_color_density[index] = layer.color.extend(density);
+            config.fog_height_falloff[index] = Vec4::new(
+                layer.height,
+                layer.falloff,
+                layer.noise_scale,
+                layer.noise_intensity,
+            );
+            config.fog_noise_speed[index] =
+                Vec4::new(layer.noise_speed.x, layer.noise_speed.y, 0.0, 0.0);
+        }
+        config.fog_time = self.sky_settings.fog_time;
     }
 }
 

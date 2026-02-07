@@ -34,6 +34,11 @@ struct SkyConfig
     float moon_intensity;
     float3 moon_color;
     float moon_angular_radius;
+    float4 fog_color_density[2];
+    float4 fog_height_falloff[2];
+    float4 fog_noise_speed[2];
+    float fog_time;
+    float3 _padding1;
 };
 
 struct FSInput
@@ -70,6 +75,24 @@ float disc_mask(float3 view_dir, float3 light_dir, float angular_radius)
     return smoothstep(outer, inner, dot_val);
 }
 
+float hash21(float2 p)
+{
+    float n = dot(p, float2(127.1, 311.7));
+    return frac(sin(n) * 43758.5453);
+}
+
+float noise2d(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    float a = hash21(i);
+    float b = hash21(i + float2(1.0, 0.0));
+    float c = hash21(i + float2(0.0, 1.0));
+    float d = hash21(i + float2(1.0, 1.0));
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
 [shader("fragment")]
 FSOutput main(FSInput input)
 {
@@ -95,6 +118,30 @@ FSOutput main(FSInput input)
     float3 sky_color = base_color;
     sky_color += sky.sun_color * sky.sun_intensity * (sun_disc + sun_halo);
     sky_color += sky.moon_color * sky.moon_intensity * (moon_disc + moon_halo);
+
+    float height = saturate(-world_dir.y * 0.5 + 0.5);
+    float horizon_factor = saturate(1.0 - height);
+    [unroll]
+    for (int i = 0; i < 2; i++)
+    {
+        float density = sky.fog_color_density[i].w;
+        if (density > 0.0)
+        {
+            float3 fog_color = sky.fog_color_density[i].xyz;
+            float layer_height = sky.fog_height_falloff[i].x;
+            float falloff = sky.fog_height_falloff[i].y;
+            float noise_scale = sky.fog_height_falloff[i].z;
+            float noise_intensity = sky.fog_height_falloff[i].w;
+            float2 noise_speed = sky.fog_noise_speed[i].xy;
+
+            float height_profile = exp(-abs(height - layer_height) * falloff);
+            float2 noise_uv = world_dir.xz * noise_scale + noise_speed * sky.fog_time;
+            float noise_val = noise2d(noise_uv);
+            float noise_mod = lerp(1.0, noise_val, noise_intensity);
+            float fog_factor = saturate(density * height_profile * horizon_factor * noise_mod);
+            sky_color = lerp(sky_color, fog_color, fog_factor);
+        }
+    }
 
     sky_color *= sky.intensity_scale;
 

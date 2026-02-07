@@ -24,7 +24,7 @@ pub use noren::*;
 use render::deferred::DeferredRenderer;
 pub use render::environment::clouds::CloudRenderer;
 pub use render::environment::ocean::OceanFrameSettings;
-pub use render::environment::sky::SkyFrameSettings;
+pub use render::environment::sky::{SkyFogLayer, SkyFrameSettings};
 pub use render::environment::sky::SkyboxFrameSettings;
 pub use render::environment::terrain::TerrainRenderObject;
 use render::forward::ForwardRenderer;
@@ -671,7 +671,8 @@ impl RenderEngine {
         }
 
         let time_advanced = self.sky_settings.advance_time_of_day(delta_time);
-        if time_advanced {
+        let fog_time_advanced = self.sky_settings.advance_fog_time(delta_time);
+        if time_advanced || fog_time_advanced {
             self.renderer.set_sky_settings(self.sky_settings.clone());
         }
 

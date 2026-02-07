@@ -119,6 +119,7 @@ fn main() {
                 auto_sun_enabled: true,
                 latitude_degrees: Some(latitude_degrees),
                 longitude_degrees: Some(longitude_degrees),
+                ..Default::default()
             },
             sun_light_intensity: 3.5,
             moon_light_intensity: 0.4,
