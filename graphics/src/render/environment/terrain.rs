@@ -57,9 +57,6 @@ const TERRAIN_REFRESH_FRAME_INTERVAL: u64 = 4;
 const TERRAIN_SETTINGS_POLL_INTERVAL: u64 = 30;
 const TERRAIN_CAMERA_POSITION_EPSILON: f32 = 0.25;
 const TERRAIN_VIEW_PROJECTION_EPSILON: f32 = 1e-3;
-const TERRAIN_LOD_HYSTERESIS_RATIO: f32 = 0.25;
-const TERRAIN_LOD_SMOOTHING: f32 = 0.2;
-const TERRAIN_LOD_BLEND_WINDOW: f32 = 0.15;
 const TERRAIN_CAMERA_VELOCITY_EPSILON: f32 = 0.02;
 const TERRAIN_MISSING_LOD_POLL_LIMIT: usize = 4;
 
@@ -167,7 +164,6 @@ pub struct TerrainRenderer {
     last_refresh_chunk_coords: Option<[i32; 2]>,
     last_base_chunk_hashes: HashMap<TerrainChunkKey, u64>,
     missing_lod_artifacts: HashSet<String>,
-    smoothed_lod_targets: HashMap<TerrainChunkKey, f32>,
     visibility_cache_selection_hash: u64,
     visibility_cache_view_projection: Option<Mat4>,
     visibility_cache_camera_position: Option<Vec3>,
@@ -600,7 +596,6 @@ impl TerrainRenderer {
             last_refresh_chunk_coords: None,
             last_base_chunk_hashes: HashMap::new(),
             missing_lod_artifacts: HashSet::new(),
-            smoothed_lod_targets: HashMap::new(),
             visibility_cache_selection_hash: 0,
             visibility_cache_view_projection: None,
             visibility_cache_camera_position: None,
@@ -739,7 +734,6 @@ impl TerrainRenderer {
         self.last_refresh_chunk_coords = None;
         self.last_base_chunk_hashes.clear();
         self.missing_lod_artifacts.clear();
-        self.smoothed_lod_targets.clear();
         self.visibility_cache_keys.clear();
         self.visibility_cache_selection_hash = 0;
         self.visibility_cache_view_projection = None;
@@ -763,7 +757,6 @@ impl TerrainRenderer {
         self.last_refresh_chunk_coords = None;
         self.last_base_chunk_hashes.clear();
         self.missing_lod_artifacts.clear();
-        self.smoothed_lod_targets.clear();
         self.visibility_cache_keys.clear();
         self.visibility_cache_selection_hash = 0;
         self.visibility_cache_view_projection = None;
@@ -1322,79 +1315,52 @@ impl TerrainRenderer {
     }
 
     fn select_lod_objects(&mut self) -> Vec<TerrainRenderObject> {
-        self.smoothed_lod_targets
-            .retain(|key, _| self.lod_sources.contains_key(key));
-        let keys: Vec<TerrainChunkKey> = self.lod_sources.keys().cloned().collect();
-        let mut selected = Vec::with_capacity(keys.len());
-        for key in keys {
-            let Some(sources) = self.lod_sources.get(&key).cloned() else {
-                continue;
-            };
-            if sources.is_empty() {
-                continue;
+        let Some(settings) = self.terrain_settings.as_ref() else {
+            return Vec::new();
+        };
+        let Some(center_coords) = self.camera_chunk_coords(settings) else {
+            return Vec::new();
+        };
+        let Some(project_key) = self.terrain_project_key.clone() else {
+            return Vec::new();
+        };
+
+        let resolution = self.clipmap_resolution.max(1) as i32;
+        let half = resolution / 2;
+        let mut selected = Vec::new();
+
+        for grid_y in 0..resolution {
+            for grid_x in 0..resolution {
+                let offset_x = grid_x - half;
+                let offset_y = grid_y - half;
+                let coords = [center_coords[0] + offset_x, center_coords[1] + offset_y];
+                let key = TerrainChunkKey {
+                    project_key: project_key.clone(),
+                    coords,
+                };
+                let Some(sources) = self.lod_sources.get(&key) else {
+                    continue;
+                };
+                let ring = offset_x.abs().max(offset_y.abs()) as u32;
+                let target_lod = if ring <= 1 {
+                    0
+                } else {
+                    ring.ilog2().min(self.lod_levels.saturating_sub(1))
+                } as u8;
+                let object = Self::select_clipmap_source(sources, target_lod);
+                selected.push(object);
             }
-            let previous_lod = self.active_chunk_lod_levels.get(&key).copied();
-            selected.push(self.select_lod_for_chunk(&key, &sources, previous_lod));
         }
+
         selected
     }
 
-    fn select_lod_for_chunk(
-        &mut self,
-        key: &TerrainChunkKey,
+    fn select_clipmap_source(
         sources: &[TerrainRenderObject],
-        previous_lod: Option<u8>,
+        target_lod: u8,
     ) -> TerrainRenderObject {
-        let reference = &sources[0];
-        let (center_world, extent_world) = Self::world_bounds(reference);
-        let distance = (center_world - self.camera_position).length();
-
-        let chunk_extent = extent_world.x.max(extent_world.y).max(1.0);
-        let lod_step = (chunk_extent * 2.0).max(1.0);
-        let max_lod = sources
-            .iter()
-            .map(|source| source.artifact.lod)
-            .max()
-            .unwrap_or(0);
-        let screen_error = if distance > 0.0 {
-            (chunk_extent / distance.max(1.0)) * self.camera_far.max(1.0)
-        } else {
-            f32::MAX
-        };
-        let lod_span = (self.lod_levels.max(1) - 1) as f32;
-        let desired_lod = if screen_error > 0.0 && screen_error.is_finite() {
-            let error_log = screen_error.log2().clamp(0.0, lod_span);
-            (lod_span - error_log).clamp(0.0, max_lod as f32)
-        } else {
-            max_lod as f32
-        };
-        let smoothed_lod = self
-            .smoothed_lod_targets
-            .get(key)
-            .copied()
-            .map(|prev| prev + (desired_lod - prev) * TERRAIN_LOD_SMOOTHING)
-            .unwrap_or(desired_lod);
-        self.smoothed_lod_targets.insert(key.clone(), smoothed_lod);
-        let base_lod = smoothed_lod.floor();
-        let frac = smoothed_lod - base_lod;
-        let mut target_lod = if frac <= TERRAIN_LOD_BLEND_WINDOW {
-            base_lod
-        } else if frac >= 1.0 - TERRAIN_LOD_BLEND_WINDOW {
-            (base_lod + 1.0).min(max_lod as f32)
-        } else {
-            smoothed_lod.round()
-        } as u8;
-        if let Some(previous_lod) = previous_lod {
-            let hysteresis = lod_step * TERRAIN_LOD_HYSTERESIS_RATIO;
-            let min_distance = previous_lod as f32 * lod_step - hysteresis;
-            let max_distance = (previous_lod as f32 + 1.0) * lod_step + hysteresis;
-            if (min_distance..=max_distance).contains(&distance) {
-                target_lod = previous_lod.min(max_lod);
-            }
-        }
-
-        let mut best = reference.clone();
-        let mut best_delta = reference.artifact.lod.abs_diff(target_lod);
+        let mut best = sources[0].clone();
+        let mut best_delta = best.artifact.lod.abs_diff(target_lod);
         for source in sources.iter().skip(1) {
             let delta = source.artifact.lod.abs_diff(target_lod);
             if delta < best_delta

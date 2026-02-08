@@ -2236,7 +2236,7 @@ impl DeferredRenderer {
                 },
                 |mut cmd| {
                     if !debug_output_active {
-                        cmd = cmd.combine(self.subrender.environment.render(
+                        cmd = cmd.combine(self.subrender.environment.render_opaque(
                             &self.data.viewport,
                             camera_handle,
                             Some(scene_color.view),
@@ -2279,6 +2279,11 @@ impl DeferredRenderer {
 
                             cmd = c.unbind_graphics_pipeline();
                         }
+
+                        cmd = cmd.combine(self.subrender.environment.render_fog(
+                            &self.data.viewport,
+                            camera_handle,
+                        ));
                     }
 
                     cmd = cmd.combine(

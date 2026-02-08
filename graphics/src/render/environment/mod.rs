@@ -302,7 +302,7 @@ impl EnvironmentRenderer {
         self.paused
     }
 
-    pub fn render(
+    pub fn render_opaque(
         &mut self,
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
@@ -361,6 +361,15 @@ impl EnvironmentRenderer {
                     .record_draws(viewport, &mut self.dynamic, camera, self.time),
             )
         // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
+    }
+
+    pub fn render_fog(
+        &mut self,
+        viewport: &Viewport,
+        camera: dashi::Handle<Camera>,
+    ) -> CommandStream<PendingGraphics> {
+        self.sky
+            .record_fog_draws(viewport, &mut self.dynamic, camera)
     }
 
     pub fn record_compute(&mut self, ctx: &mut Context) -> CommandStream<Executable> {

@@ -563,6 +563,7 @@ pub struct SkyCubemapPass {
 
 pub struct SkyRenderer {
     pipeline: PSO,
+    fog_pipeline: PSO,
     skybox_pipeline: PSO,
     skybox_sampler: Handle<Sampler>,
     skybox_fallback_view: ImageView,
@@ -658,6 +659,39 @@ fn compile_sky_shaders() -> [bento::CompilationResult; 2] {
     [vertex, fragment]
 }
 
+fn compile_fog_shaders() -> [bento::CompilationResult; 2] {
+    let compiler = Compiler::new().expect("Failed to create shader compiler");
+    let base_request = Request {
+        name: Some("fog".to_string()),
+        lang: ShaderLang::Slang,
+        optimization: OptimizationLevel::Performance,
+        debug_symbols: true,
+        ..Default::default()
+    };
+
+    let vertex = compiler
+        .compile(
+            include_str!("shaders/sky_vert.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Vertex,
+                ..base_request.clone()
+            },
+        )
+        .expect("Failed to compile fog vertex shader");
+
+    let fragment = compiler
+        .compile(
+            include_str!("shaders/fog_frag.slang").as_bytes(),
+            &Request {
+                stage: dashi::ShaderType::Fragment,
+                ..base_request
+            },
+        )
+        .expect("Failed to compile fog fragment shader");
+
+    [vertex, fragment]
+}
+
 fn default_skybox_view(ctx: &mut dashi::Context) -> ImageView {
     let face = vec![135, 206, 235, 255];
     let faces = [
@@ -725,6 +759,7 @@ impl SkyRenderer {
         dynamic: &DynamicAllocator,
     ) -> Self {
         let shaders = compile_sky_shaders();
+        let fog_shaders = compile_fog_shaders();
         let skybox_shaders = compile_skybox_shaders();
 
         let (skybox_view, skybox_swap_info) = if let Some(cubemap) = info.skybox.cubemap.as_ref() {
@@ -812,6 +847,59 @@ impl SkyRenderer {
 
         state.register_pso_tables(&pipeline);
 
+        let mut fog_builder = PSOBuilder::new()
+            .vertex_compiled(Some(fog_shaders[0].clone()))
+            .fragment_compiled(Some(fog_shaders[1].clone()))
+            .set_attachment_format(0, info.color_format)
+            .add_table_variable_with_resources(
+                "sky_draw_ssbo",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "SkyParams",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(cfg.device()),
+                    slot: 0,
+                }],
+            );
+
+        fog_builder = fog_builder.add_reserved_table_variables(state).unwrap();
+
+        if info.use_depth {
+            fog_builder = fog_builder.add_depth_target(AttachmentDesc {
+                format: Format::D24S8,
+                samples: info.sample_count,
+            });
+        }
+
+        let fog_pipeline = fog_builder
+            .set_details(dashi::GraphicsPipelineDetails {
+                color_blend_states: vec![dashi::ColorBlendState {
+                    enable: true,
+                    src_blend: dashi::BlendFactor::SrcAlpha,
+                    dst_blend: dashi::BlendFactor::InvSrcAlpha,
+                    blend_op: dashi::BlendOp::Add,
+                    src_alpha_blend: dashi::BlendFactor::One,
+                    dst_alpha_blend: dashi::BlendFactor::InvSrcAlpha,
+                    alpha_blend_op: dashi::BlendOp::Add,
+                    write_mask: Default::default(),
+                }],
+                sample_count: info.sample_count,
+                depth_test: Some(dashi::DepthInfo {
+                    should_test: false,
+                    should_write: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .build(ctx)
+            .expect("Failed to build fog PSO");
+
+        state.register_pso_tables(&fog_pipeline);
+
         let mut skybox_builder = PSOBuilder::new()
             .vertex_compiled(Some(skybox_shaders[0].clone()))
             .fragment_compiled(Some(skybox_shaders[1].clone()))
@@ -873,6 +961,7 @@ impl SkyRenderer {
 
         Self {
             pipeline,
+            fog_pipeline,
             skybox_pipeline,
             skybox_sampler,
             skybox_fallback_view: skybox_view,
@@ -1280,6 +1369,43 @@ impl SkyRenderer {
                 })
                 .unbind_graphics_pipeline()
         }
+    }
+
+    pub fn record_fog_draws(
+        &mut self,
+        viewport: &Viewport,
+        dynamic: &mut DynamicAllocator,
+        camera: dashi::Handle<Camera>,
+    ) -> CommandStream<PendingGraphics> {
+        if !self.enabled
+            || !self
+                .sky_settings
+                .fog_layers
+                .iter()
+                .any(|layer| layer.enabled && layer.density > 0.0)
+        {
+            return CommandStream::subdraw();
+        }
+
+        let mut alloc = dynamic
+            .bump()
+            .expect("Failed to allocate fog dynamic buffer");
+
+        let params = &mut alloc.slice::<SkyDrawParams>()[0];
+        params.camera_index = camera.slot as u32;
+        params._padding = [0; 3];
+
+        CommandStream::<PendingGraphics>::subdraw()
+            .bind_graphics_pipeline(self.fog_pipeline.handle)
+            .update_viewport(viewport)
+            .draw(&Draw {
+                bind_tables: self.fog_pipeline.tables(),
+                dynamic_buffers: [None, Some(alloc), None, None],
+                instance_count: 1,
+                count: 3,
+                ..Default::default()
+            })
+            .unbind_graphics_pipeline()
     }
 
     pub fn record_compute(

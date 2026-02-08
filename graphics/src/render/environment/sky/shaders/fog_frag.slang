@@ -1,4 +1,4 @@
-// Procedural Sky Fragment Shader (sky_frag.slang)
+// Fog Fragment Shader (fog_frag.slang)
 
 struct Camera
 {
@@ -58,23 +58,6 @@ StructuredBuffer<SkyConfig> SkyParams : register(t1, space1);
 static SkyDrawParams sky_draw = sky_draw_ssbo[0];
 static SkyConfig sky = SkyParams[0];
 
-float3 sky_gradient(float3 view_dir)
-{
-    float horizon_weight = saturate(view_dir.y * 0.5 + 0.5);
-    float zenith_weight = pow(horizon_weight, 0.35);
-    return lerp(sky.horizon_init, sky.zenith_tint, zenith_weight);
-}
-
-float disc_mask(float3 view_dir, float3 light_dir, float angular_radius)
-{
-    float dot_val = dot(view_dir, light_dir);
-    float radius = max(angular_radius, 0.0001);
-    float edge = max(radius * 0.15, 0.00005);
-    float inner = cos(max(radius - edge, 0.0001));
-    float outer = cos(radius + edge);
-    return smoothstep(outer, inner, dot_val);
-}
-
 float hash21(float2 p)
 {
     float n = dot(p, float2(127.1, 311.7));
@@ -105,22 +88,40 @@ FSOutput main(FSInput input)
     float3 dir = normalize(float3(ndc.x * aspect * tan_half, ndc.y * tan_half, -1.0));
     float3 world_dir = normalize(mul((float3x3)camera.world_from_camera, dir));
 
-    float3 base_color = sky_gradient(world_dir);
-    float sun_dot = max(dot(world_dir, sky.sun_dir), 0.0);
-    float moon_dot = max(dot(world_dir, sky.moon_dir), 0.0);
+    float height = saturate(-world_dir.y * 0.5 + 0.5);
+    float horizon_factor = saturate(1.0 - height);
 
-    float sun_disc = disc_mask(world_dir, sky.sun_dir, sky.sun_angular_radius);
-    float moon_disc = disc_mask(world_dir, sky.moon_dir, sky.moon_angular_radius);
+    float fog_factors[2];
+    float3 fog_colors[2];
+    [unroll]
+    for (int i = 0; i < 2; i++)
+    {
+        float density = sky.fog_color_density[i].w;
+        float3 fog_color = sky.fog_color_density[i].xyz;
+        float layer_height = sky.fog_height_falloff[i].x;
+        float falloff = sky.fog_height_falloff[i].y;
+        float noise_scale = sky.fog_height_falloff[i].z;
+        float noise_intensity = sky.fog_height_falloff[i].w;
+        float2 noise_speed = sky.fog_noise_speed[i].xy;
 
-    float sun_halo = pow(sun_dot, 256.0) * 0.1 + pow(sun_dot, 512.0) * 0.2;
-    float moon_halo = pow(moon_dot, 64.0) * 0.25 + pow(moon_dot, 256.0) * 0.8;
+        float height_profile = exp(-abs(height - layer_height) * falloff);
+        float2 noise_uv = world_dir.xz * noise_scale + noise_speed * sky.fog_time;
+        float noise_val = noise2d(noise_uv);
+        float noise_mod = lerp(1.0, noise_val, noise_intensity);
+        float fog_factor = saturate(density * height_profile * horizon_factor * noise_mod);
+        fog_factors[i] = fog_factor;
+        fog_colors[i] = fog_color;
+    }
 
-    float3 sky_color = base_color;
-    sky_color += sky.sun_color * sky.sun_intensity * (sun_disc + sun_halo);
-    sky_color += sky.moon_color * sky.moon_intensity * (moon_disc + moon_halo);
+    float fog_alpha = 1.0 - (1.0 - fog_factors[0]) * (1.0 - fog_factors[1]);
+    float3 fog_color = float3(0.0, 0.0, 0.0);
+    if (fog_alpha > 0.0001)
+    {
+        fog_color = (fog_colors[0] * fog_factors[0] * (1.0 - fog_factors[1])
+            + fog_colors[1] * fog_factors[1]) / fog_alpha;
+    }
 
-    sky_color *= sky.intensity_scale;
-
-    output.color = float4(sky_color, 1.0);
+    fog_color *= sky.intensity_scale;
+    output.color = float4(fog_color, fog_alpha);
     return output;
 }

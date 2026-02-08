@@ -636,7 +636,7 @@ impl ForwardRenderer {
                     }),
                 },
                 |mut cmd| {
-                    cmd.combine(self.environment.render(
+                    cmd.combine(self.environment.render_opaque(
                         &self.viewport,
                         camera_handle,
                         None,
@@ -664,6 +664,7 @@ impl ForwardRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
+                    cmd = cmd.combine(self.environment.render_fog(&self.viewport, camera_handle));
                     cmd = cmd.combine(
                         self.text
                             .render_transparent(self.ctx.as_mut(), &self.viewport),
