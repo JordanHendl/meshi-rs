@@ -59,8 +59,8 @@ void main() {
 
     uint resolution = max(params.clipmap_resolution, 1u);
     uint total_tiles = resolution * resolution;
-    return;
-    if (idx >= total_tiles) {
+    uint active_tiles = min(params.max_tiles, total_tiles);
+    if (idx >= active_tiles) {
         return;
     }
 
@@ -74,7 +74,7 @@ void main() {
 
     if (idx == 0) {
         draw_args.args[0].vertex_count = 6u;
-        draw_args.args[0].instance_count = params.max_tiles;
+        draw_args.args[0].instance_count = active_tiles;
         draw_args.args[0].first_vertex = 0u;
         draw_args.args[0].first_instance = 0u;
     }

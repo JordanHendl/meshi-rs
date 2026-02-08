@@ -1,5 +1,7 @@
 use glam::{Mat4, Vec2, Vec3};
 use noren::rdb::terrain::{TerrainChunk, TerrainChunkArtifact, TerrainProjectSettings};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use crate::render::environment::terrain::TerrainRenderObject;
 
@@ -75,6 +77,20 @@ pub fn terrain_chunk_artifact_from_chunk(
     project_key: &str,
     chunk: &TerrainChunk,
 ) -> TerrainChunkArtifact {
+    let content_hash = terrain_chunk_content_hash(chunk);
+    let cache_key = TerrainArtifactCacheKey {
+        project_key: project_key.to_string(),
+        content_hash,
+    };
+    if let Some(cached) = terrain_artifact_cache()
+        .lock()
+        .expect("terrain artifact cache lock")
+        .get(&cache_key)
+        .cloned()
+    {
+        return cached;
+    }
+
     let grid_x = chunk.tiles_per_chunk[0].saturating_add(1).max(1);
     let grid_y = chunk.tiles_per_chunk[1].saturating_add(1).max(1);
     let mut normals = Vec::with_capacity((grid_x * grid_y) as usize);
@@ -90,8 +106,7 @@ pub fn terrain_chunk_artifact_from_chunk(
     }
     let hole_masks = vec![0u8; (grid_x * grid_y) as usize];
     let (material_ids, material_weights) = terrain_chunk_material_blends(chunk);
-    let content_hash = terrain_chunk_content_hash(chunk);
-    TerrainChunkArtifact {
+    let artifact = TerrainChunkArtifact {
         project_key: project_key.to_string(),
         chunk_coords: chunk.chunk_coords,
         lod: 0,
@@ -106,7 +121,27 @@ pub fn terrain_chunk_artifact_from_chunk(
         material_weights,
         content_hash,
         material_blend_texture: Default::default(),
-    }
+    };
+
+    terrain_artifact_cache()
+        .lock()
+        .expect("terrain artifact cache lock")
+        .insert(cache_key, artifact.clone());
+
+    artifact
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct TerrainArtifactCacheKey {
+    project_key: String,
+    content_hash: u64,
+}
+
+fn terrain_artifact_cache() -> &'static Mutex<HashMap<TerrainArtifactCacheKey, TerrainChunkArtifact>>
+{
+    static CACHE: OnceLock<Mutex<HashMap<TerrainArtifactCacheKey, TerrainChunkArtifact>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn chunk_height_sample(chunk: &TerrainChunk, x: u32, y: u32) -> f32 {

@@ -156,7 +156,7 @@ pub struct TerrainRenderer {
     last_refresh_camera_position: Option<Vec3>,
     last_refresh_view_projection: Option<Mat4>,
     last_refresh_chunk_coords: Option<[i32; 2]>,
-    last_base_chunk_hashes: HashMap<String, u64>,
+    last_base_chunk_hashes: HashMap<TerrainChunkKey, u64>,
     missing_lod_artifacts: HashSet<String>,
     visibility_cache_selection_hash: u64,
     visibility_cache_view_projection: Option<Mat4>,
@@ -817,34 +817,143 @@ impl TerrainRenderer {
         };
 
         let mut next_base_hashes = HashMap::with_capacity(chunks.len());
-        for base_artifact in &chunks {
-            let coord_key =
-                chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
-            let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(base_artifact.lod));
-            next_base_hashes.insert(entry, base_artifact.content_hash);
+        let mut base_artifacts = HashMap::with_capacity(chunks.len());
+        for base_artifact in chunks {
+            let key = TerrainChunkKey {
+                project_key: project_key.clone(),
+                coords: base_artifact.chunk_coords,
+            };
+            next_base_hashes.insert(key.clone(), base_artifact.content_hash);
+            base_artifacts.insert(key, base_artifact);
         }
 
         let base_hashes_changed = next_base_hashes != self.last_base_chunk_hashes;
-        let needs_full_rebuild = settings_changed
-            || base_hashes_changed
-            || self.terrain_render_objects.is_empty()
-            || self.terrain_dirty;
+        let needs_full_rebuild =
+            settings_changed || self.terrain_render_objects.is_empty() || self.terrain_dirty;
         if !needs_full_rebuild {
+            if !base_hashes_changed {
+                self.last_base_chunk_hashes = next_base_hashes;
+                return;
+            }
+
+            let mut removed_keys = Vec::new();
+            for key in self.last_base_chunk_hashes.keys() {
+                if !next_base_hashes.contains_key(key) {
+                    removed_keys.push(key.clone());
+                }
+            }
+
+            for key in &removed_keys {
+                if let Some(objects) = self.lod_sources.remove(key) {
+                    for object in objects {
+                        self.terrain_render_objects.remove(&object.key);
+                    }
+                }
+            }
+
+            let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
+            let mut updated_chunks = 0usize;
+            let mut loaded_artifacts = 0usize;
+
+            for (key, base_artifact) in base_artifacts {
+                let needs_update = self
+                    .last_base_chunk_hashes
+                    .get(&key)
+                    .map(|hash| *hash != base_artifact.content_hash)
+                    .unwrap_or(true);
+                if !needs_update {
+                    continue;
+                }
+
+                let coord_key =
+                    chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
+                let mut sources = Vec::with_capacity(lod_levels as usize);
+
+                for lod in 0..lod_levels {
+                    let entry =
+                        chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
+                    let mut artifact = if lod == base_artifact.lod {
+                        base_artifact.clone()
+                    } else if self.missing_lod_artifacts.contains(&entry) {
+                        let mut fallback = base_artifact.clone();
+                        fallback.lod = lod;
+                        fallback
+                    } else {
+                        match self.fetch_lod_artifact(&entry) {
+                            Some(found) => {
+                                self.missing_lod_artifacts.remove(&entry);
+                                found
+                            }
+                            None => {
+                                self.missing_lod_artifacts.insert(entry.clone());
+                                let mut fallback = base_artifact.clone();
+                                fallback.lod = lod;
+                                fallback
+                            }
+                        }
+                    };
+                    artifact.lod = lod;
+
+                    let object = if let Some(existing) =
+                        self.terrain_render_objects.get(&entry).cloned()
+                    {
+                        if existing.artifact.content_hash == artifact.content_hash {
+                            let mut updated = existing.clone();
+                            updated.transform = terrain_loader::terrain_chunk_transform(
+                                &settings,
+                                updated.artifact.chunk_coords,
+                                updated.artifact.bounds_min,
+                            );
+                            updated
+                        } else {
+                            terrain_loader::terrain_render_object_from_artifact(
+                                &settings,
+                                entry.clone(),
+                                artifact,
+                            )
+                        }
+                    } else {
+                        terrain_loader::terrain_render_object_from_artifact(
+                            &settings,
+                            entry.clone(),
+                            artifact,
+                        )
+                    };
+
+                    if !self.terrain_render_objects.contains_key(&entry) {
+                        loaded_artifacts += 1;
+                    }
+                    self.terrain_render_objects.insert(entry.clone(), object.clone());
+                    sources.push(object);
+                }
+
+                sources.sort_by_key(|source| source.artifact.lod);
+                self.lod_sources.insert(key.clone(), sources);
+                updated_chunks += 1;
+            }
+
             self.last_base_chunk_hashes = next_base_hashes;
+            if updated_chunks > 0 || !removed_keys.is_empty() {
+                info!(
+                    "Terrain refresh: updated_chunks={}, loaded_artifacts={}",
+                    updated_chunks, loaded_artifacts
+                );
+            }
             return;
         }
+
+        let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
 
         let mut next_objects = HashMap::new();
         let mut ordered_objects = Vec::new();
         let mut loaded_artifacts = 0usize;
+        let expected_objects = base_artifacts.len() * lod_levels as usize;
         let mut changed = settings_changed
             || base_hashes_changed
             || self.terrain_dirty
-            || chunks.len() != self.terrain_render_objects.len();
+            || expected_objects != self.terrain_render_objects.len();
 
-        let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
-
-        for base_artifact in chunks {
+        for base_artifact in base_artifacts.values() {
             let coord_key =
                 chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
             for lod in 0..lod_levels {
@@ -1221,7 +1330,7 @@ impl TerrainRenderer {
             return true;
         };
 
-        for plane in &planes[..4] {
+        for plane in planes {
             let normal = Vec3::new(plane.x, plane.y, plane.z);
             let distance = normal.dot(center) + plane.w;
             let projection_radius = extent.dot(normal.abs());
@@ -1456,6 +1565,7 @@ impl TerrainRenderer {
                 height_scale: 5.0,
                 _padding: [0.0; 2],
             };
+            let group_count_x = (self.max_tiles + 63) / 64;
 
             return stream
                 .prepare_buffer(self.clipmap_buffer, UsageBits::COMPUTE_SHADER)
@@ -1464,7 +1574,7 @@ impl TerrainRenderer {
                 .prepare_buffer(self.heightmap_buffer, UsageBits::COMPUTE_SHADER)
                 .prepare_buffer(self.meshlet_buffer, UsageBits::COMPUTE_SHADER)
                 .dispatch(&Dispatch {
-                    x: 1,
+                    x: group_count_x.max(1),
                     y: 1,
                     z: 1,
                     pipeline: pipeline.handle,
