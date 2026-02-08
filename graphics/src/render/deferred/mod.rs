@@ -2239,6 +2239,7 @@ impl DeferredRenderer {
                         cmd = cmd.combine(self.subrender.environment.render_opaque(
                             &self.data.viewport,
                             camera_handle,
+                            Some(camera_data.far),
                             Some(scene_color.view),
                             Some(depth),
                             Some(shadow_map.view),

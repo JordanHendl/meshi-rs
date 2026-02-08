@@ -1,6 +1,6 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_scalar_block_layout : disable
+#extension GL_EXT_scalar_block_layout : enable
 
 struct Camera {
     mat4 world_from_camera;
@@ -89,7 +89,7 @@ layout(set = 0, binding = 1) readonly buffer OceanWaves {
     vec4 values[];
 } ocean_waves[];
 
-layout(std430, set = 0, binding = 0) readonly buffer OceanParams {
+layout(scalar, std430, set = 0, binding = 0) readonly buffer OceanParams {
     uvec4 cascade_fft_sizes;
     vec4 cascade_patch_sizes;
     vec4 cascade_blend_ranges;
@@ -124,7 +124,7 @@ layout(std430, set = 0, binding = 0) readonly buffer OceanParams {
     float ssr_max_distance;
     float ssr_thickness;
     uint ssr_steps;
-    float debug_view;
+    uint debug_view;
     vec3 _padding2;
 } params;
 
@@ -280,7 +280,7 @@ void main() {
     uint lod_step = min(1u << clip_level, grid_resolution - 1);
     uint lod_step_next = min(lod_step * 2u, grid_resolution - 1);
     uint clip_outer = max(base_radius * (1u << clip_level), 1u);
-    float morph_band = max(base_radius_f * 0.25, 1.0);
+    float morph_band = max(base_radius_f * 0.05, 0.25);
     float morph = smoothstep(float(clip_outer) - morph_band, float(clip_outer), ring_f);
     // --- World anchoring ---
     // Anchor geometry to the camera for smooth motion, but anchor wave sampling
@@ -318,10 +318,10 @@ void main() {
 //    vec2 wave_world = world + (wave_origin - camera_origin) + params.current * params.time;
     // --- Cascade blending ---
     // Blend near/mid/far cascades by distance with overlapping smooth ramps.
-    float w_near = 1.0 - smoothstep(near_range * 0.5, near_range * 1.4, distance);
-    float w_far = smoothstep(mid_range * 0.6, far_range * 1.1, distance);
-    float w_mid = smoothstep(near_range * 0.4, mid_range * 1.05, distance)
-        * (1.0 - smoothstep(mid_range * 0.6, far_range * 1.05, distance));
+    float w_near = 1.0 - smoothstep(near_range * 0.15, near_range * 0.35, distance);
+    float w_far = smoothstep(mid_range * 0.85, far_range * 1.0, distance);
+    float w_mid = smoothstep(near_range * 0.2, mid_range * 0.55, distance)
+        * (1.0 - smoothstep(mid_range * 0.85, far_range * 1.0, distance));
     float weight_sum = max(w_near + w_mid + w_far, 0.001);
     w_near /= weight_sum;
     w_mid /= weight_sum;

@@ -306,6 +306,7 @@ impl EnvironmentRenderer {
         &mut self,
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
+        camera_far: Option<f32>,
         scene_color: Option<dashi::ImageView>,
         scene_depth: Option<dashi::ImageView>,
         shadow_map: Option<dashi::ImageView>,
@@ -358,7 +359,7 @@ impl EnvironmentRenderer {
             )
             .combine(
                 self.ocean
-                    .record_draws(viewport, &mut self.dynamic, camera, self.time),
+                    .record_draws(viewport, &mut self.dynamic, camera, self.time, camera_far),
             )
         // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }

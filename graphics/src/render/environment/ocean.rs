@@ -43,8 +43,8 @@ pub struct OceanInfo {
 impl Default for OceanInfo {
     fn default() -> Self {
         Self {
-            patch_size: 32.0,
-            vertex_resolution: 128,
+            patch_size: 64.0,
+            vertex_resolution: 32,
             cascade_fft_sizes: [256, 128, 64],
             cascade_patch_scales: [0.1, 1.0, 4.0],
             base_tile_radius: 1,
@@ -473,7 +473,7 @@ struct OceanDrawParams {
     tile_height_step: f32,
     endless: u32,
     time: f32,
-    wind_dir: Vec2,
+    wind_dir: [f32; 2],
     wind_speed: f32,
     gerstner_amplitude: f32,
     fresnel_bias: f32,
@@ -483,12 +483,12 @@ struct OceanDrawParams {
     foam_advection_strength: f32,
     foam_decay_rate: f32,
     foam_noise_scale: f32,
-    current: Vec2,
-    _padding1: Vec3,
-    absorption_coeff: Vec4,
-    shallow_color: Vec4,
-    deep_color: Vec4,
-    scattering_color: Vec4,
+    current: [f32; 2],
+    _padding1: [f32; 3],
+    absorption_coeff: [f32; 4],
+    shallow_color: [f32; 4],
+    deep_color: [f32; 4],
+    scattering_color: [f32; 4],
     scattering_strength: f32,
     turbidity_depth: f32,
     refraction_strength: f32,
@@ -497,7 +497,7 @@ struct OceanDrawParams {
     ssr_thickness: f32,
     ssr_steps: u32,
     debug_view: u32,
-    _padding2: Vec3,
+    _padding2: [f32; 3],
 }
 
 #[repr(C)]
@@ -1082,8 +1082,11 @@ impl OceanRenderer {
         state.register_pso_tables(&pipeline);
         let default_frame = OceanFrameSettings::default();
         let base_tile_radius = ocean_info.base_tile_radius.max(1);
-        let max_tile_radius = ocean_info.max_tile_radius.max(base_tile_radius);
         let far_tile_radius = ocean_info.far_tile_radius.max(base_tile_radius);
+        let max_tile_radius = ocean_info
+            .max_tile_radius
+            .max(base_tile_radius)
+            .max(far_tile_radius);
         Self {
             pipeline,
             cascades,
@@ -1849,6 +1852,7 @@ impl OceanRenderer {
         dynamic: &mut DynamicAllocator,
         camera: Handle<Camera>,
         time: f32,
+        camera_far: Option<f32>,
     ) -> CommandStream<PendingGraphics> {
         if !self.enabled {
             return CommandStream::subdraw();
@@ -1870,11 +1874,26 @@ impl OceanRenderer {
         }
         // Blend ranges determine how quickly we transition between cascades by distance.
         let blend_ranges = [
-            cascade_patch_sizes[0] * 1.0,
-            cascade_patch_sizes[1] * 32.0,
-            cascade_patch_sizes[2] * 64.0,
+            cascade_patch_sizes[0] * 0.35,
+            cascade_patch_sizes[1] * 1.5,
+            cascade_patch_sizes[2] * 3.0,
             0.0,
         ];
+
+        let mut max_tile_radius = self.max_tile_radius.max(1);
+        let mut far_tile_radius = self.far_tile_radius.max(1);
+        if let Some(far_plane) = camera_far {
+            if far_plane > 0.0 {
+                let near_patch = cascade_patch_sizes[0].max(0.001);
+                let base_patch_size = cascade_patch_sizes[1]
+                    .min(near_patch * 2.5)
+                    .max(0.001);
+                let tile_size = (base_patch_size * 2.0).max(0.001);
+                let required_radius = (far_plane / tile_size).ceil() as u32;
+                far_tile_radius = far_tile_radius.max(required_radius);
+                max_tile_radius = max_tile_radius.max(required_radius);
+            }
+        }
 
         // Copy the current frame settings into the GPU draw parameter block.
         *params = OceanDrawParams {
@@ -1884,12 +1903,12 @@ impl OceanRenderer {
             vertex_resolution: self.vertex_resolution,
             camera_index: camera.slot as u32,
             base_tile_radius: self.base_tile_radius,
-            max_tile_radius: self.max_tile_radius,
-            far_tile_radius: self.far_tile_radius,
+            max_tile_radius,
+            far_tile_radius,
             tile_height_step: self.tile_height_step,
             endless: self.endless as u32,
             time,
-            wind_dir: self.wind_dir,
+            wind_dir: [self.wind_dir.x, self.wind_dir.y],
             wind_speed: self.wind_speed,
             gerstner_amplitude: self.gerstner_amplitude,
             fresnel_bias: self.fresnel_bias,
@@ -1899,27 +1918,32 @@ impl OceanRenderer {
             foam_advection_strength: self.foam_advection_strength,
             foam_decay_rate: self.foam_decay_rate,
             foam_noise_scale: self.foam_noise_scale,
-            current: self.current,
-            _padding1: Default::default(),
-            absorption_coeff: Vec4::new(
+            current: [self.current.x, self.current.y],
+            _padding1: [0.0; 3],
+            absorption_coeff: [
                 self.absorption_coeff.x,
                 self.absorption_coeff.y,
                 self.absorption_coeff.z,
                 0.0,
-            ),
-            shallow_color: Vec4::new(
+            ],
+            shallow_color: [
                 self.shallow_color.x,
                 self.shallow_color.y,
                 self.shallow_color.z,
                 0.0,
-            ),
-            deep_color: Vec4::new(self.deep_color.x, self.deep_color.y, self.deep_color.z, 0.0),
-            scattering_color: Vec4::new(
+            ],
+            deep_color: [
+                self.deep_color.x,
+                self.deep_color.y,
+                self.deep_color.z,
+                0.0,
+            ],
+            scattering_color: [
                 self.scattering_color.x,
                 self.scattering_color.y,
                 self.scattering_color.z,
                 0.0,
-            ),
+            ],
             scattering_strength: self.scattering_strength,
             turbidity_depth: self.turbidity_depth,
             refraction_strength: self.refraction_strength,
@@ -1928,7 +1952,7 @@ impl OceanRenderer {
             ssr_thickness: self.ssr_thickness,
             ssr_steps: self.ssr_steps,
             debug_view: self.debug_view as u32,
-            _padding2: Default::default(),
+            _padding2: [0.0; 3],
         };
         let mut shadow_alloc = dynamic
             .bump()
@@ -1966,7 +1990,7 @@ impl OceanRenderer {
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);
         let vertex_count = quad_count * 6;
-        let max_tile_count = self.max_tile_radius.max(1) * 2 + 1;
+        let max_tile_count = max_tile_radius.max(1) * 2 + 1;
         let instance_count = max_tile_count * max_tile_count;
 
         // TODO: Evaluate meshlet-based culling/LOD once mesh/cluster rendering is available.

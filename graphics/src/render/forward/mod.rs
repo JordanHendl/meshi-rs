@@ -18,7 +18,10 @@ use driver::command::{DrawIndexedIndirect, DrawIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    BindlessState, reservations::bindless_materials::ReservedBindlessMaterials, types::Material,
+    reservations::bindless_camera::ReservedBindlessCamera,
+    reservations::bindless_materials::ReservedBindlessMaterials,
+    BindlessState,
+    types::Material,
     types::*,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
@@ -607,11 +610,11 @@ impl ForwardRenderer {
                         };
                         (obj.scene_handle, todo!(), billboard.clone())
                     };
-                    if let Some(material) = billboard.info.material {
-                        let transform = self.scene.get_object_transform(scene_handle);
-                        self.update_billboard_vertices(&billboard, transform, camera_handle);
-                        billboard_draws.push(BillboardDraw {
-                            vertex_buffer: billboard.vertex_buffer,
+            if let Some(material) = billboard.info.material {
+                let transform = self.scene.get_object_transform(scene_handle);
+                self.update_billboard_vertices(&billboard, transform, camera_handle);
+                billboard_draws.push(BillboardDraw {
+                    vertex_buffer: billboard.vertex_buffer,
                             material,
                             transformation: todo!(),
                             total_transform: transform,
@@ -620,6 +623,17 @@ impl ForwardRenderer {
                     }
                 }
             }
+
+            let camera_far = match self
+                .state
+                .reserved::<ReservedBindlessCamera>("meshi_bindless_cameras")
+            {
+                Ok(cameras) => Some(cameras.camera(camera_handle).far),
+                Err(_) => {
+                    warn!("ForwardRenderer failed to access bindless cameras");
+                    None
+                }
+            };
 
             // Forward SPLIT pass. Renders the following framebuffers:
             // 1) Color
@@ -639,6 +653,7 @@ impl ForwardRenderer {
                     cmd.combine(self.environment.render_opaque(
                         &self.viewport,
                         camera_handle,
+                        camera_far,
                         None,
                         Some(depth.view),
                         None,
