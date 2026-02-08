@@ -31,7 +31,6 @@ use crate::terrain_loader;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
-use furikake::reservations::bindless_textures::ReservedBindlessTextures;
 use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::{
@@ -153,6 +152,7 @@ pub struct TerrainRenderer {
     last_settings_poll_frame: u64,
     last_refresh_camera_position: Option<Vec3>,
     last_refresh_view_projection: Option<Mat4>,
+    last_refresh_chunk_coords: Option<[i32; 2]>,
 }
 
 #[derive(Clone)]
@@ -245,12 +245,7 @@ impl ImagePagerBackend for TerrainImageBackend<'_> {
         if handle == u32::MAX {
             return;
         }
-        let _ = self.state.reserved_mut::<ReservedBindlessTextures, _>(
-            "meshi_bindless_textures",
-            |textures| {
-                textures.remove_texture(handle as u16);
-            },
-        );
+        self.state.remove_texture(handle as u16);
     }
 }
 
@@ -534,6 +529,7 @@ impl TerrainRenderer {
             last_settings_poll_frame: 0,
             last_refresh_camera_position: None,
             last_refresh_view_projection: None,
+            last_refresh_chunk_coords: None,
         }
     }
 
@@ -601,6 +597,7 @@ impl TerrainRenderer {
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
         self.active_chunk_lod_levels.clear();
+        self.last_refresh_chunk_coords = None;
         self.terrain_dirty = true;
     }
 
@@ -612,6 +609,7 @@ impl TerrainRenderer {
         self.lod_sources.clear();
         self.active_chunk_lods.clear();
         self.active_chunk_lod_levels.clear();
+        self.last_refresh_chunk_coords = None;
         self.terrain_dirty = true;
     }
 
@@ -620,13 +618,28 @@ impl TerrainRenderer {
         let _frame_marker = bump.alloc(0u8);
         self.refresh_frame_index = self.refresh_frame_index.saturating_add(1);
         self.update_camera_state(camera, state);
-        if self.terrain_project_key.is_some() && self.should_refresh_terrain() {
-            self.refresh_rdb_objects(camera);
-            self.last_refresh_frame = self.refresh_frame_index;
-            self.last_settings_poll_frame = self.refresh_frame_index;
-            self.last_refresh_camera_position = Some(self.camera_position);
-            self.last_refresh_view_projection = self.view_projection;
-            self.terrain_dirty = false;
+        if self.terrain_project_key.is_some() {
+            let settings_poll_due = self
+                .refresh_frame_index
+                .saturating_sub(self.last_settings_poll_frame)
+                >= TERRAIN_SETTINGS_POLL_INTERVAL;
+            if settings_poll_due {
+                self.poll_terrain_settings();
+                self.last_settings_poll_frame = self.refresh_frame_index;
+            }
+
+            if self.should_refresh_terrain() {
+                self.refresh_rdb_objects(camera);
+                self.last_refresh_frame = self.refresh_frame_index;
+                self.last_settings_poll_frame = self.refresh_frame_index;
+                self.last_refresh_camera_position = Some(self.camera_position);
+                self.last_refresh_view_projection = self.view_projection;
+                self.last_refresh_chunk_coords = self
+                    .terrain_settings
+                    .as_ref()
+                    .and_then(|settings| self.camera_chunk_coords(settings));
+                self.terrain_dirty = false;
+            }
         }
         if self.terrain_settings_dirty {
             if let Some(settings) = self.terrain_settings.clone() {
@@ -726,27 +739,9 @@ impl TerrainRenderer {
             return;
         };
 
-        let settings_entry = project_settings_entry(&project_key);
         let db = unsafe { db_ptr.as_mut() };
-        let settings = match db.terrain_mut().fetch_project_settings(&settings_entry) {
-            Ok(settings) => settings,
-            Err(err) => {
-                warn!(
-                    "Failed to load terrain project settings '{}': {err:?}",
-                    settings_entry
-                );
-                if let Some(mut rdb_ptr) = self.terrain_rdb {
-                    if let Ok(settings) =
-                        unsafe { rdb_ptr.as_mut() }.fetch::<TerrainProjectSettings>(&settings_entry)
-                    {
-                        settings
-                    } else {
-                        return;
-                    }
-                } else {
-                    return;
-                }
-            }
+        let Some(settings) = self.load_terrain_settings(&project_key, db) else {
+            return;
         };
 
         let settings_changed = self
@@ -846,6 +841,34 @@ impl TerrainRenderer {
         );
     }
 
+    fn poll_terrain_settings(&mut self) {
+        let Some(project_key) = self.terrain_project_key.clone() else {
+            return;
+        };
+        let Some(mut db_ptr) = self.deferred.as_ref().and_then(|deferred| deferred.db) else {
+            return;
+        };
+        let db = unsafe { db_ptr.as_mut() };
+        let Some(settings) = self.load_terrain_settings(&project_key, db) else {
+            return;
+        };
+
+        let settings_changed = self
+            .terrain_settings
+            .as_ref()
+            .map(|cached| cached != &settings)
+            .unwrap_or(true);
+        if settings_changed {
+            info!(
+                "Loaded terrain settings for project '{}' ({:?})",
+                project_key, settings
+            );
+            self.terrain_settings = Some(settings.clone());
+            self.terrain_settings_dirty = true;
+            self.terrain_dirty = true;
+        }
+    }
+
     fn terrain_frustum(&self, plane_z: f32) -> Option<TerrainFrustum> {
         let view_projection = self.view_projection?;
         let inverse = view_projection.inverse();
@@ -908,6 +931,22 @@ impl TerrainRenderer {
             origin_y + chunk_size_y * 0.5,
             center_z,
         )
+    }
+
+    fn camera_chunk_coords(&self, settings: &TerrainProjectSettings) -> Option<[i32; 2]> {
+        if settings.tile_size <= 0.0 {
+            return None;
+        }
+        let tiles_x = settings.tiles_per_chunk[0].max(1) as f32;
+        let tiles_y = settings.tiles_per_chunk[1].max(1) as f32;
+        let chunk_size_x = tiles_x * settings.tile_size;
+        let chunk_size_y = tiles_y * settings.tile_size;
+        if chunk_size_x <= 0.0 || chunk_size_y <= 0.0 {
+            return None;
+        }
+        let local_x = (self.camera_position.x - settings.world_bounds_min[0]) / chunk_size_x;
+        let local_y = (self.camera_position.y - settings.world_bounds_min[1]) / chunk_size_y;
+        Some([local_x.floor() as i32, local_y.floor() as i32])
     }
 
     fn select_lod_objects(&self) -> Vec<TerrainRenderObject> {
@@ -992,20 +1031,8 @@ impl TerrainRenderer {
             .refresh_frame_index
             .saturating_sub(self.last_refresh_frame)
             >= TERRAIN_REFRESH_FRAME_INTERVAL;
-        let settings_poll_due = self
-            .refresh_frame_index
-            .saturating_sub(self.last_settings_poll_frame)
-            >= TERRAIN_SETTINGS_POLL_INTERVAL;
 
         if self.terrain_dirty {
-            return true;
-        }
-
-        if self.terrain_render_objects.is_empty() {
-            return settings_poll_due || refresh_due;
-        }
-
-        if settings_poll_due {
             return true;
         }
 
@@ -1023,6 +1050,16 @@ impl TerrainRenderer {
             (None, Some(_)) | (Some(_), None) => true,
             (None, None) => false,
         };
+
+        if self.terrain_render_objects.is_empty() {
+            if let Some(settings) = self.terrain_settings.as_ref() {
+                if let Some(current_chunk) = self.camera_chunk_coords(settings) {
+                    return self
+                        .last_refresh_chunk_coords
+                        .map_or(true, |last| last != current_chunk);
+                }
+            }
+        }
 
         camera_moved || view_changed
     }
@@ -1042,6 +1079,30 @@ impl TerrainRenderer {
         };
         let rdb = unsafe { rdb_ptr.as_mut() };
         rdb.fetch::<TerrainChunkArtifact>(entry).ok()
+    }
+
+    fn load_terrain_settings(
+        &mut self,
+        project_key: &str,
+        db: &mut DB,
+    ) -> Option<TerrainProjectSettings> {
+        let settings_entry = project_settings_entry(project_key);
+        match db.terrain_mut().fetch_project_settings(&settings_entry) {
+            Ok(settings) => Some(settings),
+            Err(err) => {
+                warn!(
+                    "Failed to load terrain project settings '{}': {err:?}",
+                    settings_entry
+                );
+                if let Some(mut rdb_ptr) = self.terrain_rdb {
+                    unsafe { rdb_ptr.as_mut() }
+                        .fetch::<TerrainProjectSettings>(&settings_entry)
+                        .ok()
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     fn world_bounds(object: &TerrainRenderObject) -> (Vec3, Vec3) {
