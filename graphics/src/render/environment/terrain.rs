@@ -522,10 +522,8 @@ impl TerrainRenderer {
             );
 
         pso_builder = pso_builder
-            .add_reserved_table_variable(state, "meshi_bindless_textures")
+            .add_reserved_table_variables(state)
             .unwrap()
-            .add_reserved_table_variable(state, "meshi_bindless_materials")
-            .unwrap();
 
         if info.use_depth {
             pso_builder = pso_builder.add_depth_target(AttachmentDesc {
