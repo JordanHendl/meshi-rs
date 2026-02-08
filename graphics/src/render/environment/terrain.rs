@@ -523,7 +523,7 @@ impl TerrainRenderer {
 
         pso_builder = pso_builder
             .add_reserved_table_variables(state)
-            .unwrap()
+            .unwrap();
 
         if info.use_depth {
             pso_builder = pso_builder.add_depth_target(AttachmentDesc {
@@ -1874,7 +1874,6 @@ impl TerrainRenderer {
         let Some(settings) = self.terrain_settings.clone() else {
             return None;
         };
-        self.ensure_static_geometry(&settings, state);
         let static_geometry = self.static_geometry.as_ref()?;
         let geometry = static_geometry
             .lods
