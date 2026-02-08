@@ -21,6 +21,8 @@ use noren::rdb::terrain::{
 use noren::rdb::DeviceGeometryLayer;
 use tare::transient::BindlessTextureRegistry;
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::ptr::NonNull;
 use tracing::{info, warn};
 
@@ -153,6 +155,13 @@ pub struct TerrainRenderer {
     last_refresh_camera_position: Option<Vec3>,
     last_refresh_view_projection: Option<Mat4>,
     last_refresh_chunk_coords: Option<[i32; 2]>,
+    last_base_chunk_hashes: HashMap<String, u64>,
+    missing_lod_artifacts: HashSet<String>,
+    visibility_cache_selection_hash: u64,
+    visibility_cache_view_projection: Option<Mat4>,
+    visibility_cache_camera_position: Option<Vec3>,
+    visibility_cache_camera_far: f32,
+    visibility_cache_keys: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -530,6 +539,13 @@ impl TerrainRenderer {
             last_refresh_camera_position: None,
             last_refresh_view_projection: None,
             last_refresh_chunk_coords: None,
+            last_base_chunk_hashes: HashMap::new(),
+            missing_lod_artifacts: HashSet::new(),
+            visibility_cache_selection_hash: 0,
+            visibility_cache_view_projection: None,
+            visibility_cache_camera_position: None,
+            visibility_cache_camera_far: 0.0,
+            visibility_cache_keys: HashSet::new(),
         }
     }
 
@@ -598,6 +614,13 @@ impl TerrainRenderer {
         self.active_chunk_lods.clear();
         self.active_chunk_lod_levels.clear();
         self.last_refresh_chunk_coords = None;
+        self.last_base_chunk_hashes.clear();
+        self.missing_lod_artifacts.clear();
+        self.visibility_cache_keys.clear();
+        self.visibility_cache_selection_hash = 0;
+        self.visibility_cache_view_projection = None;
+        self.visibility_cache_camera_position = None;
+        self.visibility_cache_camera_far = 0.0;
         self.terrain_dirty = true;
     }
 
@@ -610,6 +633,13 @@ impl TerrainRenderer {
         self.active_chunk_lods.clear();
         self.active_chunk_lod_levels.clear();
         self.last_refresh_chunk_coords = None;
+        self.last_base_chunk_hashes.clear();
+        self.missing_lod_artifacts.clear();
+        self.visibility_cache_keys.clear();
+        self.visibility_cache_selection_hash = 0;
+        self.visibility_cache_view_projection = None;
+        self.visibility_cache_camera_position = None;
+        self.visibility_cache_camera_far = 0.0;
         self.terrain_dirty = true;
     }
 
@@ -756,6 +786,7 @@ impl TerrainRenderer {
             );
             self.terrain_settings = Some(settings.clone());
             self.terrain_settings_dirty = true;
+            self.missing_lod_artifacts.clear();
         }
 
         let chunks = match db.fetch_terrain_chunks_from_view(&settings, &project_key, camera) {
@@ -766,10 +797,31 @@ impl TerrainRenderer {
             }
         };
 
+        let mut next_base_hashes = HashMap::with_capacity(chunks.len());
+        for base_artifact in &chunks {
+            let coord_key =
+                chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
+            let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(base_artifact.lod));
+            next_base_hashes.insert(entry, base_artifact.content_hash);
+        }
+
+        let base_hashes_changed = next_base_hashes != self.last_base_chunk_hashes;
+        let needs_full_rebuild = settings_changed
+            || base_hashes_changed
+            || self.terrain_render_objects.is_empty()
+            || self.terrain_dirty;
+        if !needs_full_rebuild {
+            self.last_base_chunk_hashes = next_base_hashes;
+            return;
+        }
+
         let mut next_objects = HashMap::new();
         let mut ordered_objects = Vec::new();
         let mut loaded_artifacts = 0usize;
-        let mut changed = settings_changed || chunks.len() != self.terrain_render_objects.len();
+        let mut changed = settings_changed
+            || base_hashes_changed
+            || self.terrain_dirty
+            || chunks.len() != self.terrain_render_objects.len();
 
         let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
 
@@ -780,12 +832,23 @@ impl TerrainRenderer {
                 let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
                 let mut artifact = if lod == base_artifact.lod {
                     base_artifact.clone()
+                } else if self.missing_lod_artifacts.contains(&entry) {
+                    let mut fallback = base_artifact.clone();
+                    fallback.lod = lod;
+                    fallback
                 } else {
-                    self.fetch_lod_artifact(&entry).unwrap_or_else(|| {
-                        let mut fallback = base_artifact.clone();
-                        fallback.lod = lod;
-                        fallback
-                    })
+                    match self.fetch_lod_artifact(&entry) {
+                        Some(found) => {
+                            self.missing_lod_artifacts.remove(&entry);
+                            found
+                        }
+                        None => {
+                            self.missing_lod_artifacts.insert(entry.clone());
+                            let mut fallback = base_artifact.clone();
+                            fallback.lod = lod;
+                            fallback
+                        }
+                    }
                 };
                 artifact.lod = lod;
 
@@ -834,6 +897,7 @@ impl TerrainRenderer {
 
         self.terrain_render_objects = next_objects;
         self.lod_sources = Self::group_lod_sources(&ordered_objects);
+        self.last_base_chunk_hashes = next_base_hashes;
         info!(
             "Terrain refresh: loaded_artifacts={}, total_objects={}",
             loaded_artifacts,
@@ -1185,6 +1249,16 @@ impl TerrainRenderer {
         map
     }
 
+    fn visibility_selection_hash(selection: &[TerrainRenderObject]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        for object in selection {
+            object.key.hash(&mut hasher);
+            object.artifact.content_hash.hash(&mut hasher);
+            object.artifact.lod.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
     fn apply_render_objects(
         &mut self,
         objects: &[TerrainRenderObject],
@@ -1254,18 +1328,50 @@ impl TerrainRenderer {
         objects: &[TerrainRenderObject],
         deferred: &mut TerrainDeferredResources,
     ) {
-        let mut visible_keys = HashSet::with_capacity(objects.len());
+        let selection_hash = Self::visibility_selection_hash(objects);
+        let view_projection_stable = match (self.visibility_cache_view_projection, self.view_projection) {
+            (Some(last), Some(current)) => {
+                Self::mat4_max_delta(last, current) <= TERRAIN_VIEW_PROJECTION_EPSILON
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        let camera_position_stable = self.visibility_cache_camera_position.map_or(false, |last| {
+            self.camera_position.distance(last) <= TERRAIN_CAMERA_POSITION_EPSILON
+        });
+        let camera_far_stable =
+            (self.visibility_cache_camera_far - self.camera_far).abs() <= f32::EPSILON;
+        let use_cache = self.visibility_cache_selection_hash == selection_hash
+            && view_projection_stable
+            && camera_position_stable
+            && camera_far_stable;
+
+        let mut visible_keys = if use_cache {
+            self.visibility_cache_keys.clone()
+        } else {
+            HashSet::with_capacity(objects.len())
+        };
         let mut to_register = Vec::new();
         for object in objects {
-//            if !self.chunk_visible(object) {
-//                continue;
-//            }
-            visible_keys.insert(object.key.clone());
+            if !use_cache {
+                if !self.chunk_visible(object) {
+                    continue;
+                }
+                visible_keys.insert(object.key.clone());
+            }
             if let Some(entry) = deferred.objects.get(&object.key) {
                 if entry.draws.is_empty() {
                     to_register.push(object.key.clone());
                 }
             }
+        }
+
+        if !use_cache {
+            self.visibility_cache_selection_hash = selection_hash;
+            self.visibility_cache_view_projection = self.view_projection;
+            self.visibility_cache_camera_position = Some(self.camera_position);
+            self.visibility_cache_camera_far = self.camera_far;
+            self.visibility_cache_keys = visible_keys.clone();
         }
 
         for key in to_register {
