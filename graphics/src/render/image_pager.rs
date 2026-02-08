@@ -174,6 +174,10 @@ impl ImagePager {
         self.entries.get(key).map(|entry| entry.status)
     }
 
+    pub fn handle(&self, key: &ImagePagerKey) -> Option<BindlessImageHandle> {
+        self.entries.get(key).map(|entry| entry.handle)
+    }
+
     pub fn register_inline_image(
         &mut self,
         key: ImagePagerKey,
