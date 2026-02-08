@@ -42,11 +42,11 @@ struct ImagePagerEntry {
 
 pub trait ImagePagerBackend {
     fn reserve_handle(&mut self) -> BindlessImageHandle;
-    fn register_image(&mut self, handle: BindlessImageHandle, view: ImageView);
+    fn register_image(&mut self, handle: BindlessImageHandle, view: ImageView)
+        -> BindlessImageHandle;
     fn register_image_immediate(&mut self, view: ImageView) -> BindlessImageHandle {
         let handle = self.reserve_handle();
-        self.register_image(handle, view);
-        handle
+        self.register_image(handle, view)
     }
     fn release_image(&mut self, handle: BindlessImageHandle);
 }
@@ -223,7 +223,12 @@ impl ImagePager {
 
             match load_result {
                 Ok(view) => {
-                    backend.register_image(entry.handle, view);
+                    let new_handle = backend.register_image(entry.handle, view);
+                    if new_handle != entry.handle {
+                        self.handle_to_key.remove(&entry.handle);
+                        entry.handle = new_handle;
+                        self.handle_to_key.insert(new_handle, key.clone());
+                    }
                     entry.status = ImagePagerStatus::Ready;
                 }
                 Err(_) => {
@@ -294,8 +299,13 @@ mod tests {
             handle
         }
 
-        fn register_image(&mut self, handle: BindlessImageHandle, _view: ImageView) {
+        fn register_image(
+            &mut self,
+            handle: BindlessImageHandle,
+            _view: ImageView,
+        ) -> BindlessImageHandle {
             self.registered.insert(handle);
+            handle
         }
 
         fn release_image(&mut self, handle: BindlessImageHandle) {

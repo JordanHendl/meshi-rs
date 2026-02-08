@@ -19,6 +19,7 @@ use noren::rdb::terrain::{
     chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
 };
 use noren::rdb::DeviceGeometryLayer;
+use tare::transient::BindlessTextureRegistry;
 use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
 use tracing::{info, warn};
@@ -236,16 +237,8 @@ impl ImagePagerBackend for TerrainImageBackend<'_> {
         u32::MAX
     }
 
-    fn register_image(&mut self, _handle: u32, _view: dashi::ImageView) {}
-
-    fn register_image_immediate(&mut self, view: dashi::ImageView) -> u32 {
-        let mut handle = u32::MAX;
-        self.state
-            .reserved_mut::<ReservedBindlessTextures, _>("meshi_bindless_textures", |textures| {
-                handle = textures.add_texture(view) as u32;
-            })
-            .expect("register terrain texture");
-        handle
+    fn register_image(&mut self, _handle: u32, view: dashi::ImageView) -> u32 {
+        self.state.add_texture(view) as u32
     }
 
     fn release_image(&mut self, handle: u32) {
@@ -652,7 +645,18 @@ impl TerrainRenderer {
             return;
         };
 
-        if selection_keys != self.active_chunk_lods {
+        let mut selection_changed = selection_keys != self.active_chunk_lods;
+        if !selection_changed {
+            selection_changed = selection.iter().any(|object| {
+                deferred
+                    .objects
+                    .get(&object.key)
+                    .map(|entry| entry.content_hash != object.artifact.content_hash)
+                    .unwrap_or(true)
+            });
+        }
+
+        if selection_changed {
             self.active_chunk_lods = selection_keys;
             self.active_chunk_lod_levels = selection
                 .iter()
@@ -984,10 +988,6 @@ impl TerrainRenderer {
     }
 
     fn should_refresh_terrain(&self) -> bool {
-        if self.terrain_render_objects.is_empty() || self.terrain_dirty {
-            return true;
-        }
-
         let refresh_due = self
             .refresh_frame_index
             .saturating_sub(self.last_refresh_frame)
@@ -996,6 +996,14 @@ impl TerrainRenderer {
             .refresh_frame_index
             .saturating_sub(self.last_settings_poll_frame)
             >= TERRAIN_SETTINGS_POLL_INTERVAL;
+
+        if self.terrain_dirty {
+            return true;
+        }
+
+        if self.terrain_render_objects.is_empty() {
+            return settings_poll_due || refresh_due;
+        }
 
         if settings_poll_due {
             return true;
