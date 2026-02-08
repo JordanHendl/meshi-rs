@@ -20,11 +20,15 @@ use noren::rdb::terrain::{
 };
 use noren::rdb::DeviceGeometryLayer;
 use tare::transient::BindlessTextureRegistry;
+use crossbeam_queue::SegQueue;
 use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ptr::NonNull;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tracing::{info, warn};
 
 use crate::render::deferred::PerDrawData;
@@ -164,6 +168,11 @@ pub struct TerrainRenderer {
     visibility_cache_camera_far: f32,
     visibility_cache_keys: HashSet<String>,
     texture_data_cache: HashMap<TerrainTextureCacheKey, std::sync::Arc<Vec<f32>>>,
+    texture_work_requests: Arc<SegQueue<TerrainTextureWorkItem>>,
+    texture_work_results: Arc<SegQueue<TerrainTextureBuildResult>>,
+    texture_work_pending: HashSet<TerrainTextureWorkKey>,
+    texture_worker_running: Arc<AtomicBool>,
+    texture_worker_handle: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -212,6 +221,23 @@ struct TerrainTextureCacheKey {
     kind: &'static str,
     hash: u64,
     grid: [u32; 2],
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct TerrainTextureWorkKey {
+    hash: u64,
+    grid: [u32; 2],
+}
+
+#[derive(Clone)]
+struct TerrainTextureWorkItem {
+    artifact: Arc<TerrainChunkArtifact>,
+    work_key: TerrainTextureWorkKey,
+}
+
+struct TerrainTextureBuildResult {
+    work_key: TerrainTextureWorkKey,
+    textures: Vec<(TerrainTextureCacheKey, Arc<Vec<f32>>)>,
 }
 
 #[derive(Clone)]
@@ -362,6 +388,15 @@ impl TerrainRenderer {
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
+        let texture_work_requests = Arc::new(SegQueue::new());
+        let texture_work_results = Arc::new(SegQueue::new());
+        let texture_worker_running = Arc::new(AtomicBool::new(true));
+        let texture_worker_handle = Some(Self::spawn_texture_worker(
+            Arc::clone(&texture_work_requests),
+            Arc::clone(&texture_work_results),
+            Arc::clone(&texture_worker_running),
+        ));
+
         let terrain_info = info.terrain;
         let mut clipmap_descs = Vec::with_capacity(terrain_info.lod_levels as usize);
         for level in 0..terrain_info.lod_levels {
@@ -565,7 +600,68 @@ impl TerrainRenderer {
             visibility_cache_camera_far: 0.0,
             visibility_cache_keys: HashSet::new(),
             texture_data_cache: HashMap::new(),
+            texture_work_requests,
+            texture_work_results,
+            texture_work_pending: HashSet::new(),
+            texture_worker_running,
+            texture_worker_handle,
         }
+    }
+
+    fn spawn_texture_worker(
+        requests: Arc<SegQueue<TerrainTextureWorkItem>>,
+        results: Arc<SegQueue<TerrainTextureBuildResult>>,
+        running: Arc<AtomicBool>,
+    ) -> JoinHandle<()> {
+        thread::spawn(move || {
+            while running.load(Ordering::Acquire) {
+                if let Some(item) = requests.pop() {
+                    let grid_x = item.work_key.grid[0];
+                    let grid_y = item.work_key.grid[1];
+                    let artifact = &item.artifact;
+                    let textures = vec![
+                        (
+                            TerrainTextureCacheKey {
+                                kind: "height",
+                                hash: item.work_key.hash,
+                                grid: item.work_key.grid,
+                            },
+                            Arc::new(Self::build_heightmap_data(artifact, grid_x, grid_y)),
+                        ),
+                        (
+                            TerrainTextureCacheKey {
+                                kind: "normal",
+                                hash: item.work_key.hash,
+                                grid: item.work_key.grid,
+                            },
+                            Arc::new(Self::build_normalmap_data(artifact, grid_x, grid_y)),
+                        ),
+                        (
+                            TerrainTextureCacheKey {
+                                kind: "blend",
+                                hash: item.work_key.hash,
+                                grid: item.work_key.grid,
+                            },
+                            Arc::new(Self::build_blendmap_data(artifact, grid_x, grid_y)),
+                        ),
+                        (
+                            TerrainTextureCacheKey {
+                                kind: "blend_ids",
+                                hash: item.work_key.hash,
+                                grid: item.work_key.grid,
+                            },
+                            Arc::new(Self::build_blend_ids_data(artifact, grid_x, grid_y)),
+                        ),
+                    ];
+                    results.push(TerrainTextureBuildResult {
+                        work_key: item.work_key,
+                        textures,
+                    });
+                } else {
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+        })
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
@@ -641,6 +737,8 @@ impl TerrainRenderer {
         self.visibility_cache_camera_position = None;
         self.visibility_cache_camera_far = 0.0;
         self.terrain_dirty = true;
+        self.texture_data_cache.clear();
+        self.texture_work_pending.clear();
     }
 
     pub fn set_project_key(&mut self, project_key: &str) {
@@ -660,6 +758,8 @@ impl TerrainRenderer {
         self.visibility_cache_camera_position = None;
         self.visibility_cache_camera_far = 0.0;
         self.terrain_dirty = true;
+        self.texture_data_cache.clear();
+        self.texture_work_pending.clear();
     }
 
     pub fn update(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
@@ -667,6 +767,7 @@ impl TerrainRenderer {
         let _frame_marker = bump.alloc(0u8);
         self.refresh_frame_index = self.refresh_frame_index.saturating_add(1);
         self.update_camera_state(camera, state);
+        self.drain_texture_work();
         if self.terrain_project_key.is_some() {
             let settings_poll_due = self
                 .refresh_frame_index
@@ -893,6 +994,7 @@ impl TerrainRenderer {
                         }
                     };
                     artifact.lod = lod;
+                    self.queue_texture_build(&artifact);
 
                     let object = if let Some(existing) =
                         self.terrain_render_objects.get(&entry).cloned()
@@ -979,6 +1081,7 @@ impl TerrainRenderer {
                     }
                 };
                 artifact.lod = lod;
+                self.queue_texture_build(&artifact);
 
                 if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
                     if existing.artifact.content_hash == artifact.content_hash {
@@ -2038,25 +2141,12 @@ impl TerrainRenderer {
         grid_x: u32,
         grid_y: u32,
     ) -> Option<dashi::ImageView> {
-        let data = self.cached_texture_data(
-            TerrainTextureCacheKey {
-                kind: "height",
-                hash: artifact.content_hash,
-                grid: [grid_x, grid_y],
-            },
-            || {
-                let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
-                if artifact.heights.len() == (grid_x * grid_y) as usize {
-                    for height in &artifact.heights {
-                        data.extend_from_slice(&[*height, 0.0, 0.0, 1.0]);
-                    }
-                } else {
-                    data.resize((grid_x * grid_y * 4) as usize, 0.0);
-                }
-                data
-            },
-        );
-        self.build_texture_view(ctx, &format!("terrain_{key}_height"), grid_x, grid_y, &data)
+        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
+            kind: "height",
+            hash: artifact.content_hash,
+            grid: [grid_x, grid_y],
+        })?;
+        self.build_texture_view(ctx, &format!("terrain_{key}_height"), grid_x, grid_y, data)
     }
 
     fn build_normalmap_view(
@@ -2067,31 +2157,12 @@ impl TerrainRenderer {
         grid_x: u32,
         grid_y: u32,
     ) -> Option<dashi::ImageView> {
-        let data = self.cached_texture_data(
-            TerrainTextureCacheKey {
-                kind: "normal",
-                hash: artifact.content_hash,
-                grid: [grid_x, grid_y],
-            },
-            || {
-                let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
-                if artifact.normals.len() == (grid_x * grid_y) as usize {
-                    for normal in &artifact.normals {
-                        data.extend_from_slice(&[normal[0], normal[1], normal[2], 1.0]);
-                    }
-                } else {
-                    data.resize((grid_x * grid_y * 4) as usize, 0.0);
-                    for chunk in data.chunks_exact_mut(4) {
-                        chunk[0] = 0.0;
-                        chunk[1] = 1.0;
-                        chunk[2] = 0.0;
-                        chunk[3] = 1.0;
-                    }
-                }
-                data
-            },
-        );
-        self.build_texture_view(ctx, &format!("terrain_{key}_normal"), grid_x, grid_y, &data)
+        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
+            kind: "normal",
+            hash: artifact.content_hash,
+            grid: [grid_x, grid_y],
+        })?;
+        self.build_texture_view(ctx, &format!("terrain_{key}_normal"), grid_x, grid_y, data)
     }
 
     fn build_blendmap_view(
@@ -2102,32 +2173,12 @@ impl TerrainRenderer {
         grid_x: u32,
         grid_y: u32,
     ) -> Option<dashi::ImageView> {
-        let data = self.cached_texture_data(
-            TerrainTextureCacheKey {
-                kind: "blend",
-                hash: artifact.content_hash,
-                grid: [grid_x, grid_y],
-            },
-            || {
-                let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
-                let expected = (grid_x * grid_y) as usize;
-                if let Some(weights) = artifact.material_weights.as_deref() {
-                    if weights.len() == expected {
-                        for weight in weights {
-                            data.extend_from_slice(weight);
-                        }
-                    }
-                }
-                if data.is_empty() {
-                    data.resize((grid_x * grid_y * 4) as usize, 0.0);
-                    for chunk in data.chunks_exact_mut(4) {
-                        chunk[0] = 1.0;
-                    }
-                }
-                data
-            },
-        );
-        self.build_texture_view(ctx, &format!("terrain_{key}_blend"), grid_x, grid_y, &data)
+        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
+            kind: "blend",
+            hash: artifact.content_hash,
+            grid: [grid_x, grid_y],
+        })?;
+        self.build_texture_view(ctx, &format!("terrain_{key}_blend"), grid_x, grid_y, data)
     }
 
     fn build_blend_ids_view(
@@ -2138,34 +2189,12 @@ impl TerrainRenderer {
         grid_x: u32,
         grid_y: u32,
     ) -> Option<dashi::ImageView> {
-        let data = self.cached_texture_data(
-            TerrainTextureCacheKey {
-                kind: "blend_ids",
-                hash: artifact.content_hash,
-                grid: [grid_x, grid_y],
-            },
-            || {
-                let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
-                let expected = (grid_x * grid_y) as usize;
-                if let Some(ids) = artifact.material_ids.as_deref() {
-                    if ids.len() == expected {
-                        for id in ids {
-                            data.extend_from_slice(&[
-                                id[0] as f32,
-                                id[1] as f32,
-                                id[2] as f32,
-                                id[3] as f32,
-                            ]);
-                        }
-                    }
-                }
-                if data.is_empty() {
-                    data.resize((grid_x * grid_y * 4) as usize, 0.0);
-                }
-                data
-            },
-        );
-        self.build_texture_view(ctx, &format!("terrain_{key}_blend_ids"), grid_x, grid_y, &data)
+        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
+            kind: "blend_ids",
+            hash: artifact.content_hash,
+            grid: [grid_x, grid_y],
+        })?;
+        self.build_texture_view(ctx, &format!("terrain_{key}_blend_ids"), grid_x, grid_y, data)
     }
 
     fn build_texture_view(
@@ -2195,6 +2224,139 @@ impl TerrainRenderer {
             view_type: ImageViewType::Type2D,
             range: SubresourceRange::new(0, 1, 0, 1),
         })
+    }
+
+    fn build_heightmap_data(
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Vec<f32> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        if artifact.heights.len() == (grid_x * grid_y) as usize {
+            for height in &artifact.heights {
+                data.extend_from_slice(&[*height, 0.0, 0.0, 1.0]);
+            }
+        } else {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+        }
+        data
+    }
+
+    fn build_normalmap_data(
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Vec<f32> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        if artifact.normals.len() == (grid_x * grid_y) as usize {
+            for normal in &artifact.normals {
+                data.extend_from_slice(&[normal[0], normal[1], normal[2], 1.0]);
+            }
+        } else {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+            for chunk in data.chunks_exact_mut(4) {
+                chunk[0] = 0.0;
+                chunk[1] = 1.0;
+                chunk[2] = 0.0;
+                chunk[3] = 1.0;
+            }
+        }
+        data
+    }
+
+    fn build_blendmap_data(
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Vec<f32> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        let expected = (grid_x * grid_y) as usize;
+        if let Some(weights) = artifact.material_weights.as_deref() {
+            if weights.len() == expected {
+                for weight in weights {
+                    data.extend_from_slice(weight);
+                }
+            }
+        }
+        if data.is_empty() {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+            for chunk in data.chunks_exact_mut(4) {
+                chunk[0] = 1.0;
+            }
+        }
+        data
+    }
+
+    fn build_blend_ids_data(
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Vec<f32> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        let expected = (grid_x * grid_y) as usize;
+        if let Some(ids) = artifact.material_ids.as_deref() {
+            if ids.len() == expected {
+                for id in ids {
+                    data.extend_from_slice(&[
+                        id[0] as f32,
+                        id[1] as f32,
+                        id[2] as f32,
+                        id[3] as f32,
+                    ]);
+                }
+            }
+        }
+        if data.is_empty() {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+        }
+        data
+    }
+
+    fn queue_texture_build(&mut self, artifact: &TerrainChunkArtifact) {
+        let grid_x = artifact.grid_size[0];
+        let grid_y = artifact.grid_size[1];
+        if grid_x == 0 || grid_y == 0 {
+            return;
+        }
+        let work_key = TerrainTextureWorkKey {
+            hash: artifact.content_hash,
+            grid: [grid_x, grid_y],
+        };
+        if self.texture_work_pending.contains(&work_key) {
+            return;
+        }
+        let kinds_ready = ["height", "normal", "blend", "blend_ids"]
+            .iter()
+            .all(|kind| {
+                self.texture_data_cache.contains_key(&TerrainTextureCacheKey {
+                    kind,
+                    hash: work_key.hash,
+                    grid: work_key.grid,
+                })
+            });
+        if kinds_ready {
+            return;
+        }
+
+        self.texture_work_pending.insert(work_key);
+        self.texture_work_requests.push(TerrainTextureWorkItem {
+            artifact: Arc::new(artifact.clone()),
+            work_key,
+        });
+    }
+
+    fn drain_texture_work(&mut self) {
+        let mut had_results = false;
+        while let Some(result) = self.texture_work_results.pop() {
+            for (key, data) in result.textures {
+                self.texture_data_cache.entry(key).or_insert(data);
+            }
+            self.texture_work_pending.remove(&result.work_key);
+            had_results = true;
+        }
+        if had_results {
+            self.terrain_dirty = true;
+        }
     }
 
     fn release_terrain_textures(&mut self, textures: &TerrainTextureSet, state: &mut BindlessState) {
@@ -2344,24 +2506,19 @@ impl TerrainRenderer {
         VertexBufferSlot::Skeleton
     }
 
-    fn cached_texture_data(
-        &mut self,
-        key: TerrainTextureCacheKey,
-        build: impl FnOnce() -> Vec<f32>,
-    ) -> std::sync::Arc<Vec<f32>> {
-        if let Some(data) = self.texture_data_cache.get(&key) {
-            return std::sync::Arc::clone(data);
-        }
-        let data = std::sync::Arc::new(build());
-        self.texture_data_cache
-            .insert(key, std::sync::Arc::clone(&data));
-        data
-    }
-
     fn geometry_cache() -> &'static Mutex<HashMap<TerrainGeometryCacheKey, TerrainPlaneGeometry>> {
         static CACHE: OnceLock<Mutex<HashMap<TerrainGeometryCacheKey, TerrainPlaneGeometry>>> =
             OnceLock::new();
         CACHE.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
+}
+
+impl Drop for TerrainRenderer {
+    fn drop(&mut self) {
+        self.texture_worker_running.store(false, Ordering::Release);
+        if let Some(handle) = self.texture_worker_handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
