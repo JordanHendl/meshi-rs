@@ -181,7 +181,7 @@ VSOutput main(VSInput input) {
   if (draw.terrain_height_texture_id != INVALID_BINDLESS_ID) {
     const float height = meshi_bindless_textures[draw.terrain_height_texture_id]
       .Sample(meshi_bindless_samplers[draw.terrain_height_texture_id], vertex.tex_coords).x;
-    local_pos.y = height;
+    local_pos.y = height + vertex.position.y;
   }
   if (draw.terrain_normal_texture_id != INVALID_BINDLESS_ID) {
     local_normal = meshi_bindless_textures[draw.terrain_normal_texture_id]

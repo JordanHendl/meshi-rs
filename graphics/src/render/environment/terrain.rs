@@ -1777,6 +1777,49 @@ impl TerrainRenderer {
             }
         }
 
+        if lod + 1 < lod_levels {
+            let skirt_depth = spacing_x.max(spacing_y);
+            let mut add_skirt_edge =
+                |edge: &[u32], vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>| {
+                    if edge.len() < 2 {
+                        return;
+                    }
+                    let skirt_start = vertices.len() as u32;
+                    for &base in edge {
+                        let mut skirt_vertex = vertices[base as usize];
+                        skirt_vertex.position[1] -= skirt_depth;
+                        vertices.push(skirt_vertex);
+                    }
+                    for i in 0..edge.len() - 1 {
+                        let b0 = edge[i];
+                        let b1 = edge[i + 1];
+                        let s0 = skirt_start + i as u32;
+                        let s1 = skirt_start + i as u32 + 1;
+                        indices.extend_from_slice(&[b0, s0, b1, b1, s0, s1]);
+                        indices.extend_from_slice(&[b0, b1, s0, b1, s1, s0]);
+                    }
+                };
+
+            let mut top_edge = Vec::with_capacity(grid_x as usize);
+            let mut bottom_edge = Vec::with_capacity(grid_x as usize);
+            for x in 0..grid_x {
+                top_edge.push(x);
+                bottom_edge.push((grid_y - 1) * grid_x + x);
+            }
+
+            let mut left_edge = Vec::with_capacity(grid_y as usize);
+            let mut right_edge = Vec::with_capacity(grid_y as usize);
+            for y in 0..grid_y {
+                left_edge.push(y * grid_x);
+                right_edge.push(y * grid_x + grid_x - 1);
+            }
+
+            add_skirt_edge(&top_edge, &mut vertices, &mut indices);
+            add_skirt_edge(&bottom_edge, &mut vertices, &mut indices);
+            add_skirt_edge(&left_edge, &mut vertices, &mut indices);
+            add_skirt_edge(&right_edge, &mut vertices, &mut indices);
+        }
+
         let mut layer = DeviceGeometryLayer::default();
         if !self.register_furikake_geometry_layer(&mut layer, &vertices, Some(&indices), state) {
             return None;
