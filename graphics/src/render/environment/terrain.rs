@@ -59,6 +59,8 @@ const TERRAIN_CAMERA_POSITION_EPSILON: f32 = 0.25;
 const TERRAIN_VIEW_PROJECTION_EPSILON: f32 = 1e-3;
 const TERRAIN_CAMERA_VELOCITY_EPSILON: f32 = 0.02;
 const TERRAIN_MISSING_LOD_POLL_LIMIT: usize = 4;
+const TERRAIN_UPDATE_BUDGET_PER_FRAME: usize = 12;
+const TERRAIN_REFRESH_CHUNK_BUDGET_PER_FRAME: usize = 12;
 
 impl Default for TerrainInfo {
     fn default() -> Self {
@@ -170,6 +172,10 @@ pub struct TerrainRenderer {
     visibility_cache_camera_far: f32,
     visibility_cache_keys: HashSet<String>,
     camera_velocity: f32,
+    pending_selection: Option<Vec<TerrainRenderObject>>,
+    pending_selection_keys: HashMap<TerrainChunkKey, String>,
+    pending_selection_lod_levels: HashMap<TerrainChunkKey, u8>,
+    pending_refresh: Option<PendingTerrainRefresh>,
     texture_data_cache: HashMap<TerrainTextureCacheKey, std::sync::Arc<Vec<f32>>>,
     texture_work_requests: Arc<SegQueue<TerrainTextureWorkItem>>,
     texture_work_results: Arc<SegQueue<TerrainTextureBuildResult>>,
@@ -255,6 +261,40 @@ struct TerrainTextureSet {
     normal: Option<TerrainTexture>,
     blend: Option<TerrainTexture>,
     blend_ids: Option<TerrainTexture>,
+}
+
+struct PendingTerrainRefresh {
+    kind: PendingRefreshKind,
+}
+
+enum PendingRefreshKind {
+    Full(PendingFullRefresh),
+    Delta(PendingDeltaRefresh),
+}
+
+struct PendingFullRefresh {
+    project_key: String,
+    settings: TerrainProjectSettings,
+    base_artifacts: Vec<TerrainChunkArtifact>,
+    next_base_hashes: HashMap<TerrainChunkKey, u64>,
+    lod_levels: u8,
+    next_objects: HashMap<String, TerrainRenderObject>,
+    ordered_objects: Vec<TerrainRenderObject>,
+    loaded_artifacts: usize,
+    index: usize,
+}
+
+struct PendingDeltaRefresh {
+    project_key: String,
+    settings: TerrainProjectSettings,
+    updates: Vec<(TerrainChunkKey, TerrainChunkArtifact)>,
+    removals: Vec<TerrainChunkKey>,
+    next_base_hashes: HashMap<TerrainChunkKey, u64>,
+    lod_levels: u8,
+    updated_chunks: usize,
+    loaded_artifacts: usize,
+    update_index: usize,
+    removal_index: usize,
 }
 
 impl TerrainTextureSet {
@@ -602,6 +642,10 @@ impl TerrainRenderer {
             visibility_cache_camera_far: 0.0,
             visibility_cache_keys: HashSet::new(),
             camera_velocity: 0.0,
+            pending_selection: None,
+            pending_selection_keys: HashMap::new(),
+            pending_selection_lod_levels: HashMap::new(),
+            pending_refresh: None,
             texture_data_cache: HashMap::new(),
             texture_work_requests,
             texture_work_results,
@@ -742,6 +786,10 @@ impl TerrainRenderer {
         self.last_frame_camera_position = None;
         self.camera_velocity = 0.0;
         self.terrain_dirty = true;
+        self.pending_selection = None;
+        self.pending_selection_keys.clear();
+        self.pending_selection_lod_levels.clear();
+        self.pending_refresh = None;
         self.texture_data_cache.clear();
         self.texture_work_pending.clear();
     }
@@ -765,6 +813,10 @@ impl TerrainRenderer {
         self.last_frame_camera_position = None;
         self.camera_velocity = 0.0;
         self.terrain_dirty = true;
+        self.pending_selection = None;
+        self.pending_selection_keys.clear();
+        self.pending_selection_lod_levels.clear();
+        self.pending_refresh = None;
         self.texture_data_cache.clear();
         self.texture_work_pending.clear();
     }
@@ -833,8 +885,9 @@ impl TerrainRenderer {
         }
 
         if selection_changed {
-            self.active_chunk_lods = selection_keys;
-            self.active_chunk_lod_levels = selection
+            self.pending_selection = Some(selection.clone());
+            self.pending_selection_keys = selection_keys;
+            self.pending_selection_lod_levels = selection
                 .iter()
                 .map(|object| {
                     (
@@ -846,7 +899,22 @@ impl TerrainRenderer {
                     )
                 })
                 .collect();
-            self.apply_render_objects(&selection, &mut deferred, state);
+        }
+
+        if let Some(pending) = self.pending_selection.take() {
+            let completed = self.apply_render_objects(
+                &pending,
+                &mut deferred,
+                state,
+                TERRAIN_UPDATE_BUDGET_PER_FRAME,
+            );
+            if completed {
+                self.active_chunk_lods = std::mem::take(&mut self.pending_selection_keys);
+                self.active_chunk_lod_levels =
+                    std::mem::take(&mut self.pending_selection_lod_levels);
+            } else {
+                self.pending_selection = Some(pending);
+            }
         }
 
         self.update_visibility(&selection, &mut deferred);
@@ -893,6 +961,205 @@ impl TerrainRenderer {
         sources
     }
 
+    fn process_pending_refresh(&mut self, pending: &mut PendingTerrainRefresh) -> bool {
+        let mut remaining = TERRAIN_REFRESH_CHUNK_BUDGET_PER_FRAME;
+        match &mut pending.kind {
+            PendingRefreshKind::Full(state) => {
+                while state.index < state.base_artifacts.len() && remaining > 0 {
+                    let base_artifact = state.base_artifacts[state.index].clone();
+                    state.index += 1;
+                    remaining = remaining.saturating_sub(1);
+                    self.process_full_refresh_chunk(state, &base_artifact);
+                }
+
+                if state.index >= state.base_artifacts.len() {
+                    self.terrain_render_objects = std::mem::take(&mut state.next_objects);
+                    self.lod_sources = Self::group_lod_sources(&state.ordered_objects);
+                    self.last_base_chunk_hashes = std::mem::take(&mut state.next_base_hashes);
+                    info!(
+                        "Terrain refresh: loaded_artifacts={}, total_objects={}",
+                        state.loaded_artifacts,
+                        self.terrain_render_objects.len()
+                    );
+                    return true;
+                }
+            }
+            PendingRefreshKind::Delta(state) => {
+                while state.update_index < state.updates.len() && remaining > 0 {
+                    let (key, base_artifact) = state.updates[state.update_index].clone();
+                    state.update_index += 1;
+                    remaining = remaining.saturating_sub(1);
+                    self.process_delta_refresh_chunk(state, &key, &base_artifact);
+                }
+
+                while state.removal_index < state.removals.len() && remaining > 0 {
+                    let key = &state.removals[state.removal_index];
+                    state.removal_index += 1;
+                    remaining = remaining.saturating_sub(1);
+                    if let Some(objects) = self.lod_sources.remove(key) {
+                        for object in objects {
+                            self.terrain_render_objects.remove(&object.key);
+                        }
+                    }
+                }
+
+                if state.update_index >= state.updates.len()
+                    && state.removal_index >= state.removals.len()
+                {
+                    self.last_base_chunk_hashes = std::mem::take(&mut state.next_base_hashes);
+                    if state.updated_chunks > 0 || !state.removals.is_empty() {
+                        info!(
+                            "Terrain refresh: updated_chunks={}, loaded_artifacts={}",
+                            state.updated_chunks, state.loaded_artifacts
+                        );
+                    }
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn process_full_refresh_chunk(
+        &mut self,
+        state: &mut PendingFullRefresh,
+        base_artifact: &TerrainChunkArtifact,
+    ) {
+        let coord_key = chunk_coord_key(
+            base_artifact.chunk_coords[0],
+            base_artifact.chunk_coords[1],
+        );
+        for lod in 0..state.lod_levels {
+            let entry = chunk_artifact_entry(&state.project_key, &coord_key, &lod_key(lod));
+            let mut artifact = if lod == base_artifact.lod {
+                base_artifact.clone()
+            } else if self.missing_lod_artifacts.contains(&entry) {
+                let mut fallback = base_artifact.clone();
+                fallback.lod = lod;
+                fallback
+            } else {
+                match self.fetch_lod_artifact(&entry) {
+                    Some(found) => {
+                        self.missing_lod_artifacts.remove(&entry);
+                        found
+                    }
+                    None => {
+                        self.missing_lod_artifacts.insert(entry.clone());
+                        let mut fallback = base_artifact.clone();
+                        fallback.lod = lod;
+                        fallback
+                    }
+                }
+            };
+            artifact.lod = lod;
+            self.queue_texture_build(&artifact);
+
+            let object = if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                if existing.artifact.content_hash == artifact.content_hash {
+                    let mut updated = existing.clone();
+                    updated.transform = terrain_loader::terrain_chunk_transform(
+                        &state.settings,
+                        updated.artifact.chunk_coords,
+                        updated.artifact.bounds_min,
+                    );
+                    updated
+                } else {
+                    terrain_loader::terrain_render_object_from_artifact(
+                        &state.settings,
+                        entry.clone(),
+                        artifact,
+                    )
+                }
+            } else {
+                terrain_loader::terrain_render_object_from_artifact(
+                    &state.settings,
+                    entry.clone(),
+                    artifact,
+                )
+            };
+
+            if !state.next_objects.contains_key(&entry) {
+                state.loaded_artifacts += 1;
+            }
+            state.next_objects.insert(entry.clone(), object.clone());
+            state.ordered_objects.push(object);
+        }
+    }
+
+    fn process_delta_refresh_chunk(
+        &mut self,
+        state: &mut PendingDeltaRefresh,
+        key: &TerrainChunkKey,
+        base_artifact: &TerrainChunkArtifact,
+    ) {
+        let coord_key = chunk_coord_key(
+            base_artifact.chunk_coords[0],
+            base_artifact.chunk_coords[1],
+        );
+        let mut sources = Vec::with_capacity(state.lod_levels as usize);
+
+        for lod in 0..state.lod_levels {
+            let entry = chunk_artifact_entry(&state.project_key, &coord_key, &lod_key(lod));
+            let mut artifact = if lod == base_artifact.lod {
+                base_artifact.clone()
+            } else if self.missing_lod_artifacts.contains(&entry) {
+                let mut fallback = base_artifact.clone();
+                fallback.lod = lod;
+                fallback
+            } else {
+                match self.fetch_lod_artifact(&entry) {
+                    Some(found) => {
+                        self.missing_lod_artifacts.remove(&entry);
+                        found
+                    }
+                    None => {
+                        self.missing_lod_artifacts.insert(entry.clone());
+                        let mut fallback = base_artifact.clone();
+                        fallback.lod = lod;
+                        fallback
+                    }
+                }
+            };
+            artifact.lod = lod;
+            self.queue_texture_build(&artifact);
+
+            let object = if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
+                if existing.artifact.content_hash == artifact.content_hash {
+                    let mut updated = existing.clone();
+                    updated.transform = terrain_loader::terrain_chunk_transform(
+                        &state.settings,
+                        updated.artifact.chunk_coords,
+                        updated.artifact.bounds_min,
+                    );
+                    updated
+                } else {
+                    terrain_loader::terrain_render_object_from_artifact(
+                        &state.settings,
+                        entry.clone(),
+                        artifact,
+                    )
+                }
+            } else {
+                terrain_loader::terrain_render_object_from_artifact(
+                    &state.settings,
+                    entry.clone(),
+                    artifact,
+                )
+            };
+
+            if !self.terrain_render_objects.contains_key(&entry) {
+                state.loaded_artifacts += 1;
+            }
+            self.terrain_render_objects.insert(entry.clone(), object.clone());
+            sources.push(object);
+        }
+
+        sources.sort_by_key(|source| source.artifact.lod);
+        self.lod_sources.insert(key.clone(), sources);
+        state.updated_chunks += 1;
+    }
+
     fn refresh_rdb_objects(&mut self, camera: Handle<Camera>) {
         let Some(project_key) = self.terrain_project_key.clone() else {
             return;
@@ -901,6 +1168,13 @@ impl TerrainRenderer {
             warn!("Terrain refresh skipped: no terrain DB available.");
             return;
         };
+        if let Some(mut pending) = self.pending_refresh.take() {
+            let completed = self.process_pending_refresh(&mut pending);
+            if !completed {
+                self.pending_refresh = Some(pending);
+            }
+            return;
+        }
 
         let db = unsafe { db_ptr.as_mut() };
         let Some(settings) = self.load_terrain_settings(&project_key, db) else {
@@ -950,6 +1224,7 @@ impl TerrainRenderer {
                 return;
             }
 
+            let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
             let mut removed_keys = Vec::new();
             for key in self.last_base_chunk_hashes.keys() {
                 if !next_base_hashes.contains_key(key) {
@@ -957,196 +1232,69 @@ impl TerrainRenderer {
                 }
             }
 
-            for key in &removed_keys {
-                if let Some(objects) = self.lod_sources.remove(key) {
-                    for object in objects {
-                        self.terrain_render_objects.remove(&object.key);
-                    }
-                }
-            }
-
-            let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
-            let mut updated_chunks = 0usize;
-            let mut loaded_artifacts = 0usize;
-
+            let mut updates = Vec::new();
             for (key, base_artifact) in base_artifacts {
                 let needs_update = self
                     .last_base_chunk_hashes
                     .get(&key)
                     .map(|hash| *hash != base_artifact.content_hash)
                     .unwrap_or(true);
-                if !needs_update {
-                    continue;
+                if needs_update {
+                    updates.push((key, base_artifact));
                 }
-
-                let coord_key =
-                    chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
-                let mut sources = Vec::with_capacity(lod_levels as usize);
-
-                for lod in 0..lod_levels {
-                    let entry =
-                        chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
-                    let mut artifact = if lod == base_artifact.lod {
-                        base_artifact.clone()
-                    } else if self.missing_lod_artifacts.contains(&entry) {
-                        let mut fallback = base_artifact.clone();
-                        fallback.lod = lod;
-                        fallback
-                    } else {
-                        match self.fetch_lod_artifact(&entry) {
-                            Some(found) => {
-                                self.missing_lod_artifacts.remove(&entry);
-                                found
-                            }
-                            None => {
-                                self.missing_lod_artifacts.insert(entry.clone());
-                                let mut fallback = base_artifact.clone();
-                                fallback.lod = lod;
-                                fallback
-                            }
-                        }
-                    };
-                    artifact.lod = lod;
-                    self.queue_texture_build(&artifact);
-
-                    let object = if let Some(existing) =
-                        self.terrain_render_objects.get(&entry).cloned()
-                    {
-                        if existing.artifact.content_hash == artifact.content_hash {
-                            let mut updated = existing.clone();
-                            updated.transform = terrain_loader::terrain_chunk_transform(
-                                &settings,
-                                updated.artifact.chunk_coords,
-                                updated.artifact.bounds_min,
-                            );
-                            updated
-                        } else {
-                            terrain_loader::terrain_render_object_from_artifact(
-                                &settings,
-                                entry.clone(),
-                                artifact,
-                            )
-                        }
-                    } else {
-                        terrain_loader::terrain_render_object_from_artifact(
-                            &settings,
-                            entry.clone(),
-                            artifact,
-                        )
-                    };
-
-                    if !self.terrain_render_objects.contains_key(&entry) {
-                        loaded_artifacts += 1;
-                    }
-                    self.terrain_render_objects.insert(entry.clone(), object.clone());
-                    sources.push(object);
-                }
-
-                sources.sort_by_key(|source| source.artifact.lod);
-                self.lod_sources.insert(key.clone(), sources);
-                updated_chunks += 1;
             }
 
-            self.last_base_chunk_hashes = next_base_hashes;
-            if updated_chunks > 0 || !removed_keys.is_empty() {
-                info!(
-                    "Terrain refresh: updated_chunks={}, loaded_artifacts={}",
-                    updated_chunks, loaded_artifacts
-                );
+            if updates.is_empty() && removed_keys.is_empty() {
+                self.last_base_chunk_hashes = next_base_hashes;
+                return;
+            }
+
+            let mut pending = PendingTerrainRefresh {
+                kind: PendingRefreshKind::Delta(PendingDeltaRefresh {
+                    project_key,
+                    settings,
+                    updates,
+                    removals: removed_keys,
+                    next_base_hashes,
+                    lod_levels,
+                    updated_chunks: 0,
+                    loaded_artifacts: 0,
+                    update_index: 0,
+                    removal_index: 0,
+                }),
+            };
+            let completed = self.process_pending_refresh(&mut pending);
+            if !completed {
+                self.pending_refresh = Some(pending);
             }
             return;
         }
 
         let lod_levels = self.lod_levels.min(u32::from(u8::MAX)) as u8;
-
-        let mut next_objects = HashMap::new();
-        let mut ordered_objects = Vec::new();
-        let mut loaded_artifacts = 0usize;
-        let expected_objects = base_artifacts.len() * lod_levels as usize;
-        let mut changed = settings_changed
-            || base_hashes_changed
-            || self.terrain_dirty
-            || expected_objects != self.terrain_render_objects.len();
-
-        for base_artifact in base_artifacts.values() {
-            let coord_key =
-                chunk_coord_key(base_artifact.chunk_coords[0], base_artifact.chunk_coords[1]);
-            for lod in 0..lod_levels {
-                let entry = chunk_artifact_entry(&project_key, &coord_key, &lod_key(lod));
-                let mut artifact = if lod == base_artifact.lod {
-                    base_artifact.clone()
-                } else if self.missing_lod_artifacts.contains(&entry) {
-                    let mut fallback = base_artifact.clone();
-                    fallback.lod = lod;
-                    fallback
-                } else {
-                    match self.fetch_lod_artifact(&entry) {
-                        Some(found) => {
-                            self.missing_lod_artifacts.remove(&entry);
-                            found
-                        }
-                        None => {
-                            self.missing_lod_artifacts.insert(entry.clone());
-                            let mut fallback = base_artifact.clone();
-                            fallback.lod = lod;
-                            fallback
-                        }
-                    }
-                };
-                artifact.lod = lod;
-                self.queue_texture_build(&artifact);
-
-                if let Some(existing) = self.terrain_render_objects.get(&entry).cloned() {
-                    if existing.artifact.content_hash == artifact.content_hash {
-                        let mut updated = existing.clone();
-                        updated.transform = terrain_loader::terrain_chunk_transform(
-                            &settings,
-                            updated.artifact.chunk_coords,
-                            updated.artifact.bounds_min,
-                        );
-                        next_objects.insert(entry.clone(), updated.clone());
-                        ordered_objects.push(updated);
-                        continue;
-                    }
-                }
-
-                if !changed {
-                    changed = self
-                        .terrain_render_objects
-                        .get(&entry)
-                        .map(|existing| existing.artifact.content_hash != artifact.content_hash)
-                        .unwrap_or(true);
-                }
-                let object = terrain_loader::terrain_render_object_from_artifact(
-                    &settings,
-                    entry.clone(),
-                    artifact,
-                );
-                next_objects.insert(entry.clone(), object.clone());
-                ordered_objects.push(object);
-                loaded_artifacts += 1;
+        if !settings_changed && !base_hashes_changed && !self.terrain_dirty {
+            let expected_objects = base_artifacts.len() * lod_levels as usize;
+            if expected_objects == self.terrain_render_objects.len() {
+                return;
             }
         }
 
-        if !changed {
-            changed = self
-                .terrain_render_objects
-                .keys()
-                .any(|key| !next_objects.contains_key(key));
+        let mut pending = PendingTerrainRefresh {
+            kind: PendingRefreshKind::Full(PendingFullRefresh {
+                project_key,
+                settings,
+                base_artifacts: base_artifacts.into_values().collect(),
+                next_base_hashes,
+                lod_levels,
+                next_objects: HashMap::new(),
+                ordered_objects: Vec::new(),
+                loaded_artifacts: 0,
+                index: 0,
+            }),
+        };
+        let completed = self.process_pending_refresh(&mut pending);
+        if !completed {
+            self.pending_refresh = Some(pending);
         }
-
-        if !changed {
-            return;
-        }
-
-        self.terrain_render_objects = next_objects;
-        self.lod_sources = Self::group_lod_sources(&ordered_objects);
-        self.last_base_chunk_hashes = next_base_hashes;
-        info!(
-            "Terrain refresh: loaded_artifacts={}, total_objects={}",
-            loaded_artifacts,
-            self.terrain_render_objects.len()
-        );
     }
 
     fn poll_missing_lod_artifacts(&mut self) {
@@ -1587,31 +1735,28 @@ impl TerrainRenderer {
         objects: &[TerrainRenderObject],
         deferred: &mut TerrainDeferredResources,
         state: &mut BindlessState,
-    ) {
+        update_budget: usize,
+    ) -> bool {
+        let mut remaining_budget = update_budget;
         let mut next_keys = HashSet::with_capacity(objects.len());
         for object in objects {
             next_keys.insert(object.key.clone());
         }
 
-        let mut removals = Vec::new();
-        for (key, entry) in &deferred.objects {
-            if !next_keys.contains(key) {
-                removals.push((key.clone(), entry.clone()));
-            }
-        }
-
-        for (key, entry) in removals {
-            self.release_terrain_entry(&entry, deferred, state);
-            deferred.objects.remove(&key);
-        }
-
+        let mut pending_work = false;
         for object in objects {
             if let Some(entry) = deferred.objects.get(&object.key).cloned() {
+                self.update_terrain_transform(entry.transform_handle, object.transform, state);
                 if entry.content_hash == object.artifact.content_hash {
-                    self.update_terrain_transform(entry.transform_handle, object.transform, state);
                     continue;
                 }
             }
+
+            if remaining_budget == 0 {
+                pending_work = true;
+                continue;
+            }
+            remaining_budget = remaining_budget.saturating_sub(1);
 
             let Some(entry_build) =
                 self.build_terrain_entry(&object.key, &object.artifact, state)
@@ -1648,6 +1793,25 @@ impl TerrainRenderer {
                 },
             );
         }
+
+        let mut removals = Vec::new();
+        for (key, entry) in &deferred.objects {
+            if !next_keys.contains(key) {
+                removals.push((key.clone(), entry.clone()));
+            }
+        }
+
+        for (key, entry) in removals {
+            if remaining_budget == 0 {
+                pending_work = true;
+                break;
+            }
+            remaining_budget = remaining_budget.saturating_sub(1);
+            self.release_terrain_entry(&entry, deferred, state);
+            deferred.objects.remove(&key);
+        }
+
+        !pending_work
     }
 
     fn update_visibility(
