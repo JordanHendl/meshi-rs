@@ -1286,11 +1286,9 @@ impl SkyRenderer {
         &mut self,
         ctx: &mut dashi::Context,
         time: f32,
-        delta_time: f32,
+        _delta_time: f32,
     ) -> CommandStream<Executable> {
-        let mut stream = CommandStream::new().begin();
-
-        stream.end()
+        CommandStream::new().begin().end()
     }
 }
 
