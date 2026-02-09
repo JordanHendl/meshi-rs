@@ -203,7 +203,7 @@ VSOutput main(VSInput input) {
   float3 local_normal = vertex.normal;
   const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords);
   local_pos.y = terrain_height_buffer[clipmap_sample].x + vertex.position.y;
-  local_normal = terrain_normal_buffer[clipmap_sample].xyz;
+  local_normal = normalize(terrain_normal_buffer[clipmap_sample].xyz);
 
   const float4 world_pos = mul(model, float4(local_pos, 1.0));
   const float3 world_normal = normalize(mul(model, float4(local_normal, 0.0)).xyz);

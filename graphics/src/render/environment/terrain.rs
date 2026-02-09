@@ -4,8 +4,9 @@ use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw, DrawIndexedIndirect};
 use dashi::{
-    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
-    MemoryVisibility, SampleCount, ShaderResource, UsageBits, Viewport,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator,
+    DynamicAllocatorState, Format, Handle, MemoryVisibility, SampleCount, ShaderResource, UsageBits,
+    Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
@@ -186,6 +187,8 @@ pub struct TerrainRenderer {
     clipmap_slots: Vec<Option<TerrainClipmapSlot>>,
     clipmap_buffers_dirty: bool,
     clipmap_cache_dirty: bool,
+    deferred_sample_count: Option<SampleCount>,
+    deferred_dynamic_state: Option<DynamicAllocatorState>,
     pending_selection_tiles: HashMap<TerrainChunkKey, u32>,
     active_selection_tiles: HashMap<TerrainChunkKey, u32>,
 }
@@ -641,6 +644,8 @@ impl TerrainRenderer {
             clipmap_slots,
             clipmap_buffers_dirty,
             clipmap_cache_dirty: clipmap_buffers_dirty,
+            deferred_sample_count: None,
+            deferred_dynamic_state: None,
             pending_selection_tiles: HashMap::new(),
             active_selection_tiles: HashMap::new(),
         }
@@ -747,6 +752,8 @@ impl TerrainRenderer {
             },
             state,
         );
+        self.deferred_sample_count = Some(sample_count);
+        self.deferred_dynamic_state = Some(dynamic.state());
 
         let Some(clipmap_buffers) = self.clipmap_buffers.as_ref() else {
             warn!("Terrain clipmap buffers missing; deferred terrain will be disabled.");
@@ -758,7 +765,7 @@ impl TerrainRenderer {
             state,
             sample_count,
             &draw_builder,
-            dynamic,
+            dynamic.state(),
             clipmap_buffers,
         );
 
@@ -881,7 +888,7 @@ impl TerrainRenderer {
         if self.terrain_settings_dirty {
             if let Some(settings) = self.terrain_settings.clone() {
                 self.ensure_static_geometry(&settings, state);
-                self.ensure_clipmap_buffers(&settings);
+                self.ensure_clipmap_buffers(&settings, Some(state));
             }
             self.terrain_settings_dirty = false;
         }
@@ -2127,7 +2134,7 @@ impl TerrainRenderer {
         state: &mut BindlessState,
         sample_count: SampleCount,
         draw_builder: &GPUDrawBuilder,
-        dynamic: &DynamicAllocator,
+        dynamic_state: DynamicAllocatorState,
         clipmap_buffers: &TerrainClipmapBuffers,
     ) -> PSO {
         let shaders = compile_terrain_deferred_shaders();
@@ -2150,7 +2157,7 @@ impl TerrainRenderer {
             .add_table_variable_with_resources(
                 "per_scene_ssbo",
                 vec![dashi::IndexedResource {
-                    resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    resource: ShaderResource::DynamicStorage(dynamic_state),
                     slot: 0,
                 }],
             )
@@ -2468,7 +2475,11 @@ impl TerrainRenderer {
         Some(geometry)
     }
 
-    fn ensure_clipmap_buffers(&mut self, settings: &TerrainProjectSettings) {
+    fn ensure_clipmap_buffers(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        state: Option<&mut BindlessState>,
+    ) {
         let grid_x = settings.tiles_per_chunk[0].saturating_add(1).max(1);
         let grid_y = settings.tiles_per_chunk[1].saturating_add(1).max(1);
         let grid_size = [grid_x, grid_y];
@@ -2478,6 +2489,28 @@ impl TerrainRenderer {
                     "Terrain clipmap grid size mismatch (settings {:?} vs startup {:?}).",
                     grid_size, buffers.grid_size
                 );
+                self.build_clipmap_buffers(grid_size);
+                self.texture_data_cache.clear();
+                self.clipmap_cache_dirty = true;
+                if let (Some(deferred), Some(state)) = (self.deferred.as_mut(), state) {
+                    if let (Some(mut ctx_ptr), Some(sample_count), Some(dynamic_state)) = (
+                        self.context,
+                        self.deferred_sample_count,
+                        self.deferred_dynamic_state.clone(),
+                    ) {
+                        if let Some(clipmap_buffers) = self.clipmap_buffers.as_ref() {
+                            let ctx = unsafe { ctx_ptr.as_mut() };
+                            deferred.pipeline = Self::build_deferred_pipeline(
+                                ctx,
+                                state,
+                                sample_count,
+                                &deferred.draw_builder,
+                                dynamic_state,
+                                clipmap_buffers,
+                            );
+                        }
+                    }
+                }
             }
             return;
         }
@@ -2587,7 +2620,7 @@ impl TerrainRenderer {
     ) {
         if self.clipmap_buffers.is_none() {
             if let Some(settings) = self.terrain_settings.clone() {
-                self.ensure_clipmap_buffers(&settings);
+                self.ensure_clipmap_buffers(&settings, None);
             }
         }
         let Some(buffers) = self.clipmap_buffers.as_mut() else {
