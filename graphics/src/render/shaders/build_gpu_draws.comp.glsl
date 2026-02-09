@@ -20,6 +20,7 @@ struct PerDrawData {
     uint terrain_normal_texture_id;
     uint terrain_blend_texture_id;
     uint terrain_blend_ids_texture_id;
+    uint terrain_clipmap_tile;
 };
 
 struct CulledObject {

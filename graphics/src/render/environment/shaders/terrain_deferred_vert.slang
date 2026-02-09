@@ -25,10 +25,14 @@ struct PerDrawData {
   uint terrain_normal_texture_id;
   uint terrain_blend_texture_id;
   uint terrain_blend_ids_texture_id;
+  uint terrain_clipmap_tile;
 };
 
 struct PerSceneData {
   Handle camera;
+  uint2 clipmap_grid_size;
+  uint clipmap_tile_texel_count;
+  uint _padding;
 };
 
 struct Camera {
@@ -60,6 +64,8 @@ struct VSOutput {
   [[vk::location(4)]] float4 world_tangent : TANGENT0;
   [[vk::location(5)]] nointerpolation uint blend_texture_id : TERRAIN_BLEND_TEXTURE;
   [[vk::location(6)]] nointerpolation uint blend_ids_texture_id : TERRAIN_BLEND_IDS_TEXTURE;
+  [[vk::location(7)]] nointerpolation uint clipmap_tile_index : TERRAIN_CLIPMAP_TILE;
+  [[vk::location(8)]] nointerpolation uint material_id : TERRAIN_MATERIAL_ID;
 };
 
 struct VertexData {
@@ -78,6 +84,12 @@ uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t0, space1);
 uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t0, space2);
 static PerSceneData scene = per_scene_ssbo[0];
 
+uniform StructuredBuffer<float4> terrain_height_buffer : register(t0, space3);
+uniform StructuredBuffer<float4> terrain_normal_buffer : register(t0, space4);
+uniform StructuredBuffer<float4> terrain_blend_buffer : register(t0, space5);
+uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t0, space6);
+uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t0, space7);
+
 uniform Texture2D meshi_bindless_textures[] : register(t0, space0);
 uniform SamplerState meshi_bindless_samplers[] : register(s1, space0);
 uniform StructuredBuffer<Camera> meshi_bindless_cameras : register(t2, space0);
@@ -85,6 +97,17 @@ uniform StructuredBuffer<Transformation> meshi_bindless_transformations : regist
 uniform ByteAddressBuffer meshi_bindless_vertices : register(t12, space0);
 
 static const uint INVALID_BINDLESS_ID = 0xFFFFFFFFu;
+
+uint clipmap_index(uint tile_index, float2 uv) {
+  const uint2 grid = scene.clipmap_grid_size;
+  if (grid.x == 0u || grid.y == 0u) {
+    return 0u;
+  }
+  const float2 clamped = saturate(uv);
+  const float2 texel = clamped * float2(grid.x - 1u, grid.y - 1u);
+  const uint2 texel_coord = uint2(texel + 0.5);
+  return tile_index * scene.clipmap_tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
+}
 
 float4x4 inverse(float4x4 m) {
   float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
@@ -178,15 +201,9 @@ VSOutput main(VSInput input) {
 
   float3 local_pos = vertex.position;
   float3 local_normal = vertex.normal;
-  if (draw.terrain_height_texture_id != INVALID_BINDLESS_ID) {
-    const float height = meshi_bindless_textures[draw.terrain_height_texture_id]
-      .Sample(meshi_bindless_samplers[draw.terrain_height_texture_id], vertex.tex_coords).x;
-    local_pos.y = height + vertex.position.y;
-  }
-  if (draw.terrain_normal_texture_id != INVALID_BINDLESS_ID) {
-    local_normal = meshi_bindless_textures[draw.terrain_normal_texture_id]
-      .Sample(meshi_bindless_samplers[draw.terrain_normal_texture_id], vertex.tex_coords).xyz;
-  }
+  const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords);
+  local_pos.y = terrain_height_buffer[clipmap_sample].x + vertex.position.y;
+  local_normal = terrain_normal_buffer[clipmap_sample].xyz;
 
   const float4 world_pos = mul(model, float4(local_pos, 1.0));
   const float3 world_normal = normalize(mul(model, float4(local_normal, 0.0)).xyz);
@@ -200,6 +217,8 @@ VSOutput main(VSInput input) {
   output.world_tangent = float4(world_tangent, vertex.tangent.w);
   output.blend_texture_id = draw.terrain_blend_texture_id;
   output.blend_ids_texture_id = draw.terrain_blend_ids_texture_id;
+  output.clipmap_tile_index = draw.terrain_clipmap_tile;
+  output.material_id = draw.material_id.valid() ? uint(draw.material_id.id()) : 0xFFFFu;
 
   output.position.y = -output.position.y;
   return output;

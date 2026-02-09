@@ -23,10 +23,11 @@ struct PerDrawData {
     uint vertex_count;
     uint index_id;
     uint index_count;
-    uint terrain_height_texture_id;
-    uint terrain_normal_texture_id;
-    uint terrain_blend_texture_id;
-    uint terrain_blend_ids_texture_id;
+  uint terrain_height_texture_id;
+  uint terrain_normal_texture_id;
+  uint terrain_blend_texture_id;
+  uint terrain_blend_ids_texture_id;
+  uint terrain_clipmap_tile;
 };
 
 uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t0, space1);

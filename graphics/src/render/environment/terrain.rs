@@ -4,9 +4,8 @@ use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw, DrawIndexedIndirect};
 use dashi::{
-    AspectMask, Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format,
-    Handle, ImageInfo, ImageViewType, MemoryVisibility, SampleCount, ShaderResource,
-    SubresourceRange, UsageBits, Viewport,
+    Buffer, BufferInfo, BufferUsage, CommandStream, Context, DynamicAllocator, Format, Handle,
+    MemoryVisibility, SampleCount, ShaderResource, UsageBits, Viewport,
 };
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
@@ -33,8 +32,8 @@ use tracing::{info, warn};
 
 use crate::render::deferred::PerDrawData;
 use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
-use crate::render::image_pager::{ImagePager, ImagePagerBackend, ImagePagerKey, InlineImageKey};
 use crate::terrain_loader;
+use tare::utils::StagedBuffer;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
@@ -50,6 +49,7 @@ pub struct TerrainInfo {
     pub lod_levels: u32,
     pub clipmap_resolution: u32,
     pub max_tiles: u32,
+    pub clipmap_tile_resolution: [u32; 2],
 }
 
 pub const TERRAIN_DRAW_BIN: u32 = 0;
@@ -70,6 +70,7 @@ impl Default for TerrainInfo {
             lod_levels: 4,
             clipmap_resolution,
             max_tiles: clipmap_resolution * clipmap_resolution,
+            clipmap_tile_resolution: [65, 65],
         }
     }
 }
@@ -146,7 +147,6 @@ pub struct TerrainRenderer {
     use_depth: bool,
     deferred: Option<TerrainDeferredResources>,
     static_geometry: Option<TerrainStaticGeometry>,
-    image_pager: ImagePager,
     lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
     active_chunk_lods: HashMap<TerrainChunkKey, String>,
     active_chunk_lod_levels: HashMap<TerrainChunkKey, u8>,
@@ -176,12 +176,18 @@ pub struct TerrainRenderer {
     pending_selection_keys: HashMap<TerrainChunkKey, String>,
     pending_selection_lod_levels: HashMap<TerrainChunkKey, u8>,
     pending_refresh: Option<PendingTerrainRefresh>,
-    texture_data_cache: HashMap<TerrainTextureCacheKey, std::sync::Arc<Vec<f32>>>,
+    texture_data_cache: HashMap<TerrainTextureCacheKey, Arc<Vec<f32>>>,
     texture_work_requests: Arc<SegQueue<TerrainTextureWorkItem>>,
     texture_work_results: Arc<SegQueue<TerrainTextureBuildResult>>,
     texture_work_pending: HashSet<TerrainTextureWorkKey>,
     texture_worker_running: Arc<AtomicBool>,
     texture_worker_handle: Option<JoinHandle<()>>,
+    clipmap_buffers: Option<TerrainClipmapBuffers>,
+    clipmap_slots: Vec<Option<TerrainClipmapSlot>>,
+    clipmap_buffers_dirty: bool,
+    clipmap_cache_dirty: bool,
+    pending_selection_tiles: HashMap<TerrainChunkKey, u32>,
+    active_selection_tiles: HashMap<TerrainChunkKey, u32>,
 }
 
 #[derive(Clone)]
@@ -191,7 +197,7 @@ struct TerrainObjectEntry {
     draw_instances: Vec<TerrainDrawInstance>,
     content_hash: u64,
     material_handle: Handle<Material>,
-    textures: TerrainTextureSet,
+    clipmap_tile_index: u32,
 }
 
 #[derive(Clone)]
@@ -201,6 +207,7 @@ struct TerrainDrawInstance {
     vertex_count: u32,
     index_id: u32,
     index_count: u32,
+    clipmap_tile_index: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -249,18 +256,22 @@ struct TerrainTextureBuildResult {
     textures: Vec<(TerrainTextureCacheKey, Arc<Vec<f32>>)>,
 }
 
-#[derive(Clone)]
-struct TerrainTexture {
-    key: ImagePagerKey,
-    handle: u32,
+struct TerrainClipmapBuffers {
+    grid_size: [u32; 2],
+    tile_texel_count: u32,
+    tile_count: u32,
+    height: StagedBuffer,
+    normal: StagedBuffer,
+    blend: StagedBuffer,
+    blend_ids: StagedBuffer,
+    hole_mask: StagedBuffer,
 }
 
-#[derive(Clone, Default)]
-struct TerrainTextureSet {
-    height: Option<TerrainTexture>,
-    normal: Option<TerrainTexture>,
-    blend: Option<TerrainTexture>,
-    blend_ids: Option<TerrainTexture>,
+#[derive(Clone, Copy)]
+struct TerrainClipmapSlot {
+    hash: u64,
+    lod: u8,
+    grid_size: [u32; 2],
 }
 
 struct PendingTerrainRefresh {
@@ -297,52 +308,10 @@ struct PendingDeltaRefresh {
     removal_index: usize,
 }
 
-impl TerrainTextureSet {
-    fn height_handle(&self) -> u32 {
-        self.height.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
-    }
-
-    fn normal_handle(&self) -> u32 {
-        self.normal.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
-    }
-
-    fn blend_handle(&self) -> u32 {
-        self.blend.as_ref().map(|tex| tex.handle).unwrap_or(u32::MAX)
-    }
-
-    fn blend_ids_handle(&self) -> u32 {
-        self.blend_ids
-            .as_ref()
-            .map(|tex| tex.handle)
-            .unwrap_or(u32::MAX)
-    }
-}
-
 struct TerrainEntryBuild {
     draw_instances: Vec<TerrainDrawInstance>,
     material_handle: Handle<Material>,
-    textures: TerrainTextureSet,
-}
-
-struct TerrainImageBackend<'a> {
-    state: &'a mut BindlessState,
-}
-
-impl ImagePagerBackend for TerrainImageBackend<'_> {
-    fn reserve_handle(&mut self) -> u32 {
-        u32::MAX
-    }
-
-    fn register_image(&mut self, _handle: u32, view: dashi::ImageView) -> u32 {
-        self.state.add_texture(view) as u32
-    }
-
-    fn release_image(&mut self, handle: u32) {
-        if handle == u32::MAX {
-            return;
-        }
-        self.state.remove_texture(handle as u16);
-    }
+    clipmap_tile_index: u32,
 }
 
 struct TerrainDeferredResources {
@@ -500,6 +469,23 @@ impl TerrainRenderer {
             })
             .expect("Failed to create terrain meshlet buffer");
 
+        let clipmap_buffers = if terrain_info.clipmap_tile_resolution[0] > 0
+            && terrain_info.clipmap_tile_resolution[1] > 0
+        {
+            Some(Self::allocate_clipmap_buffers(
+                ctx,
+                terrain_info.clipmap_resolution,
+                terrain_info.clipmap_tile_resolution,
+            ))
+        } else {
+            None
+        };
+        let clipmap_slots = clipmap_buffers
+            .as_ref()
+            .map(|buffers| vec![None; buffers.tile_count as usize])
+            .unwrap_or_default();
+        let clipmap_buffers_dirty = clipmap_buffers.is_some();
+
         let compute_pipeline = Some(
             CSOBuilder::new()
                 .shader(Some(
@@ -616,7 +602,6 @@ impl TerrainRenderer {
             use_depth: info.use_depth,
             deferred: None,
             static_geometry: None,
-            image_pager: ImagePager::new(),
             lod_sources: HashMap::new(),
             active_chunk_lods: HashMap::new(),
             active_chunk_lod_levels: HashMap::new(),
@@ -652,6 +637,12 @@ impl TerrainRenderer {
             texture_work_pending: HashSet::new(),
             texture_worker_running,
             texture_worker_handle,
+            clipmap_buffers,
+            clipmap_slots,
+            clipmap_buffers_dirty,
+            clipmap_cache_dirty: clipmap_buffers_dirty,
+            pending_selection_tiles: HashMap::new(),
+            active_selection_tiles: HashMap::new(),
         }
     }
 
@@ -698,6 +689,14 @@ impl TerrainRenderer {
                                 grid: item.work_key.grid,
                             },
                             Arc::new(Self::build_blend_ids_data(artifact, grid_x, grid_y)),
+                        ),
+                        (
+                            TerrainTextureCacheKey {
+                                kind: "hole_mask",
+                                hash: item.work_key.hash,
+                                grid: item.work_key.grid,
+                            },
+                            Arc::new(Self::build_hole_mask_data(artifact, grid_x, grid_y)),
                         ),
                     ];
                     results.push(TerrainTextureBuildResult {
@@ -749,8 +748,19 @@ impl TerrainRenderer {
             state,
         );
 
-        let pipeline =
-            Self::build_deferred_pipeline(ctx, state, sample_count, &draw_builder, dynamic);
+        let Some(clipmap_buffers) = self.clipmap_buffers.as_ref() else {
+            warn!("Terrain clipmap buffers missing; deferred terrain will be disabled.");
+            return;
+        };
+
+        let pipeline = Self::build_deferred_pipeline(
+            ctx,
+            state,
+            sample_count,
+            &draw_builder,
+            dynamic,
+            clipmap_buffers,
+        );
 
         self.deferred = Some(TerrainDeferredResources {
             draw_builder,
@@ -792,6 +802,11 @@ impl TerrainRenderer {
         self.pending_refresh = None;
         self.texture_data_cache.clear();
         self.texture_work_pending.clear();
+        self.clipmap_slots.iter_mut().for_each(|slot| *slot = None);
+        self.clipmap_buffers_dirty = true;
+        self.clipmap_cache_dirty = true;
+        self.pending_selection_tiles.clear();
+        self.active_selection_tiles.clear();
     }
 
     pub fn set_project_key(&mut self, project_key: &str) {
@@ -819,6 +834,11 @@ impl TerrainRenderer {
         self.pending_refresh = None;
         self.texture_data_cache.clear();
         self.texture_work_pending.clear();
+        self.clipmap_slots.iter_mut().for_each(|slot| *slot = None);
+        self.clipmap_buffers_dirty = true;
+        self.clipmap_cache_dirty = true;
+        self.pending_selection_tiles.clear();
+        self.active_selection_tiles.clear();
     }
 
     pub fn update(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
@@ -831,7 +851,9 @@ impl TerrainRenderer {
         self.update_camera_state(camera, state);
         self.camera_velocity = self.camera_position.distance(previous_frame_position);
         self.last_frame_camera_position = Some(self.camera_position);
-        self.drain_texture_work();
+        if self.drain_texture_work() {
+            self.clipmap_cache_dirty = true;
+        }
         if self.terrain_project_key.is_some() {
             let settings_poll_due = self
                 .refresh_frame_index
@@ -859,6 +881,7 @@ impl TerrainRenderer {
         if self.terrain_settings_dirty {
             if let Some(settings) = self.terrain_settings.clone() {
                 self.ensure_static_geometry(&settings, state);
+                self.ensure_clipmap_buffers(&settings);
             }
             self.terrain_settings_dirty = false;
         }
@@ -866,7 +889,7 @@ impl TerrainRenderer {
             return;
         }
 
-        let selection = self.select_lod_objects();
+        let (selection, selection_tiles) = self.select_lod_objects();
         let selection_keys = Self::selection_key_map(&selection);
 
         let Some(mut deferred) = self.deferred.take() else {
@@ -887,6 +910,7 @@ impl TerrainRenderer {
         if selection_changed {
             self.pending_selection = Some(selection.clone());
             self.pending_selection_keys = selection_keys;
+            self.pending_selection_tiles = selection_tiles.clone();
             self.pending_selection_lod_levels = selection
                 .iter()
                 .map(|object| {
@@ -902,19 +926,28 @@ impl TerrainRenderer {
         }
 
         if let Some(pending) = self.pending_selection.take() {
+            let tile_map = std::mem::take(&mut self.pending_selection_tiles);
             let completed = self.apply_render_objects(
                 &pending,
+                &tile_map,
                 &mut deferred,
                 state,
                 TERRAIN_UPDATE_BUDGET_PER_FRAME,
             );
             if completed {
                 self.active_chunk_lods = std::mem::take(&mut self.pending_selection_keys);
+                self.active_selection_tiles = tile_map;
                 self.active_chunk_lod_levels =
                     std::mem::take(&mut self.pending_selection_lod_levels);
             } else {
                 self.pending_selection = Some(pending);
+                self.pending_selection_tiles = tile_map;
             }
+        }
+
+        if selection_changed || self.clipmap_cache_dirty {
+            self.refresh_clipmap_tiles(&selection, &selection_tiles);
+            self.clipmap_cache_dirty = false;
         }
 
         self.update_visibility(&selection, &mut deferred);
@@ -1462,15 +1495,15 @@ impl TerrainRenderer {
         Some([local_x.floor() as i32, local_y.floor() as i32])
     }
 
-    fn select_lod_objects(&mut self) -> Vec<TerrainRenderObject> {
+    fn select_lod_objects(&mut self) -> (Vec<TerrainRenderObject>, HashMap<TerrainChunkKey, u32>) {
         let Some(settings) = self.terrain_settings.as_ref() else {
-            return Vec::new();
+            return (Vec::new(), HashMap::new());
         };
         let Some(center_coords) = self.camera_chunk_coords(settings) else {
-            return Vec::new();
+            return (Vec::new(), HashMap::new());
         };
         let Some(project_key) = self.terrain_project_key.clone() else {
-            return Vec::new();
+            return (Vec::new(), HashMap::new());
         };
 
         let resolution = self.clipmap_resolution.max(1) as i32;
@@ -1500,7 +1533,56 @@ impl TerrainRenderer {
             }
         }
 
-        selected
+        let tile_indices = self.assign_clipmap_tiles(&selected);
+        (selected, tile_indices)
+    }
+
+    fn assign_clipmap_tiles(
+        &self,
+        selection: &[TerrainRenderObject],
+    ) -> HashMap<TerrainChunkKey, u32> {
+        let tile_count = (self.clipmap_resolution.max(1) * self.clipmap_resolution.max(1)) as usize;
+        let mut used = vec![false; tile_count];
+        let mut tile_indices = HashMap::with_capacity(selection.len());
+
+        for object in selection {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            if let Some(&slot) = self.active_selection_tiles.get(&key) {
+                let slot_index = slot as usize;
+                if slot_index < tile_count && !used[slot_index] {
+                    used[slot_index] = true;
+                    tile_indices.insert(key, slot);
+                }
+            }
+        }
+
+        let mut next_slot = 0usize;
+        for object in selection {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            if tile_indices.contains_key(&key) {
+                continue;
+            }
+            while next_slot < tile_count && used[next_slot] {
+                next_slot += 1;
+            }
+            let slot = if next_slot < tile_count {
+                used[next_slot] = true;
+                let slot = next_slot as u32;
+                next_slot += 1;
+                slot
+            } else {
+                0
+            };
+            tile_indices.insert(key, slot);
+        }
+
+        tile_indices
     }
 
     fn select_clipmap_source(
@@ -1733,6 +1815,7 @@ impl TerrainRenderer {
     fn apply_render_objects(
         &mut self,
         objects: &[TerrainRenderObject],
+        tile_indices: &HashMap<TerrainChunkKey, u32>,
         deferred: &mut TerrainDeferredResources,
         state: &mut BindlessState,
         update_budget: usize,
@@ -1745,9 +1828,31 @@ impl TerrainRenderer {
 
         let mut pending_work = false;
         for object in objects {
-            if let Some(entry) = deferred.objects.get(&object.key).cloned() {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            let tile_index = tile_indices.get(&key).copied().unwrap_or(0);
+            if let Some(entry) = deferred.objects.get_mut(&object.key) {
                 self.update_terrain_transform(entry.transform_handle, object.transform, state);
                 if entry.content_hash == object.artifact.content_hash {
+                    if entry.clipmap_tile_index != tile_index {
+                        if remaining_budget == 0 {
+                            pending_work = true;
+                            continue;
+                        }
+                        remaining_budget = remaining_budget.saturating_sub(1);
+                        entry.clipmap_tile_index = tile_index;
+                        for instance in &mut entry.draw_instances {
+                            instance.clipmap_tile_index = tile_index;
+                        }
+                        TerrainRenderer::release_terrain_draws(entry, &mut deferred.draw_builder);
+                        entry.draws = self.register_draw_instances(
+                            &entry.draw_instances,
+                            entry.transform_handle,
+                            &mut deferred.draw_builder,
+                        );
+                    }
                     continue;
                 }
             }
@@ -1759,7 +1864,7 @@ impl TerrainRenderer {
             remaining_budget = remaining_budget.saturating_sub(1);
 
             let Some(entry_build) =
-                self.build_terrain_entry(&object.key, &object.artifact, state)
+                self.build_terrain_entry(&object.artifact, tile_index, state)
             else {
                 warn!("Failed to build terrain render object '{}'.", object.key);
                 continue;
@@ -1770,15 +1875,11 @@ impl TerrainRenderer {
             let draws = self.register_draw_instances(
                 &draw_instances,
                 transform_handle,
-                &entry_build.textures,
                 &mut deferred.draw_builder,
             );
 
-            if let Some(entry) = deferred.objects.get(&object.key).cloned() {
-                if entry.content_hash != object.artifact.content_hash {
-                    self.release_terrain_entry(&entry, deferred, state);
-                    deferred.objects.remove(&object.key);
-                }
+            if let Some(entry) = deferred.objects.remove(&object.key) {
+                self.release_terrain_entry(&entry, deferred, state);
             }
 
             deferred.objects.insert(
@@ -1789,7 +1890,7 @@ impl TerrainRenderer {
                     draw_instances,
                     content_hash: object.artifact.content_hash,
                     material_handle: entry_build.material_handle,
-                    textures: entry_build.textures,
+                    clipmap_tile_index: entry_build.clipmap_tile_index,
                 },
             );
         }
@@ -1874,7 +1975,6 @@ impl TerrainRenderer {
             entry.draws = self.register_draw_instances(
                 &instances,
                 transform_handle,
-                &entry.textures,
                 &mut deferred.draw_builder,
             );
         }
@@ -1941,6 +2041,7 @@ impl TerrainRenderer {
         camera: Handle<Camera>,
         indices_handle: Handle<Buffer>,
     ) -> CommandStream<PendingGraphics> {
+        let sync = self.sync_clipmap_buffers();
         let Some(deferred) = &mut self.deferred else {
             return CommandStream::<PendingGraphics>::subdraw();
         };
@@ -1948,14 +2049,33 @@ impl TerrainRenderer {
         #[repr(C)]
         struct PerSceneData {
             camera: Handle<Camera>,
+            clipmap_grid_size: [u32; 2],
+            clipmap_tile_texel_count: u32,
+            _padding: u32,
         }
 
         let mut alloc = dynamic
             .bump()
             .expect("Failed to allocate terrain per-scene data");
-        alloc.slice::<PerSceneData>()[0].camera = camera;
+        let clipmap_info = self.clipmap_buffers.as_ref().map(|buffers| {
+            (
+                buffers.grid_size,
+                buffers.tile_texel_count,
+            )
+        });
+        let (grid_size, tile_texel_count) = clipmap_info.unwrap_or(([0, 0], 0));
+        alloc.slice::<PerSceneData>()[0] = PerSceneData {
+            camera,
+            clipmap_grid_size: grid_size,
+            clipmap_tile_texel_count: tile_texel_count,
+            _padding: 0,
+        };
 
-        CommandStream::<PendingGraphics>::subdraw()
+        let mut stream = CommandStream::<PendingGraphics>::subdraw();
+        if let Some(sync) = sync {
+            stream = stream.combine(sync);
+        }
+        stream
             .bind_graphics_pipeline(deferred.pipeline.handle)
             .update_viewport(viewport)
             .draw_indexed_indirect(&DrawIndexedIndirect {
@@ -2008,6 +2128,7 @@ impl TerrainRenderer {
         sample_count: SampleCount,
         draw_builder: &GPUDrawBuilder,
         dynamic: &DynamicAllocator,
+        clipmap_buffers: &TerrainClipmapBuffers,
     ) -> PSO {
         let shaders = compile_terrain_deferred_shaders();
 
@@ -2030,6 +2151,45 @@ impl TerrainRenderer {
                 "per_scene_ssbo",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::DynamicStorage(dynamic.state()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "terrain_height_buffer",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(clipmap_buffers.height.device().into()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "terrain_normal_buffer",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(clipmap_buffers.normal.device().into()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "terrain_blend_buffer",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(clipmap_buffers.blend.device().into()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "terrain_blend_ids_buffer",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(
+                        clipmap_buffers.blend_ids.device().into(),
+                    ),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "terrain_hole_mask_buffer",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::StorageBuffer(
+                        clipmap_buffers.hole_mask.device().into(),
+                    ),
                     slot: 0,
                 }],
             )
@@ -2066,7 +2226,6 @@ impl TerrainRenderer {
         for draw in &entry.draws {
             deferred.draw_builder.release_draw(*draw);
         }
-        self.release_terrain_textures(&entry.textures, state);
 
         if entry.material_handle.valid() {
             state
@@ -2088,7 +2247,6 @@ impl TerrainRenderer {
         &mut self,
         instances: &[TerrainDrawInstance],
         transform_handle: Handle<Transformation>,
-        textures: &TerrainTextureSet,
         draw_builder: &mut GPUDrawBuilder,
     ) -> Vec<Handle<PerDrawData>> {
         instances
@@ -2102,10 +2260,7 @@ impl TerrainRenderer {
                     instance.vertex_count,
                     instance.index_id,
                     instance.index_count,
-                    textures.height_handle(),
-                    textures.normal_handle(),
-                    textures.blend_handle(),
-                    textures.blend_ids_handle(),
+                    instance.clipmap_tile_index,
                 ))
             })
             .collect()
@@ -2113,8 +2268,8 @@ impl TerrainRenderer {
 
     fn build_terrain_entry(
         &mut self,
-        key: &str,
         artifact: &TerrainChunkArtifact,
+        clipmap_tile_index: u32,
         state: &mut BindlessState,
     ) -> Option<TerrainEntryBuild> {
         let static_geometry = self.static_geometry.as_ref()?;
@@ -2123,7 +2278,6 @@ impl TerrainRenderer {
             .get(artifact.lod as usize)
             .copied()
             .or_else(|| static_geometry.lods.last().copied())?;
-        let textures = self.load_terrain_textures(key, artifact, state);
         let (material_handle, _material) = self.allocate_terrain_material(state);
         let draw_instances = vec![TerrainDrawInstance {
             material: material_handle,
@@ -2131,12 +2285,13 @@ impl TerrainRenderer {
             vertex_count: geometry.vertex_count,
             index_id: geometry.index_id,
             index_count: geometry.index_count,
+            clipmap_tile_index,
         }];
 
         Some(TerrainEntryBuild {
             draw_instances,
             material_handle,
-            textures,
+            clipmap_tile_index,
         })
     }
 
@@ -2313,157 +2468,300 @@ impl TerrainRenderer {
         Some(geometry)
     }
 
-    fn load_terrain_textures(
-        &mut self,
-        key: &str,
-        artifact: &TerrainChunkArtifact,
-        state: &mut BindlessState,
-    ) -> TerrainTextureSet {
+    fn ensure_clipmap_buffers(&mut self, settings: &TerrainProjectSettings) {
+        let grid_x = settings.tiles_per_chunk[0].saturating_add(1).max(1);
+        let grid_y = settings.tiles_per_chunk[1].saturating_add(1).max(1);
+        let grid_size = [grid_x, grid_y];
+        if let Some(buffers) = self.clipmap_buffers.as_ref() {
+            if buffers.grid_size != grid_size {
+                warn!(
+                    "Terrain clipmap grid size mismatch (settings {:?} vs startup {:?}).",
+                    grid_size, buffers.grid_size
+                );
+            }
+            return;
+        }
+
+        self.build_clipmap_buffers(grid_size);
+    }
+
+    fn build_clipmap_buffers(&mut self, grid_size: [u32; 2]) {
         let Some(mut ctx_ptr) = self.context else {
-            return TerrainTextureSet::default();
+            return;
         };
         let ctx = unsafe { ctx_ptr.as_mut() };
-        let mut backend = TerrainImageBackend { state };
+        let buffers = Self::allocate_clipmap_buffers(ctx, self.clipmap_resolution, grid_size);
+        let tile_count = buffers.tile_count;
+        self.clipmap_buffers = Some(buffers);
+        self.clipmap_slots = vec![None; tile_count as usize];
+        self.clipmap_buffers_dirty = true;
+        self.clipmap_cache_dirty = true;
+    }
 
-        let grid_x = artifact.grid_size[0];
-        let grid_y = artifact.grid_size[1];
-        if grid_x == 0 || grid_y == 0 {
-            return TerrainTextureSet::default();
-        }
+    fn allocate_clipmap_buffers(
+        ctx: &mut Context,
+        clipmap_resolution: u32,
+        grid_size: [u32; 2],
+    ) -> TerrainClipmapBuffers {
+        let tile_count = clipmap_resolution.max(1) * clipmap_resolution.max(1);
+        let tile_texel_count = grid_size[0].saturating_mul(grid_size[1]).max(1);
+        let texel_total = tile_count.saturating_mul(tile_texel_count).max(1);
+        let byte_size = texel_total
+            .saturating_mul(4)
+            .saturating_mul(std::mem::size_of::<f32>() as u32)
+            .max(256);
 
-        let mut textures = TerrainTextureSet::default();
-        let height_view = self.build_heightmap_view(ctx, key, artifact, grid_x, grid_y);
-        textures.height =
-            self.cached_terrain_texture("height", artifact.content_hash, &mut backend, height_view);
-
-        let normal_view = self.build_normalmap_view(ctx, key, artifact, grid_x, grid_y);
-        textures.normal =
-            self.cached_terrain_texture("normal", artifact.content_hash, &mut backend, normal_view);
-
-        let blend_view = self.build_blendmap_view(ctx, key, artifact, grid_x, grid_y);
-        textures.blend =
-            self.cached_terrain_texture("blend", artifact.content_hash, &mut backend, blend_view);
-
-        let blend_ids_view = self.build_blend_ids_view(ctx, key, artifact, grid_x, grid_y);
-        textures.blend_ids = self.cached_terrain_texture(
-            "blend_ids",
-            artifact.content_hash,
-            &mut backend,
-            blend_ids_view,
+        let mut height = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI GFX TERRAIN] Clipmap Heightmap",
+                byte_size,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+        let mut normal = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI GFX TERRAIN] Clipmap Normals",
+                byte_size,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+        let mut blend = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI GFX TERRAIN] Clipmap Blend Weights",
+                byte_size,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+        let mut blend_ids = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI GFX TERRAIN] Clipmap Blend Ids",
+                byte_size,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+        let mut hole_mask = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI GFX TERRAIN] Clipmap Hole Masks",
+                byte_size,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
         );
 
-        textures
-    }
+        Self::fill_default_height(height.as_slice_mut::<f32>());
+        Self::fill_default_normal(normal.as_slice_mut::<f32>());
+        Self::fill_default_blend(blend.as_slice_mut::<f32>());
+        Self::fill_default_blend_ids(blend_ids.as_slice_mut::<f32>());
+        Self::fill_default_hole_mask(hole_mask.as_slice_mut::<f32>());
 
-    fn cached_terrain_texture(
-        &mut self,
-        kind: &'static str,
-        hash: u64,
-        backend: &mut TerrainImageBackend<'_>,
-        view: Option<dashi::ImageView>,
-    ) -> Option<TerrainTexture> {
-        let key = ImagePagerKey::Inline(InlineImageKey {
-            id: format!("terrain/{kind}/{hash:016x}"),
-        });
-        if let Some(handle) = self.image_pager.handle(&key) {
-            return Some(TerrainTexture { key, handle });
+        TerrainClipmapBuffers {
+            grid_size,
+            tile_texel_count,
+            tile_count,
+            height,
+            normal,
+            blend,
+            blend_ids,
+            hole_mask,
         }
-        let view = view?;
-        let handle = self.image_pager.register_inline_image(key.clone(), view, backend);
-        Some(TerrainTexture { key, handle })
     }
 
-    fn build_heightmap_view(
+    fn refresh_clipmap_tiles(
         &mut self,
-        ctx: &mut Context,
-        key: &str,
-        artifact: &TerrainChunkArtifact,
-        grid_x: u32,
-        grid_y: u32,
-    ) -> Option<dashi::ImageView> {
-        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
-            kind: "height",
-            hash: artifact.content_hash,
-            grid: [grid_x, grid_y],
-        })?;
-        self.build_texture_view(ctx, &format!("terrain_{key}_height"), grid_x, grid_y, data)
+        selection: &[TerrainRenderObject],
+        tile_indices: &HashMap<TerrainChunkKey, u32>,
+    ) {
+        if self.clipmap_buffers.is_none() {
+            if let Some(settings) = self.terrain_settings.clone() {
+                self.ensure_clipmap_buffers(&settings);
+            }
+        }
+        let Some(buffers) = self.clipmap_buffers.as_mut() else {
+            return;
+        };
+
+        let tile_texel_count = buffers.tile_texel_count as usize;
+        let tile_data_len = tile_texel_count * 4;
+        let height_slice = buffers.height.as_slice_mut::<f32>();
+        let normal_slice = buffers.normal.as_slice_mut::<f32>();
+        let blend_slice = buffers.blend.as_slice_mut::<f32>();
+        let blend_ids_slice = buffers.blend_ids.as_slice_mut::<f32>();
+        let hole_mask_slice = buffers.hole_mask.as_slice_mut::<f32>();
+
+        for object in selection {
+            let key = TerrainChunkKey {
+                project_key: object.artifact.project_key.clone(),
+                coords: object.artifact.chunk_coords,
+            };
+            let Some(&tile_index) = tile_indices.get(&key) else {
+                continue;
+            };
+            let slot_index = tile_index as usize;
+            if slot_index >= self.clipmap_slots.len() {
+                continue;
+            }
+            let slot = self.clipmap_slots[slot_index];
+            let needs_update = slot
+                .map(|slot| {
+                    slot.hash != object.artifact.content_hash
+                        || slot.lod != object.artifact.lod
+                        || slot.grid_size != object.artifact.grid_size
+                })
+                .unwrap_or(true);
+            if !needs_update && !self.clipmap_cache_dirty {
+                continue;
+            }
+
+            let range_start = slot_index * tile_data_len;
+            let range_end = range_start + tile_data_len;
+            let mut updated = true;
+            updated &= self.copy_cached_tile(
+                "height",
+                object.artifact.content_hash,
+                object.artifact.grid_size,
+                &mut height_slice[range_start..range_end],
+            );
+            updated &= self.copy_cached_tile(
+                "normal",
+                object.artifact.content_hash,
+                object.artifact.grid_size,
+                &mut normal_slice[range_start..range_end],
+            );
+            updated &= self.copy_cached_tile(
+                "blend",
+                object.artifact.content_hash,
+                object.artifact.grid_size,
+                &mut blend_slice[range_start..range_end],
+            );
+            updated &= self.copy_cached_tile(
+                "blend_ids",
+                object.artifact.content_hash,
+                object.artifact.grid_size,
+                &mut blend_ids_slice[range_start..range_end],
+            );
+            updated &= self.copy_cached_tile(
+                "hole_mask",
+                object.artifact.content_hash,
+                object.artifact.grid_size,
+                &mut hole_mask_slice[range_start..range_end],
+            );
+
+            if !updated {
+                if slot.is_none() {
+                    Self::fill_default_height(&mut height_slice[range_start..range_end]);
+                    Self::fill_default_normal(&mut normal_slice[range_start..range_end]);
+                    Self::fill_default_blend(&mut blend_slice[range_start..range_end]);
+                    Self::fill_default_blend_ids(&mut blend_ids_slice[range_start..range_end]);
+                    Self::fill_default_hole_mask(&mut hole_mask_slice[range_start..range_end]);
+                    self.clipmap_buffers_dirty = true;
+                }
+                self.queue_texture_build(&object.artifact);
+                continue;
+            }
+
+            self.clipmap_slots[slot_index] = Some(TerrainClipmapSlot {
+                hash: object.artifact.content_hash,
+                lod: object.artifact.lod,
+                grid_size: object.artifact.grid_size,
+            });
+            self.clipmap_buffers_dirty = true;
+        }
     }
 
-    fn build_normalmap_view(
-        &mut self,
-        ctx: &mut Context,
-        key: &str,
-        artifact: &TerrainChunkArtifact,
-        grid_x: u32,
-        grid_y: u32,
-    ) -> Option<dashi::ImageView> {
-        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
-            kind: "normal",
-            hash: artifact.content_hash,
-            grid: [grid_x, grid_y],
-        })?;
-        self.build_texture_view(ctx, &format!("terrain_{key}_normal"), grid_x, grid_y, data)
-    }
-
-    fn build_blendmap_view(
-        &mut self,
-        ctx: &mut Context,
-        key: &str,
-        artifact: &TerrainChunkArtifact,
-        grid_x: u32,
-        grid_y: u32,
-    ) -> Option<dashi::ImageView> {
-        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
-            kind: "blend",
-            hash: artifact.content_hash,
-            grid: [grid_x, grid_y],
-        })?;
-        self.build_texture_view(ctx, &format!("terrain_{key}_blend"), grid_x, grid_y, data)
-    }
-
-    fn build_blend_ids_view(
-        &mut self,
-        ctx: &mut Context,
-        key: &str,
-        artifact: &TerrainChunkArtifact,
-        grid_x: u32,
-        grid_y: u32,
-    ) -> Option<dashi::ImageView> {
-        let data = self.texture_data_cache.get(&TerrainTextureCacheKey {
-            kind: "blend_ids",
-            hash: artifact.content_hash,
-            grid: [grid_x, grid_y],
-        })?;
-        self.build_texture_view(ctx, &format!("terrain_{key}_blend_ids"), grid_x, grid_y, data)
-    }
-
-    fn build_texture_view(
-        &self,
-        ctx: &mut Context,
-        name: &str,
-        width: u32,
-        height: u32,
-        data: &[f32],
-    ) -> Option<dashi::ImageView> {
-        if width == 0 || height == 0 || data.is_empty() {
+    fn sync_clipmap_buffers(&mut self) -> Option<CommandStream<Executable>> {
+        if !self.clipmap_buffers_dirty {
             return None;
         }
-        let info = ImageInfo {
-            debug_name: name,
-            dim: [width, height, 1],
-            layers: 1,
-            format: Format::RGBA32F,
-            mip_levels: 1,
-            initial_data: Some(bytemuck::cast_slice(data)),
-            ..Default::default()
+        let buffers = self.clipmap_buffers.as_mut()?;
+        self.clipmap_buffers_dirty = false;
+        let mut stream = CommandStream::new().begin();
+        stream = stream
+            .combine(buffers.height.sync_up())
+            .combine(buffers.normal.sync_up())
+            .combine(buffers.blend.sync_up())
+            .combine(buffers.blend_ids.sync_up())
+            .combine(buffers.hole_mask.sync_up());
+        Some(stream.end())
+    }
+
+    fn copy_cached_tile(
+        &self,
+        kind: &'static str,
+        hash: u64,
+        grid: [u32; 2],
+        dest: &mut [f32],
+    ) -> bool {
+        let Some(data) = self.texture_data_cache.get(&TerrainTextureCacheKey {
+            kind,
+            hash,
+            grid,
+        }) else {
+            return false;
         };
-        let image = ctx.make_image(&info).ok()?;
-        Some(dashi::ImageView {
-            img: image,
-            aspect: AspectMask::Color,
-            view_type: ImageViewType::Type2D,
-            range: SubresourceRange::new(0, 1, 0, 1),
-        })
+        if data.len() != dest.len() {
+            return false;
+        }
+        dest.copy_from_slice(data);
+        true
+    }
+
+    fn fill_default_height(dest: &mut [f32]) {
+        for chunk in dest.chunks_exact_mut(4) {
+            chunk[0] = 0.0;
+            chunk[1] = 0.0;
+            chunk[2] = 0.0;
+            chunk[3] = 1.0;
+        }
+    }
+
+    fn fill_default_normal(dest: &mut [f32]) {
+        for chunk in dest.chunks_exact_mut(4) {
+            chunk[0] = 0.0;
+            chunk[1] = 1.0;
+            chunk[2] = 0.0;
+            chunk[3] = 1.0;
+        }
+    }
+
+    fn fill_default_blend(dest: &mut [f32]) {
+        for chunk in dest.chunks_exact_mut(4) {
+            chunk[0] = 1.0;
+            chunk[1] = 0.0;
+            chunk[2] = 0.0;
+            chunk[3] = 0.0;
+        }
+    }
+
+    fn fill_default_blend_ids(dest: &mut [f32]) {
+        for chunk in dest.chunks_exact_mut(4) {
+            chunk[0] = 0.0;
+            chunk[1] = 0.0;
+            chunk[2] = 0.0;
+            chunk[3] = 0.0;
+        }
+    }
+
+    fn fill_default_hole_mask(dest: &mut [f32]) {
+        for chunk in dest.chunks_exact_mut(4) {
+            chunk[0] = 0.0;
+            chunk[1] = 0.0;
+            chunk[2] = 0.0;
+            chunk[3] = 0.0;
+        }
     }
 
     fn build_heightmap_data(
@@ -2552,6 +2850,25 @@ impl TerrainRenderer {
         data
     }
 
+    fn build_hole_mask_data(
+        artifact: &TerrainChunkArtifact,
+        grid_x: u32,
+        grid_y: u32,
+    ) -> Vec<f32> {
+        let mut data = Vec::with_capacity((grid_x * grid_y * 4) as usize);
+        let expected = (grid_x * grid_y) as usize;
+        if artifact.hole_masks.len() == expected {
+            for mask in &artifact.hole_masks {
+                let value = if *mask == 0 { 0.0 } else { 1.0 };
+                data.extend_from_slice(&[value, 0.0, 0.0, 0.0]);
+            }
+        }
+        if data.is_empty() {
+            data.resize((grid_x * grid_y * 4) as usize, 0.0);
+        }
+        data
+    }
+
     fn queue_texture_build(&mut self, artifact: &TerrainChunkArtifact) {
         let grid_x = artifact.grid_size[0];
         let grid_y = artifact.grid_size[1];
@@ -2565,7 +2882,7 @@ impl TerrainRenderer {
         if self.texture_work_pending.contains(&work_key) {
             return;
         }
-        let kinds_ready = ["height", "normal", "blend", "blend_ids"]
+        let kinds_ready = ["height", "normal", "blend", "blend_ids", "hole_mask"]
             .iter()
             .all(|kind| {
                 self.texture_data_cache.contains_key(&TerrainTextureCacheKey {
@@ -2585,7 +2902,7 @@ impl TerrainRenderer {
         });
     }
 
-    fn drain_texture_work(&mut self) {
+    fn drain_texture_work(&mut self) -> bool {
         let mut had_results = false;
         while let Some(result) = self.texture_work_results.pop() {
             for (key, data) in result.textures {
@@ -2597,21 +2914,7 @@ impl TerrainRenderer {
         if had_results {
             self.terrain_dirty = true;
         }
-    }
-
-    fn release_terrain_textures(&mut self, textures: &TerrainTextureSet, state: &mut BindlessState) {
-        let mut backend = TerrainImageBackend { state };
-        for texture in [
-            textures.height.as_ref(),
-            textures.normal.as_ref(),
-            textures.blend.as_ref(),
-            textures.blend_ids.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            self.image_pager.release_by_key(&texture.key, &mut backend);
-        }
+        had_results
     }
 
     fn allocate_terrain_material(

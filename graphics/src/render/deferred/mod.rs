@@ -93,6 +93,7 @@ pub struct PerDrawData {
     terrain_normal_texture_id: u32,
     terrain_blend_texture_id: u32,
     terrain_blend_ids_texture_id: u32,
+    terrain_clipmap_tile: u32,
 }
 
 impl PerDrawData {
@@ -104,10 +105,7 @@ impl PerDrawData {
         vertex_count: u32,
         index_id: u32,
         index_count: u32,
-        terrain_height_texture_id: u32,
-        terrain_normal_texture_id: u32,
-        terrain_blend_texture_id: u32,
-        terrain_blend_ids_texture_id: u32,
+        terrain_clipmap_tile: u32,
     ) -> Self {
         Self {
             scene_id,
@@ -117,10 +115,11 @@ impl PerDrawData {
             vertex_count,
             index_id,
             index_count,
-            terrain_height_texture_id,
-            terrain_normal_texture_id,
-            terrain_blend_texture_id,
-            terrain_blend_ids_texture_id,
+            terrain_height_texture_id: u32::MAX,
+            terrain_normal_texture_id: u32::MAX,
+            terrain_blend_texture_id: u32::MAX,
+            terrain_blend_ids_texture_id: u32::MAX,
+            terrain_clipmap_tile,
             ..Default::default()
         }
     }

@@ -9,6 +9,10 @@ struct Material {
   uint _padding1;
 };
 
+struct Handle {
+  uint m_packed;
+};
+
 static const uint MATERIAL_FLAG_PBR_NORMAL = 1u;
 static const uint MATERIAL_FLAG_VERTEX_COLOR = 1u << 1;
 static const uint MATERIAL_FLAG_UNLIT = 1u << 2;
@@ -16,6 +20,7 @@ static const uint MATERIAL_FLAG_TOON = 1u << 3;
 static const uint MATERIAL_FLAG_EMISSIVE_ONLY = 1u << 4;
 static const uint INVALID_BINDLESS_ID = 0xFFFFu;
 static const uint INVALID_TEXTURE_ID = 0xFFFFFFFFu;
+static const uint INVALID_MATERIAL_ID = 0xFFFFu;
 
 struct FSInput {
   [[vk::location(0)]] float3 world_pos : POSITION_WS;
@@ -25,6 +30,8 @@ struct FSInput {
   [[vk::location(4)]] float4 world_tangent : TANGENT0;
   [[vk::location(5)]] nointerpolation uint blend_texture_id : TERRAIN_BLEND_TEXTURE;
   [[vk::location(6)]] nointerpolation uint blend_ids_texture_id : TERRAIN_BLEND_IDS_TEXTURE;
+  [[vk::location(7)]] nointerpolation uint clipmap_tile_index : TERRAIN_CLIPMAP_TILE;
+  [[vk::location(8)]] nointerpolation uint material_id : TERRAIN_MATERIAL_ID;
 };
 
 struct FSOutput {
@@ -37,6 +44,19 @@ struct FSOutput {
 uniform Texture2D meshi_bindless_textures[] : register(t0, space0);
 uniform SamplerState meshi_bindless_samplers[] : register(s1, space0);
 uniform StructuredBuffer<Material> meshi_bindless_materials : register(t4, space0);
+uniform StructuredBuffer<float4> terrain_blend_buffer : register(t0, space5);
+uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t0, space6);
+uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t0, space7);
+
+struct PerSceneData {
+  Handle camera;
+  uint2 clipmap_grid_size;
+  uint clipmap_tile_texel_count;
+  uint _padding;
+};
+
+uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t0, space2);
+static PerSceneData scene = per_scene_ssbo[0];
 
 float4 sample_texture(uint idx, float2 coords) {
   return meshi_bindless_textures[idx].Sample(meshi_bindless_samplers[idx], coords);
@@ -51,6 +71,17 @@ float4 sample_bindless(uint idx, float2 coords, float4 fallback) {
 
 bool valid_texture(uint texture_id) {
   return texture_id != INVALID_BINDLESS_ID;
+}
+
+uint clipmap_index(uint tile_index, float2 uv) {
+  const uint2 grid = scene.clipmap_grid_size;
+  if (grid.x == 0u || grid.y == 0u) {
+    return 0u;
+  }
+  const float2 clamped = saturate(uv);
+  const float2 texel = clamped * float2(grid.x - 1u, grid.y - 1u);
+  const uint2 texel_coord = uint2(texel + 0.5);
+  return tile_index * scene.clipmap_tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
 }
 
 float3 resolve_normal(Material material, FSInput input) {
@@ -86,17 +117,14 @@ float4 resolve_base_color(Material material, FSInput input) {
 [shader("fragment")]
 FSOutput main(FSInput input) {
   FSOutput output;
-  const float4 blend_weights = sample_bindless(
-    input.blend_texture_id,
-    input.tex_coords,
-    float4(1.0, 0.0, 0.0, 0.0)
-  );
-  const float4 blend_ids = sample_bindless(
-    input.blend_ids_texture_id,
-    input.tex_coords,
-    float4(0.0, 0.0, 0.0, 0.0)
-  );
-  const uint4 material_ids = uint4(blend_ids + 0.5);
+  const uint clipmap_sample = clipmap_index(input.clipmap_tile_index, input.tex_coords);
+  const float4 blend_weights = terrain_blend_buffer[clipmap_sample];
+  const float4 blend_ids = terrain_blend_ids_buffer[clipmap_sample];
+  const bool use_fallback_material =
+    all(blend_ids == float4(0.0, 0.0, 0.0, 0.0)) && input.material_id != INVALID_MATERIAL_ID;
+  const uint4 material_ids = use_fallback_material
+    ? uint4(input.material_id, 0u, 0u, 0u)
+    : uint4(blend_ids + 0.5);
   float total_weight = 0.0;
   float3 blended_color = float3(0.0, 0.0, 0.0);
   float3 blended_normal = float3(0.0, 0.0, 0.0);
