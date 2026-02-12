@@ -12,6 +12,23 @@ struct Material {
 struct Handle {
   uint m_packed;
 };
+struct PerDrawData {
+  Handle scene_id;
+  Handle transform_id;
+  Handle material_id;
+  Handle skeleton_id;
+  Handle animation_state_id;
+  Handle per_obj_joints_id;
+  uint vertex_id;
+  uint vertex_count;
+  uint index_id;
+  uint index_count;
+  uint terrain_height_texture_id;
+  uint terrain_normal_texture_id;
+  uint terrain_blend_texture_id;
+  uint terrain_blend_ids_texture_id;
+  uint terrain_clipmap_tile;
+};
 
 static const uint MATERIAL_FLAG_PBR_NORMAL = 1u;
 static const uint MATERIAL_FLAG_VERTEX_COLOR = 1u << 1;
@@ -34,20 +51,6 @@ struct FSInput {
   [[vk::location(8)]] nointerpolation uint material_id : TERRAIN_MATERIAL_ID;
 };
 
-struct FSOutput {
-  float4 position : SV_TARGET0;
-  float4 albedo : SV_TARGET1;
-  float4 normal : SV_TARGET2;
-  float4 material_code : SV_TARGET3;
-};
-
-uniform Texture2D meshi_bindless_textures[] : register(t0, space0);
-uniform SamplerState meshi_bindless_samplers[] : register(s1, space0);
-uniform StructuredBuffer<Material> meshi_bindless_materials : register(t4, space0);
-uniform StructuredBuffer<float4> terrain_blend_buffer : register(t0, space5);
-uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t0, space6);
-uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t0, space7);
-
 struct PerSceneData {
   Handle camera;
   uint2 clipmap_grid_size;
@@ -55,7 +58,44 @@ struct PerSceneData {
   uint _padding;
 };
 
-uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t0, space2);
+struct Camera {
+  column_major float4x4 world_from_camera;
+  column_major float4x4 projection;
+  float2 viewport;
+  float near;
+  float far;
+  float fov_y_radians;
+  uint projection_kind;
+  float _padding;
+};
+
+struct Transformation {
+  column_major float4x4 transform;
+};
+
+
+struct FSOutput {
+  float4 position : SV_TARGET0;
+  float4 albedo : SV_TARGET1;
+  float4 normal : SV_TARGET2;
+  float4 material_code : SV_TARGET3;
+};
+
+uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t1, space0);
+uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t2, space0);
+uniform StructuredBuffer<float4> terrain_height_buffer : register(t3, space0);
+uniform StructuredBuffer<float4> terrain_normal_buffer : register(t4, space0);
+uniform StructuredBuffer<float4> terrain_blend_buffer : register(t5, space0);
+uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t6, space0);
+uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t7, space0);
+
+uniform Texture2D meshi_bindless_textures[] : register(t0, space1);
+uniform SamplerState meshi_bindless_samplers[] : register(s1, space1);
+uniform StructuredBuffer<Material> meshi_bindless_materials : register(t3, space1);
+uniform StructuredBuffer<Camera> meshi_bindless_cameras : register(t4, space1);
+uniform StructuredBuffer<Transformation> meshi_bindless_transformations : register(t0, space2);
+uniform ByteAddressBuffer meshi_bindless_vertices : register(t1, space2);
+
 static PerSceneData scene = per_scene_ssbo[0];
 
 float4 sample_texture(uint idx, float2 coords) {
@@ -174,8 +214,8 @@ FSOutput main(FSInput input) {
   }
 
   output.position = float4(input.world_pos, 1.0);
-  output.albedo = float4(blended_color, 1.0);
-  output.normal = float4(blended_normal, 1.0);
+  output.albedo = input.color;
+  output.normal = float4(input.world_normal, 1.0);
   output.material_code = float4(0.0, float(material_flags), metallic, roughness);
   return output;
 }

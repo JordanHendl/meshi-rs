@@ -1,3 +1,15 @@
+struct Material {
+  uint base_color_texture_id;
+  uint normal_texture_id;
+  uint metallic_roughness_texture_id;
+  uint occlusion_texture_id;
+  uint emissive_texture_id;
+  uint material_flags;
+  uint render_mask;
+  uint _padding1;
+};
+
+
 struct Handle {
   uint m_packed;
 
@@ -80,21 +92,22 @@ struct VertexData {
 
 static const uint VERTEX_STRIDE = 96u;
 
-uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t0, space1);
-uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t0, space2);
+uniform StructuredBuffer<PerDrawData> per_draw_ssbo : register(t1, space0);
+uniform StructuredBuffer<PerSceneData> per_scene_ssbo : register(t2, space0);
+uniform StructuredBuffer<float4> terrain_height_buffer : register(t3, space0);
+uniform StructuredBuffer<float4> terrain_normal_buffer : register(t4, space0);
+uniform StructuredBuffer<float4> terrain_blend_buffer : register(t5, space0);
+uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t6, space0);
+uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t7, space0);
+
+uniform Texture2D meshi_bindless_textures[] : register(t0, space1);
+uniform SamplerState meshi_bindless_samplers[] : register(s1, space1);
+uniform StructuredBuffer<Material> meshi_bindless_materials : register(t3, space1);
+uniform StructuredBuffer<Camera> meshi_bindless_cameras : register(t4, space1);
+uniform StructuredBuffer<Transformation> meshi_bindless_transformations : register(t0, space2);
+uniform ByteAddressBuffer meshi_bindless_vertices : register(t1, space2);
+
 static PerSceneData scene = per_scene_ssbo[0];
-
-uniform StructuredBuffer<float4> terrain_height_buffer : register(t0, space3);
-uniform StructuredBuffer<float4> terrain_normal_buffer : register(t0, space4);
-uniform StructuredBuffer<float4> terrain_blend_buffer : register(t0, space5);
-uniform StructuredBuffer<float4> terrain_blend_ids_buffer : register(t0, space6);
-uniform StructuredBuffer<float4> terrain_hole_mask_buffer : register(t0, space7);
-
-uniform Texture2D meshi_bindless_textures[] : register(t0, space0);
-uniform SamplerState meshi_bindless_samplers[] : register(s1, space0);
-uniform StructuredBuffer<Camera> meshi_bindless_cameras : register(t2, space0);
-uniform StructuredBuffer<Transformation> meshi_bindless_transformations : register(t3, space0);
-uniform ByteAddressBuffer meshi_bindless_vertices : register(t12, space0);
 
 static const uint INVALID_BINDLESS_ID = 0xFFFFFFFFu;
 

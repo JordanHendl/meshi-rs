@@ -2089,7 +2089,7 @@ impl TerrainRenderer {
                 indices: indices_handle,
                 indirect: deferred.draw_builder.draw_list(),
                 bind_tables: deferred.pipeline.tables(),
-                dynamic_buffers: [None, None, Some(alloc), None],
+                dynamic_buffers: [Some(alloc), None, None, None],
                 draw_count: deferred.draw_builder.draw_count(),
                 ..Default::default()
             })
