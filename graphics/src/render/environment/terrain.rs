@@ -717,6 +717,9 @@ impl TerrainRenderer {
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
+        if let Some(sync) = self.sync_clipmap_buffers() {
+            stream = stream.combine(sync);
+        }
         if let Some(deferred) = &mut self.deferred {
             stream = stream.combine(deferred.draw_builder.pre_compute());
         }
@@ -2048,7 +2051,6 @@ impl TerrainRenderer {
         camera: Handle<Camera>,
         indices_handle: Handle<Buffer>,
     ) -> CommandStream<PendingGraphics> {
-        let sync = self.sync_clipmap_buffers();
         let Some(deferred) = &mut self.deferred else {
             return CommandStream::<PendingGraphics>::subdraw();
         };
@@ -2079,9 +2081,6 @@ impl TerrainRenderer {
         };
 
         let mut stream = CommandStream::<PendingGraphics>::subdraw();
-        if let Some(sync) = sync {
-            stream = stream.combine(sync);
-        }
         stream
             .bind_graphics_pipeline(deferred.pipeline.handle)
             .update_viewport(viewport)

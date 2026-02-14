@@ -20,6 +20,8 @@ pub struct ProjectMetadata {
     pub runtime_target: String,
     #[serde(default)]
     pub plugin_list: Vec<String>,
+    #[serde(default = "default_viewport_pixels")]
+    pub viewport_pixels: [u32; 2],
 }
 
 impl Default for ProjectMetadata {
@@ -32,6 +34,7 @@ impl Default for ProjectMetadata {
             build_profiles: default_build_profiles(),
             runtime_target: default_runtime_target(),
             plugin_list: Vec::new(),
+            viewport_pixels: default_viewport_pixels(),
         }
     }
 }
@@ -108,6 +111,12 @@ impl ProjectManager {
         self.active_project.as_ref()
     }
 
+    pub fn active_project_root(&self) -> Option<PathBuf> {
+        self.active_project
+            .as_ref()
+            .map(|project| PathBuf::from(&project.root_path))
+    }
+
     pub fn workspace_root(&self) -> PathBuf {
         self.global_config
             .workspace_root
@@ -139,6 +148,8 @@ impl ProjectManager {
         metadata.name = base_name;
         metadata.root_path = project_root.to_string_lossy().to_string();
 
+        self.initialize_project_layout(&metadata)?;
+
         self.set_active_project(metadata.clone());
         self.save_project_metadata(&metadata)?;
         self.save_global()?;
@@ -149,9 +160,9 @@ impl ProjectManager {
         let root = if path.is_dir() {
             path
         } else {
-            path.parent()
-                .map(PathBuf::from)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid project path"))?
+            path.parent().map(PathBuf::from).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Invalid project path")
+            })?
         };
 
         fs::create_dir_all(&root)?;
@@ -166,6 +177,8 @@ impl ProjectManager {
         if metadata.name.trim().is_empty() {
             metadata.name = default_project_name();
         }
+
+        self.initialize_project_layout(&metadata)?;
 
         self.set_active_project(metadata.clone());
         self.save_project_metadata(&metadata)?;
@@ -247,6 +260,17 @@ impl ProjectManager {
         root.join(".meshi").join("Project.toml")
     }
 
+    fn initialize_project_layout(&self, metadata: &ProjectMetadata) -> io::Result<()> {
+        let root = PathBuf::from(&metadata.root_path);
+        let database_root = root.join("database");
+        let app_root = root.join("apps").join("hello_engine");
+
+        fs::create_dir_all(&database_root)?;
+        fs::create_dir_all(&app_root)?;
+        ensure_app_starter_files(&app_root)?;
+        Ok(())
+    }
+
     fn load_global_config(path: &Path) -> io::Result<GlobalProjectConfig> {
         let contents = fs::read_to_string(path)?;
         toml::from_str(&contents).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
@@ -278,6 +302,10 @@ fn default_runtime_target() -> String {
     "native".to_string()
 }
 
+fn default_viewport_pixels() -> [u32; 2] {
+    [1280, 720]
+}
+
 fn slugify_project_folder(name: &str) -> String {
     let mut slug = String::new();
     for ch in name.chars() {
@@ -296,7 +324,7 @@ fn slugify_project_folder(name: &str) -> String {
 }
 
 fn unique_project_root(workspace_root: &Path, slug: &str) -> PathBuf {
-    let mut candidate = workspace_root.join(slug);
+    let candidate = workspace_root.join(slug);
     if !candidate.exists() {
         return candidate;
     }
@@ -310,3 +338,90 @@ fn unique_project_root(workspace_root: &Path, slug: &str) -> PathBuf {
         index += 1;
     }
 }
+
+fn ensure_app_starter_files(app_root: &Path) -> io::Result<()> {
+    let editor_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let meshi_cpp_root = editor_root
+        .parent()
+        .unwrap_or(&editor_root)
+        .join("meshi-cpp");
+    let hello_engine_root = meshi_cpp_root
+        .join("src")
+        .join("examples")
+        .join("hello_engine");
+    let helper_header = meshi_cpp_root
+        .join("src")
+        .join("examples")
+        .join("example_helper.hpp");
+
+    copy_or_write_default(
+        &hello_engine_root.join("main.cpp"),
+        &app_root.join("main.cpp"),
+        FALLBACK_HELLO_ENGINE_MAIN,
+    )?;
+    copy_or_write_default(
+        &hello_engine_root.join("CMakeLists.txt"),
+        &app_root.join("CMakeLists.txt"),
+        FALLBACK_HELLO_ENGINE_CMAKELISTS,
+    )?;
+    copy_or_write_default(
+        &helper_header,
+        &app_root.join("example_helper.hpp"),
+        FALLBACK_EXAMPLE_HELPER,
+    )?;
+
+    Ok(())
+}
+
+fn copy_or_write_default(
+    source: &Path,
+    destination: &Path,
+    fallback_contents: &str,
+) -> io::Result<()> {
+    if destination.exists() {
+        return Ok(());
+    }
+    if source.exists() {
+        fs::copy(source, destination)?;
+    } else {
+        fs::write(destination, fallback_contents)?;
+    }
+    Ok(())
+}
+
+const FALLBACK_HELLO_ENGINE_MAIN: &str = r#"#include <meshi/meshi.hpp>
+
+int main() {
+  meshi::initialize_meshi_engine(meshi::EngineInfo{
+      .application_name = "Hello Engine!",
+      .application_root = ".",
+  });
+
+  while (meshi::engine()) {
+    meshi::engine()->update();
+  }
+  return 0;
+}
+"#;
+
+const FALLBACK_HELLO_ENGINE_CMAKELISTS: &str = r#"cmake_minimum_required(VERSION 3.16)
+project(meshi_app LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(MESHI_WRAPPER_DIR "" CACHE PATH "Path to the Meshi C++ wrapper repo")
+if (NOT MESHI_WRAPPER_DIR)
+  message(FATAL_ERROR "MESHI_WRAPPER_DIR is not set. Provide the path to the Meshi C++ wrapper repo.")
+endif()
+
+add_subdirectory(${MESHI_WRAPPER_DIR} meshi_wrapper)
+add_executable(meshi_app main.cpp)
+target_link_libraries(meshi_app PRIVATE meshi_wrapper)
+"#;
+
+const FALLBACK_EXAMPLE_HELPER: &str = r#"#pragma once
+#ifndef EXAMPLE_APP_DIR
+  #define EXAMPLE_APP_DIR
+#endif
+"#;

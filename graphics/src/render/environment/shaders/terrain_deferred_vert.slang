@@ -186,6 +186,26 @@ float4x4 model_matrix(PerDrawData draw) {
   return identity_matrix();
 }
 
+
+
+bool sample_terrain_surface(uint clipmap_sample, out float terrain_height, out float3 terrain_normal) {
+  uint height_count = 0u;
+  uint height_stride = 0u;
+  terrain_height_buffer.GetDimensions(height_count, height_stride);
+  uint normal_count = 0u;
+  uint normal_stride = 0u;
+  terrain_normal_buffer.GetDimensions(normal_count, normal_stride);
+  if (clipmap_sample >= height_count || clipmap_sample >= normal_count) {
+    terrain_height = 0.0;
+    terrain_normal = float3(0.0, 1.0, 0.0);
+    return false;
+  }
+
+  terrain_height = terrain_height_buffer[clipmap_sample].x;
+  terrain_normal = normalize(terrain_normal_buffer[clipmap_sample].xyz);
+  return true;
+}
+
 VertexData load_vertex_data(PerDrawData draw, uint vertex_id) {
   VertexData data;
   const uint base = draw.vertex_id + vertex_id * VERTEX_STRIDE;
@@ -215,8 +235,12 @@ VSOutput main(VSInput input) {
   float3 local_pos = vertex.position;
   float3 local_normal = vertex.normal;
   const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords);
-  local_pos.y = terrain_height_buffer[clipmap_sample].x + vertex.position.y;
-  local_normal = normalize(terrain_normal_buffer[clipmap_sample].xyz);
+  float terrain_height = 0.0;
+  float3 terrain_normal = local_normal;
+  if (sample_terrain_surface(clipmap_sample, terrain_height, terrain_normal)) {
+    local_pos.y = terrain_height + vertex.position.y;
+    local_normal = terrain_normal;
+  }
 
   const float4 world_pos = mul(model, float4(local_pos, 1.0));
   const float3 world_normal = normalize(mul(model, float4(local_normal, 0.0)).xyz);

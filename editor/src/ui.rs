@@ -2,7 +2,11 @@ use meshi_graphics::gui::{
     GuiContext, GuiDraw, GuiLayer, GuiQuad, GuiTextDraw, Menu, MenuBar, MenuBarRenderOptions,
     MenuBarState, MenuColors, MenuItem, MenuLayoutMetrics,
 };
-use std::fmt::Write;
+use std::{
+    fmt::Write,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     project::ProjectManager,
@@ -17,7 +21,7 @@ pub struct EditorUi {
     runtime_texture_size: [usize; 2],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiAction {
     BuildProject,
     BuildAndRun,
@@ -27,6 +31,7 @@ pub enum UiAction {
     OpenProject,
     OpenWorkspace,
     SaveAll,
+    OpenProjectFile(PathBuf),
 }
 
 const ACTION_BUILD_PROJECT: u32 = 1;
@@ -153,6 +158,7 @@ impl EditorUi {
         runtime_status: RuntimeStatus,
         runtime_logs: &[RuntimeLogEntry],
         runtime_error: Option<&str>,
+        project_viewport_pixels: [u32; 2],
     ) -> UiFrameOutput {
         self.refresh_file_menu(project_manager);
         self.refresh_build_menu();
@@ -174,10 +180,17 @@ impl EditorUi {
             .resizable(false)
             .default_width(280.0)
             .show(ctx, |ui| {
-                ui.heading("ECS / Scene");
+                ui.heading("Project / Scene");
                 ui.separator();
-                for line in ["Scene Hierarchy", "Entities & Components", "Systems"] {
-                    ui.label(line);
+                for entry in Self::project_structure_entries(project_manager) {
+                    if let Some(path) = entry.path {
+                        let response = ui.selectable_label(false, entry.label);
+                        if response.double_clicked() {
+                            action = Some(UiAction::OpenProjectFile(path));
+                        }
+                    } else {
+                        ui.label(entry.label);
+                    }
                 }
             });
 
@@ -197,7 +210,10 @@ impl EditorUi {
                 }
             });
 
-        let mut viewport_pixels = [1_u32, 1_u32];
+        let viewport_pixels = [
+            project_viewport_pixels[0].max(1),
+            project_viewport_pixels[1].max(1),
+        ];
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Engine Preview");
             ui.separator();
@@ -222,16 +238,16 @@ impl EditorUi {
             });
             ui.separator();
 
-            let available = ui.available_size();
-            let viewport_points = egui::vec2(available.x.max(1.0), available.y.max(1.0));
             let pixels_per_point = ctx.pixels_per_point();
-            viewport_pixels = [
-                (viewport_points.x * pixels_per_point).round().max(1.0) as u32,
-                (viewport_points.y * pixels_per_point).round().max(1.0) as u32,
-            ];
+            let viewport_points = egui::vec2(
+                viewport_pixels[0] as f32 / pixels_per_point,
+                viewport_pixels[1] as f32 / pixels_per_point,
+            );
 
             if let Some(texture) = &self.runtime_texture {
-                ui.add(egui::Image::new(texture).fit_to_exact_size(viewport_points));
+                ui.centered_and_justified(|ui| {
+                    ui.add(egui::Image::new(texture).fit_to_exact_size(viewport_points));
+                });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("Waiting for runtime frame...");
@@ -356,6 +372,63 @@ impl EditorUi {
                 self.runtime_texture_size = size;
             }
         }
+    }
+
+    fn project_structure_entries(project_manager: &ProjectManager) -> Vec<ProjectTreeEntry> {
+        let Some(metadata) = project_manager.metadata() else {
+            return vec![ProjectTreeEntry::text("No active project")];
+        };
+
+        let root = Path::new(&metadata.root_path);
+        let app_root = root.join("apps").join("hello_engine");
+        let mut lines = vec![
+            format!("Project: {}", metadata.name),
+            format!("Root: {}", metadata.root_path),
+            "database/".to_string(),
+            "apps/".to_string(),
+            "  hello_engine/".to_string(),
+        ];
+
+        for file_name in ["main.cpp", "CMakeLists.txt", "example_helper.hpp"] {
+            let marker = if app_root.join(file_name).exists() {
+                "✓"
+            } else {
+                "•"
+            };
+            lines.push(format!("    {} {}", marker, file_name));
+        }
+
+        if let Ok(entries) = fs::read_dir(root.join("database")) {
+            let count = entries.flatten().count();
+            lines.push(format!("database entries: {}", count));
+        }
+
+        let mut entries = vec![
+            ProjectTreeEntry::text(format!("Project: {}", metadata.name)),
+            ProjectTreeEntry::text(format!("Root: {}", metadata.root_path)),
+            ProjectTreeEntry::text("database/"),
+            ProjectTreeEntry::text("apps/"),
+            ProjectTreeEntry::text("  hello_engine/"),
+        ];
+
+        for file_name in ["main.cpp", "CMakeLists.txt", "example_helper.hpp"] {
+            let file_path = app_root.join(file_name);
+            let marker = if file_path.exists() { "✓" } else { "•" };
+            entries.push(ProjectTreeEntry::file(
+                format!("    {} {}", marker, file_name),
+                file_path,
+            ));
+        }
+
+        if let Ok(entries_dir) = fs::read_dir(root.join("database")) {
+            let count = entries_dir.flatten().count();
+            entries.push(ProjectTreeEntry::text(format!(
+                "database entries: {}",
+                count
+            )));
+        }
+
+        entries
     }
 
     fn refresh_file_menu(&mut self, project_manager: &ProjectManager) {
@@ -486,6 +559,27 @@ impl EditorUi {
                 color: [0.78, 0.8, 0.86, 1.0],
                 scale: 0.9,
             });
+        }
+    }
+}
+
+struct ProjectTreeEntry {
+    label: String,
+    path: Option<PathBuf>,
+}
+
+impl ProjectTreeEntry {
+    fn text(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            path: None,
+        }
+    }
+
+    fn file(label: impl Into<String>, path: PathBuf) -> Self {
+        Self {
+            label: label.into(),
+            path: Some(path),
         }
     }
 }

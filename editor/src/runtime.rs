@@ -43,8 +43,7 @@ pub struct RuntimeBridge {
     viewport_size: [u32; 2],
     last_frame: Option<RuntimeFrame>,
     template_root: PathBuf,
-    runtime_root: PathBuf,
-    build_root: PathBuf,
+    project_runtime_root: Option<PathBuf>,
     repo_root: PathBuf,
     status: RuntimeStatus,
     last_error: Option<String>,
@@ -59,12 +58,7 @@ impl RuntimeBridge {
     pub fn new() -> Self {
         let editor_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let template_root = editor_root.join("templates").join("cpp").join("meshi_app");
-        let runtime_root = editor_root.join("runtime").join("meshi_app");
-        let build_root = runtime_root.join("build");
-        let repo_root = editor_root
-            .parent()
-            .unwrap_or(&editor_root)
-            .to_path_buf();
+        let repo_root = editor_root.parent().unwrap_or(&editor_root).to_path_buf();
         let (event_tx, event_rx) = mpsc::channel();
         Self {
             engine: None,
@@ -73,8 +67,7 @@ impl RuntimeBridge {
             viewport_size: [0, 0],
             last_frame: None,
             template_root,
-            runtime_root,
-            build_root,
+            project_runtime_root: None,
             repo_root,
             status: RuntimeStatus::Idle,
             last_error: None,
@@ -106,16 +99,16 @@ impl RuntimeBridge {
         self.push_log(level, message);
     }
 
-    pub fn build_project(&mut self) {
-        self.start_build(RuntimeBuildAction::BuildOnly);
+    pub fn build_project(&mut self, project_root: Option<&Path>) {
+        self.start_build(project_root, RuntimeBuildAction::BuildOnly);
     }
 
-    pub fn build_and_run(&mut self) {
-        self.start_build(RuntimeBuildAction::BuildAndRun);
+    pub fn build_and_run(&mut self, project_root: Option<&Path>) {
+        self.start_build(project_root, RuntimeBuildAction::BuildAndRun);
     }
 
-    pub fn rebuild_all(&mut self) {
-        self.start_build(RuntimeBuildAction::RebuildAll);
+    pub fn rebuild_all(&mut self, project_root: Option<&Path>) {
+        self.start_build(project_root, RuntimeBuildAction::RebuildAll);
     }
 
     pub fn poll(&mut self) {
@@ -212,7 +205,7 @@ impl RuntimeBridge {
         self.viewport_size = viewport_pixels;
     }
 
-    fn start_build(&mut self, action: RuntimeBuildAction) {
+    fn start_build(&mut self, project_root: Option<&Path>, action: RuntimeBuildAction) {
         self.cleanup_build_thread();
         if matches!(self.status, RuntimeStatus::Building) {
             self.push_log(RuntimeLogLevel::Warn, "Build already in progress.");
@@ -224,9 +217,22 @@ impl RuntimeBridge {
         self.status = RuntimeStatus::Building;
         self.push_log(RuntimeLogLevel::Info, "Starting C++ build pipeline...");
 
+        let Some(project_root) = project_root.map(PathBuf::from) else {
+            self.last_error =
+                Some("No active project. Create or open a project first.".to_string());
+            self.status = RuntimeStatus::Failed;
+            self.push_log(
+                RuntimeLogLevel::Error,
+                "No active project selected for build.",
+            );
+            return;
+        };
+        let runtime_root = project_root.join("apps").join("hello_engine");
+        let build_root = runtime_root.join("build");
+
+        self.project_runtime_root = Some(runtime_root.clone());
+
         let template_root = self.template_root.clone();
-        let runtime_root = self.runtime_root.clone();
-        let build_root = self.build_root.clone();
         let repo_root = self.repo_root.clone();
         let sender = self.event_tx.clone();
 
@@ -268,10 +274,7 @@ impl RuntimeBridge {
                 return;
             }
 
-            let mut build_args = vec![
-                "--build".into(),
-                build_root.display().to_string(),
-            ];
+            let mut build_args = vec!["--build".into(), build_root.display().to_string()];
             if cfg!(windows) {
                 build_args.push("--config".into());
                 build_args.push("Debug".into());
@@ -282,7 +285,9 @@ impl RuntimeBridge {
                 return;
             }
 
-            let _ = sender.send(RuntimeEvent::BuildFinished { run: action.run_after() });
+            let _ = sender.send(RuntimeEvent::BuildFinished {
+                run: action.run_after(),
+            });
         }));
     }
 
@@ -347,7 +352,15 @@ impl RuntimeBridge {
     }
 
     fn launch_runtime(&mut self) {
-        let executable = runtime_executable_path(&self.build_root);
+        let Some(runtime_root) = self.project_runtime_root.clone() else {
+            self.last_error = Some("No active project runtime configured.".to_string());
+            self.status = RuntimeStatus::Failed;
+            self.push_log(RuntimeLogLevel::Error, "Runtime project is not configured.");
+            return;
+        };
+
+        let build_root = runtime_root.join("build");
+        let executable = runtime_executable_path(&build_root);
         if !executable.exists() {
             self.last_error = Some(format!(
                 "Runtime executable not found at {}",
@@ -359,7 +372,7 @@ impl RuntimeBridge {
         }
 
         let mut command = Command::new(&executable);
-        command.current_dir(&self.runtime_root);
+        command.current_dir(&runtime_root);
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
@@ -440,18 +453,26 @@ fn ensure_runtime_workspace(
     runtime_root: &Path,
     action: RuntimeBuildAction,
 ) -> io::Result<()> {
-    if matches!(action, RuntimeBuildAction::RebuildAll) && runtime_root.exists() {
-        fs::remove_dir_all(runtime_root)?;
-    }
     fs::create_dir_all(runtime_root)?;
 
-    for entry in fs::read_dir(template_root)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            let file_name = entry.file_name();
-            let destination = runtime_root.join(file_name);
-            fs::copy(path, destination)?;
+    let build_root = runtime_root.join("build");
+    if matches!(action, RuntimeBuildAction::RebuildAll) && build_root.exists() {
+        fs::remove_dir_all(build_root)?;
+    }
+
+    let cmake_path = runtime_root.join("CMakeLists.txt");
+    let main_cpp_path = runtime_root.join("main.cpp");
+    if !cmake_path.exists() || !main_cpp_path.exists() {
+        for entry in fs::read_dir(template_root)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let file_name = entry.file_name();
+                let destination = runtime_root.join(file_name);
+                if !destination.exists() {
+                    fs::copy(path, destination)?;
+                }
+            }
         }
     }
     Ok(())

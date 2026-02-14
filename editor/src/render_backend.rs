@@ -74,6 +74,10 @@ impl EditorRenderBackend for EguiBackend {
                 RuntimeStatus::Idle,
                 &[],
                 None,
+                project_manager
+                    .metadata()
+                    .map(|metadata| metadata.viewport_pixels)
+                    .unwrap_or([1280, 720]),
             );
         }));
     }

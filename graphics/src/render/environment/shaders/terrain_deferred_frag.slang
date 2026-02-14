@@ -110,7 +110,7 @@ float4 sample_bindless(uint idx, float2 coords, float4 fallback) {
 }
 
 bool valid_texture(uint texture_id) {
-  return texture_id != INVALID_BINDLESS_ID;
+  return texture_id != INVALID_BINDLESS_ID && texture_id != INVALID_TEXTURE_ID;
 }
 
 uint clipmap_index(uint tile_index, float2 uv) {
@@ -124,19 +124,36 @@ uint clipmap_index(uint tile_index, float2 uv) {
   return tile_index * scene.clipmap_tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
 }
 
-float3 resolve_normal(Material material, FSInput input) {
-  float3 n = normalize(input.world_normal);
-  const bool use_pbr_normal = (material.material_flags & MATERIAL_FLAG_PBR_NORMAL) != 0;
-  if (!use_pbr_normal || !valid_texture(material.normal_texture_id)) {
-    return n;
-  }
 
-  float3 t = normalize(input.world_tangent.xyz);
-  float3 b = normalize(cross(n, t)) * input.world_tangent.w;
-  float3x3 tbn = float3x3(t, b, n);
-  float3 normal_map =
-    sample_texture(material.normal_texture_id, input.tex_coords).xyz * 2.0 - 1.0;
-  return normalize(mul(normal_map, tbn));
+
+bool resolve_material(uint material_id, out Material material) {
+  uint material_count = 0u;
+  uint material_stride = 0u;
+  meshi_bindless_materials.GetDimensions(material_count, material_stride);
+  if (material_id == INVALID_MATERIAL_ID || material_id >= material_count) {
+    material = (Material)0;
+    return false;
+  }
+  material = meshi_bindless_materials[material_id];
+  return true;
+}
+
+
+bool sample_blend_data(uint clipmap_sample, out float4 blend_weights, out float4 blend_ids) {
+  uint blend_count = 0u;
+  uint blend_stride = 0u;
+  terrain_blend_buffer.GetDimensions(blend_count, blend_stride);
+  uint ids_count = 0u;
+  uint ids_stride = 0u;
+  terrain_blend_ids_buffer.GetDimensions(ids_count, ids_stride);
+  if (clipmap_sample >= blend_count || clipmap_sample >= ids_count) {
+    blend_weights = float4(0.0, 0.0, 0.0, 0.0);
+    blend_ids = float4(0.0, 0.0, 0.0, 0.0);
+    return false;
+  }
+  blend_weights = terrain_blend_buffer[clipmap_sample];
+  blend_ids = terrain_blend_ids_buffer[clipmap_sample];
+  return true;
 }
 
 float4 resolve_base_color(Material material, FSInput input) {
@@ -158,8 +175,9 @@ float4 resolve_base_color(Material material, FSInput input) {
 FSOutput main(FSInput input) {
   FSOutput output;
   const uint clipmap_sample = clipmap_index(input.clipmap_tile_index, input.tex_coords);
-  const float4 blend_weights = terrain_blend_buffer[clipmap_sample];
-  const float4 blend_ids = terrain_blend_ids_buffer[clipmap_sample];
+  float4 blend_weights;
+  float4 blend_ids;
+  sample_blend_data(clipmap_sample, blend_weights, blend_ids);
   const bool use_fallback_material =
     all(blend_ids == float4(0.0, 0.0, 0.0, 0.0)) && input.material_id != INVALID_MATERIAL_ID;
   const uint4 material_ids = use_fallback_material
@@ -167,7 +185,6 @@ FSOutput main(FSInput input) {
     : uint4(blend_ids + 0.5);
   float total_weight = 0.0;
   float3 blended_color = float3(0.0, 0.0, 0.0);
-  float3 blended_normal = float3(0.0, 0.0, 0.0);
   float metallic = 0.0;
   float roughness = 0.0;
   uint material_flags = 0u;
@@ -179,12 +196,14 @@ FSOutput main(FSInput input) {
     }
 
     const uint material_id = material_ids[i];
-    const Material material = meshi_bindless_materials[material_id];
+    Material material;
+    if (!resolve_material(material_id, material)) {
+      continue;
+    }
     material_flags |= material.material_flags;
 
     const float4 base_color = resolve_base_color(material, input);
     blended_color += base_color.rgb * weight;
-    blended_normal += resolve_normal(material, input) * weight;
 
     float material_metallic = 0.0;
     float material_roughness = 1.0;
@@ -205,16 +224,14 @@ FSOutput main(FSInput input) {
     blended_color *= inv_weight;
     metallic *= inv_weight;
     roughness *= inv_weight;
-    blended_normal = normalize(blended_normal * inv_weight);
   } else {
     blended_color = input.color.rgb;
-    blended_normal = normalize(input.world_normal);
     metallic = 0.0;
     roughness = 1.0;
   }
 
   output.position = float4(input.world_pos, 1.0);
-  output.albedo = input.color;
+  output.albedo = float4(blended_color, 1.0);
   output.normal = float4(input.world_normal, 1.0);
   output.material_code = float4(0.0, float(material_flags), metallic, roughness);
   return output;
