@@ -193,6 +193,10 @@ mod editor {
                 }
             }
             let delta_time = ctx.input(|input| input.unstable_dt);
+            self.runtime.configure_hot_reload(
+                self.project_manager.active_project_root().as_deref(),
+                self.runtime_controls.hot_reload_enabled,
+            );
             let rendered = self.runtime.tick(
                 delta_time,
                 &mut self.runtime_controls,

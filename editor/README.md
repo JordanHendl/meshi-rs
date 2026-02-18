@@ -25,6 +25,19 @@ Suggested module layout:
 - `editor/src/project/`: project discovery, configuration, workspace state.
 - `editor/src/runtime/`: glue for launching C++ user runtime builds.
 
+### Current GUI module map
+
+The egui UI is split into focused modules under `editor/src/ui/`:
+
+- `mod.rs`: orchestrates top-level frame layout.
+- `actions.rs`: menu/command action enum and action ids.
+- `menu.rs`: menu construction + refresh logic.
+- `project_tree.rs`: project tree entry generation.
+- `panels.rs`: individual panel drawing helpers.
+
+To add a new editor element, add a `draw_*` function in `panels.rs` and call
+it from `EditorUi::build_egui` in `mod.rs`.
+
 ### C++ user runtime
 
 User-authored runtime/game code is written in C++ and built against the Meshi

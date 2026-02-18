@@ -8,6 +8,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
+    time::SystemTime,
 };
 
 pub struct RuntimeFrame {
@@ -18,6 +19,7 @@ pub struct RuntimeFrame {
 #[derive(Default)]
 pub struct RuntimeControlState {
     pub playing: bool,
+    pub hot_reload_enabled: bool,
     step_requested: bool,
 }
 
@@ -52,6 +54,7 @@ pub struct RuntimeBridge {
     event_tx: Sender<RuntimeEvent>,
     build_thread: Option<JoinHandle<()>>,
     child: Option<Child>,
+    hot_reload: HotReloadState,
 }
 
 impl RuntimeBridge {
@@ -76,6 +79,20 @@ impl RuntimeBridge {
             event_tx,
             build_thread: None,
             child: None,
+            hot_reload: HotReloadState::default(),
+        }
+    }
+
+    pub fn configure_hot_reload(&mut self, project_root: Option<&Path>, enabled: bool) {
+        self.hot_reload.enabled = enabled;
+        self.hot_reload.project_root = project_root.map(PathBuf::from);
+
+        if !enabled {
+            return;
+        }
+
+        if self.hot_reload.baseline_input.is_none() {
+            self.hot_reload.baseline_input = self.latest_runtime_source_timestamp();
         }
     }
 
@@ -124,6 +141,7 @@ impl RuntimeBridge {
         viewport_pixels: [u32; 2],
     ) -> bool {
         self.poll();
+        self.poll_hot_reload();
         let viewport_pixels = [viewport_pixels[0].max(1), viewport_pixels[1].max(1)];
         let mut size_changed = false;
         if self.engine.is_none() || self.viewport_size != viewport_pixels {
@@ -231,6 +249,7 @@ impl RuntimeBridge {
         let build_root = runtime_root.join("build");
 
         self.project_runtime_root = Some(runtime_root.clone());
+        self.hot_reload.baseline_input = self.latest_runtime_source_timestamp();
 
         let template_root = self.template_root.clone();
         let repo_root = self.repo_root.clone();
@@ -289,6 +308,51 @@ impl RuntimeBridge {
                 run: action.run_after(),
             });
         }));
+    }
+
+    fn poll_hot_reload(&mut self) {
+        if !self.hot_reload.enabled || matches!(self.status, RuntimeStatus::Building) {
+            return;
+        }
+
+        let latest_input = self.latest_runtime_source_timestamp();
+        let should_reload = match (self.hot_reload.baseline_input, latest_input) {
+            (Some(previous), Some(current)) => current > previous,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+
+        if should_reload {
+            self.hot_reload.baseline_input = latest_input;
+            self.push_log(
+                RuntimeLogLevel::Info,
+                "Detected C++ source changes. Rebuilding runtime for hot reload...",
+            );
+            let project_root = self.hot_reload.project_root.clone();
+            self.start_build(project_root.as_deref(), RuntimeBuildAction::BuildAndRun);
+        }
+    }
+
+    fn latest_runtime_source_timestamp(&self) -> Option<SystemTime> {
+        let project_root = self.hot_reload.project_root.as_ref()?;
+        let runtime_root = project_root.join("apps").join("hello_engine");
+
+        let mut latest = None;
+        for relative in ["main.cpp", "CMakeLists.txt", "example_helper.hpp"] {
+            let path = runtime_root.join(relative);
+            let Ok(meta) = fs::metadata(path) else {
+                continue;
+            };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            latest = Some(match latest {
+                Some(previous) if previous > modified => previous,
+                _ => modified,
+            });
+        }
+
+        latest
     }
 
     fn drain_events(&mut self) {
@@ -446,6 +510,13 @@ enum RuntimeEvent {
     Log(RuntimeLogEntry),
     Error(String),
     BuildFinished { run: bool },
+}
+
+#[derive(Default)]
+struct HotReloadState {
+    enabled: bool,
+    project_root: Option<PathBuf>,
+    baseline_input: Option<SystemTime>,
 }
 
 fn ensure_runtime_workspace(
