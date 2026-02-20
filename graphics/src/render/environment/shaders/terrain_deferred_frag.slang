@@ -53,9 +53,12 @@ struct FSInput {
 
 struct PerSceneData {
   Handle camera;
-  uint2 clipmap_grid_size;
-  uint clipmap_tile_texel_count;
-  uint _padding;
+  uint2 surface_grid_size;
+  uint surface_tile_texel_count;
+  uint _padding0;
+  uint2 material_grid_size;
+  uint material_tile_texel_count;
+  uint _padding1;
 };
 
 struct Camera {
@@ -113,15 +116,14 @@ bool valid_texture(uint texture_id) {
   return texture_id != INVALID_BINDLESS_ID && texture_id != INVALID_TEXTURE_ID;
 }
 
-uint clipmap_index(uint tile_index, float2 uv) {
-  const uint2 grid = scene.clipmap_grid_size;
+uint clipmap_index(uint tile_index, float2 uv, uint2 grid, uint tile_texel_count) {
   if (grid.x == 0u || grid.y == 0u) {
     return 0u;
   }
   const float2 clamped = saturate(uv);
   const float2 texel = clamped * float2(grid.x - 1u, grid.y - 1u);
   const uint2 texel_coord = uint2(texel + 0.5);
-  return tile_index * scene.clipmap_tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
+  return tile_index * tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
 }
 
 
@@ -174,7 +176,7 @@ float4 resolve_base_color(Material material, FSInput input) {
 [shader("fragment")]
 FSOutput main(FSInput input) {
   FSOutput output;
-  const uint clipmap_sample = clipmap_index(input.clipmap_tile_index, input.tex_coords);
+  const uint clipmap_sample = clipmap_index(input.clipmap_tile_index, input.tex_coords, scene.material_grid_size, scene.material_tile_texel_count);
   float4 blend_weights;
   float4 blend_ids;
   sample_blend_data(clipmap_sample, blend_weights, blend_ids);

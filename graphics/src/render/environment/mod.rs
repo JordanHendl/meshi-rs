@@ -8,12 +8,12 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{BindlessState, types::Camera};
+use furikake::{types::Camera, BindlessState};
 use glam::{Mat4, Vec3, Vec4};
-use noren::{DB, RDBFile};
+use noren::{RDBFile, DB};
 
-use crate::CloudSettings;
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use crate::{CloudSettings, TerrainRenderSettings};
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
 use sky::SkyRenderer;
@@ -202,11 +202,7 @@ impl EnvironmentRenderer {
             .record_cubemap_face(viewport, &mut self.dynamic, face_index)
     }
 
-    pub fn update_terrain(
-        &mut self,
-        camera: Handle<Camera>,
-        state: &mut BindlessState,
-    ) {
+    pub fn update_terrain(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
         self.terrain.update(camera, state);
     }
 
@@ -249,6 +245,10 @@ impl EnvironmentRenderer {
 
     pub fn set_terrain_project_key(&mut self, project_key: &str) {
         self.terrain.set_project_key(project_key);
+    }
+
+    pub fn set_terrain_render_settings(&mut self, settings: TerrainRenderSettings) {
+        self.terrain.set_render_settings(settings);
     }
 
     pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
@@ -357,10 +357,13 @@ impl EnvironmentRenderer {
                     .map(|clouds| clouds.record_composite(viewport))
                     .unwrap_or_else(CommandStream::<PendingGraphics>::subdraw),
             )
-            .combine(
-                self.ocean
-                    .record_draws(viewport, &mut self.dynamic, camera, self.time, camera_far),
-            )
+            .combine(self.ocean.record_draws(
+                viewport,
+                &mut self.dynamic,
+                camera,
+                self.time,
+                camera_far,
+            ))
         // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }
 

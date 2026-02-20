@@ -42,9 +42,12 @@ struct PerDrawData {
 
 struct PerSceneData {
   Handle camera;
-  uint2 clipmap_grid_size;
-  uint clipmap_tile_texel_count;
-  uint _padding;
+  uint2 surface_grid_size;
+  uint surface_tile_texel_count;
+  uint _padding0;
+  uint2 material_grid_size;
+  uint material_tile_texel_count;
+  uint _padding1;
 };
 
 struct Camera {
@@ -111,15 +114,14 @@ static PerSceneData scene = per_scene_ssbo[0];
 
 static const uint INVALID_BINDLESS_ID = 0xFFFFFFFFu;
 
-uint clipmap_index(uint tile_index, float2 uv) {
-  const uint2 grid = scene.clipmap_grid_size;
+uint clipmap_index(uint tile_index, float2 uv, uint2 grid, uint tile_texel_count) {
   if (grid.x == 0u || grid.y == 0u) {
     return 0u;
   }
   const float2 clamped = saturate(uv);
   const float2 texel = clamped * float2(grid.x - 1u, grid.y - 1u);
   const uint2 texel_coord = uint2(texel + 0.5);
-  return tile_index * scene.clipmap_tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
+  return tile_index * tile_texel_count + texel_coord.y * grid.x + texel_coord.x;
 }
 
 float4x4 inverse(float4x4 m) {
@@ -234,7 +236,7 @@ VSOutput main(VSInput input) {
 
   float3 local_pos = vertex.position;
   float3 local_normal = vertex.normal;
-  const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords);
+  const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords, scene.surface_grid_size, scene.surface_tile_texel_count);
   float terrain_height = 0.0;
   float3 terrain_normal = local_normal;
   if (sample_terrain_surface(clipmap_sample, terrain_height, terrain_normal)) {

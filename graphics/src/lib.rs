@@ -18,14 +18,17 @@ use dashi::{
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use meshi_ffi_structs::{EventCallbackInfo, FFIImage, LightFlags, LightInfo, LightType, event};
+use meshi_ffi_structs::{event, EventCallbackInfo, FFIImage, LightFlags, LightInfo, LightType};
 use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
 pub use render::environment::clouds::CloudRenderer;
 pub use render::environment::ocean::OceanFrameSettings;
-pub use render::environment::sky::{SkyFogLayer, SkyFrameSettings};
 pub use render::environment::sky::SkyboxFrameSettings;
+pub use render::environment::sky::{SkyFogLayer, SkyFrameSettings};
+pub use render::environment::terrain::settings::{
+    TerrainClipmapResourceSettings, TerrainClipmapSettings, TerrainRenderSettings,
+};
 pub use render::environment::terrain::TerrainRenderObject;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
@@ -75,6 +78,7 @@ pub struct RenderEngine {
     skybox_settings: SkyboxFrameSettings,
     ocean_settings: OceanFrameSettings,
     cloud_settings: CloudSettings,
+    terrain_settings: TerrainRenderSettings,
     light_cache: Vec<CachedLightEntry>,
     spot_shadow_light: Option<render::SpotShadowLight>,
 }
@@ -232,6 +236,8 @@ impl RenderEngine {
             .expect("Failed to make render queue");
 
         let cloud_settings = renderer.cloud_settings();
+        let terrain_settings = TerrainRenderSettings::default();
+        renderer.set_terrain_render_settings(terrain_settings);
 
         Ok(Self {
             displays: Pool::new(8),
@@ -252,6 +258,7 @@ impl RenderEngine {
             skybox_settings: SkyboxFrameSettings::default(),
             ocean_settings: OceanFrameSettings::default(),
             cloud_settings,
+            terrain_settings,
             light_cache: Vec::new(),
             spot_shadow_light: None,
         })
@@ -516,6 +523,15 @@ impl RenderEngine {
 
     pub fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
         self.renderer.set_terrain_rdb(rdb, project_key);
+    }
+
+    pub fn terrain_render_settings(&self) -> TerrainRenderSettings {
+        self.terrain_settings
+    }
+
+    pub fn set_terrain_render_settings(&mut self, settings: TerrainRenderSettings) {
+        self.terrain_settings = settings;
+        self.renderer.set_terrain_render_settings(settings);
     }
 
     pub fn release_object(&mut self, handle: Handle<RenderObject>) {
@@ -1229,5 +1245,9 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon { -Vec3::Y } else { Vec3::Y }
+    if is_moon {
+        -Vec3::Y
+    } else {
+        Vec3::Y
+    }
 }

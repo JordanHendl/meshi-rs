@@ -44,6 +44,24 @@ fn main() {
 
     setup.engine.set_cloud_weather_map(None);
 
+    setup
+        .engine
+        .set_terrain_render_settings(TerrainRenderSettings {
+            enabled: true,
+            clipmap_resolution: 18,
+            max_tiles: 12 * 12,
+            lod_levels: 6,
+            clipmap: TerrainClipmapSettings {
+                surface: TerrainClipmapResourceSettings {
+                    tile_resolution: [257, 257],
+                },
+                material: TerrainClipmapResourceSettings {
+                    tile_resolution: [257, 257],
+                },
+            },
+            ..Default::default()
+        });
+
     let project_key = "iceland";
     setup.engine.set_terrain_project_key(project_key);
 

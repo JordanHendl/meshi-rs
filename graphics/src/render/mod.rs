@@ -17,12 +17,12 @@ use crate::{
 };
 use bumpalo_herd::Herd;
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{BindlessState, types::Camera, types::Light, types::Material};
+use furikake::{types::Camera, types::Light, types::Material, BindlessState};
 use glam::Mat4;
 use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
-use noren::DB;
 use noren::RDBFile;
+use noren::DB;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -162,5 +162,6 @@ pub trait Renderer {
     fn set_cloud_weather_map(&mut self, view: Option<ImageView>);
     fn set_terrain_project_key(&mut self, project_key: &str);
     fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str);
+    fn set_terrain_render_settings(&mut self, settings: crate::TerrainRenderSettings);
     fn shut_down(self: Box<Self>);
 }

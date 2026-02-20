@@ -6,12 +6,12 @@ use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::GuiFrame;
 use crate::{
-    AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject, RenderObject,
-    RenderObjectInfo, TextInfo, TextObject, render::scene::*,
+    render::scene::*, AnimationState, BillboardInfo, CloudSettings, GuiInfo, GuiObject,
+    RenderObject, RenderObjectInfo, TextInfo, TextObject,
 };
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
-use bumpalo::Bump;
+use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
 use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
 use dashi::structs::{IndexedIndirectCommand, IndirectCommand};
 use dashi::*;
 use driver::command::{DrawIndexedIndirect, DrawIndirect};
@@ -19,16 +19,14 @@ use execution::{CommandDispatch, CommandRing};
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
     reservations::bindless_camera::ReservedBindlessCamera,
-    reservations::bindless_materials::ReservedBindlessMaterials,
+    reservations::bindless_materials::ReservedBindlessMaterials, types::Material, types::*,
     BindlessState,
-    types::Material,
-    types::*,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
-    DB, RDBFile,
     meta::{DeviceModel, HostMaterial},
+    RDBFile, DB,
 };
 use resource_pool::resource_list::ResourceList;
 use std::{collections::HashMap, ptr::NonNull};
@@ -610,11 +608,11 @@ impl ForwardRenderer {
                         };
                         (obj.scene_handle, todo!(), billboard.clone())
                     };
-            if let Some(material) = billboard.info.material {
-                let transform = self.scene.get_object_transform(scene_handle);
-                self.update_billboard_vertices(&billboard, transform, camera_handle);
-                billboard_draws.push(BillboardDraw {
-                    vertex_buffer: billboard.vertex_buffer,
+                    if let Some(material) = billboard.info.material {
+                        let transform = self.scene.get_object_transform(scene_handle);
+                        self.update_billboard_vertices(&billboard, transform, camera_handle);
+                        billboard_draws.push(BillboardDraw {
+                            vertex_buffer: billboard.vertex_buffer,
                             material,
                             transformation: todo!(),
                             total_transform: transform,
@@ -847,6 +845,8 @@ impl Renderer for ForwardRenderer {
     }
 
     fn set_terrain_rdb(&mut self, _rdb: &mut RDBFile, _project_key: &str) {}
+
+    fn set_terrain_render_settings(&mut self, _settings: crate::TerrainRenderSettings) {}
 
     fn set_terrain_project_key(&mut self, _project_key: &str) {}
 

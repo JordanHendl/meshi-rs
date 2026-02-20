@@ -1,7 +1,7 @@
 use super::debug_layer::DebugLayer;
 use super::environment::{
+    terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
-    terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
 };
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -10,20 +10,20 @@ use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
-    debug_register_radial_with_description, debug_register_radial_with_description_and_conflicts,
-    debug_register_with_description,
+    debug_register_int_with_description, debug_register_radial_with_description,
+    debug_register_radial_with_description_and_conflicts, debug_register_with_description,
+    DebugRadialOption, DebugRegistryValue, PageType,
 };
 use crate::gui::{GuiFrame, Slider};
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
-    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
+    render::scene::*, BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject,
 };
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
+use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
+use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
 use bytemuck::cast_slice;
 use dashi::cmd::Executable;
 use dashi::gpu::cmd::{Scope, SyncPoint};
@@ -31,21 +31,21 @@ use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
-use furikake::PSOBuilderFurikakeExt;
-use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
+use furikake::reservations::ReservedBinding;
 use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::types::*;
-use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
+use furikake::PSOBuilderFurikakeExt;
+use furikake::{types::Material, types::VertexBufferSlot, types::*, BindlessState};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
-use noren::{DB, RDBFile};
+use noren::{RDBFile, DB};
 use resource_pool::resource_list::ResourceList;
 use std::collections::HashMap;
 use tare::graph::*;
@@ -1760,10 +1760,9 @@ impl DeferredRenderer {
                 )
                 .expect("Failed to read camera for terrain update");
         }
-        self.subrender.environment.update_terrain(
-            *camera,
-            self.state.as_mut(),
-        );
+        self.subrender
+            .environment
+            .update_terrain(*camera, self.state.as_mut());
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self
@@ -2280,10 +2279,11 @@ impl DeferredRenderer {
                             cmd = c.unbind_graphics_pipeline();
                         }
 
-                        cmd = cmd.combine(self.subrender.environment.render_fog(
-                            &self.data.viewport,
-                            camera_handle,
-                        ));
+                        cmd = cmd.combine(
+                            self.subrender
+                                .environment
+                                .render_fog(&self.data.viewport, camera_handle),
+                        );
                     }
 
                     cmd = cmd.combine(
@@ -2506,6 +2506,12 @@ impl Renderer for DeferredRenderer {
 
     fn set_terrain_project_key(&mut self, project_key: &str) {
         DeferredRenderer::set_terrain_project_key(self, project_key);
+    }
+
+    fn set_terrain_render_settings(&mut self, settings: crate::TerrainRenderSettings) {
+        self.subrender
+            .environment
+            .set_terrain_render_settings(settings);
     }
 
     fn shut_down(self: Box<Self>) {
