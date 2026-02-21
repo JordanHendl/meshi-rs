@@ -14,7 +14,7 @@ class ModelObject : public meshi::Actor {
 public:
   ModelObject() {
     add_subobject<meshi::ModelComponent>(meshi::ModelComponent::CreateInfo{
-                                            .model = "model/witch",
+                                            .model = "model/cube",
                                             .rigid_body_info = {},
                                         })
         ->attach_to(root_component());

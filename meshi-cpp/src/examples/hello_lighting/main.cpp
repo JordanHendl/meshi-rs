@@ -102,7 +102,7 @@ private:
 
 auto main() -> int {
   meshi::initialize_meshi_engine(meshi::EngineInfo{
-      .application_name = "Hello Engine!",
+      .application_name = "Hello Lighting!",
       .application_root = EXAMPLE_APP_DIR,
   });
 

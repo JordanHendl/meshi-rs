@@ -25,6 +25,36 @@ public:
     m_gfx = GraphicsSystem(api_, raw_gfx);
   }
 
+  EngineBackend(const EngineBackend &) = delete;
+  auto operator=(const EngineBackend &) -> EngineBackend & = delete;
+
+  EngineBackend(EngineBackend &&other) noexcept
+      : m_phys(std::move(other.m_phys)),
+        m_gfx(std::move(other.m_gfx)),
+        engine_(other.engine_),
+        api_(other.api_) {
+    other.engine_ = nullptr;
+    other.api_ = nullptr;
+  }
+
+  auto operator=(EngineBackend &&other) noexcept -> EngineBackend & {
+    if (this != &other) {
+      if (api_ && engine_) {
+        api_->destroy_engine(engine_);
+      }
+
+      m_phys = std::move(other.m_phys);
+      m_gfx = std::move(other.m_gfx);
+      engine_ = other.engine_;
+      api_ = other.api_;
+
+      other.engine_ = nullptr;
+      other.api_ = nullptr;
+    }
+
+    return *this;
+  }
+
   ~EngineBackend() {
     if (api_ && engine_) {
       api_->destroy_engine(engine_);

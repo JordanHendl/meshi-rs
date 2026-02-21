@@ -11,7 +11,6 @@ members = [
     "utils",
     "ffi_structs",
     "editor",
-    "tools/terrain_editor",
 ]
 
 #[package]

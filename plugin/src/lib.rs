@@ -9,11 +9,9 @@ use meshi_graphics::{
     Camera, Display, DisplayInfo as GfxDisplayInfo, Light, RenderEngineInfo, RenderObject,
     RenderObjectInfo as GfxRenderObjectInfo, WindowInfo as GfxWindowInfo,
 };
-use meshi_physics::SimulationInfo;
 pub use meshi_physics::PhysicsSimulation;
-use meshi_physics::{
-    CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody,
-};
+use meshi_physics::SimulationInfo;
+use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody};
 use meshi_utils::timer::Timer;
 use noren::{meta::DeviceModel, DBInfo};
 use resource_pool::Handle;
@@ -53,15 +51,15 @@ pub struct MeshiPluginApi {
     pub gfx_release_light: extern "C" fn(*mut MeshiEngine, *const Handle<Light>),
     pub gfx_set_light_transform: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const Mat4),
     pub gfx_set_light_info: extern "C" fn(*mut MeshiEngine, Handle<Light>, *const LightInfo),
-    pub gfx_register_display: extern "C" fn(*mut MeshiEngine, *const DisplayInfo) -> Handle<Display>,
+    pub gfx_register_display:
+        extern "C" fn(*mut MeshiEngine, *const DisplayInfo) -> Handle<Display>,
     pub gfx_attach_camera_to_display:
         extern "C" fn(*mut MeshiEngine, Handle<Display>, Handle<Camera>),
     pub gfx_register_camera: extern "C" fn(*mut MeshiEngine, *const Mat4) -> Handle<Camera>,
     pub gfx_set_camera_transform: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
     pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
     pub gfx_capture_mouse: extern "C" fn(*mut MeshiEngine, i32),
-    pub audio_create_source:
-        extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<AudioSource>,
+    pub audio_create_source: extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<AudioSource>,
     pub audio_destroy_source: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
     pub audio_play: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
     pub audio_pause: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
@@ -81,28 +79,41 @@ pub struct MeshiPluginApi {
     pub audio_register_finished_callback:
         extern "C" fn(*mut MeshiEngine, *mut c_void, FinishedCallback),
     pub physx_set_gravity: extern "C" fn(*mut MeshiEngine, f32),
-    pub physx_create_material:
-        extern "C" fn(*mut MeshiEngine, *const meshi_physics::MaterialInfo)
-            -> Handle<meshi_physics::Material>,
+    pub physx_create_material: extern "C" fn(
+        *mut MeshiEngine,
+        *const meshi_physics::MaterialInfo,
+    ) -> Handle<meshi_physics::Material>,
     pub physx_release_material:
         extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::Material>),
-    pub physx_create_rigid_body:
-        extern "C" fn(*mut MeshiEngine, *const meshi_physics::RigidBodyInfo)
-            -> Handle<meshi_physics::RigidBody>,
+    pub physx_create_rigid_body: extern "C" fn(
+        *mut MeshiEngine,
+        *const meshi_physics::RigidBodyInfo,
+    ) -> Handle<meshi_physics::RigidBody>,
     pub physx_release_rigid_body:
         extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>),
-    pub physx_apply_force_to_rigid_body:
-        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const ForceApplyInfo),
-    pub physx_set_rigid_body_transform:
-        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const meshi_physics::ActorStatus) -> i32,
-    pub physx_get_rigid_body_status:
-        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *mut meshi_physics::ActorStatus) -> i32,
+    pub physx_apply_force_to_rigid_body: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<meshi_physics::RigidBody>,
+        *const ForceApplyInfo,
+    ),
+    pub physx_set_rigid_body_transform: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<meshi_physics::RigidBody>,
+        *const meshi_physics::ActorStatus,
+    ) -> i32,
+    pub physx_get_rigid_body_status: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<meshi_physics::RigidBody>,
+        *mut meshi_physics::ActorStatus,
+    ) -> i32,
     pub physx_get_rigid_body_velocity:
         extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>) -> Vec3,
-    pub physx_set_collision_shape:
-        extern "C" fn(*mut MeshiEngine, *const Handle<meshi_physics::RigidBody>, *const CollisionShape) -> i32,
-    pub physx_get_contacts:
-        extern "C" fn(*mut MeshiEngine, *mut ContactInfo, usize) -> usize,
+    pub physx_set_collision_shape: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<meshi_physics::RigidBody>,
+        *const CollisionShape,
+    ) -> i32,
+    pub physx_get_contacts: extern "C" fn(*mut MeshiEngine, *mut ContactInfo, usize) -> usize,
     pub physx_collision_shape_sphere: extern "C" fn(f32) -> CollisionShape,
     pub physx_collision_shape_box: extern "C" fn(Vec3) -> CollisionShape,
     pub physx_collision_shape_capsule: extern "C" fn(f32, f32) -> CollisionShape,
@@ -535,24 +546,15 @@ pub extern "C" fn meshi_gfx_create_render_object(
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
 
     let info: &RenderObjectInfo = unsafe { &(*info) };
+
     let mesh = unsafe { CStr::from_ptr(info.mesh) }
         .to_str()
-        .unwrap_or("mesh/default");
+        .unwrap_or("model/default");
 
-    let material = unsafe { CStr::from_ptr(info.material) }
-        .to_str()
-        .unwrap_or("material/default");
-
-    let mesh = engine
+    let model = engine
         .database
-        .fetch_gpu_mesh_with_material(mesh, material)
-        .expect("Failed to load mesh");
-
-    let model = DeviceModel {
-        name: "".to_string(),
-        meshes: vec![mesh],
-        rig: Default::default(),
-    };
+        .fetch_gpu_model(mesh)
+        .expect("Failed to  load model!");
 
     let h = engine
         .render
@@ -648,9 +650,7 @@ pub extern "C" fn meshi_gfx_set_light_transform(
     }
 
     let engine: &mut MeshiEngine = unsafe { &mut (*render) };
-    engine
-        .render
-        .set_light_transform(h, unsafe { &*transform });
+    engine.render.set_light_transform(h, unsafe { &*transform });
 }
 
 /// Update the properties for a directional light.
@@ -1115,8 +1115,7 @@ pub extern "C" fn meshi_physx_set_rigid_body_transform(
     if engine.is_null() || h.is_null() || info.is_null() {
         return 0;
     }
-    if unsafe { &mut (*engine).physics }
-        .set_rigid_body_transform(unsafe { *h }, unsafe { &*info })
+    if unsafe { &mut (*engine).physics }.set_rigid_body_transform(unsafe { *h }, unsafe { &*info })
     {
         1
     } else {

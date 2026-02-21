@@ -118,8 +118,8 @@ impl EnvironmentRenderer {
         CommandStream::new()
             .begin()
             .combine(self.sky.pre_compute(ctx))
-            .combine(self.ocean.pre_compute())
-            .combine(self.terrain.pre_compute())
+//            .combine(self.ocean.pre_compute())
+//            .combine(self.terrain.pre_compute())
             .end()
     }
 
@@ -127,8 +127,8 @@ impl EnvironmentRenderer {
         CommandStream::new()
             .begin()
             .combine(self.sky.post_compute())
-            .combine(self.ocean.post_compute())
-            .combine(self.terrain.post_compute())
+//            .combine(self.ocean.post_compute())
+//            .combine(self.terrain.post_compute())
             .end()
     }
 

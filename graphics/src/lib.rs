@@ -18,7 +18,7 @@ use dashi::{
 pub use furikake::types::AnimationState as FAnimationState;
 pub use furikake::types::{Camera, Light, Material};
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use meshi_ffi_structs::{event, EventCallbackInfo, FFIImage, LightFlags, LightInfo, LightType};
+use meshi_ffi_structs::{EventCallbackInfo, FFIImage, LightFlags, LightInfo, LightType, event};
 use meshi_utils::MeshiError;
 pub use noren::*;
 use render::deferred::DeferredRenderer;
@@ -26,10 +26,10 @@ pub use render::environment::clouds::CloudRenderer;
 pub use render::environment::ocean::OceanFrameSettings;
 pub use render::environment::sky::SkyboxFrameSettings;
 pub use render::environment::sky::{SkyFogLayer, SkyFrameSettings};
+pub use render::environment::terrain::TerrainRenderObject;
 pub use render::environment::terrain::settings::{
     TerrainClipmapResourceSettings, TerrainClipmapSettings, TerrainRenderSettings,
 };
-pub use render::environment::terrain::TerrainRenderObject;
 use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
@@ -930,6 +930,7 @@ impl RenderEngine {
 
     pub fn attach_camera_to_display(&mut self, display: Handle<Display>, camera: Handle<Camera>) {
         if display.valid() {
+            tracing::info!("Attached camera {:?} to display", camera);
             self.displays.get_mut_ref(display).unwrap().scene = camera;
         }
     }
@@ -1245,9 +1246,5 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon {
-        -Vec3::Y
-    } else {
-        Vec3::Y
-    }
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }
