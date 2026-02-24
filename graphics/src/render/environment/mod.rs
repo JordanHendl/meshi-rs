@@ -8,10 +8,11 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{types::Camera, BindlessState};
+use furikake::{BindlessState, types::Camera};
 use glam::{Mat4, Vec3, Vec4};
-use noren::{RDBFile, DB};
+use noren::{DB, RDBFile};
 
+use crate::render::SubrendererDrawInfo;
 use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::{CloudSettings, TerrainRenderSettings};
 use clouds::CloudRenderer;
@@ -118,8 +119,8 @@ impl EnvironmentRenderer {
         CommandStream::new()
             .begin()
             .combine(self.sky.pre_compute(ctx))
-//            .combine(self.ocean.pre_compute())
-//            .combine(self.terrain.pre_compute())
+            //            .combine(self.ocean.pre_compute())
+            //            .combine(self.terrain.pre_compute())
             .end()
     }
 
@@ -127,8 +128,8 @@ impl EnvironmentRenderer {
         CommandStream::new()
             .begin()
             .combine(self.sky.post_compute())
-//            .combine(self.ocean.post_compute())
-//            .combine(self.terrain.post_compute())
+            //            .combine(self.ocean.post_compute())
+            //            .combine(self.terrain.post_compute())
             .end()
     }
 
@@ -251,14 +252,6 @@ impl EnvironmentRenderer {
         self.terrain.set_render_settings(settings);
     }
 
-    pub fn build_terrain_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
-        self.terrain.build_deferred_draws(bin, view)
-    }
-
-    pub fn terrain_draw_builder(&self) -> Option<&GPUDrawBuilder> {
-        self.terrain.draw_builder()
-    }
-
     pub fn terrain_draw_info(&self) -> Option<terrain::TerrainDrawInfo> {
         self.terrain.draw_info()
     }
@@ -304,65 +297,45 @@ impl EnvironmentRenderer {
 
     pub fn render_opaque(
         &mut self,
-        viewport: &Viewport,
-        camera: dashi::Handle<Camera>,
-        camera_far: Option<f32>,
-        scene_color: Option<dashi::ImageView>,
-        scene_depth: Option<dashi::ImageView>,
-        shadow_map: Option<dashi::ImageView>,
-        shadow_cascade_count: u32,
-        shadow_resolution: u32,
-        shadow_splits: Vec4,
-        shadow_matrices: [Mat4; 4],
+        info: &mut SubrendererDrawInfo,
+        scene_color: Option<u16>,
+        scene_depth: Option<u16>,
     ) -> CommandStream<PendingGraphics> {
-        self.ocean
-            .set_environment_map(self.sky.environment_cubemap_view());
-        self.ocean.set_scene_textures(scene_color, scene_depth);
-        self.ocean.set_shadow_map(
-            shadow_map,
-            shadow_cascade_count,
-            shadow_resolution,
-            shadow_splits,
-            shadow_matrices,
-        );
+//        self.ocean
+//            .set_environment_map(self.sky.environment_cubemap_view());
+//        self.ocean.set_scene_textures(scene_color, scene_depth);
+        //        self.ocean.set_shadow_map(
+        //        );
         let cloud_shadow_info = self
             .clouds
             .as_ref()
             .and_then(|clouds| clouds.shadow_map_info());
         if let Some(info) = cloud_shadow_info {
-            self.ocean.set_cloud_shadow_map(
-                Some(info.shadow_buffer),
-                info.shadow_cascade_count,
-                info.shadow_resolution,
-                Vec4::from(info.shadow_cascade_splits),
-                info.shadow_cascade_extents,
-                info.shadow_cascade_resolutions,
-                info.shadow_cascade_offsets,
-            );
+            //            self.ocean.set_cloud_shadow_map();
         } else {
-            self.ocean
-                .set_cloud_shadow_map(None, 0, 0, Vec4::ZERO, [0.0; 4], [0; 4], [0; 4]);
+            //            self.ocean
+            //                .set_cloud_shadow_map(None, 0, 0, Vec4::ZERO, [0.0; 4], [0; 4], [0; 4]);
         }
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(
-                viewport,
+                &info.viewport,
                 &mut self.dynamic,
-                camera,
+                info.camera,
                 self.time,
                 self.last_delta_time,
             ))
             .combine(
                 self.clouds
                     .as_mut()
-                    .map(|clouds| clouds.record_composite(viewport))
+                    .map(|clouds| clouds.record_composite(&info.viewport))
                     .unwrap_or_else(CommandStream::<PendingGraphics>::subdraw),
             )
             .combine(self.ocean.record_draws(
-                viewport,
+                &info.viewport,
                 &mut self.dynamic,
-                camera,
+                info.camera,
                 self.time,
-                camera_far,
+                None,
             ))
         // .combine(self.terrain.record_draws(viewport, &mut self.dynamic))
     }

@@ -55,14 +55,14 @@ layout(set = 0, binding = 3) buffer DrawList {
 } draw_list;
 
 layout(set = 1, binding = 0) readonly buffer DrawParams {
-    uint bin;
     uint view;
     uint num_bins;
     uint max_objects;
     uint num_draws;
+    uint bins_len;
     uint _padding0;
     uint _padding1;
-    uint _padding2;
+    uint bins[56];
 } params;
 
 uint handle_slot(Handle handle_value) {
@@ -89,13 +89,18 @@ void main() {
         return;
     }
 
-    if (params.bin >= params.num_bins) {
-        draw_list.commands[idx] = cmd;
+    uint bin_dispatch_idx = gl_GlobalInvocationID.z;
+    if (bin_dispatch_idx >= params.bins_len) {
         return;
     }
 
-    //uint bin_offset = params.view * params.num_bins + params.bin;
-    uint bin_offset = params.bin;
+    uint bin = params.bins[bin_dispatch_idx];
+    if (bin >= params.num_bins) {
+        return;
+    }
+
+    //uint bin_offset = params.view * params.num_bins + bin;
+    uint bin_offset = bin;
     uint bin_count = counts.counts[bin_offset];
     uint scene_slot = handle_slot(draw.scene_id);
 
@@ -112,5 +117,7 @@ void main() {
     if (visible) {
         cmd.instance_count = 1u;
     }
-    draw_list.commands[idx] = cmd;
+
+    uint draw_list_idx = bin * params.max_objects + idx;
+    draw_list.commands[draw_list_idx] = cmd;
 }

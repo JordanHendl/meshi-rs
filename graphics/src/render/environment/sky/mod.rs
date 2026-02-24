@@ -1472,13 +1472,13 @@ impl SkyRenderer {
             self.skybox_fallback_view
         };
 
-        self.skybox_pipeline.update_table(
-            "skybox_texture",
-            dashi::IndexedResource {
-                resource: ShaderResource::Image(view),
-                slot: 0,
-            },
-        );
+//        self.skybox_pipeline.update_table(
+//            "skybox_texture",
+//            dashi::IndexedResource {
+//                resource: ShaderResource::Image(view),
+//                slot: 0,
+//            },
+//        );
     }
 
     fn ensure_cubemap_resources(&mut self, ctx: &mut dashi::Context, size: u32) -> bool {

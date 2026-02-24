@@ -11,6 +11,7 @@ mod skinning;
 pub mod text;
 
 use crate::gui::GuiFrame;
+use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
     ShadowCascadeSettings, TextInfo, TextObject,
@@ -23,6 +24,7 @@ use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
 use noren::RDBFile;
 use noren::DB;
+use tare::graph::RenderGraph;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -127,7 +129,6 @@ pub trait Renderer {
         &mut self,
         settings: crate::render::environment::ocean::OceanFrameSettings,
     );
-    fn set_spot_shadow_light(&mut self, light: Option<SpotShadowLight>);
     fn register_object(
         &mut self,
         info: &RenderObjectInfo,
@@ -164,4 +165,11 @@ pub trait Renderer {
     fn set_terrain_rdb(&mut self, rdb: &mut RDBFile, project_key: &str);
     fn set_terrain_render_settings(&mut self, settings: crate::TerrainRenderSettings);
     fn shut_down(self: Box<Self>);
+}
+
+struct SubrendererDrawInfo {
+    draw_builder: *mut GPUDrawBuilder,
+    graph: *mut RenderGraph,
+    camera: Handle<Camera>,
+    viewport: Viewport,
 }

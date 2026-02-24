@@ -1,7 +1,7 @@
 use super::debug_layer::DebugLayer;
 use super::environment::{
-    terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
+    terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
 };
 use super::gpu_draw_builder::GPUDrawBuilder;
 use super::gui::GuiRenderer;
@@ -10,20 +10,20 @@ use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::debug::{
-    debug_register_int_with_description, debug_register_radial_with_description,
-    debug_register_radial_with_description_and_conflicts, debug_register_with_description,
     DebugRadialOption, DebugRegistryValue, PageType,
+    debug_register_radial_with_description_and_conflicts, debug_register_with_description,
 };
 use crate::gui::{GuiFrame, Slider};
+use crate::render::SubrendererDrawInfo;
 use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
-use crate::{
-    render::scene::*, BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject,
-};
 use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
-use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
+use crate::{
+    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
+};
+use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use bumpalo::collections::Vec as BumpVec;
 use bumpalo::Bump;
+use bumpalo::collections::Vec as BumpVec;
 use bytemuck::cast_slice;
 use dashi::cmd::Executable;
 use dashi::gpu::cmd::{Scope, SyncPoint};
@@ -31,33 +31,27 @@ use dashi::utils::gpupool::GPUPool;
 use dashi::*;
 use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
+use furikake::PSOBuilderFurikakeExt;
+use furikake::reservations::ReservedBinding;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
 use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
-use furikake::reservations::ReservedBinding;
 use furikake::types::AnimationState as FurikakeAnimationState;
 use furikake::types::*;
-use furikake::PSOBuilderFurikakeExt;
-use furikake::{types::Material, types::VertexBufferSlot, types::*, BindlessState};
+use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
 use noren::rdb::primitives::Vertex;
 use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
-use noren::{RDBFile, DB};
+use noren::{DB, RDBFile};
 use resource_pool::resource_list::ResourceList;
 use std::collections::HashMap;
 use tare::graph::*;
 use tare::transient::TransientAllocator;
 use tare::utils::StagedBuffer;
 use tracing::{info, warn};
-
-mod shadow;
-mod shadows;
-
-use shadow::ShadowPassInfo;
-use shadows::{ShadowCascadeInfo, ShadowPipelineMode, ShadowSystem};
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -209,7 +203,6 @@ enum DeferredDepthDebugView {
 struct DeferredDebugViews {
     cloud_debug_view: CloudDebugView,
     deferred_framebuffer: u32,
-    shadow_map: u32,
     depth: u32,
 }
 
@@ -218,7 +211,6 @@ impl Default for DeferredDebugViews {
         Self {
             cloud_debug_view: CloudDebugView::None,
             deferred_framebuffer: DeferredFramebufferDebugView::None as u32,
-            shadow_map: DeferredShadowDebugView::None as u32,
             depth: DeferredDepthDebugView::Off as u32,
         }
     }
@@ -237,9 +229,7 @@ pub struct DeferredRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
-    depth: ImageView,
     cloud_overlay: Handle<TextObject>,
-    shadows: ShadowSystem,
     frame_count: usize,
     frame_bump: Bump,
     debug_views: DeferredDebugViews,
@@ -319,8 +309,13 @@ impl DeferredRenderer {
         };
 
         ctx.init_gpu_timers(64).unwrap();
+
+        // Init global command dispatcher
         CommandDispatch::init(ctx.as_mut()).expect("Failed to init command dispatcher!");
         let mut state = Box::new(BindlessState::new(&mut ctx));
+
+        // Initialize GPU Scene to process scenes (from a camera). Each scene processes data into
+        // bins.
         let scene = GPUScene::new(
             &GPUSceneInfo {
                 name: "[MESHI] Deferred Renderer Scene",
@@ -357,42 +352,6 @@ impl DeferredRenderer {
             })
             .expect("Unable to create dynamic allocator!");
 
-        let initial_shadow_cascade = [ShadowCascadeInfo::default()];
-        let shadow_cascade_buffer = StagedBuffer::new(
-            ctx.as_mut(),
-            BufferInfo {
-                debug_name: "[MESHI DEFERRED] Shadow Cascade Info",
-                byte_size: std::mem::size_of::<ShadowCascadeInfo>() as u32,
-                visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::STORAGE,
-                initial_data: unsafe { Some(&initial_shadow_cascade.align_to::<u8>().1) },
-            },
-        );
-
-        let depth_image = ctx
-            .make_image(&ImageInfo {
-                debug_name: "[MESHI DEFERRED] Persistent Depth",
-                dim: [
-                    info.initial_viewport.area.w as u32,
-                    info.initial_viewport.area.h as u32,
-                    1,
-                ],
-                layers: 1,
-                format: Format::D24S8,
-                mip_levels: 1,
-                samples: info.sample_count,
-                initial_data: None,
-                ..Default::default()
-            })
-            .expect("create persistent depth image");
-
-        let depth = ImageView {
-            img: depth_image,
-            aspect: AspectMask::Depth,
-            view_type: ImageViewType::Type2D,
-            range: SubresourceRange::new(0, 1, 0, 1),
-        };
-
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
@@ -404,7 +363,7 @@ impl DeferredRenderer {
                 skybox: super::environment::sky::SkyboxInfo::default(),
                 ocean: super::environment::ocean::OceanInfo::default(),
                 terrain: super::environment::terrain::TerrainInfo::default(),
-                cloud_depth_view: Some(depth),
+                cloud_depth_view: None,
             },
         );
 
@@ -448,6 +407,17 @@ impl DeferredRenderer {
                 },
             )
             .expect("Failed to compile deferred combine fragment shader");
+
+        let dummy = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "[MESHI] Dummy Buffer",
+                byte_size: 1024,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            })
+            .expect("Failed to create dummy buffer");
+
         let mut psostate = PSOBuilder::new()
             .set_debug_name("[MESHI] Deferred Combine")
             .vertex_compiled(Some(vertex))
@@ -468,7 +438,7 @@ impl DeferredRenderer {
             .add_table_variable_with_resources(
                 "shadow_cascade_ssbo",
                 vec![IndexedResource {
-                    resource: ShaderResource::StorageBuffer(shadow_cascade_buffer.device()),
+                    resource: ShaderResource::StorageBuffer(dummy.into()),
                     slot: 0,
                 }],
             );
@@ -550,23 +520,6 @@ impl DeferredRenderer {
             ),
         };
 
-        let terrain_draw_builder = subrender
-            .environment
-            .terrain_draw_builder()
-            .expect("terrain draw builder");
-        let shadows = ShadowSystem::new(
-            ctx.as_mut(),
-            state.as_mut(),
-            &proc.draw_builder,
-            terrain_draw_builder,
-            &data.dynamic,
-            shadow_cascade_buffer,
-            ShadowPassInfo {
-                cascades: info.shadow_cascades,
-                ..Default::default()
-            },
-            ShadowPipelineMode::Deferred,
-        );
 
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
@@ -579,6 +532,7 @@ impl DeferredRenderer {
             scale: 1.0,
             render_mode: TextRenderMode::Plain,
         });
+
         Self {
             ctx,
             state,
@@ -592,9 +546,7 @@ impl DeferredRenderer {
             psos,
             text,
             gui,
-            depth,
             cloud_overlay,
-            shadows,
             frame_count: 0,
             frame_bump: Bump::new(),
             debug_views: DeferredDebugViews::default(),
@@ -988,150 +940,17 @@ impl DeferredRenderer {
         db.import_furikake_state(self.state.as_mut());
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.subrender.environment.initialize_database(db);
-        self.register_shadow_debug();
         self.register_debug_views();
         self.text.initialize_database(db);
-    }
-
-    fn register_shadow_debug(&mut self) {
-        let shadows = &mut self.shadows;
-        let shadow_resolution = shadows.resolution_mut() as *mut u32;
-        let cascades = shadows.cascades_mut();
-        unsafe {
-            debug_register_int_with_description(
-                PageType::Shadow,
-                Slider::new_int(0, "Opaque Shadow Resolution", 256.0, 4096.0, 0.0),
-                shadow_resolution,
-                "Opaque Shadow Resolution",
-                Some("Controls the resolution of the opaque shadow map atlas."),
-            );
-            debug_register_radial_with_description(
-                PageType::Shadow,
-                "Opaque Shadow Cascades",
-                DebugRegistryValue::U32(&mut cascades.cascade_count),
-                &[
-                    DebugRadialOption {
-                        label: "1",
-                        value: 1.0,
-                    },
-                    DebugRadialOption {
-                        label: "2",
-                        value: 2.0,
-                    },
-                    DebugRadialOption {
-                        label: "3",
-                        value: 3.0,
-                    },
-                    DebugRadialOption {
-                        label: "4",
-                        value: 4.0,
-                    },
-                ],
-                Some("Select how many cascaded shadow maps are used for opaque geometry."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 0 Split", 0.0, 1.0, 0.0),
-                &mut cascades.cascade_splits[0] as *mut f32,
-                "Opaque Cascade 0 Split",
-                Some("Sets the normalized split distance for the first cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 1 Split", 0.0, 1.0, 0.0),
-                &mut cascades.cascade_splits[1] as *mut f32,
-                "Opaque Cascade 1 Split",
-                Some("Sets the normalized split distance for the second cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 2 Split", 0.0, 1.0, 0.0),
-                &mut cascades.cascade_splits[2] as *mut f32,
-                "Opaque Cascade 2 Split",
-                Some("Sets the normalized split distance for the third cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 3 Split", 0.0, 1.0, 0.0),
-                &mut cascades.cascade_splits[3] as *mut f32,
-                "Opaque Cascade 3 Split",
-                Some("Sets the normalized split distance for the fourth cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 0 Extent", 100.0, 200000.0, 0.0),
-                &mut cascades.cascade_extents[0] as *mut f32,
-                "Opaque Cascade 0 Extent",
-                Some("Sets the coverage radius for the nearest opaque shadow cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 1 Extent", 100.0, 200000.0, 0.0),
-                &mut cascades.cascade_extents[1] as *mut f32,
-                "Opaque Cascade 1 Extent",
-                Some("Sets the coverage radius for the second opaque shadow cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 2 Extent", 100.0, 200000.0, 0.0),
-                &mut cascades.cascade_extents[2] as *mut f32,
-                "Opaque Cascade 2 Extent",
-                Some("Sets the coverage radius for the third opaque shadow cascade."),
-            );
-            debug_register_with_description(
-                PageType::Shadow,
-                Slider::new(0, "Opaque Cascade 3 Extent", 100.0, 200000.0, 0.0),
-                &mut cascades.cascade_extents[3] as *mut f32,
-                "Opaque Cascade 3 Extent",
-                Some("Sets the coverage radius for the furthest opaque shadow cascade."),
-            );
-            debug_register_radial_with_description(
-                PageType::Shadow,
-                "Opaque Spot Shadow Enabled",
-                DebugRegistryValue::Bool(shadows.spot_enabled_mut()),
-                &[
-                    DebugRadialOption {
-                        label: "Off",
-                        value: 0.0,
-                    },
-                    DebugRadialOption {
-                        label: "On",
-                        value: 1.0,
-                    },
-                ],
-                Some("Toggle rendering the active opaque spot light shadow map."),
-            );
-            debug_register_int_with_description(
-                PageType::Shadow,
-                Slider::new_int(0, "Opaque Spot Shadow Resolution", 128.0, 4096.0, 0.0),
-                shadows.spot_resolution_mut() as *mut u32,
-                "Opaque Spot Shadow Resolution",
-                Some("Controls the resolution of the opaque spot light shadow map."),
-            );
-        }
     }
 
     fn register_debug_views(&mut self) {
         let cloud_view = DebugRegistryValue::CloudDebugView(&mut self.debug_views.cloud_debug_view);
         let deferred_view = DebugRegistryValue::U32(&mut self.debug_views.deferred_framebuffer);
-        let shadow_view = DebugRegistryValue::U32(&mut self.debug_views.shadow_map);
         let depth_view = DebugRegistryValue::U32(&mut self.debug_views.depth);
-        let cloud_conflicts = [
-            deferred_view.clone(),
-            shadow_view.clone(),
-            depth_view.clone(),
-        ];
-        let deferred_conflicts = [cloud_view.clone(), shadow_view.clone(), depth_view.clone()];
-        let shadow_conflicts = [
-            cloud_view.clone(),
-            deferred_view.clone(),
-            depth_view.clone(),
-        ];
-        let depth_conflicts = [
-            cloud_view.clone(),
-            deferred_view.clone(),
-            shadow_view.clone(),
-        ];
+        let cloud_conflicts = [deferred_view.clone(), depth_view.clone()];
+        let deferred_conflicts = [cloud_view.clone(), depth_view.clone()];
+        let depth_conflicts = [cloud_view.clone(), deferred_view.clone()];
         unsafe {
             debug_register_radial_with_description_and_conflicts(
                 PageType::DebugViews,
@@ -1254,27 +1073,6 @@ impl DeferredRenderer {
                 ],
                 Some("Selects a deferred GBuffer attachment to display."),
                 Some(&deferred_conflicts),
-            );
-            debug_register_radial_with_description_and_conflicts(
-                PageType::DebugViews,
-                "Shadow Maps",
-                shadow_view,
-                &[
-                    DebugRadialOption {
-                        label: "None",
-                        value: DeferredShadowDebugView::None as u32 as f32,
-                    },
-                    DebugRadialOption {
-                        label: "Cascaded Atlas",
-                        value: DeferredShadowDebugView::Cascaded as u32 as f32,
-                    },
-                    DebugRadialOption {
-                        label: "Spot Shadow",
-                        value: DeferredShadowDebugView::Spot as u32 as f32,
-                    },
-                ],
-                Some("Selects a shadow map to return from the renderer."),
-                Some(&shadow_conflicts),
             );
             debug_register_radial_with_description_and_conflicts(
                 PageType::DebugViews,
@@ -1743,26 +1541,6 @@ impl DeferredRenderer {
             delta_time: *delta_time,
             ..Default::default()
         });
-        let mut camera_position = Vec3::ZERO;
-        let mut camera_far = 0.0f32;
-        let mut view_projection = None;
-        if camera.valid() {
-            self.state
-                .reserved_mut(
-                    "meshi_bindless_cameras",
-                    |a: &mut ReservedBindlessCamera| {
-                        let data = a.camera(*camera);
-                        camera_position = data.position();
-                        camera_far = data.far;
-                        let view = data.world_from_camera.inverse();
-                        view_projection = Some(data.projection * view);
-                    },
-                )
-                .expect("Failed to read camera for terrain update");
-        }
-        self.subrender
-            .environment
-            .update_terrain(*camera, self.state.as_mut());
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self
@@ -1771,13 +1549,10 @@ impl DeferredRenderer {
                 .expect("Failed to update furikake state")
                 .combine(self.proc.scene.cull());
 
-            self.shadows.update_spot_light_state(self.state.as_mut());
-
             cmd = cmd
                 .combine(self.proc.scene.pre_compute())
                 .combine(self.proc.draw_builder.pre_compute())
                 .combine(self.subrender.environment.pre_compute(self.ctx.as_mut()))
-                .combine(self.shadows.pre_compute())
                 .combine(self.gui.pre_compute())
                 .combine(self.text.pre_compute())
                 .combine(DeferredFrameBlitter::pre_compute())
@@ -1811,7 +1586,7 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-
+    
         // Prepare for frame... this does the following (not all encompassing):
         // 1) Build skinning transformations
         // 2) Syncs all cpu configto gpu
@@ -1835,14 +1610,21 @@ impl DeferredRenderer {
 
         let semaphores = self.graph.make_semaphores(1);
         let mut outputs = Vec::with_capacity(views.len());
-        let depth = self.depth;
-
+        
+        let mut subrender_info  = SubrendererDrawInfo {
+            draw_builder: &mut self.proc.draw_builder,
+            graph: &mut self.graph,
+            camera: Default::default(),
+            viewport: self.data.viewport,
+        };
         for (view_idx, camera) in views.iter().enumerate() {
+            subrender_info.camera = *camera;
             let position = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Position Framebuffer View {view_idx}"),
                 format: Format::RGBA32F,
                 ..default_framebuffer_info
             });
+            
 
             let diffuse = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
@@ -1869,6 +1651,13 @@ impl DeferredRenderer {
             let scene_color = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Scene Color View {view_idx}"),
                 format: Format::BGRA8,
+                samples: self.sample_count,
+                ..default_framebuffer_info
+            });
+
+            let depth = self.graph.make_image(&ImageInfo {
+                debug_name: &format!("[MESHI DEFERRED] Depth Framebuffer View {view_idx}"),
+                format: Format::D24S8,
                 samples: self.sample_count,
                 ..default_framebuffer_info
             });
@@ -1905,36 +1694,15 @@ impl DeferredRenderer {
 
             let camera_handle = *camera;
 
+            // PRECOMPUTE: Prepare everything for frame
             self.pre_compute(delta_time, camera_handle);
-
-            let shadow_result = self.shadows.process(
-                &mut self.graph,
-                self.state.as_ref(),
-                &mut self.data.dynamic,
-                &mut self.proc.draw_builder,
-                &mut self.subrender.environment,
-                &camera_data,
-                view_idx as u32,
-            );
-            let shadow_map = shadow_result.cascaded.shadow_map;
-            let shadow_resolution = shadow_result.cascaded.shadow_resolution;
-            let cascade_data = shadow_result.cascaded.cascade_data;
-            let spot_shadow_bindless_id = shadow_result.spot.shadow_bindless_id;
-            let spot_shadow_resolution = shadow_result.spot.shadow_resolution;
-            let spot_shadow_matrix = shadow_result.spot.shadow_matrix;
-            let spot_shadow_map = shadow_result.spot.shadow_map;
 
             self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
                     .combine(
                         self.proc
                             .draw_builder
-                            .build_draws(BIN_GBUFFER_OPAQUE, view_idx as u32),
-                    )
-                    .combine(
-                        self.subrender
-                            .environment
-                            .build_terrain_draws(TERRAIN_DRAW_BIN, view_idx as u32),
+                            .build_draws(&[BIN_GBUFFER_OPAQUE], view_idx as u32),
                     )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
@@ -1951,7 +1719,7 @@ impl DeferredRenderer {
                     name: Some("[MESHI] DEFERRED SPLIT".to_string()),
                     viewport: self.data.viewport,
                     color_attachments: deferred_pass_attachments,
-                    depth_attachment: Some(depth),
+                    depth_attachment: Some(depth.view),
                     clear_values: deferred_pass_clear,
                     depth_clear: Some(ClearValue::DepthStencil {
                         depth: 1.0,
@@ -2057,16 +1825,16 @@ impl DeferredRenderer {
                     per_obj.diff = diffuse.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.norm = normal.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.mat = material_code.bindless_id.unwrap_or(u16::MAX) as u32;
-                    per_obj.shadow = shadow_map.bindless_id.unwrap_or(u16::MAX) as u32;
-                    per_obj.shadow_cascade_count = cascade_data.count;
-                    per_obj.shadow_resolution = shadow_resolution;
+                    per_obj.shadow = u16::MAX as u32;
+                    per_obj.shadow_cascade_count = u16::MAX as u32;
+                    per_obj.shadow_resolution = 0;
                     per_obj.debug_view =
                         self.subrender.environment.cloud_settings().debug_view as u32;
-                    per_obj.spot_shadow_texture = spot_shadow_bindless_id;
-                    per_obj.spot_shadow_resolution = spot_shadow_resolution;
+                    per_obj.spot_shadow_texture = 0;
+                    per_obj.spot_shadow_resolution = 0;
                     per_obj.spot_shadow_padding0 = 0;
                     per_obj.spot_shadow_padding1 = 0;
-                    per_obj.spot_shadow_matrix = spot_shadow_matrix;
+                    per_obj.spot_shadow_matrix = Default::default();
 
                     cmd = cmd
                         .bind_graphics_pipeline(self.psos.combine_pso.handle)
@@ -2097,22 +1865,13 @@ impl DeferredRenderer {
                 }
                 _ => None,
             };
-            let shadow_debug_output = match self.debug_views.shadow_map {
-                value if value == DeferredShadowDebugView::Cascaded as u32 => Some(shadow_map.view),
-                value if value == DeferredShadowDebugView::Spot as u32 => {
-                    spot_shadow_map.as_ref().map(|map| map.view)
-                }
-                _ => None,
-            };
             let depth_debug_output = if self.debug_views.depth == DeferredDepthDebugView::On as u32
             {
                 Some(depth)
             } else {
                 None
             };
-            let debug_output = deferred_debug_output
-                .or(shadow_debug_output)
-                .or(depth_debug_output);
+            let debug_output = deferred_debug_output.or(None);
             let debug_output_active = debug_output.is_some();
 
             let scene_color_view = scene_color.view;
@@ -2228,23 +1987,16 @@ impl DeferredRenderer {
                     name: Some("[MESHI] TRANSPARENT".to_string()),
                     viewport: self.data.viewport,
                     color_attachments: transparent_attachments,
-                    depth_attachment: Some(depth),
+                    depth_attachment: Some(depth.view),
                     clear_values: transparent_clear,
                     depth_clear: None,
                 },
                 |mut cmd| {
                     if !debug_output_active {
                         cmd = cmd.combine(self.subrender.environment.render_opaque(
-                            &self.data.viewport,
-                            camera_handle,
-                            Some(camera_data.far),
-                            Some(scene_color.view),
-                            Some(depth),
-                            Some(shadow_map.view),
-                            cascade_data.count,
-                            shadow_resolution,
-                            Vec4::from_array(cascade_data.splits),
-                            cascade_data.matrices,
+                            &mut subrender_info,
+                            scene_color.bindless_id,
+                            depth.bindless_id,
                         ));
 
                         if !billboard_draws.is_empty() {
@@ -2309,7 +2061,6 @@ impl DeferredRenderer {
             cmd.combine(self.proc.scene.post_compute())
                 .combine(self.proc.draw_builder.post_compute())
                 .combine(self.subrender.environment.post_compute())
-                .combine(self.shadows.post_compute())
                 .combine(self.gui.post_compute())
                 .combine(self.text.post_compute())
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
@@ -2381,31 +2132,6 @@ impl Renderer for DeferredRenderer {
 
     fn set_ocean_settings(&mut self, settings: super::environment::ocean::OceanFrameSettings) {
         self.subrender.environment.update_ocean(settings);
-    }
-
-    fn set_spot_shadow_light(&mut self, light: Option<super::SpotShadowLight>) {
-        let previous_handle = self.shadows.spot_light_handle();
-        let next_handle = light.map(|entry| entry.handle);
-        if previous_handle != next_handle {
-            self.state
-                .reserved_mut(
-                    "meshi_bindless_lights",
-                    |lights: &mut furikake::reservations::bindless_lights::ReservedBindlessLights| {
-                        if let Some(handle) = previous_handle {
-                            if handle.valid() {
-                                lights.light_mut(handle).extra.y = 0.0;
-                            }
-                        }
-                        if let Some(handle) = next_handle {
-                            if handle.valid() {
-                                lights.light_mut(handle).extra.y = 1.0;
-                            }
-                        }
-                    },
-                )
-                .ok();
-        }
-        self.shadows.set_spot_light(light);
     }
 
     fn register_object(

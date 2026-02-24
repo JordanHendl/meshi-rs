@@ -30,7 +30,6 @@ pub use render::environment::terrain::TerrainRenderObject;
 pub use render::environment::terrain::settings::{
     TerrainClipmapResourceSettings, TerrainClipmapSettings, TerrainRenderSettings,
 };
-use render::forward::ForwardRenderer;
 use render::{FrameTimer, Renderer, RendererInfo};
 use std::collections::{HashMap, HashSet};
 use std::{ffi::c_void, ptr::NonNull};
@@ -126,7 +125,6 @@ impl RenderEngine {
             }
         }
         self.spot_shadow_light = selected;
-        self.renderer.set_spot_shadow_light(selected);
     }
 
     fn update_cached_light_info(
@@ -218,7 +216,7 @@ impl RenderEngine {
         let renderer_select = info.renderer;
         let mut renderer: Box<dyn Renderer> = match renderer_select {
             RendererSelect::Deferred => Box::new(DeferredRenderer::new(&renderer_info)),
-            RendererSelect::Forward => Box::new(ForwardRenderer::new(&renderer_info)),
+            RendererSelect::Forward => todo!(),
         };
 
         let event_loop = if cfg!(test) || info.headless {

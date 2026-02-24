@@ -979,17 +979,6 @@ impl TerrainRenderer {
         self.deferred = Some(deferred);
     }
 
-    pub fn build_deferred_draws(&mut self, bin: u32, view: u32) -> CommandStream<Executable> {
-        if !self.enabled {
-            return CommandStream::new().begin().end();
-        }
-        let Some(deferred) = &mut self.deferred else {
-            return CommandStream::new().begin().end();
-        };
-
-        deferred.draw_builder.build_draws(bin, view)
-    }
-
     pub fn draw_builder(&self) -> Option<&GPUDrawBuilder> {
         self.deferred
             .as_ref()

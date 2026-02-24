@@ -1497,102 +1497,23 @@ impl OceanRenderer {
     }
 
     pub fn set_environment_map(&mut self, view: ImageView) {
-        self.pipeline.update_table(
-            "ocean_env_map",
-            dashi::IndexedResource {
-                resource: ShaderResource::Image(view),
-                slot: 0,
-            },
-        );
-        self.pipeline.update_table(
-            "ocean_env_sampler",
-            dashi::IndexedResource {
-                resource: ShaderResource::Sampler(self.environment_sampler),
-                slot: 0,
-            },
-        );
+        todo!()
     }
 
     pub fn set_scene_textures(&mut self, color: Option<ImageView>, depth: Option<ImageView>) {
-        let color_view = color.unwrap_or(self.scene_color_fallback);
-        let depth_view = depth.unwrap_or(self.scene_depth_fallback);
-        self.pipeline.update_table(
-            "ocean_scene_color",
-            dashi::IndexedResource {
-                resource: ShaderResource::Image(color_view),
-                slot: 0,
-            },
-        );
-        self.pipeline.update_table(
-            "ocean_scene_depth",
-            dashi::IndexedResource {
-                resource: ShaderResource::Image(depth_view),
-                slot: 0,
-            },
-        );
-        self.pipeline.update_table(
-            "ocean_scene_sampler",
-            dashi::IndexedResource {
-                resource: ShaderResource::Sampler(self.scene_sampler),
-                slot: 0,
-            },
-        );
+        todo!()
     }
 
     pub fn set_shadow_map(
         &mut self,
-        shadow_map: Option<ImageView>,
-        cascade_count: u32,
-        resolution: u32,
-        splits: Vec4,
-        matrices: [Mat4; 4],
     ) {
-        let shadow_view = shadow_map.unwrap_or(self.scene_depth_fallback);
-        self.pipeline.update_table(
-            "ocean_shadow_map",
-            dashi::IndexedResource {
-                resource: ShaderResource::Image(shadow_view),
-                slot: 0,
-            },
-        );
-        self.pipeline.update_table(
-            "ocean_shadow_sampler",
-            dashi::IndexedResource {
-                resource: ShaderResource::Sampler(self.scene_sampler),
-                slot: 0,
-            },
-        );
-        self.shadow_cascade_count = cascade_count;
-        self.shadow_resolution = resolution;
-        self.shadow_splits = splits;
-        self.shadow_matrices = matrices;
+        todo!()
     }
 
     pub fn set_cloud_shadow_map(
         &mut self,
-        shadow_buffer: Option<Handle<Buffer>>,
-        cascade_count: u32,
-        resolution: u32,
-        splits: Vec4,
-        cascade_extents: [f32; 4],
-        cascade_resolutions: [u32; 4],
-        cascade_offsets: [u32; 4],
     ) {
-        let buffer = shadow_buffer.unwrap_or(self.cloud_shadow_buffer);
-        self.pipeline.update_table(
-            "cloud_shadow_buffer",
-            dashi::IndexedResource {
-                resource: ShaderResource::StorageBuffer(buffer.into()),
-                slot: 0,
-            },
-        );
-        self.cloud_shadow_enabled = shadow_buffer.is_some();
-        self.cloud_shadow_cascade_count = cascade_count;
-        self.cloud_shadow_resolution = resolution;
-        self.cloud_shadow_splits = splits;
-        self.cloud_shadow_cascade_extents = cascade_extents;
-        self.cloud_shadow_cascade_resolutions = cascade_resolutions;
-        self.cloud_shadow_cascade_offsets = cascade_offsets;
+        todo!()
     }
 
     pub fn record_compute(
@@ -1885,9 +1806,7 @@ impl OceanRenderer {
         if let Some(far_plane) = camera_far {
             if far_plane > 0.0 {
                 let near_patch = cascade_patch_sizes[0].max(0.001);
-                let base_patch_size = cascade_patch_sizes[1]
-                    .min(near_patch * 2.5)
-                    .max(0.001);
+                let base_patch_size = cascade_patch_sizes[1].min(near_patch * 2.5).max(0.001);
                 let tile_size = (base_patch_size * 2.0).max(0.001);
                 let required_radius = (far_plane / tile_size).ceil() as u32;
                 far_tile_radius = far_tile_radius.max(required_radius);
@@ -1932,12 +1851,7 @@ impl OceanRenderer {
                 self.shallow_color.z,
                 0.0,
             ],
-            deep_color: [
-                self.deep_color.x,
-                self.deep_color.y,
-                self.deep_color.z,
-                0.0,
-            ],
+            deep_color: [self.deep_color.x, self.deep_color.y, self.deep_color.z, 0.0],
             scattering_color: [
                 self.scattering_color.x,
                 self.scattering_color.y,
