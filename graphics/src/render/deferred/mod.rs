@@ -229,7 +229,6 @@ pub struct DeferredRenderer {
     graph: RenderGraph,
     text: TextRenderer,
     gui: GuiRenderer,
-    cloud_overlay: Handle<TextObject>,
     frame_count: usize,
     frame_bump: Bump,
     debug_views: DeferredDebugViews,
@@ -525,13 +524,6 @@ impl DeferredRenderer {
         let mut text = TextRenderer::new();
         text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
         let gui = GuiRenderer::new();
-        let cloud_overlay = text.register_text(&TextInfo {
-            text: String::new(),
-            position: Vec2::new(12.0, 12.0),
-            color: Vec4::ONE,
-            scale: 1.0,
-            render_mode: TextRenderMode::Plain,
-        });
 
         Self {
             ctx,
@@ -546,7 +538,6 @@ impl DeferredRenderer {
             psos,
             text,
             gui,
-            cloud_overlay,
             frame_count: 0,
             frame_bump: Bump::new(),
             debug_views: DeferredDebugViews::default(),
@@ -1662,17 +1653,6 @@ impl DeferredRenderer {
                 ..default_framebuffer_info
             });
 
-            let camera_data = match self
-                .state
-                .reserved::<ReservedBindlessCamera>("meshi_bindless_cameras")
-            {
-                Ok(cameras) => *cameras.camera(*camera),
-                Err(_) => {
-                    warn!("Deferred renderer failed to access bindless cameras for shadows");
-                    Camera::default()
-                }
-            };
-
             assert!(self.ctx.image_info(normal.view.img).format == Format::RGBA32F);
             assert!(self.ctx.image_info(position.view.img).format == Format::RGBA32F);
             assert!(self.ctx.image_info(diffuse.view.img).format == Format::RGBA8);
@@ -1764,7 +1744,7 @@ impl DeferredRenderer {
                         .update_viewport(&self.data.viewport)
                         .draw_indexed_indirect(&DrawIndexedIndirect {
                             indices: indices_handle,
-                            indirect: self.proc.draw_builder.draw_list(),
+                            indirect: self.proc.draw_builder.draw_list_for_bin(BIN_GBUFFER_OPAQUE),
                             bind_tables: self.psos.standard.tables(),
                             dynamic_buffers: [None, None, Some(alloc), None],
                             draw_count: self.proc.draw_builder.draw_count(),
@@ -1935,7 +1915,6 @@ impl DeferredRenderer {
             } else {
                 String::new()
             };
-            self.text.set_text(self.cloud_overlay, &overlay_text);
 
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////

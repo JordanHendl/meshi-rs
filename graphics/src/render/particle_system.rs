@@ -231,7 +231,7 @@ impl ParticleSystem {
             .bind_graphics_pipeline(draw_info.pipeline)
             .draw_indexed_indirect(&DrawIndexedIndirect {
                 indices: self.data.index_buffer,
-                indirect: self.data.draw_list,
+                indirect: self.data.draw_list.into(),
                 bind_tables: draw_info.bind_tables,
                 dynamic_buffers: draw_info.dynamic_buffers,
                 draw_count: self.draw_count(),

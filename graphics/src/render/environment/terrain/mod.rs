@@ -2111,7 +2111,7 @@ impl TerrainRenderer {
             .update_viewport(viewport)
             .draw_indexed_indirect(&DrawIndexedIndirect {
                 indices: indices_handle,
-                indirect: deferred.draw_builder.draw_list(),
+                indirect: deferred.draw_builder.draw_list().into(),
                 bind_tables: deferred.pipeline.tables(),
                 dynamic_buffers: [Some(alloc), None, None, None],
                 draw_count: deferred.draw_builder.draw_count(),

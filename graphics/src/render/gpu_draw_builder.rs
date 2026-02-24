@@ -198,11 +198,17 @@ impl GPUDrawBuilder {
         self.data.draw_list
     }
 
-    pub fn draw_list_for_bin(&self, bin: u32) -> (Handle<Buffer>, u64) {
+
+    pub fn draw_list_for_bin(&self, bin: u32) -> BufferView {
         let offset = bin as u64
             * self.data.max_objects as u64
             * std::mem::size_of::<IndexedIndirectCommand>() as u64;
-        (self.data.draw_list, offset)
+        BufferView {
+            handle: self.data.draw_list,
+            size: (self.data.max_objects as usize * std::mem::size_of::<IndexedIndirectCommand>())
+                as u64,
+            offset,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -228,7 +234,9 @@ impl GPUDrawBuilder {
         let Some(build_draws) = self.pipelines.build_draws.as_ref() else {
             return stream.end();
         };
-
+        
+        #[repr(C)]
+        #[derive(Debug)]
         struct PerDispatch {
             view: u32,
             num_bins: u32,
@@ -248,7 +256,6 @@ impl GPUDrawBuilder {
         per_dispatch.bins_len = dispatch_layout.bins_len;
         per_dispatch._padding = [0; 2];
         per_dispatch.bins = dispatch_layout.bins;
-
         stream
             .dispatch(&Dispatch {
                 x: dispatch_layout.dispatch_x,

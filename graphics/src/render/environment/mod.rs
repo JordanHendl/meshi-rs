@@ -82,6 +82,7 @@ impl EnvironmentRenderer {
             .expect("Failed to make environment dynamic allocator");
 
         let sky = SkyRenderer::new(ctx, state, &info, &dynamic);
+        let environment_map = sky.environment_cubemap_view();
         let clouds = info.cloud_depth_view.map(|depth_view| {
             CloudRenderer::new(
                 ctx,
@@ -89,10 +90,10 @@ impl EnvironmentRenderer {
                 &info.initial_viewport,
                 depth_view,
                 info.sample_count,
-                sky.environment_cubemap_view(),
+                environment_map,
             )
         });
-        let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, sky.environment_cubemap_view());
+        let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, environment_map);
         let terrain = TerrainRenderer::new(ctx, state, &info, &dynamic);
 
         Self {
@@ -301,8 +302,8 @@ impl EnvironmentRenderer {
         scene_color: Option<u16>,
         scene_depth: Option<u16>,
     ) -> CommandStream<PendingGraphics> {
-//        self.ocean
-//            .set_environment_map(self.sky.environment_cubemap_view());
+        // The environment map is sourced from the sky and bound into ocean state at
+        // renderer initialization, not per-frame during opaque rendering.
 //        self.ocean.set_scene_textures(scene_color, scene_depth);
         //        self.ocean.set_shadow_map(
         //        );
