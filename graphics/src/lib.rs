@@ -1,3 +1,18 @@
+#![allow(
+    dead_code,
+    deprecated,
+    non_camel_case_types,
+    private_interfaces,
+    unreachable_patterns,
+    unsafe_op_in_unsafe_fn,
+    unused_assignments,
+    unused_imports,
+    unused_mut,
+    unused_parens,
+    unused_unsafe,
+    unused_variables
+)]
+
 pub mod gui;
 mod render;
 pub mod structs;

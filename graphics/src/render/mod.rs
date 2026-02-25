@@ -1,33 +1,31 @@
-mod debug_layer;
+mod debug;
 pub mod deferred;
 pub mod environment;
 pub mod forward;
-mod gpu_draw_builder;
 pub mod gui;
-pub mod image_pager;
-mod particle_system;
-mod scene;
-mod skinning;
+mod particle;
+mod shadow;
 pub mod text;
-
+mod utils;
 use crate::gui::GuiFrame;
-use crate::render::gpu_draw_builder::GPUDrawBuilder;
+use utils::gpu_draw_builder::GPUDrawBuilder;
 use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
     ShadowCascadeSettings, TextInfo, TextObject,
 };
 use bumpalo_herd::Herd;
+use dashi::DynamicAllocator;
 use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
-use furikake::{types::Camera, types::Light, types::Material, BindlessState};
+use furikake::{BindlessState, types::Camera, types::Light, types::Material};
 use glam::Mat4;
 use meshi_ffi_structs::LightInfo;
 use meshi_utils::MeshiError;
-use noren::RDBFile;
 use noren::DB;
-use tare::graph::RenderGraph;
+use noren::RDBFile;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+use tare::graph::RenderGraph;
 
 pub struct RendererInfo {
     pub headless: bool,
@@ -168,8 +166,9 @@ pub trait Renderer {
 }
 
 struct SubrendererDrawInfo {
-    draw_builder: *mut GPUDrawBuilder,
-    graph: *mut RenderGraph,
+    draw_builder: &'static mut GPUDrawBuilder,
+    graph: &'static mut RenderGraph,
+    alloc: &'static mut DynamicAllocator,
     camera: Handle<Camera>,
     viewport: Viewport,
 }

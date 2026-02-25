@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use dashi::Handle;
 use glam::{Mat4, Vec2};
 use meshi_graphics::defaults::DEFAULT_CUBEMAP_ENTRY;

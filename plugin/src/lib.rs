@@ -13,7 +13,7 @@ pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::SimulationInfo;
 use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody};
 use meshi_utils::timer::Timer;
-use noren::{meta::DeviceModel, DBInfo};
+use noren::DBInfo;
 use resource_pool::Handle;
 use std::ffi::*;
 use tracing::{info, Level};
@@ -294,7 +294,7 @@ impl MeshiEngine {
         dt_secs
     }
 
-    fn shut_down(mut self) {
+    fn shut_down(self) {
         self.render.shut_down();
     }
 

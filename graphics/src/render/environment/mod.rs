@@ -13,7 +13,6 @@ use glam::{Mat4, Vec3, Vec4};
 use noren::{DB, RDBFile};
 
 use crate::render::SubrendererDrawInfo;
-use crate::render::gpu_draw_builder::GPUDrawBuilder;
 use crate::{CloudSettings, TerrainRenderSettings};
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
@@ -257,6 +256,16 @@ impl EnvironmentRenderer {
         self.terrain.draw_info()
     }
 
+    pub fn record_deferred_split(
+        &mut self,
+        info: &SubrendererDrawInfo,
+        indices_handle: Handle<Buffer>,
+    ) -> CommandStream<PendingGraphics> {
+        self.terrain
+            .record_deferred_draws(info, indices_handle)
+    }
+
+
     pub fn record_terrain_draws(
         &mut self,
         viewport: &Viewport,
@@ -264,8 +273,7 @@ impl EnvironmentRenderer {
         camera: Handle<Camera>,
         indices_handle: Handle<Buffer>,
     ) -> CommandStream<PendingGraphics> {
-        self.terrain
-            .record_deferred_draws(viewport, dynamic, camera, indices_handle)
+        todo!()
     }
 
     pub fn set_time(&mut self, time_seconds: f32) {

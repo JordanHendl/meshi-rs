@@ -33,8 +33,9 @@ use std::time::Duration;
 use tare::transient::BindlessTextureRegistry;
 use tracing::{info, warn};
 
+use crate::render::SubrendererDrawInfo;
 use crate::render::deferred::PerDrawData;
-use crate::render::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
+use crate::render::utils::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
 use crate::terrain_loader;
 use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::reservations::bindless_indices::ReservedBindlessIndices;
@@ -2055,9 +2056,7 @@ impl TerrainRenderer {
 
     pub fn record_deferred_draws(
         &mut self,
-        viewport: &Viewport,
-        dynamic: &mut DynamicAllocator,
-        camera: Handle<Camera>,
+        info: &SubrendererDrawInfo,
         indices_handle: Handle<Buffer>,
     ) -> CommandStream<PendingGraphics> {
         if !self.enabled {
@@ -2078,7 +2077,7 @@ impl TerrainRenderer {
             _padding1: u32,
         }
 
-        let mut alloc = dynamic
+        let mut alloc = info.alloc
             .bump()
             .expect("Failed to allocate terrain per-scene data");
         let clipmap_info = self.clipmap_buffers.as_ref().map(|buffers| {
@@ -2096,7 +2095,7 @@ impl TerrainRenderer {
             material_tile_texel_count,
         ) = clipmap_info.unwrap_or(([0, 0], 0, [0, 0], 0));
         alloc.slice::<PerSceneData>()[0] = PerSceneData {
-            camera,
+            camera: info.camera,
             surface_grid_size,
             surface_tile_texel_count,
             _padding0: 0,
@@ -2108,7 +2107,7 @@ impl TerrainRenderer {
         let mut stream = CommandStream::<PendingGraphics>::subdraw();
         stream
             .bind_graphics_pipeline(deferred.pipeline.handle)
-            .update_viewport(viewport)
+            .update_viewport(&info.viewport)
             .draw_indexed_indirect(&DrawIndexedIndirect {
                 indices: indices_handle,
                 indirect: deferred.draw_builder.draw_list().into(),

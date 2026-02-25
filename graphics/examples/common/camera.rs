@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 use glam::{Mat4, Quat, Vec2, Vec3};
 use meshi_ffi_structs::event::{Event, EventSource, EventType, KeyCode};
 

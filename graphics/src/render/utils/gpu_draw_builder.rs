@@ -8,7 +8,7 @@ use dashi::{
 };
 use furikake::BindlessState;
 
-use super::deferred::PerDrawData;
+use crate::render::deferred::PerDrawData;
 
 const MAX_DISPATCH_BINS: usize = 56;
 

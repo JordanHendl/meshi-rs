@@ -1,12 +1,13 @@
-use super::debug_layer::DebugLayer;
+use super::debug::DebugLayer;
 use super::environment::{
     EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
     terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
 };
-use super::gpu_draw_builder::GPUDrawBuilder;
+use super::utils::gpu_draw_builder::GPUDrawBuilder;
+use super::utils::gpu_draw_builder::GPUDrawBuilderInfo;
 use super::gui::GuiRenderer;
-use super::scene::GPUScene;
-use super::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
+use super::utils::scene::GPUScene;
+use super::utils::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
 use super::text::{TextDraw, TextDrawMode, TextRenderer};
 use super::{Renderer, RendererInfo, ViewOutput};
 use crate::gui::debug::{
@@ -15,10 +16,9 @@ use crate::gui::debug::{
 };
 use crate::gui::{GuiFrame, Slider};
 use crate::render::SubrendererDrawInfo;
-use crate::render::gpu_draw_builder::GPUDrawBuilderInfo;
 use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
 use crate::{
-    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::scene::*,
+    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::utils::scene::*,
 };
 use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
@@ -518,7 +518,6 @@ impl DeferredRenderer {
                 &data,
             ),
         };
-
 
         let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
@@ -1564,6 +1563,23 @@ impl DeferredRenderer {
         });
     }
 
+    fn subrender_draw_info(&mut self) -> SubrendererDrawInfo {
+        unsafe {
+            let graph = &mut *(&mut self.graph as *mut RenderGraph);
+            let draw_builder = &mut *(&mut self.proc.draw_builder as *mut GPUDrawBuilder);
+            let alloc = &mut *(&mut self.data.dynamic as *mut DynamicAllocator);
+            let mut subrender_info = SubrendererDrawInfo {
+                draw_builder,
+                graph,
+                alloc,
+                camera: Default::default(),
+                viewport: self.data.viewport,
+            };
+
+            return subrender_info;
+        }
+    }
+
     pub fn update(
         &mut self,
         sems: &[Handle<Semaphore>],
@@ -1577,7 +1593,7 @@ impl DeferredRenderer {
         if views.is_empty() {
             return Vec::new();
         }
-    
+
         // Prepare for frame... this does the following (not all encompassing):
         // 1) Build skinning transformations
         // 2) Syncs all cpu configto gpu
@@ -1601,13 +1617,8 @@ impl DeferredRenderer {
 
         let semaphores = self.graph.make_semaphores(1);
         let mut outputs = Vec::with_capacity(views.len());
-        
-        let mut subrender_info  = SubrendererDrawInfo {
-            draw_builder: &mut self.proc.draw_builder,
-            graph: &mut self.graph,
-            camera: Default::default(),
-            viewport: self.data.viewport,
-        };
+
+        let mut subrender_info = self.subrender_draw_info();
         for (view_idx, camera) in views.iter().enumerate() {
             subrender_info.camera = *camera;
             let position = self.graph.make_image(&ImageInfo {
@@ -1615,7 +1626,6 @@ impl DeferredRenderer {
                 format: Format::RGBA32F,
                 ..default_framebuffer_info
             });
-            
 
             let diffuse = self.graph.make_image(&ImageInfo {
                 debug_name: &format!("[MESHI DEFERRED] Diffuse Framebuffer View {view_idx}"),
@@ -1751,12 +1761,11 @@ impl DeferredRenderer {
                             ..Default::default()
                         })
                         .unbind_graphics_pipeline()
-                        .combine(self.subrender.environment.record_terrain_draws(
-                            &self.data.viewport,
-                            &mut self.data.dynamic,
-                            camera_handle,
-                            indices_handle,
-                        ));
+                        .combine(
+                            self.subrender
+                                .environment
+                                .record_deferred_split(&subrender_info, indices_handle),
+                        );
 
                     cmd
                 },
@@ -1851,39 +1860,11 @@ impl DeferredRenderer {
             } else {
                 None
             };
-            let debug_output = deferred_debug_output.or(None);
-            let debug_output_active = debug_output.is_some();
-
             let scene_color_view = scene_color.view;
             let final_combine_view = final_combine.view;
             let scene_width = self.data.viewport.area.w as u32;
             let scene_height = self.data.viewport.area.h as u32;
 
-            if let Some(debug_output_view) = debug_output {
-                let debug_blits = vec![BlitImage {
-                    src: debug_output_view.img,
-                    dst: final_combine_view.img,
-                    src_range: SubresourceRange::new(0, 1, 0, 1),
-                    dst_range: SubresourceRange::new(0, 1, 0, 1),
-                    filter: Filter::Linear,
-                    src_region: Rect2D {
-                        x: 0,
-                        y: 0,
-                        w: scene_width,
-                        h: scene_height,
-                    },
-                    dst_region: Rect2D {
-                        x: 0,
-                        y: 0,
-                        w: scene_width,
-                        h: scene_height,
-                    },
-                }];
-                self.graph.add_compute_pass(move |mut cmd| {
-                    cmd = cmd.combine(DeferredFrameBlitter::post_compute(&debug_blits));
-                    cmd.end()
-                });
-            }
             let scene_blits = vec![BlitImage {
                 src: final_combine_view.img,
                 dst: scene_color_view.img,
@@ -1971,51 +1952,49 @@ impl DeferredRenderer {
                     depth_clear: None,
                 },
                 |mut cmd| {
-                    if !debug_output_active {
-                        cmd = cmd.combine(self.subrender.environment.render_opaque(
-                            &mut subrender_info,
-                            scene_color.bindless_id,
-                            depth.bindless_id,
-                        ));
+                    cmd = cmd.combine(self.subrender.environment.render_opaque(
+                        &mut subrender_info,
+                        scene_color.bindless_id,
+                        depth.bindless_id,
+                    ));
 
-                        if !billboard_draws.is_empty() {
-                            let mut c = cmd
-                                .bind_graphics_pipeline(self.psos.billboard.handle)
-                                .update_viewport(&self.data.viewport);
+                    if !billboard_draws.is_empty() {
+                        let mut c = cmd
+                            .bind_graphics_pipeline(self.psos.billboard.handle)
+                            .update_viewport(&self.data.viewport);
 
-                            for draw in billboard_draws.iter() {
-                                let mut alloc = self
-                                    .data
-                                    .dynamic
-                                    .bump()
-                                    .expect("Failed to allocate billboard draw buffer!");
-                                let per_obj = &mut alloc.slice::<PerObjectInfo>()[0];
-                                per_obj.transform = draw.transform;
-                                per_obj.scene_id = draw.scene_handle;
-                                per_obj.material_id = draw.material;
-                                per_obj.camera_id = camera_handle;
-                                per_obj.skeleton_id = Handle::default();
-                                per_obj.animation_state_id = Handle::default();
-                                per_obj.per_obj_joints_id = Handle::default();
+                        for draw in billboard_draws.iter() {
+                            let mut alloc = self
+                                .data
+                                .dynamic
+                                .bump()
+                                .expect("Failed to allocate billboard draw buffer!");
+                            let per_obj = &mut alloc.slice::<PerObjectInfo>()[0];
+                            per_obj.transform = draw.transform;
+                            per_obj.scene_id = draw.scene_handle;
+                            per_obj.material_id = draw.material;
+                            per_obj.camera_id = camera_handle;
+                            per_obj.skeleton_id = Handle::default();
+                            per_obj.animation_state_id = Handle::default();
+                            per_obj.per_obj_joints_id = Handle::default();
 
-                                c = c.draw(&Draw {
-                                    vertices: draw.vertex_buffer,
-                                    bind_tables: self.psos.billboard.tables(),
-                                    dynamic_buffers: [None, Some(alloc), None, None],
-                                    instance_count: 1,
-                                    count: 6,
-                                });
-                            }
-
-                            cmd = c.unbind_graphics_pipeline();
+                            c = c.draw(&Draw {
+                                vertices: draw.vertex_buffer,
+                                bind_tables: self.psos.billboard.tables(),
+                                dynamic_buffers: [None, Some(alloc), None, None],
+                                instance_count: 1,
+                                count: 6,
+                            });
                         }
 
-                        cmd = cmd.combine(
-                            self.subrender
-                                .environment
-                                .render_fog(&self.data.viewport, camera_handle),
-                        );
+                        cmd = c.unbind_graphics_pipeline();
                     }
+
+                    cmd = cmd.combine(
+                        self.subrender
+                            .environment
+                            .render_fog(&self.data.viewport, camera_handle),
+                    );
 
                     cmd = cmd.combine(
                         self.gui
@@ -2043,7 +2022,7 @@ impl DeferredRenderer {
                 .combine(self.gui.post_compute())
                 .combine(self.text.post_compute())
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
-                //                .combine(self.subrender.debug.record(self.ctx.as_mut(), self.state.as_ref(), outputs[0].image, [self.data.viewport.area.w as u32, self.data.viewport.area.h as u32]));
+                // .combine(self.subrender.debug.record(self.ctx.as_mut(), self.state.as_ref(), outputs[0].image, [self.data.viewport.area.w as u32, self.data.viewport.area.h as u32]))
                 .end()
         });
 
