@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_imports)]
 mod project;
 mod render_backend;
 mod runtime;

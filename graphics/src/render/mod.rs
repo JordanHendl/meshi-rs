@@ -4,7 +4,7 @@ pub mod environment;
 pub mod forward;
 pub mod gui;
 mod particle;
-mod shadow;
+//mod shadow;
 pub mod text;
 mod utils;
 use crate::gui::GuiFrame;
@@ -168,6 +168,7 @@ pub trait Renderer {
 struct SubrendererDrawInfo {
     draw_builder: &'static mut GPUDrawBuilder,
     graph: &'static mut RenderGraph,
+    state: &'static mut BindlessState,
     alloc: &'static mut DynamicAllocator,
     camera: Handle<Camera>,
     viewport: Viewport,

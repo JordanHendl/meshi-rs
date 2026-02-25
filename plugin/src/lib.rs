@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_imports)]
 use glam::{Mat4, Vec3};
 pub use meshi_audio::AudioEngine;
 use meshi_audio::{

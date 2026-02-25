@@ -7,7 +7,15 @@
 164	2904	7933438668387336	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	12e1c91c4cd1a422
 2869	3036	7933438669693040	bin/hello_animation.exe	4537f781f3c40da7
 4976	5270	7933443059596959	bin/hello_engine.exe	5077c7212e36978
-47	288	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
-47	288	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
 27	304	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
 27	304	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
+34	307	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
+34	307	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
+42	5392	7937539166388062	_deps/glm-build/glm/CMakeFiles/glm.dir/detail/glm.cpp.obj	ef8bec0ee039c1ad
+5393	5638	7937539168028426	bin/glm.lib	eacec7bfa28664f9
+318	11097	7937539223258284	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	530883411d979978
+313	11140	7937539223638266	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	12e1c91c4cd1a422
+308	11190	7937539224285607	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	ea84704d50f2ad4d
+11097	11297	7937539225121459	bin/hello_animation.exe	4537f781f3c40da7
+11140	11325	7937539225388370	bin/hello_lights.exe	45bf2ec1afb30fc9
+11190	11368	7937539225898352	bin/hello_engine.exe	5077c7212e36978

@@ -1,57 +1,70 @@
-use super::debug::DebugLayer;
-use super::environment::{
-    EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
-    terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
+use std::collections::HashMap;
+
+use bento::{
+    Compiler, OptimizationLevel, Request, ShaderLang,
+    builder::{AttachmentDesc, PSO, PSOBuilder},
 };
-use super::utils::gpu_draw_builder::GPUDrawBuilder;
-use super::utils::gpu_draw_builder::GPUDrawBuilderInfo;
-use super::gui::GuiRenderer;
-use super::utils::scene::GPUScene;
-use super::utils::skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo};
-use super::text::{TextDraw, TextDrawMode, TextRenderer};
-use super::{Renderer, RendererInfo, ViewOutput};
-use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType,
-    debug_register_radial_with_description_and_conflicts, debug_register_with_description,
-};
-use crate::gui::{GuiFrame, Slider};
-use crate::render::SubrendererDrawInfo;
-use crate::{AnimationState, CloudDebugView, GuiInfo, GuiObject, TextInfo, TextRenderMode};
-use crate::{
-    BillboardInfo, BillboardType, RenderObject, RenderObjectInfo, TextObject, render::utils::scene::*,
-};
-use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
-use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use bumpalo::Bump;
-use bumpalo::collections::Vec as BumpVec;
+use bumpalo::{Bump, collections::Vec as BumpVec};
 use bytemuck::cast_slice;
-use dashi::cmd::Executable;
-use dashi::gpu::cmd::{Scope, SyncPoint};
-use dashi::utils::gpupool::GPUPool;
-use dashi::*;
+use dashi::{
+    cmd::Executable,
+    gpu::cmd::{Scope, SyncPoint},
+    utils::gpupool::GPUPool,
+    *,
+};
 use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
-use furikake::PSOBuilderFurikakeExt;
-use furikake::reservations::ReservedBinding;
-use furikake::reservations::bindless_camera::ReservedBindlessCamera;
-use furikake::reservations::bindless_indices::ReservedBindlessIndices;
-use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
-use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
-use furikake::types::AnimationState as FurikakeAnimationState;
-use furikake::types::*;
-use furikake::{BindlessState, types::Material, types::VertexBufferSlot, types::*};
+use furikake::{
+    BindlessState, PSOBuilderFurikakeExt,
+    reservations::{
+        ReservedBinding, bindless_camera::ReservedBindlessCamera,
+        bindless_indices::ReservedBindlessIndices, bindless_materials::ReservedBindlessMaterials,
+        bindless_vertices::ReservedBindlessVertices,
+    },
+    types::{AnimationState as FurikakeAnimationState, Material, VertexBufferSlot, *},
+};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
-use noren::meta::{DeviceMaterial, DeviceMesh, DeviceModel};
-use noren::rdb::primitives::Vertex;
-use noren::rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry};
-use noren::{DB, RDBFile};
+use noren::{
+    DB, RDBFile,
+    meta::{DeviceMaterial, DeviceMesh, DeviceModel},
+    rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry, primitives::Vertex},
+};
 use resource_pool::resource_list::ResourceList;
-use std::collections::HashMap;
-use tare::graph::*;
-use tare::transient::TransientAllocator;
-use tare::utils::StagedBuffer;
+use tare::{graph::*, transient::TransientAllocator, utils::StagedBuffer};
 use tracing::{info, warn};
+
+use super::{
+    Renderer, RendererInfo, ViewOutput,
+    debug::DebugLayer,
+    environment::{
+        EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
+        terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
+    },
+    gui::GuiRenderer,
+    text::{TextDraw, TextDrawMode, TextRenderer},
+    utils::{
+        billboard::{
+            BillboardData, allocate_billboard_material, build_billboard_pipeline,
+            create_billboard_data, update_billboard_material_texture, update_billboard_vertices,
+        },
+        gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo},
+        scene::GPUScene,
+        skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo},
+    },
+};
+use crate::{
+    AnimationState, BillboardInfo, BillboardType, CloudDebugView, GuiInfo, GuiObject, RenderObject,
+    RenderObjectInfo, TextInfo, TextObject, TextRenderMode,
+    gui::{
+        GuiFrame, Slider,
+        debug::{
+            DebugRadialOption, DebugRegistryValue, PageType,
+            debug_register_radial_with_description_and_conflicts, debug_register_with_description,
+        },
+    },
+    render::{SubrendererDrawInfo, utils::scene::*},
+};
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -157,26 +170,6 @@ struct DeferredPSO {
     combine_pso: PSO,
 }
 
-struct DeferredExecution {
-    cull_queue: CommandRing,
-}
-
-struct DeferredFrameBlitter;
-
-impl DeferredFrameBlitter {
-    fn pre_compute() -> CommandStream<Executable> {
-        CommandStream::new().begin().end()
-    }
-
-    fn post_compute(blits: &[BlitImage]) -> CommandStream<Executable> {
-        let mut cmd = CommandStream::new().begin();
-        for blit in blits {
-            cmd = cmd.blit_images(blit);
-        }
-        cmd.end()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeferredFramebufferDebugView {
     None = 0,
@@ -223,7 +216,6 @@ pub struct DeferredRenderer {
     subrender: Renderers,
     psos: DeferredPSO,
     sample_count: SampleCount,
-    exec: DeferredExecution,
     state: Box<BindlessState>,
     alloc: Box<TransientAllocator>,
     graph: RenderGraph,
@@ -251,23 +243,6 @@ struct SkinnedRenderData {
     model: DeviceModel,
     skinning: SkinningInfo,
     skinning_handle: SkinningHandle,
-}
-
-#[derive(Clone)]
-struct BillboardData {
-    info: BillboardInfo,
-    vertex_buffer: Handle<Buffer>,
-    owns_material: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct BillboardVertex {
-    center: [f32; 3],
-    offset: [f32; 2],
-    size: [f32; 2],
-    color: [f32; 4],
-    tex_coords: [f32; 2],
 }
 
 fn to_handle(h: Handle<RenderObjectData>) -> Handle<RenderObject> {
@@ -511,15 +486,14 @@ impl DeferredRenderer {
                 &proc,
                 &data,
             ),
-            billboard: Self::build_billboard_pipeline(
+            billboard: build_billboard_pipeline(
                 ctx.as_mut(),
                 &mut state,
                 info.sample_count,
-                &data,
+                ShaderResource::DynamicStorage(data.dynamic.state()),
             ),
         };
 
-        let exec = DeferredExecution { cull_queue };
         let mut text = TextRenderer::new();
         text.initialize_renderer(ctx.as_mut(), state.as_mut(), info.sample_count);
         let gui = GuiRenderer::new();
@@ -528,7 +502,6 @@ impl DeferredRenderer {
             ctx,
             state,
             graph,
-            exec,
             sample_count: info.sample_count,
             alloc,
             data,
@@ -603,326 +576,6 @@ impl DeferredRenderer {
 
         state.register_pso_tables(&s);
         s
-    }
-
-    fn build_billboard_pipeline(
-        ctx: &mut Context,
-        state: &mut BindlessState,
-        sample_count: SampleCount,
-        data: &RendererData,
-    ) -> PSO {
-        let shaders = miso::stdbillboard(&[]);
-
-        let mut pso_builder = PSOBuilder::new()
-            .set_debug_name("[MESHI] Deferred Billboard")
-            .vertex_compiled(Some(shaders[0].clone()))
-            .fragment_compiled(Some(shaders[1].clone()))
-            .set_attachment_format(0, Format::BGRA8)
-            .add_table_variable_with_resources(
-                "per_obj_ssbo",
-                vec![IndexedResource {
-                    resource: ShaderResource::DynamicStorage(data.dynamic.state()),
-                    slot: 0,
-                }],
-            );
-
-        pso_builder = pso_builder
-            .add_reserved_table_variables(state)
-            .expect("Failed to add reserved tables for billboard pipeline");
-
-        pso_builder = pso_builder.add_depth_target(AttachmentDesc {
-            format: Format::D24S8,
-            samples: sample_count,
-        });
-
-        let pso = pso_builder
-            .set_details(GraphicsPipelineDetails {
-                color_blend_states: vec![Default::default(); 1],
-                sample_count,
-                depth_test: Some(DepthInfo {
-                    should_test: true,
-                    should_write: false,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
-            .build(ctx)
-            .expect("Failed to build billboard pipeline!");
-
-        state.register_pso_tables(&pso);
-
-        pso
-    }
-
-    fn allocate_billboard_material(&mut self, texture_id: u32) -> Handle<Material> {
-        let mut material_handle = Handle::default();
-        self.state
-            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
-                material_handle = materials.add_material();
-                let material = materials.material_mut(material_handle);
-                *material = Material::default();
-                material.base_color_texture_id = texture_id as u32;
-                material.normal_texture_id = u32::MAX;
-                material.metallic_roughness_texture_id = u32::MAX;
-                material.occlusion_texture_id = u32::MAX;
-                material.emissive_texture_id = u32::MAX;
-            })
-            .expect("Failed to allocate billboard material");
-
-        material_handle
-    }
-
-    fn update_billboard_material_texture(&mut self, material: Handle<Material>, texture_id: u32) {
-        self.state
-            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
-                let material = materials.material_mut(material);
-                material.base_color_texture_id = texture_id as u32;
-            })
-            .expect("Failed to update billboard material texture");
-    }
-
-    fn create_billboard_data(&mut self, mut info: BillboardInfo) -> BillboardData {
-        let vertices = Self::billboard_vertices(Vec3::ZERO, Vec2::ONE, Vec4::ONE);
-        let vertex_buffer = self
-            .ctx
-            .make_buffer(&BufferInfo {
-                debug_name: "[MESHI] Billboard Vertex Buffer",
-                byte_size: (std::mem::size_of::<BillboardVertex>() * vertices.len()) as u32,
-                visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::VERTEX,
-                initial_data: Some(unsafe { vertices.align_to::<u8>().1 }),
-            })
-            .expect("Failed to create billboard vertex buffer");
-
-        let mut owns_material = false;
-        if info.material.is_none() {
-            info.material = Some(self.allocate_billboard_material(info.texture_id));
-            owns_material = true;
-        }
-
-        BillboardData {
-            info,
-            vertex_buffer,
-            owns_material,
-        }
-    }
-
-    fn billboard_vertices(center: Vec3, size: Vec2, color: Vec4) -> [BillboardVertex; 6] {
-        let offsets = [
-            Vec2::new(-0.5, -0.5),
-            Vec2::new(0.5, -0.5),
-            Vec2::new(0.5, 0.5),
-            Vec2::new(-0.5, 0.5),
-        ];
-        let tex_coords = [
-            Vec2::new(0.0, 0.0),
-            Vec2::new(1.0, 0.0),
-            Vec2::new(1.0, 1.0),
-            Vec2::new(0.0, 1.0),
-        ];
-
-        let color = color.to_array();
-        let center = center.to_array();
-        let size = size.to_array();
-
-        [
-            BillboardVertex {
-                center,
-                offset: offsets[0].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[1].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[1].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[2].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[2].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[3].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[3].to_array(),
-            },
-            BillboardVertex {
-                center,
-                offset: offsets[0].to_array(),
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-        ]
-    }
-
-    fn billboard_vertices_world(corners: [Vec3; 4], color: Vec4) -> [BillboardVertex; 6] {
-        let tex_coords = [
-            Vec2::new(0.0, 0.0),
-            Vec2::new(1.0, 0.0),
-            Vec2::new(1.0, 1.0),
-            Vec2::new(0.0, 1.0),
-        ];
-
-        let color = color.to_array();
-        let size = Vec2::ZERO.to_array();
-        let offset = Vec2::ZERO.to_array();
-
-        [
-            BillboardVertex {
-                center: corners[0].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-            BillboardVertex {
-                center: corners[1].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[1].to_array(),
-            },
-            BillboardVertex {
-                center: corners[2].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center: corners[2].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[2].to_array(),
-            },
-            BillboardVertex {
-                center: corners[3].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[3].to_array(),
-            },
-            BillboardVertex {
-                center: corners[0].to_array(),
-                offset,
-                size,
-                color,
-                tex_coords: tex_coords[0].to_array(),
-            },
-        ]
-    }
-
-    fn update_billboard_vertices(
-        &mut self,
-        billboard: &BillboardData,
-        transform: Mat4,
-        camera: Handle<Camera>,
-    ) {
-        let center = transform.transform_point3(Vec3::ZERO);
-        let mut size = Vec2::new(
-            transform.transform_vector3(Vec3::X).length(),
-            transform.transform_vector3(Vec3::Y).length(),
-        );
-
-        if size.x <= 0.0 {
-            size.x = 1.0;
-        }
-        if size.y <= 0.0 {
-            size.y = 1.0;
-        }
-
-        let vertices = match billboard.info.billboard_type {
-            BillboardType::ScreenAligned => Self::billboard_vertices(center, size, Vec4::ONE),
-            BillboardType::AxisAligned => {
-                let mut camera_position = Vec3::ZERO;
-                if camera.valid() {
-                    self.state
-                        .reserved_mut(
-                            "meshi_bindless_cameras",
-                            |a: &mut ReservedBindlessCamera| {
-                                camera_position = a.camera(camera).position();
-                            },
-                        )
-                        .expect("Failed to read camera for billboard alignment");
-                }
-
-                let mut forward = camera_position - center;
-                forward.y = 0.0;
-                if forward.length_squared() <= 1e-6 {
-                    forward = Vec3::Z;
-                } else {
-                    forward = forward.normalize();
-                }
-
-                let mut right = forward.cross(Vec3::Y);
-                if right.length_squared() <= 1e-6 {
-                    right = Vec3::X;
-                } else {
-                    right = right.normalize();
-                }
-
-                let up = Vec3::Y;
-                let half_right = right * (size.x * 0.5);
-                let half_up = up * (size.y * 0.5);
-                let corners = [
-                    center - half_right - half_up,
-                    center + half_right - half_up,
-                    center + half_right + half_up,
-                    center - half_right + half_up,
-                ];
-                Self::billboard_vertices_world(corners, Vec4::ONE)
-            }
-            BillboardType::Fixed => {
-                let right_axis = transform.transform_vector3(Vec3::X);
-                let up_axis = transform.transform_vector3(Vec3::Y);
-
-                let right = if right_axis.length_squared() <= 1e-6 {
-                    Vec3::X
-                } else {
-                    right_axis.normalize()
-                };
-                let up = if up_axis.length_squared() <= 1e-6 {
-                    Vec3::Y
-                } else {
-                    up_axis.normalize()
-                };
-
-                let half_right = right * (size.x * 0.5);
-                let half_up = up * (size.y * 0.5);
-                let corners = [
-                    center - half_right - half_up,
-                    center + half_right - half_up,
-                    center + half_right + half_up,
-                    center - half_right + half_up,
-                ];
-                Self::billboard_vertices_world(corners, Vec4::ONE)
-            }
-        };
-        let mapped = self
-            .ctx
-            .map_buffer_mut::<BillboardVertex>(BufferView::new(billboard.vertex_buffer))
-            .expect("Failed to map billboard vertex buffer");
-        mapped[..vertices.len()].copy_from_slice(&vertices);
-        self.ctx
-            .unmap_buffer(billboard.vertex_buffer)
-            .expect("Failed to unmap billboard vertex buffer");
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -1182,7 +835,11 @@ impl DeferredRenderer {
                 Ok(to_handle(h))
             }
             RenderObjectInfo::Billboard(billboard) => {
-                let billboard_data = self.create_billboard_data(billboard.clone());
+                let billboard_data = create_billboard_data(
+                    self.ctx.as_mut(),
+                    self.state.as_mut(),
+                    billboard.clone(),
+                );
                 let h = self.data.objects.push(RenderObjectData {
                     kind: RenderObjectKind::Billboard(billboard_data),
                     scene_handle,
@@ -1265,7 +922,7 @@ impl DeferredRenderer {
 
         if owns_material {
             if let Some(material) = material_handle {
-                self.update_billboard_material_texture(material, texture_id);
+                update_billboard_material_texture(self.state.as_mut(), material, texture_id);
             }
         }
     }
@@ -1330,7 +987,8 @@ impl DeferredRenderer {
             billboard.info.material = Some(material);
             billboard.owns_material = false;
         } else {
-            let new_material = Self::allocate_billboard_material(unsafe { &mut (*s) }, texture_id);
+            let new_material =
+                allocate_billboard_material(unsafe { &mut (*s) }.state.as_mut(), texture_id);
             billboard.info.material = Some(new_material);
             billboard.owns_material = true;
         }
@@ -1545,7 +1203,6 @@ impl DeferredRenderer {
                 .combine(self.subrender.environment.pre_compute(self.ctx.as_mut()))
                 .combine(self.gui.pre_compute())
                 .combine(self.text.pre_compute())
-                .combine(DeferredFrameBlitter::pre_compute())
                 .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads)
                 .combine(state_update)
                 .combine(self.subrender.environment.record_compute(self.ctx.as_mut()))
@@ -1568,10 +1225,12 @@ impl DeferredRenderer {
             let graph = &mut *(&mut self.graph as *mut RenderGraph);
             let draw_builder = &mut *(&mut self.proc.draw_builder as *mut GPUDrawBuilder);
             let alloc = &mut *(&mut self.data.dynamic as *mut DynamicAllocator);
+            let state = &mut *(self.state.as_mut() as *mut BindlessState);
             let mut subrender_info = SubrendererDrawInfo {
                 draw_builder,
                 graph,
                 alloc,
+                state,
                 camera: Default::default(),
                 viewport: self.data.viewport,
             };
@@ -1865,27 +1524,26 @@ impl DeferredRenderer {
             let scene_width = self.data.viewport.area.w as u32;
             let scene_height = self.data.viewport.area.h as u32;
 
-            let scene_blits = vec![BlitImage {
-                src: final_combine_view.img,
-                dst: scene_color_view.img,
-                src_range: SubresourceRange::new(0, 1, 0, 1),
-                dst_range: SubresourceRange::new(0, 1, 0, 1),
-                filter: Filter::Linear,
-                src_region: Rect2D {
-                    x: 0,
-                    y: 0,
-                    w: scene_width,
-                    h: scene_height,
-                },
-                dst_region: Rect2D {
-                    x: 0,
-                    y: 0,
-                    w: scene_width,
-                    h: scene_height,
-                },
-            }];
             self.graph.add_compute_pass(move |mut cmd| {
-                cmd = cmd.combine(DeferredFrameBlitter::post_compute(&scene_blits));
+                cmd = cmd.blit_images(&BlitImage {
+                    src: final_combine_view.img,
+                    dst: scene_color_view.img,
+                    src_range: SubresourceRange::new(0, 1, 0, 1),
+                    dst_range: SubresourceRange::new(0, 1, 0, 1),
+                    filter: Filter::Linear,
+                    src_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: scene_width,
+                        h: scene_height,
+                    },
+                    dst_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: scene_width,
+                        h: scene_height,
+                    },
+                });
                 cmd.end()
             });
 
@@ -1927,7 +1585,13 @@ impl DeferredRenderer {
                 if let Some(material) = billboard.info.material {
                     let transform = self.proc.scene.get_object_transform(scene_handle);
                     unsafe {
-                        (*s).update_billboard_vertices(&billboard, transform, camera_handle);
+                        update_billboard_vertices(
+                            (*s).ctx.as_mut(),
+                            (*s).state.as_mut(),
+                            &billboard,
+                            transform,
+                            camera_handle,
+                        );
                     }
                     billboard_draws.push(BillboardDraw {
                         vertex_buffer: billboard.vertex_buffer,
