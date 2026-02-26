@@ -9,6 +9,8 @@ use dashi::{
     Handle, IndexedResource, MemoryVisibility, Sampler, SamplerInfo, ShaderResource, ShaderType,
     Viewport,
 };
+use furikake::BindlessState;
+use furikake::PSOBuilderFurikakeExt;
 use tare::utils::StagedBuffer;
 
 use crate::CloudDebugView;
@@ -25,6 +27,8 @@ pub struct CloudCompositeParams {
     pub atmosphere_haze_color: [f32; 4],
     pub shadow_cascade_resolutions: [u32; 4],
     pub shadow_cascade_offsets: [u32; 4],
+    pub scene_depth_bindless_id: u32,
+    pub _padding: [u32; 3],
 }
 
 pub struct CloudCompositePass {
@@ -36,6 +40,7 @@ pub struct CloudCompositePass {
 impl CloudCompositePass {
     pub fn new(
         ctx: &mut Context,
+        state: &mut BindlessState,
         assets: &CloudAssets,
         history_color: [Handle<dashi::Buffer>; 2],
         history_transmittance: [Handle<dashi::Buffer>; 2],
@@ -43,7 +48,6 @@ impl CloudCompositePass {
         cloud_steps: Handle<dashi::Buffer>,
         history_weight: [Handle<dashi::Buffer>; 2],
         shadow_buffer: Handle<dashi::Buffer>,
-        depth_view: dashi::ImageView,
         sample_count: dashi::SampleCount,
     ) -> Self {
         let params = StagedBuffer::new(
@@ -90,7 +94,7 @@ impl CloudCompositePass {
             )
             .expect("compile cloud composite fragment");
 
-        let pipeline = PSOBuilder::new()
+        let mut pipeline_builder = PSOBuilder::new()
             .vertex_compiled(Some(vertex))
             .fragment_compiled(Some(fragment))
             .add_table_variable_with_resources(
@@ -180,19 +184,18 @@ impl CloudCompositePass {
                 }],
             )
             .add_table_variable_with_resources(
-                "scene_depth",
-                vec![IndexedResource {
-                    resource: ShaderResource::Image(depth_view),
-                    slot: 0, // binding 1
-                }],
-            )
-            .add_table_variable_with_resources(
                 "cloud_sampler",
                 vec![IndexedResource {
                     resource: ShaderResource::Sampler(sampler),
-                    slot: 0, // binding 2
+                    slot: 0, // binding 1
                 }],
-            )
+            );
+
+        pipeline_builder = pipeline_builder
+            .add_reserved_table_variables(state)
+            .unwrap();
+
+        let pipeline = pipeline_builder
             .set_attachment_format(0, Format::BGRA8)
             .add_depth_target(AttachmentDesc {
                 format: Format::D24S8,
@@ -245,6 +248,7 @@ impl CloudCompositePass {
         shadow_cascade_count: u32,
         shadow_cascade_resolutions: [u32; 4],
         shadow_cascade_offsets: [u32; 4],
+        scene_depth_bindless_id: u32,
     ) {
         let params = &mut self.params.as_slice_mut::<CloudCompositeParams>()[0];
         *params = CloudCompositeParams {
@@ -255,12 +259,7 @@ impl CloudCompositePass {
                 low_resolution[1],
             ],
             camera_params: [camera_near, camera_far, depth_sigma, history_weight_scale],
-            history_info: [
-                debug_view as u32,
-                history_index,
-                shadow_cascade_count,
-                0,
-            ],
+            history_info: [debug_view as u32, history_index, shadow_cascade_count, 0],
             shadow_params: [shadow_resolution as f32, 0.0, 0.0, 0.0],
             atmosphere_view: [
                 atmosphere_view_strength,
@@ -271,6 +270,8 @@ impl CloudCompositePass {
             atmosphere_haze_color,
             shadow_cascade_resolutions,
             shadow_cascade_offsets,
+            scene_depth_bindless_id,
+            _padding: [0; 3],
         };
     }
 
@@ -294,7 +295,10 @@ impl CloudCompositePass {
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().combine(self.params.sync_up()).end()
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .end()
     }
 
     pub fn pipeline(&self) -> &PSO {

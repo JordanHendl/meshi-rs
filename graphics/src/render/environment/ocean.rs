@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{Dispatch, Draw};
@@ -8,17 +8,17 @@ use dashi::{
     Handle, ImageInfo, ImageView, ImageViewType, MemoryVisibility, Sampler, SamplerInfo,
     ShaderResource, SubresourceRange, UsageBits, Viewport,
 };
+use furikake::types::Camera;
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
-use furikake::types::Camera;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use tracing::warn;
 
-use crate::gui::Slider;
 use crate::gui::debug::{
-    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
-    debug_register_radial_with_description, debug_register_with_description,
+    debug_register_int_with_description, debug_register_radial_with_description,
+    debug_register_with_description, DebugRadialOption, DebugRegistryValue, PageType,
 };
+use crate::gui::Slider;
 
 #[derive(Clone, Copy)]
 pub struct OceanInfo {
@@ -497,7 +497,10 @@ struct OceanDrawParams {
     ssr_thickness: f32,
     ssr_steps: u32,
     debug_view: u32,
-    _padding2: [f32; 3],
+    scene_color_bindless_id: u32,
+    scene_depth_bindless_id: u32,
+    shadow_map_bindless_id: u32,
+    env_map_bindless_id: u32,
 }
 
 #[repr(C)]
@@ -591,6 +594,10 @@ pub struct OceanRenderer {
     scene_sampler: Handle<Sampler>,
     scene_color_fallback: ImageView,
     scene_depth_fallback: ImageView,
+    scene_color_bindless_id: u32,
+    scene_depth_bindless_id: u32,
+    scene_env_map_id: u32,
+    shadow_map_bindless_id: u32,
     shadow_cascade_count: u32,
     shadow_resolution: u32,
     shadow_splits: Vec4,
@@ -987,13 +994,6 @@ impl OceanRenderer {
                 }],
             )
             .add_table_variable_with_resources(
-                "ocean_env_map",
-                vec![dashi::IndexedResource {
-                    resource: ShaderResource::Image(environment_map),
-                    slot: 0,
-                }],
-            )
-            .add_table_variable_with_resources(
                 "ocean_env_sampler",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Sampler(environment_sampler),
@@ -1001,31 +1001,9 @@ impl OceanRenderer {
                 }],
             )
             .add_table_variable_with_resources(
-                "ocean_scene_color",
-                vec![dashi::IndexedResource {
-                    resource: ShaderResource::Image(scene_color_fallback),
-                    slot: 0,
-                }],
-            )
-            .add_table_variable_with_resources(
-                "ocean_scene_depth",
-                vec![dashi::IndexedResource {
-                    resource: ShaderResource::Image(scene_depth_fallback),
-                    slot: 0,
-                }],
-            )
-            .add_table_variable_with_resources(
                 "ocean_scene_sampler",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Sampler(scene_sampler),
-                    slot: 0,
-                }],
-            );
-        pso_builder = pso_builder
-            .add_table_variable_with_resources(
-                "ocean_shadow_map",
-                vec![dashi::IndexedResource {
-                    resource: ShaderResource::Image(scene_depth_fallback),
                     slot: 0,
                 }],
             )
@@ -1133,6 +1111,10 @@ impl OceanRenderer {
             scene_sampler,
             scene_color_fallback,
             scene_depth_fallback,
+            scene_color_bindless_id: 0,
+            scene_depth_bindless_id: 0,
+            shadow_map_bindless_id: 0,
+            scene_env_map_id: 0,
             shadow_cascade_count: 0,
             shadow_resolution: 0,
             shadow_splits: Vec4::ZERO,
@@ -1496,24 +1478,54 @@ impl OceanRenderer {
         }
     }
 
-    pub fn set_environment_map(&mut self, view: ImageView) {
-        todo!()
+    pub fn set_environment_map(&mut self, view: Option<u16>) {
+        self.scene_env_map_id = view.unwrap_or(0) as u32;
     }
 
-    pub fn set_scene_textures(&mut self, color: Option<ImageView>, depth: Option<ImageView>) {
-        todo!()
+    pub fn set_scene_textures(
+        &mut self,
+        scene_color_bindless_id: Option<u16>,
+        scene_depth_bindless_id: Option<u16>,
+    ) {
+        self.scene_color_bindless_id = scene_color_bindless_id.unwrap_or(0) as u32;
+        self.scene_depth_bindless_id = scene_depth_bindless_id.unwrap_or(0) as u32;
     }
 
     pub fn set_shadow_map(
         &mut self,
+        shadow_map_bindless_id: Option<u16>,
+        shadow_resolution: u32,
+        shadow_cascade_count: u32,
+        shadow_splits: Vec4,
+        shadow_matrices: [Mat4; 4],
     ) {
-        todo!()
+        self.shadow_map_bindless_id = shadow_map_bindless_id.unwrap_or(0) as u32;
+        self.shadow_resolution = shadow_resolution;
+        self.shadow_cascade_count = shadow_cascade_count;
+        self.shadow_splits = shadow_splits;
+        self.shadow_matrices = shadow_matrices;
     }
 
     pub fn set_cloud_shadow_map(
         &mut self,
+        shadow_buffer: Option<Handle<Buffer>>,
+        shadow_resolution: u32,
+        shadow_cascade_count: u32,
+        shadow_splits: Vec4,
+        shadow_cascade_extents: [f32; 4],
+        shadow_cascade_resolutions: [u32; 4],
+        shadow_cascade_offsets: [u32; 4],
     ) {
-        todo!()
+        self.cloud_shadow_enabled = shadow_buffer.is_some();
+        if let Some(shadow_buffer) = shadow_buffer {
+            self.cloud_shadow_buffer = shadow_buffer;
+        }
+        self.cloud_shadow_resolution = shadow_resolution;
+        self.cloud_shadow_cascade_count = shadow_cascade_count;
+        self.cloud_shadow_splits = shadow_splits;
+        self.cloud_shadow_cascade_extents = shadow_cascade_extents;
+        self.cloud_shadow_cascade_resolutions = shadow_cascade_resolutions;
+        self.cloud_shadow_cascade_offsets = shadow_cascade_offsets;
     }
 
     pub fn record_compute(
@@ -1866,8 +1878,13 @@ impl OceanRenderer {
             ssr_thickness: self.ssr_thickness,
             ssr_steps: self.ssr_steps,
             debug_view: self.debug_view as u32,
-            _padding2: [0.0; 3],
+            scene_color_bindless_id: self.scene_color_bindless_id,
+            scene_depth_bindless_id: self.scene_depth_bindless_id,
+            shadow_map_bindless_id: self.shadow_map_bindless_id,
+            env_map_bindless_id: self.scene_env_map_id,
         };
+
+
         let mut shadow_alloc = dynamic
             .bump()
             .expect("Failed to allocate ocean shadow params");
@@ -1900,6 +1917,14 @@ impl OceanRenderer {
             shadow_cascade_resolutions: self.cloud_shadow_cascade_resolutions,
             shadow_cascade_offsets: self.cloud_shadow_cascade_offsets,
         };
+
+        self.pipeline.update_table(
+            "cloud_shadow_buffer",
+            dashi::IndexedResource {
+                resource: ShaderResource::StorageBuffer(self.cloud_shadow_buffer.into()),
+                slot: 0,
+            },
+        );
 
         let grid_resolution = self.vertex_resolution.max(2);
         let quad_count = (grid_resolution - 1) * (grid_resolution - 1);

@@ -47,7 +47,11 @@ layout(scalar, std430, set = 0, binding = 0) readonly buffer OceanParams {
     float ssr_thickness;
     uint ssr_steps;
     uint debug_view;
-    vec3 _padding2;
+    uint scene_color_bindless_id;
+    uint scene_depth_bindless_id;
+    uint shadow_map_bindless_id;
+    uint env_map_bindless_id;
+    uint _padding2;
 } params;
 
 
@@ -105,12 +109,10 @@ layout(set = 1, binding = 2) readonly buffer SceneLights {
     Light lights[];
 } meshi_bindless_lights;
 
-layout(set = 1, binding = 3) uniform textureCube ocean_env_map;
 layout(set = 1, binding = 4) uniform sampler ocean_env_sampler;
-layout(set = 1, binding = 5) uniform texture2D ocean_scene_color;
-layout(set = 1, binding = 6) uniform texture2D ocean_scene_depth;
+layout(set = 1, binding = 0) uniform texture2D meshi_bindless_textures[];
+layout(set = 1, binding = 3) uniform textureCube meshi_bindless_cubemaps[];
 layout(set = 1, binding = 7) uniform sampler ocean_scene_sampler;
-layout(set = 1, binding = 8) uniform texture2D ocean_shadow_map;
 layout(set = 1, binding = 9) uniform sampler ocean_shadow_sampler;
 
 const float LIGHT_TYPE_DIRECTIONAL = 0.0;
@@ -176,12 +178,13 @@ float linearize_depth(float depth, float near_plane, float far_plane) {
 }
 
 vec3 sample_scene_color(vec2 uv) {
-    return vec3(0.0);
-    return texture(sampler2D(ocean_scene_color, ocean_scene_sampler), uv).rgb;
+    uint id = params.scene_color_bindless_id;
+    return texture(sampler2D(meshi_bindless_textures[id], ocean_scene_sampler), uv).rgb;
 }
 
 float sample_scene_depth(vec2 uv, float near_plane, float far_plane) {
-    float depth = texture(sampler2D(ocean_scene_depth, ocean_scene_sampler), uv).r;
+    uint id = params.scene_depth_bindless_id;
+    float depth = texture(sampler2D(meshi_bindless_textures[id], ocean_scene_sampler), uv).r;
     return linearize_depth(depth, near_plane, far_plane);
 }
 
@@ -292,7 +295,8 @@ float sample_shadow(vec3 world_pos, float view_depth, float bias) {
             vec2 coord = uv_adjusted + offset;
             ivec2 texel_coord = ivec2(coord * atlas_size);
             texel_coord = clamp(texel_coord, ivec2(0), ivec2(int(atlas_size.x) - 1, int(atlas_size.y) - 1));
-            float map_depth = texelFetch(ocean_shadow_map, texel_coord, 0).x;
+            uint shadow_id = params.shadow_map_bindless_id;
+            float map_depth = texture(sampler2D(meshi_bindless_textures[shadow_id], ocean_shadow_sampler), (vec2(texel_coord) + 0.5) / atlas_size).x;
             shadow += (depth - bias) <= map_depth ? 1.0 : 0.0;
         }
     }
@@ -470,7 +474,7 @@ void main() {
     vec3 ssr_color = compute_ssr(cam, view_pos, view_normal, view_dir, ssr_hit);
 
     vec3 reflection_dir = normalize(reflect(-v, n));
-    vec3 env_color = texture(samplerCube(ocean_env_map, ocean_env_sampler), reflection_dir).rgb;
+    vec3 env_color = texture(samplerCube(meshi_bindless_cubemaps[params.env_map_bindless_id], ocean_env_sampler), reflection_dir).rgb;
     vec3 reflection_color = mix(env_color, ssr_color, ssr_hit * clamp(params.ssr_strength, 0.0, 1.0));
     vec3 specular_ibl = reflection_color * mix(fresnel, vec3(1.0), roughness * 0.2);
     vec3 diffuse_ibl = base_color * (1.0 - fresnel) * 0.08;

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use bento::{
+    builder::{AttachmentDesc, PSOBuilder, PSO},
     Compiler, OptimizationLevel, Request, ShaderLang,
-    builder::{AttachmentDesc, PSO, PSOBuilder},
 };
-use bumpalo::{Bump, collections::Vec as BumpVec};
+use bumpalo::{collections::Vec as BumpVec, Bump};
 use bytemuck::cast_slice;
 use dashi::{
     cmd::Executable,
@@ -15,56 +15,56 @@ use dashi::{
 use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::{
-    BindlessState, PSOBuilderFurikakeExt,
     reservations::{
-        ReservedBinding, bindless_camera::ReservedBindlessCamera,
-        bindless_indices::ReservedBindlessIndices, bindless_materials::ReservedBindlessMaterials,
-        bindless_vertices::ReservedBindlessVertices,
+        bindless_camera::ReservedBindlessCamera, bindless_indices::ReservedBindlessIndices,
+        bindless_materials::ReservedBindlessMaterials, bindless_vertices::ReservedBindlessVertices,
+        ReservedBinding,
     },
     types::{AnimationState as FurikakeAnimationState, Material, VertexBufferSlot, *},
+    BindlessState, PSOBuilderFurikakeExt,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
-    DB, RDBFile,
     meta::{DeviceMaterial, DeviceMesh, DeviceModel},
-    rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry, primitives::Vertex},
+    rdb::{primitives::Vertex, DeviceGeometry, DeviceGeometryLayer, HostGeometry},
+    RDBFile, DB,
 };
 use resource_pool::resource_list::ResourceList;
 use tare::{graph::*, transient::TransientAllocator, utils::StagedBuffer};
 use tracing::{info, warn};
 
 use super::{
-    Renderer, RendererInfo, ViewOutput,
     debug::DebugLayer,
     environment::{
+        terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
         EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
-        terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
     },
     gui::GuiRenderer,
     shadow::{ShadowPipelineMode, ShadowProcessInfo, ShadowSystem, ShadowSystemInfo},
     text::{TextDraw, TextDrawMode, TextRenderer},
     utils::{
         billboard::{
-            BillboardData, allocate_billboard_material, build_billboard_pipeline,
-            create_billboard_data, update_billboard_material_texture, update_billboard_vertices,
+            allocate_billboard_material, build_billboard_pipeline, create_billboard_data,
+            update_billboard_material_texture, update_billboard_vertices, BillboardData,
         },
         gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo},
         scene::GPUScene,
         skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo},
     },
+    Renderer, RendererInfo, ViewOutput,
 };
 use crate::{
+    gui::{
+        debug::{
+            debug_register_radial_with_description_and_conflicts, debug_register_with_description,
+            DebugRadialOption, DebugRegistryValue, PageType,
+        },
+        GuiFrame, Slider,
+    },
+    render::{utils::scene::*, SubrendererDrawInfo, SubrendererInitInfo, SubrendererProcessInfo},
     AnimationState, BillboardInfo, BillboardType, CloudDebugView, GuiInfo, GuiObject, RenderObject,
     RenderObjectInfo, TextInfo, TextObject, TextRenderMode,
-    gui::{
-        GuiFrame, Slider,
-        debug::{
-            DebugRadialOption, DebugRegistryValue, PageType,
-            debug_register_radial_with_description_and_conflicts, debug_register_with_description,
-        },
-    },
-    render::{SubrendererDrawInfo, SubrendererInitInfo, SubrendererProcessInfo, utils::scene::*},
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1666,6 +1666,11 @@ impl DeferredRenderer {
                         &mut subrender_info,
                         scene_color.bindless_id,
                         depth.bindless_id,
+                        shadow_result.cascaded.shadow_map.bindless_id,
+                        shadow_result.cascaded.shadow_resolution,
+                        shadow_result.cascaded.cascade_data.count,
+                        Vec4::from(shadow_result.cascaded.cascade_data.splits),
+                        shadow_result.cascaded.cascade_data.matrices,
                     ));
 
                     if !billboard_draws.is_empty() {

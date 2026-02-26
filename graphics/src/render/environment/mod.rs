@@ -8,9 +8,9 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{BindlessState, types::Camera};
+use furikake::{types::Camera, BindlessState};
 use glam::{Mat4, Vec3, Vec4};
-use noren::{DB, RDBFile};
+use noren::{RDBFile, DB};
 
 use crate::render::SubrendererDrawInfo;
 use crate::{CloudSettings, TerrainRenderSettings};
@@ -261,10 +261,8 @@ impl EnvironmentRenderer {
         info: &SubrendererDrawInfo,
         indices_handle: Handle<Buffer>,
     ) -> CommandStream<PendingGraphics> {
-        self.terrain
-            .record_deferred_draws(info, indices_handle)
+        self.terrain.record_deferred_draws(info, indices_handle)
     }
-
 
     pub fn record_terrain_draws(
         &mut self,
@@ -309,21 +307,44 @@ impl EnvironmentRenderer {
         info: &mut SubrendererDrawInfo,
         scene_color: Option<u16>,
         scene_depth: Option<u16>,
+        shadow_map: Option<u16>,
+        shadow_resolution: u32,
+        shadow_cascade_count: u32,
+        shadow_splits: Vec4,
+        shadow_matrices: [Mat4; 4],
     ) -> CommandStream<PendingGraphics> {
         // The environment map is sourced from the sky and bound into ocean state at
         // renderer initialization, not per-frame during opaque rendering.
-//        self.ocean.set_scene_textures(scene_color, scene_depth);
-        //        self.ocean.set_shadow_map(
-        //        );
+        self.ocean
+            .set_environment_map(Some(0));
+        self.ocean.set_scene_textures(scene_color, scene_depth);
+        self.ocean.set_shadow_map(
+            shadow_map,
+            shadow_resolution,
+            shadow_cascade_count,
+            shadow_splits,
+            shadow_matrices,
+        );
+        if let Some(clouds) = self.clouds.as_mut() {
+            clouds.set_scene_depth_bindless_id(scene_depth);
+        }
         let cloud_shadow_info = self
             .clouds
             .as_ref()
             .and_then(|clouds| clouds.shadow_map_info());
         if let Some(info) = cloud_shadow_info {
-            //            self.ocean.set_cloud_shadow_map();
+            self.ocean.set_cloud_shadow_map(
+                Some(info.shadow_buffer),
+                info.shadow_resolution,
+                info.shadow_cascade_count,
+                Vec4::from(info.shadow_cascade_splits),
+                info.shadow_cascade_extents,
+                info.shadow_cascade_resolutions,
+                info.shadow_cascade_offsets,
+            );
         } else {
-            //            self.ocean
-            //                .set_cloud_shadow_map(None, 0, 0, Vec4::ZERO, [0.0; 4], [0; 4], [0; 4]);
+            self.ocean
+                .set_cloud_shadow_map(None, 0, 0, Vec4::ZERO, [0.0; 4], [0; 4], [0; 4]);
         }
         CommandStream::<PendingGraphics>::subdraw()
             .combine(self.sky.record_draws(

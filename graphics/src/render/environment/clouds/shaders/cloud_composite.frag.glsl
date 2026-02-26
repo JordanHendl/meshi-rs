@@ -38,8 +38,8 @@ layout(set = 1, binding = 8) buffer CloudWeightB { float values[]; } cloud_weigh
 layout(set = 1, binding = 9) buffer CloudShadow { float values[]; } cloud_shadow;
 
 layout(set = 2, binding = 0) uniform texture2D cloud_weather_map;
-layout(set = 2, binding = 1) uniform texture2D scene_depth;
-layout(set = 2, binding = 2) uniform sampler cloud_sampler;
+layout(set = 2, binding = 1) uniform sampler cloud_sampler;
+layout(set = 3, binding = 0) uniform texture2D meshi_bindless_textures[];
 
 float linearize_depth(float depth) {
     float z = depth * 2.0 - 1.0;
@@ -174,7 +174,8 @@ void main() {
     float steps  = sample_steps(v_uv);
     float weight = (params.history_info.y == 0u) ? sample_weight_a(v_uv) : sample_weight_b(v_uv);
 
-    float scene_depth_v = texture(sampler2D(scene_depth, cloud_sampler), v_uv).r;
+    uint depth_id = params.scene_depth_bindless_id;
+    float scene_depth_v = texture(sampler2D(meshi_bindless_textures[depth_id], cloud_sampler), v_uv).r;
     float scene_linear = linearize_depth(scene_depth_v);
     if (depth > 0.0 && scene_linear + params.camera_params.z < depth) {
         trans = 1.0;

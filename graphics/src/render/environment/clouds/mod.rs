@@ -56,6 +56,7 @@ pub struct CloudRenderer {
     sample_count: dashi::SampleCount,
     pending_weather_map: Option<dashi::ImageView>,
     weather_map_configured: bool,
+    scene_depth_bindless_id: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -639,7 +640,7 @@ impl CloudRenderer {
         let assets = CloudAssets::new(ctx, CloudNoiseSizes::default());
         let settings = CloudSettings::default();
         let low_resolution = calc_low_res(viewport, settings.low_res_scale);
-        
+
         tracing::info!("LOW RES: {:?}", low_resolution);
         let shadow_pass = CloudShadowPass::new(
             ctx,
@@ -671,6 +672,7 @@ impl CloudRenderer {
 
         let composite_pass = CloudCompositePass::new(
             ctx,
+            state,
             &assets,
             temporal_pass.history_color,
             temporal_pass.history_transmittance,
@@ -678,7 +680,6 @@ impl CloudRenderer {
             raymarch_pass.steps_buffer,
             temporal_pass.history_weight,
             shadow_pass.shadow_buffer,
-            depth_view,
             sample_count,
         );
 
@@ -701,7 +702,12 @@ impl CloudRenderer {
             sample_count,
             pending_weather_map: None,
             weather_map_configured: true,
+            scene_depth_bindless_id: 0,
         }
+    }
+
+    pub fn set_scene_depth_bindless_id(&mut self, bindless_id: Option<u16>) {
+        self.scene_depth_bindless_id = bindless_id.unwrap_or(0) as u32;
     }
 
     pub fn settings(&self) -> CloudSettings {
@@ -905,6 +911,7 @@ impl CloudRenderer {
             self.settings.shadow.cascades.cascade_count,
             self.settings.shadow.cascades.cascade_resolutions,
             shadow_cascade_offsets,
+            self.scene_depth_bindless_id,
         );
 
         self.timings.shadow_ms = _ctx
