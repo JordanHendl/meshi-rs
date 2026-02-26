@@ -3,6 +3,7 @@
 #include "glm/ext.hpp"
 #include "meshi/world.hpp"
 #include <cassert>
+#include <cstdint>
 #include <meshi/backend.hpp>
 #include <meshi/bits/action.hpp>
 #include <meshi/bits/error.hpp>
@@ -15,18 +16,21 @@ namespace meshi {
 struct EngineInfo {
   std::string application_name = std::string("MESHI APPLICATION");
   std::string application_root = std::string("");
+  std::uint32_t canvas_width = 1280;
+  std::uint32_t canvas_height = 720;
 };
 class Engine {
 public:
   static auto make(EngineInfo info) -> Result<Engine, Error> {
+    const std::uint32_t canvas_extent[2] = {info.canvas_width, info.canvas_height};
     const auto backend_info = EngineBackendInfo{
         .application_name = info.application_name.c_str(),
         .application_location = info.application_root.c_str(),
         .headless = 0,
+        .canvas_extent = canvas_extent,
     };
 
-    return make_result<Engine, Error>(
-        Engine(backend_info));
+    return make_result<Engine, Error>(Engine(backend_info));
   };
 
   inline auto world() -> World & { return m_world; }

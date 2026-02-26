@@ -162,6 +162,29 @@ pub enum MouseButton {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GamepadButton {
+    South,
+    East,
+    West,
+    North,
+    LeftTrigger,
+    RightTrigger,
+    LeftTrigger2,
+    RightTrigger2,
+    Select,
+    Start,
+    Mode,
+    LeftThumb,
+    RightThumb,
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
+    Unknown,
+}
+
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct PressPayload {
     key: KeyCode,
@@ -182,11 +205,19 @@ struct MouseButtonPayload {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GamepadButtonPayload {
+    button: GamepadButton,
+    code: c_uint,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub union Payload {
     press: PressPayload,
     motion2d: Motion2DPayload,
     mouse_button: MouseButtonPayload,
+    gamepad_button: GamepadButtonPayload,
 }
 
 #[repr(C)]
@@ -213,6 +244,39 @@ impl Event {
 
     pub unsafe fn key(&self) -> KeyCode {
         self.payload.press.key
+    }
+
+    pub unsafe fn gamepad_button(&self) -> GamepadButton {
+        self.payload.gamepad_button.button
+    }
+
+    pub unsafe fn gamepad_button_code(&self) -> c_uint {
+        self.payload.gamepad_button.code
+    }
+}
+
+impl From<u32> for GamepadButton {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => GamepadButton::South,
+            1 => GamepadButton::East,
+            2 => GamepadButton::West,
+            3 => GamepadButton::North,
+            4 => GamepadButton::LeftTrigger,
+            5 => GamepadButton::RightTrigger,
+            6 => GamepadButton::LeftTrigger2,
+            7 => GamepadButton::RightTrigger2,
+            8 => GamepadButton::Select,
+            9 => GamepadButton::Start,
+            10 => GamepadButton::Mode,
+            11 => GamepadButton::LeftThumb,
+            12 => GamepadButton::RightThumb,
+            13 => GamepadButton::DPadUp,
+            14 => GamepadButton::DPadDown,
+            15 => GamepadButton::DPadLeft,
+            16 => GamepadButton::DPadRight,
+            _ => GamepadButton::Unknown,
+        }
     }
 }
 
@@ -617,7 +681,7 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
             })
         }
         WEvent::DeviceEvent {
-            event: DeviceEvent::Button { state, .. },
+            event: DeviceEvent::Button { button, state },
             ..
         } => {
             let et = if *state == ElementState::Pressed {
@@ -629,9 +693,9 @@ pub fn from_winit_event(event: &WEvent<'_, ()>) -> Option<Event> {
                 event_type: et,
                 source: EventSource::Gamepad,
                 payload: Payload {
-                    press: PressPayload {
-                        key: KeyCode::Undefined,
-                        previous: EventType::Unknown,
+                    gamepad_button: GamepadButtonPayload {
+                        button: GamepadButton::from(*button),
+                        code: *button,
                     },
                 },
                 timestamp: 0,
@@ -666,5 +730,13 @@ mod tests {
         assert_eq!(KeyCode::from(VK::LShift), KeyCode::Shift);
         assert_eq!(KeyCode::from(VK::NumpadAdd), KeyCode::NumpadAdd);
         assert_eq!(KeyCode::from(VK::AbntC1), KeyCode::Undefined);
+    }
+
+    #[test]
+    fn converts_gamepad_buttons() {
+        assert_eq!(GamepadButton::from(0), GamepadButton::South);
+        assert_eq!(GamepadButton::from(9), GamepadButton::Start);
+        assert_eq!(GamepadButton::from(16), GamepadButton::DPadRight);
+        assert_eq!(GamepadButton::from(32), GamepadButton::Unknown);
     }
 }

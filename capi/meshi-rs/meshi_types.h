@@ -257,6 +257,27 @@ enum class MeshiMouseButton : std::uint32_t {
     Right,
 };
 
+enum class MeshiGamepadButton : std::uint32_t {
+    South,
+    East,
+    West,
+    North,
+    LeftTrigger,
+    RightTrigger,
+    LeftTrigger2,
+    RightTrigger2,
+    Select,
+    Start,
+    Mode,
+    LeftThumb,
+    RightThumb,
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
+    Unknown,
+};
+
 struct MeshiPressPayload {
     MeshiKeyCode key;
     MeshiEventType previous;
@@ -271,10 +292,16 @@ struct MeshiMouseButtonPayload {
     MeshiVec2 pos;
 };
 
+struct MeshiGamepadButtonPayload {
+    MeshiGamepadButton button;
+    std::uint32_t code;
+};
+
 union MeshiPayload {
     MeshiPressPayload press;
     MeshiMotion2DPayload motion2d;
     MeshiMouseButtonPayload mouse_button;
+    MeshiGamepadButtonPayload gamepad_button;
 };
 
 struct MeshiEvent {

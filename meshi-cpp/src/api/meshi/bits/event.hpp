@@ -16,6 +16,7 @@ enum class EventType {
   Released = 3,
   Joystick = 4,
   Motion2D = 5,
+  CursorMoved = 6,
 };
 
 enum class EventSource {
@@ -155,6 +156,27 @@ enum class MouseButton {
   Right,
 };
 
+enum class GamepadButton {
+  South,
+  East,
+  West,
+  North,
+  LeftTrigger,
+  RightTrigger,
+  LeftTrigger2,
+  RightTrigger2,
+  Select,
+  Start,
+  Mode,
+  LeftThumb,
+  RightThumb,
+  DPadUp,
+  DPadDown,
+  DPadLeft,
+  DPadRight,
+  Unknown,
+};
+
 struct MouseButtonPayload {
   MouseButton button;
   glm::vec2 position;
@@ -168,10 +190,17 @@ struct PressPayload {
 struct Motion2DPayload {
   vec2 motion;
 };
+
+struct GamepadButtonPayload {
+  GamepadButton button;
+  uint32_t code;
+};
+
 union Payload {
   PressPayload press;
   Motion2DPayload motion2d;
   MouseButtonPayload mouse_button;
+  GamepadButtonPayload gamepad_button;
 };
 
 struct Event {
@@ -230,11 +259,18 @@ public:
           switch (e.type) {
           case EventType::Pressed:
           case EventType::Released:
-            e.payload.press.key = static_cast<KeyCode>(ev->payload.press.key);
-            e.payload.press.previous =
-                static_cast<EventType>(ev->payload.press.previous);
+            if (e.source == EventSource::Gamepad) {
+              e.payload.gamepad_button.button =
+                  static_cast<GamepadButton>(ev->payload.gamepad_button.button);
+              e.payload.gamepad_button.code = ev->payload.gamepad_button.code;
+            } else {
+              e.payload.press.key = static_cast<KeyCode>(ev->payload.press.key);
+              e.payload.press.previous =
+                  static_cast<EventType>(ev->payload.press.previous);
+            }
             break;
           case EventType::Motion2D:
+          case EventType::CursorMoved:
             e.payload.motion2d.motion =
                 {ev->payload.motion2d.motion.x, ev->payload.motion2d.motion.y};
             break;
