@@ -1,19 +1,18 @@
-use crate::ShadowCascadeSettings;
-use crate::render::utils::gpu_draw_builder::GPUDrawBuilder;
-use crate::render::{SpotShadowLight, SubrendererDrawInfo};
-use dashi::cmd::Executable;
-use dashi::gpu::cmd::{Scope, SyncPoint};
-use dashi::{
-    AspectMask, ClearValue, CommandStream, Context, DynamicAllocator, Format, Handle, ImageInfo,
-    Rect2D, ShaderResource, Viewport,
+mod cascaded;
+mod spot;
+
+use crate::{
+    ShadowCascadeSettings,
+    render::{SpotShadowLight, SubrendererInitInfo, SubrendererProcessInfo},
 };
-use furikake::BindlessState;
-use furikake::reservations::ReservedBinding;
-use glam::{Mat4, Vec2, Vec3};
-use meshi_ffi_structs::LightInfo;
-use tare::graph::*;
-use tare::transient::TransientImage;
+use dashi::{
+    BufferInfo, BufferUsage, ClearValue, CommandStream, Context, MemoryVisibility, SampleCount,
+    cmd::Executable,
+};
 use tare::utils::StagedBuffer;
+
+pub use cascaded::{CascadedShadowResult, ShadowCascadeInfo};
+pub use spot::SpotShadowResult;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ShadowPipelineMode {
@@ -22,7 +21,7 @@ pub enum ShadowPipelineMode {
 }
 
 impl ShadowPipelineMode {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             ShadowPipelineMode::Deferred => "DEFERRED",
             ShadowPipelineMode::Forward => "FORWARD",
@@ -35,29 +34,70 @@ pub struct ShadowResult {
     pub spot: SpotShadowResult,
 }
 
-pub struct ShadowSystemInfo {}
+#[derive(Clone, Copy)]
+pub struct ShadowSystemInfo {
+    pub sample_count: SampleCount,
+    pub cascades: ShadowCascadeSettings,
+    pub cascaded_resolution: u32,
+    pub spot_resolution: u32,
+    pub depth_clear: ClearValue,
+}
+
+#[derive(Clone, Copy)]
+pub struct ShadowProcessInfo {
+    pub subrenderer: SubrendererProcessInfo,
+    pub view_idx: u32,
+    pub shadow_bin: u32,
+    pub primary_light_direction: glam::Vec3,
+    pub spot_light: Option<SpotShadowLight>,
+}
 
 pub struct ShadowSystem {
-    cascaded: CascadedShadows,
-    spot: SpotShadows,
+    cascaded: cascaded::CascadedShadows,
+    spot: spot::SpotShadows,
 }
 
 impl ShadowSystem {
     pub fn new(
-        ctx: &mut Context,
-        state: &mut BindlessState,
-        info: &ShadowSystemInfo,
+        init: SubrendererInitInfo,
+        info: ShadowSystemInfo,
         mode: ShadowPipelineMode,
     ) -> Self {
-        let cascaded = CascadedShadows::new(ctx, info, mode);
-        let spot = SpotShadows::new(ctx, info, mode);
+        let SubrendererInitInfo {
+            ctx,
+            state,
+            per_draw_buffer,
+            per_scene_dynamic,
+        } = init;
+
+        let cascade_buffer = StagedBuffer::new(
+            ctx,
+            BufferInfo {
+                debug_name: "[MESHI] Shadow Cascade Info",
+                byte_size: (std::mem::size_of::<ShadowCascadeInfo>() as u32).max(256),
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: None,
+            },
+        );
+        let cascaded = cascaded::CascadedShadows::new(
+            ctx,
+            state,
+            per_draw_buffer,
+            per_scene_dynamic.clone(),
+            info,
+            mode,
+            cascade_buffer,
+        );
+        let spot =
+            spot::SpotShadows::new(ctx, state, per_draw_buffer, per_scene_dynamic, info, mode);
         Self { cascaded, spot }
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
-            //            .combine(self.cascaded.cascade_buffer().sync_up())
+            .combine(self.cascaded.cascade_buffer().sync_up())
             .end()
     }
 
@@ -65,11 +105,11 @@ impl ShadowSystem {
         CommandStream::new().begin().end()
     }
 
-    pub fn resolution(&self) -> u32 {
-        self.cascaded.resolution()
+    pub fn cascade_buffer_handle(&self) -> dashi::BufferView {
+        self.cascaded.cascade_buffer().device()
     }
 
-    pub fn process(&mut self, info: &SubrendererDrawInfo) -> ShadowResult {
+    pub fn process(&mut self, info: ShadowProcessInfo) -> ShadowResult {
         let cascaded = self.cascaded.process(info);
         let spot = self.spot.process(info);
         ShadowResult { cascaded, spot }

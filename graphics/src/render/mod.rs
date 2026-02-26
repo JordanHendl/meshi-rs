@@ -4,18 +4,20 @@ pub mod environment;
 pub mod forward;
 pub mod gui;
 mod particle;
-//mod shadow;
+mod shadow;
 pub mod text;
 mod utils;
 use crate::gui::GuiFrame;
-use utils::gpu_draw_builder::GPUDrawBuilder;
 use crate::{
     AnimationState, CloudSettings, GuiInfo, GuiObject, RenderObject, RenderObjectInfo,
     ShadowCascadeSettings, TextInfo, TextObject,
 };
 use bumpalo_herd::Herd;
 use dashi::DynamicAllocator;
-use dashi::{Context, Handle, ImageView, SampleCount, Semaphore, Viewport};
+use dashi::{
+    Buffer, BufferView, Context, DynamicAllocatorState, Handle, ImageView, SampleCount, Semaphore,
+    Viewport,
+};
 use furikake::{BindlessState, types::Camera, types::Light, types::Material};
 use glam::Mat4;
 use meshi_ffi_structs::LightInfo;
@@ -23,9 +25,11 @@ use meshi_utils::MeshiError;
 use noren::DB;
 use noren::RDBFile;
 use std::collections::VecDeque;
+use std::ptr::NonNull;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tare::graph::RenderGraph;
+use utils::gpu_draw_builder::GPUDrawBuilder;
 
 pub struct RendererInfo {
     pub headless: bool,
@@ -44,6 +48,60 @@ pub struct ViewOutput {
 pub struct SpotShadowLight {
     pub handle: Handle<Light>,
     pub info: LightInfo,
+}
+
+pub struct SubrendererInitInfo<'a> {
+    pub ctx: &'a mut Context,
+    pub state: &'a mut BindlessState,
+    pub per_draw_buffer: Handle<Buffer>,
+    pub per_scene_dynamic: DynamicAllocatorState,
+}
+
+#[derive(Clone, Copy)]
+pub struct SubrendererProcessInfo {
+    graph: NonNull<RenderGraph>,
+    state: NonNull<BindlessState>,
+    dynamic: NonNull<DynamicAllocator>,
+    pub camera: Handle<Camera>,
+    pub draw_list: BufferView,
+    pub draw_count: u32,
+}
+
+impl SubrendererProcessInfo {
+    pub fn new(
+        graph: &mut RenderGraph,
+        state: &BindlessState,
+        dynamic: &mut DynamicAllocator,
+        camera: Handle<Camera>,
+        draw_list: BufferView,
+        draw_count: u32,
+    ) -> Self {
+        Self {
+            graph: NonNull::from(graph),
+            state: NonNull::from(state),
+            dynamic: NonNull::from(dynamic),
+            camera,
+            draw_list,
+            draw_count,
+        }
+    }
+
+    pub fn graph_mut(self) -> &'static mut RenderGraph {
+        unsafe { self.graph.as_ptr().as_mut().expect("graph pointer invalid") }
+    }
+
+    pub fn state(self) -> &'static BindlessState {
+        unsafe { self.state.as_ptr().as_ref().expect("state pointer invalid") }
+    }
+
+    pub fn dynamic_mut(self) -> &'static mut DynamicAllocator {
+        unsafe {
+            self.dynamic
+                .as_ptr()
+                .as_mut()
+                .expect("dynamic pointer invalid")
+        }
+    }
 }
 
 pub struct FrameTimer {

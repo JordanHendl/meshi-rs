@@ -42,6 +42,7 @@ use super::{
         terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
     },
     gui::GuiRenderer,
+    shadow::{ShadowPipelineMode, ShadowProcessInfo, ShadowSystem, ShadowSystemInfo},
     text::{TextDraw, TextDrawMode, TextRenderer},
     utils::{
         billboard::{
@@ -63,7 +64,7 @@ use crate::{
             debug_register_radial_with_description_and_conflicts, debug_register_with_description,
         },
     },
-    render::{SubrendererDrawInfo, utils::scene::*},
+    render::{SubrendererDrawInfo, SubrendererInitInfo, SubrendererProcessInfo, utils::scene::*},
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -161,6 +162,7 @@ struct DataProcessors {
 struct Renderers {
     environment: EnvironmentRenderer,
     debug: DebugLayer,
+    shadow: ShadowSystem,
 }
 
 struct DeferredPSO {
@@ -464,7 +466,31 @@ impl DeferredRenderer {
             ),
         };
 
-        let mut subrender = Renderers { environment, debug };
+        let shadow = ShadowSystem::new(
+            SubrendererInitInfo {
+                ctx: ctx.as_mut(),
+                state: state.as_mut(),
+                per_draw_buffer: proc.draw_builder.per_draw_data(),
+                per_scene_dynamic: data.dynamic.state(),
+            },
+            ShadowSystemInfo {
+                sample_count: info.sample_count,
+                cascades: info.shadow_cascades,
+                cascaded_resolution: 2048,
+                spot_resolution: 1024,
+                depth_clear: ClearValue::DepthStencil {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+            ShadowPipelineMode::Deferred,
+        );
+
+        let mut subrender = Renderers {
+            environment,
+            debug,
+            shadow,
+        };
 
         subrender.environment.initialize_terrain_deferred(
             ctx.as_mut(),
@@ -1201,6 +1227,7 @@ impl DeferredRenderer {
                 .combine(self.proc.scene.pre_compute())
                 .combine(self.proc.draw_builder.pre_compute())
                 .combine(self.subrender.environment.pre_compute(self.ctx.as_mut()))
+                .combine(self.subrender.shadow.pre_compute())
                 .combine(self.gui.pre_compute())
                 .combine(self.text.pre_compute())
                 .sync(SyncPoint::TransferToCompute, Scope::AllCommonReads)
@@ -1351,7 +1378,7 @@ impl DeferredRenderer {
                     .combine(
                         self.proc
                             .draw_builder
-                            .build_draws(&[BIN_GBUFFER_OPAQUE], view_idx as u32),
+                            .build_draws(&[BIN_GBUFFER_OPAQUE, BIN_SHADOW], view_idx as u32),
                     )
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
@@ -1435,6 +1462,21 @@ impl DeferredRenderer {
             // Deferred COMBINE pass. Combines all deferred attachments.     //
             ///////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
+            let shadow_result = self.subrender.shadow.process(ShadowProcessInfo {
+                subrenderer: SubrendererProcessInfo::new(
+                    &mut self.graph,
+                    self.state.as_ref(),
+                    &mut self.data.dynamic,
+                    camera_handle,
+                    self.proc.draw_builder.draw_list_for_bin(BIN_SHADOW),
+                    self.proc.draw_builder.draw_count(),
+                ),
+                view_idx: view_idx as u32,
+                shadow_bin: BIN_SHADOW,
+                primary_light_direction: self.subrender.environment.primary_light_direction(),
+                spot_light: None,
+            });
+
             self.graph.add_subpass(
                 &SubpassInfo {
                     name: Some("[MESHI] DEFERRED COMBINE".to_string()),
@@ -1473,16 +1515,20 @@ impl DeferredRenderer {
                     per_obj.diff = diffuse.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.norm = normal.bindless_id.unwrap_or(u16::MAX) as u32;
                     per_obj.mat = material_code.bindless_id.unwrap_or(u16::MAX) as u32;
-                    per_obj.shadow = u16::MAX as u32;
-                    per_obj.shadow_cascade_count = u16::MAX as u32;
-                    per_obj.shadow_resolution = 0;
+                    per_obj.shadow = shadow_result
+                        .cascaded
+                        .shadow_map
+                        .bindless_id
+                        .unwrap_or(u16::MAX) as u32;
+                    per_obj.shadow_cascade_count = shadow_result.cascaded.cascade_data.count;
+                    per_obj.shadow_resolution = shadow_result.cascaded.shadow_resolution;
                     per_obj.debug_view =
                         self.subrender.environment.cloud_settings().debug_view as u32;
-                    per_obj.spot_shadow_texture = 0;
-                    per_obj.spot_shadow_resolution = 0;
+                    per_obj.spot_shadow_texture = shadow_result.spot.shadow_bindless_id;
+                    per_obj.spot_shadow_resolution = shadow_result.spot.shadow_resolution;
                     per_obj.spot_shadow_padding0 = 0;
                     per_obj.spot_shadow_padding1 = 0;
-                    per_obj.spot_shadow_matrix = Default::default();
+                    per_obj.spot_shadow_matrix = shadow_result.spot.shadow_matrix;
 
                     cmd = cmd
                         .bind_graphics_pipeline(self.psos.combine_pso.handle)
@@ -1683,6 +1729,7 @@ impl DeferredRenderer {
             cmd.combine(self.proc.scene.post_compute())
                 .combine(self.proc.draw_builder.post_compute())
                 .combine(self.subrender.environment.post_compute())
+                .combine(self.subrender.shadow.post_compute())
                 .combine(self.gui.post_compute())
                 .combine(self.text.post_compute())
                 .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads)
