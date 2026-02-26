@@ -115,10 +115,14 @@ impl EnvironmentRenderer {
         self.dynamic.reset();
     }
 
-    pub fn pre_compute(&mut self, ctx: &mut Context) -> CommandStream<Executable> {
+    pub fn pre_compute(
+        &mut self,
+        ctx: &mut Context,
+        state: &mut BindlessState,
+    ) -> CommandStream<Executable> {
         CommandStream::new()
             .begin()
-            .combine(self.sky.pre_compute(ctx))
+            .combine(self.sky.pre_compute(ctx, state))
             //            .combine(self.ocean.pre_compute())
             //            .combine(self.terrain.pre_compute())
             .end()
@@ -316,7 +320,7 @@ impl EnvironmentRenderer {
         // The environment map is sourced from the sky and bound into ocean state at
         // renderer initialization, not per-frame during opaque rendering.
         self.ocean
-            .set_environment_map(Some(0));
+            .set_environment_map(Some(self.sky.environment_cubemap_bindless_id()));
         self.ocean.set_scene_textures(scene_color, scene_depth);
         self.ocean.set_shadow_map(
             shadow_map,

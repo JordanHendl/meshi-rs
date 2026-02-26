@@ -11,12 +11,16 @@ use dashi::{
 };
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
-    reservations::bindless_camera::ReservedBindlessCamera, types::Camera, BindlessState,
+    reservations::{
+        bindless_camera::ReservedBindlessCamera, bindless_textures::ReservedBindlessCubemaps,
+    },
+    types::Camera,
+    BindlessState,
 };
 use glam::*;
 use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo};
 use tare::utils::StagedBuffer;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::gui::debug::{
     debug_register_int, debug_register_radial_with_description, debug_register_with_description,
@@ -29,6 +33,7 @@ pub struct SkyboxInfo {
     pub intensity: f32,
     pub use_procedural_cubemap: bool,
     pub update_interval_frames: u32,
+    pub cubemap_resolution: u32,
 }
 
 #[derive(Clone)]
@@ -37,6 +42,7 @@ pub struct SkyboxFrameSettings {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
     pub use_procedural_cubemap: bool,
     pub update_interval_frames: u32,
+    pub cubemap_resolution: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +86,7 @@ impl Default for SkyboxInfo {
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
+            cubemap_resolution: 512,
         }
     }
 }
@@ -91,6 +98,7 @@ impl Default for SkyboxFrameSettings {
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
+            cubemap_resolution: 512,
         }
     }
 }
@@ -166,6 +174,12 @@ impl SkyboxFrameSettings {
                 Slider::new(0, "Skybox Update Interval", 1.0, 240.0, 0.0),
                 &mut self.update_interval_frames as *mut u32,
                 "Skybox Update Interval",
+            );
+            debug_register_int(
+                PageType::Sky,
+                Slider::new(0, "Skybox Cubemap Resolution", 16.0, 4096.0, 0.0),
+                &mut self.cubemap_resolution as *mut u32,
+                "Skybox Cubemap Resolution",
             );
         }
     }
@@ -540,7 +554,8 @@ struct SkyConfig {
     fog_height_falloff: [Vec4; 2],
     fog_noise_speed: [Vec4; 2],
     fog_time: f32,
-    _fog_padding: Vec3,
+    environment_map_blend: f32,
+    _fog_padding: Vec2,
 }
 
 #[repr(C)]
@@ -553,7 +568,8 @@ struct SkyboxParams {
 #[repr(C)]
 struct SkyDrawParams {
     camera_index: u32,
-    _padding: [u32; 3],
+    environment_cubemap_bindless_id: u32,
+    _padding: [u32; 2],
 }
 
 pub struct SkyCubemapPass {
@@ -567,10 +583,12 @@ pub struct SkyRenderer {
     skybox_pipeline: PSO,
     skybox_sampler: Handle<Sampler>,
     skybox_fallback_view: ImageView,
+    skybox_fallback_bindless_id: u16,
     skybox_swap_info: Option<GPUImageInfo>,
     skybox_intensity: f32,
     use_procedural_cubemap: bool,
     cubemap_update_interval: u32,
+    cubemap_resolution: u32,
     cubemap_frame_index: u32,
     cubemap_dirty: bool,
     cubemap_size: u32,
@@ -578,11 +596,13 @@ pub struct SkyRenderer {
     cubemap_face_views: Option<[ImageView; 6]>,
     cubemap_camera_handles: Option<[Handle<Camera>; 6]>,
     procedural_cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    procedural_cubemap_bindless_id: Option<u16>,
     pending_cubemap_swap: Option<noren::rdb::imagery::DeviceCubemap>,
     cubemap_format: Format,
     sky_settings: SkyFrameSettings,
     cfg: StagedBuffer,
     enabled: bool,
+    last_logged_cubemap_source_is_procedural: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -693,7 +713,7 @@ fn compile_fog_shaders() -> [bento::CompilationResult; 2] {
 }
 
 fn default_skybox_view(ctx: &mut dashi::Context) -> ImageView {
-    let face = vec![135, 206, 235, 255];
+    let face = vec![0, 0, 0, 255];
     let faces = [
         face.clone(),
         face.clone(),
@@ -782,6 +802,17 @@ impl SkyRenderer {
             .make_sampler(&SamplerInfo::default())
             .expect("Failed to create skybox sampler");
 
+        let skybox_fallback_bindless_id = {
+            let mut cubemap_id = 0u16;
+            let _ = state.reserved_mut(
+                "meshi_bindless_cubemaps",
+                |cubemaps: &mut ReservedBindlessCubemaps| {
+                    cubemap_id = cubemaps.add_texture(skybox_view);
+                },
+            );
+            cubemap_id
+        };
+
         let initial_config = [SkyConfig {
             ..Default::default()
         }];
@@ -812,6 +843,20 @@ impl SkyRenderer {
                 "SkyParams",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::StorageBuffer(cfg.device()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "skybox_texture",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(skybox_view),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "skybox_sampler",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Sampler(skybox_sampler),
                     slot: 0,
                 }],
             );
@@ -862,6 +907,20 @@ impl SkyRenderer {
                 "SkyParams",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::StorageBuffer(cfg.device()),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "skybox_texture",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(skybox_view),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "skybox_sampler",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Sampler(skybox_sampler),
                     slot: 0,
                 }],
             );
@@ -965,10 +1024,12 @@ impl SkyRenderer {
             skybox_pipeline,
             skybox_sampler,
             skybox_fallback_view: skybox_view,
+            skybox_fallback_bindless_id,
             skybox_swap_info,
             skybox_intensity: info.skybox.intensity,
-            use_procedural_cubemap: info.skybox.use_procedural_cubemap,
+            use_procedural_cubemap: true,
             cubemap_update_interval: info.skybox.update_interval_frames.max(1),
+            cubemap_resolution: info.skybox.cubemap_resolution.max(1),
             cubemap_frame_index: 0,
             cubemap_dirty: true,
             cubemap_size: 0,
@@ -976,11 +1037,13 @@ impl SkyRenderer {
             cubemap_face_views: None,
             cubemap_camera_handles: None,
             procedural_cubemap: None,
+            procedural_cubemap_bindless_id: None,
             pending_cubemap_swap: info.skybox.cubemap.clone(),
             cubemap_format: info.color_format,
             sky_settings: SkyFrameSettings::default(),
             cfg,
             enabled: false,
+            last_logged_cubemap_source_is_procedural: None,
         }
     }
 
@@ -989,12 +1052,14 @@ impl SkyRenderer {
         let procedural_changed = self.use_procedural_cubemap != settings.use_procedural_cubemap;
         self.use_procedural_cubemap = settings.use_procedural_cubemap;
         self.cubemap_update_interval = settings.update_interval_frames.max(1);
+        let resolution_changed = self.cubemap_resolution != settings.cubemap_resolution.max(1);
+        self.cubemap_resolution = settings.cubemap_resolution.max(1);
 
         if let Some(cubemap) = settings.cubemap {
             self.pending_cubemap_swap = Some(cubemap);
         }
 
-        if procedural_changed {
+        if procedural_changed || resolution_changed {
             self.cubemap_dirty = true;
         }
 
@@ -1037,6 +1102,12 @@ impl SkyRenderer {
                 Slider::new(0, "Skybox Update Interval", 1.0, 240.0, 0.0),
                 &mut self.cubemap_update_interval as *mut u32,
                 "Skybox Update Interval",
+            );
+            debug_register_int(
+                PageType::Sky,
+                Slider::new(0, "Skybox Cubemap Resolution", 16.0, 4096.0, 0.0),
+                &mut self.cubemap_resolution as *mut u32,
+                "Skybox Cubemap Resolution",
             );
             debug_register_with_description(
                 PageType::Sky,
@@ -1251,17 +1322,13 @@ impl SkyRenderer {
         viewport: &Viewport,
         camera: dashi::Handle<Camera>,
     ) -> Option<SkyCubemapPass> {
-        if !self.enabled {
-            return None;
-        }
-
         if !self.use_procedural_cubemap {
             self.apply_skybox_binding();
             return None;
         }
 
-        let size = cubemap_size_from_viewport(viewport);
-        let recreated = self.ensure_cubemap_resources(ctx, size);
+        let size = self.cubemap_resolution.max(1);
+        let recreated = self.ensure_cubemap_resources(ctx, state, size);
 
         if recreated {
             self.cubemap_dirty = true;
@@ -1298,7 +1365,8 @@ impl SkyRenderer {
             .and_then(|handles| handles.get(face_index).copied())
             .map(|handle| handle.slot as u32)
             .unwrap_or_default();
-        params._padding = [0; 3];
+        params.environment_cubemap_bindless_id = self.environment_cubemap_bindless_id() as u32;
+        params._padding = [0; 2];
 
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.pipeline.handle)
@@ -1332,7 +1400,8 @@ impl SkyRenderer {
 
             let params = &mut alloc.slice::<SkyDrawParams>()[0];
             params.camera_index = camera.slot as u32;
-            params._padding = [0; 3];
+            params.environment_cubemap_bindless_id = self.environment_cubemap_bindless_id() as u32;
+            params._padding = [0; 2];
 
             CommandStream::<PendingGraphics>::subdraw()
                 .bind_graphics_pipeline(self.pipeline.handle)
@@ -1393,7 +1462,8 @@ impl SkyRenderer {
 
         let params = &mut alloc.slice::<SkyDrawParams>()[0];
         params.camera_index = camera.slot as u32;
-        params._padding = [0; 3];
+        params.environment_cubemap_bindless_id = self.environment_cubemap_bindless_id() as u32;
+        params._padding = [0; 2];
 
         CommandStream::<PendingGraphics>::subdraw()
             .bind_graphics_pipeline(self.fog_pipeline.handle)
@@ -1424,7 +1494,11 @@ fn cubemap_size_from_viewport(viewport: &Viewport) -> u32 {
 }
 
 impl SkyRenderer {
-    pub fn pre_compute(&mut self, ctx: &mut dashi::Context) -> CommandStream<Executable> {
+    pub fn pre_compute(
+        &mut self,
+        ctx: &mut dashi::Context,
+        state: &mut BindlessState,
+    ) -> CommandStream<Executable> {
         let mut stream = CommandStream::new().begin();
         self.update_sky_config();
         stream = stream.combine(self.cfg.sync_up());
@@ -1453,6 +1527,18 @@ impl SkyRenderer {
                     h: target_info.dim[1],
                 },
             });
+            let _ = state.reserved_mut(
+                "meshi_bindless_cubemaps",
+                |cubemaps: &mut ReservedBindlessCubemaps| {
+                    cubemaps.remove_texture(self.skybox_fallback_bindless_id);
+                    self.skybox_fallback_bindless_id =
+                        cubemaps.add_texture(self.skybox_fallback_view);
+                    info!(
+                        fallback_bindless_id = self.skybox_fallback_bindless_id,
+                        "SkyRenderer refreshed fallback cubemap bindless slot from Noren DB image"
+                    );
+                },
+            );
             self.apply_skybox_binding();
         }
         stream.end()
@@ -1472,16 +1558,28 @@ impl SkyRenderer {
             self.skybox_fallback_view
         };
 
-//        self.skybox_pipeline.update_table(
-//            "skybox_texture",
-//            dashi::IndexedResource {
-//                resource: ShaderResource::Image(view),
-//                slot: 0,
-//            },
-//        );
+        self.skybox_pipeline.update_table(
+            "skybox_texture",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "skybox_texture",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(self.skybox_fallback_view),
+                slot: 0,
+            },
+        );
     }
 
-    fn ensure_cubemap_resources(&mut self, ctx: &mut dashi::Context, size: u32) -> bool {
+    fn ensure_cubemap_resources(
+        &mut self,
+        ctx: &mut dashi::Context,
+        state: &mut BindlessState,
+        size: u32,
+    ) -> bool {
         if self.cubemap_size == size && self.procedural_cubemap.is_some() {
             return false;
         }
@@ -1512,6 +1610,22 @@ impl SkyRenderer {
             view,
             info: info.gpu(),
         });
+
+        let _ = state.reserved_mut(
+            "meshi_bindless_cubemaps",
+            |cubemaps: &mut ReservedBindlessCubemaps| {
+                if let Some(existing) = self.procedural_cubemap_bindless_id.take() {
+                    cubemaps.remove_texture(existing);
+                }
+                self.procedural_cubemap_bindless_id = Some(cubemaps.add_texture(view));
+                if let Some(bindless_id) = self.procedural_cubemap_bindless_id {
+                    info!(
+                        procedural_bindless_id = bindless_id,
+                        size, "SkyRenderer updated procedural cubemap bindless slot"
+                    );
+                }
+            },
+        );
 
         let mut faces = [ImageView::default(); 6];
         for (index, face) in faces.iter_mut().enumerate() {
@@ -1546,6 +1660,38 @@ impl SkyRenderer {
         true
     }
 
+    pub fn environment_cubemap_bindless_id(&mut self) -> u16 {
+        if self.use_procedural_cubemap {
+            if let Some(id) = self.procedural_cubemap_bindless_id {
+                if self.last_logged_cubemap_source_is_procedural != Some(true) {
+                    info!(
+                        procedural_bindless_id = id,
+                        "SkyRenderer using procedural environment cubemap"
+                    );
+                    self.last_logged_cubemap_source_is_procedural = Some(true);
+                }
+                id
+            } else {
+                if self.last_logged_cubemap_source_is_procedural != Some(false) {
+                    warn!(
+                        fallback_bindless_id = self.skybox_fallback_bindless_id,
+                        "SkyRenderer forced to use fallback environment cubemap (procedural cubemap unavailable)"
+                    );
+                    self.last_logged_cubemap_source_is_procedural = Some(false);
+                }
+                self.skybox_fallback_bindless_id
+            }
+        } else {
+            if self.last_logged_cubemap_source_is_procedural != Some(false) {
+                info!(
+                    fallback_bindless_id = self.skybox_fallback_bindless_id,
+                    "SkyRenderer using fallback environment cubemap (procedural skybox disabled)"
+                );
+                self.last_logged_cubemap_source_is_procedural = Some(false);
+            }
+            self.skybox_fallback_bindless_id
+        }
+    }
     fn ensure_skybox_swap_target(
         &mut self,
         ctx: &mut dashi::Context,
@@ -1684,6 +1830,7 @@ impl SkyRenderer {
                 Vec4::new(layer.noise_speed.x, layer.noise_speed.y, 0.0, 0.0);
         }
         config.fog_time = self.sky_settings.fog_time;
+        config.environment_map_blend = self.skybox_intensity.clamp(0.0, 1.0);
     }
 }
 

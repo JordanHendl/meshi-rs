@@ -42,6 +42,7 @@ struct DirectionalLightInfo {
 using PhysicsMaterial = MeshiMaterial;
 using PhysicsMaterialCreateInfo = MeshiMaterialInfo;
 using RigidBody = MeshiRigidBody;
+using CharacterController = MeshiCharacterControllerHandle;
 struct RigidBodyCreateInfo {
   Handle<PhysicsMaterial> material{};
   glm::vec3 initial_position{0.0f};
@@ -54,6 +55,19 @@ using ForceApplyInfo = MeshiForceApplyInfo;
 struct PhysicsActorStatus {
   glm::vec3 position{0.0f};
   glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct CharacterControllerCreateInfo {
+  glm::vec3 initial_position{0.0f};
+  float radius{0.4f};
+  float half_height{0.9f};
+  float step_height{0.35f};
+  float slope_limit_deg{50.0f};
+};
+
+struct CharacterControllerMoveResult {
+  glm::vec3 applied_motion{0.0f};
+  std::uint32_t grounded{0};
 };
 
 } // namespace meshi

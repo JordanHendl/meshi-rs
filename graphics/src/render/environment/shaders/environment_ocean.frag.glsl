@@ -34,7 +34,6 @@ layout(scalar, std430, set = 0, binding = 0) readonly buffer OceanParams {
     float foam_decay_rate;
     float foam_noise_scale;
     vec2 current;
-    vec3 _padding1;
     vec4 absorption_coeff;
     vec4 shallow_color;
     vec4 deep_color;
@@ -51,7 +50,6 @@ layout(scalar, std430, set = 0, binding = 0) readonly buffer OceanParams {
     uint scene_depth_bindless_id;
     uint shadow_map_bindless_id;
     uint env_map_bindless_id;
-    uint _padding2;
 } params;
 
 

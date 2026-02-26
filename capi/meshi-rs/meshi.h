@@ -86,6 +86,17 @@ typedef struct MeshiPluginApi {
     int32_t (*physx_get_rigid_body_status)(struct MeshiEngine* engine, const MeshiRigidBodyHandle* h, MeshiActorStatus* out_status);
     MeshiVec3 (*physx_get_rigid_body_velocity)(struct MeshiEngine* engine, const MeshiRigidBodyHandle* h);
     int32_t (*physx_set_collision_shape)(struct MeshiEngine* engine, const MeshiRigidBodyHandle* h, const MeshiCollisionShape* shape);
+    MeshiCharacterControllerHandle (*physx_create_character_controller)(struct MeshiEngine* engine, const MeshiCharacterControllerInfo* info);
+    void (*physx_release_character_controller)(struct MeshiEngine* engine, const MeshiCharacterControllerHandle* h);
+    int32_t (*physx_move_character_controller)(
+        struct MeshiEngine* engine,
+        const MeshiCharacterControllerHandle* h,
+        MeshiVec3 desired_motion,
+        MeshiCharacterControllerMoveResult* out_result);
+    int32_t (*physx_get_character_controller_status)(
+        struct MeshiEngine* engine,
+        const MeshiCharacterControllerHandle* h,
+        MeshiActorStatus* out_status);
     size_t (*physx_get_contacts)(struct MeshiEngine* engine, MeshiContactInfo* out_contacts, size_t max);
     MeshiCollisionShape (*physx_collision_shape_sphere)(float radius);
     MeshiCollisionShape (*physx_collision_shape_box)(MeshiVec3 dimensions);
@@ -178,6 +189,17 @@ int32_t meshi_physx_get_rigid_body_status(struct MeshiEngine* engine, const Mesh
 // Returns the current velocity of a rigid body or a zero vector on failure.
 MeshiVec3 meshi_physx_get_rigid_body_velocity(struct MeshiEngine* engine, const MeshiRigidBodyHandle* h);
 int32_t meshi_physx_set_collision_shape(struct MeshiEngine* engine, const MeshiRigidBodyHandle* h, const MeshiCollisionShape* shape);
+MeshiCharacterControllerHandle meshi_physx_create_character_controller(struct MeshiEngine* engine, const MeshiCharacterControllerInfo* info);
+void meshi_physx_release_character_controller(struct MeshiEngine* engine, const MeshiCharacterControllerHandle* h);
+int32_t meshi_physx_move_character_controller(
+    struct MeshiEngine* engine,
+    const MeshiCharacterControllerHandle* h,
+    MeshiVec3 desired_motion,
+    MeshiCharacterControllerMoveResult* out_result);
+int32_t meshi_physx_get_character_controller_status(
+    struct MeshiEngine* engine,
+    const MeshiCharacterControllerHandle* h,
+    MeshiActorStatus* out_status);
 size_t meshi_physx_get_contacts(struct MeshiEngine* engine, MeshiContactInfo* out_contacts, size_t max);
 MeshiCollisionShape meshi_physx_collision_shape_sphere(float radius);
 MeshiCollisionShape meshi_physx_collision_shape_box(MeshiVec3 dimensions);

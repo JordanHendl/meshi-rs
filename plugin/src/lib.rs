@@ -12,12 +12,15 @@ use meshi_graphics::{
 };
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::SimulationInfo;
-use meshi_physics::{CollisionShape, CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody};
+use meshi_physics::{
+    CharacterController, CharacterControllerInfo, CharacterControllerMoveResult, CollisionShape,
+    CollisionShapeType, ContactInfo, ForceApplyInfo, RigidBody,
+};
 use meshi_utils::timer::Timer;
 use noren::DBInfo;
 use resource_pool::Handle;
 use std::ffi::*;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 macro_rules! return_if_null {
@@ -114,6 +117,23 @@ pub struct MeshiPluginApi {
         *const Handle<meshi_physics::RigidBody>,
         *const CollisionShape,
     ) -> i32,
+    pub physx_create_character_controller: extern "C" fn(
+        *mut MeshiEngine,
+        *const CharacterControllerInfo,
+    ) -> Handle<CharacterController>,
+    pub physx_release_character_controller:
+        extern "C" fn(*mut MeshiEngine, *const Handle<CharacterController>),
+    pub physx_move_character_controller: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<CharacterController>,
+        Vec3,
+        *mut CharacterControllerMoveResult,
+    ) -> i32,
+    pub physx_get_character_controller_status: extern "C" fn(
+        *mut MeshiEngine,
+        *const Handle<CharacterController>,
+        *mut meshi_physics::ActorStatus,
+    ) -> i32,
     pub physx_get_contacts: extern "C" fn(*mut MeshiEngine, *mut ContactInfo, usize) -> usize,
     pub physx_collision_shape_sphere: extern "C" fn(f32) -> CollisionShape,
     pub physx_collision_shape_box: extern "C" fn(Vec3) -> CollisionShape,
@@ -173,6 +193,10 @@ pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
     physx_get_rigid_body_status: meshi_physx_get_rigid_body_status,
     physx_get_rigid_body_velocity: meshi_physx_get_rigid_body_velocity,
     physx_set_collision_shape: meshi_physx_set_collision_shape,
+    physx_create_character_controller: meshi_physx_create_character_controller,
+    physx_release_character_controller: meshi_physx_release_character_controller,
+    physx_move_character_controller: meshi_physx_move_character_controller,
+    physx_get_character_controller_status: meshi_physx_get_character_controller_status,
     physx_get_contacts: meshi_physx_get_contacts,
     physx_collision_shape_sphere: meshi_physx_collision_shape_sphere,
     physx_collision_shape_box: meshi_physx_collision_shape_box,
@@ -1184,6 +1208,67 @@ pub extern "C" fn meshi_physx_set_collision_shape(
     if unsafe { &mut (*engine).physics }
         .set_rigid_body_collision_shape(unsafe { *h }, unsafe { &*shape })
     {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_create_character_controller(
+    engine: *mut MeshiEngine,
+    info: *const CharacterControllerInfo,
+) -> Handle<CharacterController> {
+    if engine.is_null() || info.is_null() {
+        return Handle::default();
+    }
+    unsafe { &mut (*engine).physics }.create_character_controller(unsafe { &*info })
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_release_character_controller(
+    engine: *mut MeshiEngine,
+    h: *const Handle<CharacterController>,
+) {
+    if engine.is_null() || h.is_null() {
+        return;
+    }
+    unsafe { &mut (*engine).physics }.release_character_controller(unsafe { *h });
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_move_character_controller(
+    engine: *mut MeshiEngine,
+    h: *const Handle<CharacterController>,
+    desired_motion: Vec3,
+    out_result: *mut CharacterControllerMoveResult,
+) -> i32 {
+    if engine.is_null() || h.is_null() || out_result.is_null() {
+        return 0;
+    }
+    if let Some(result) =
+        unsafe { &mut (*engine).physics }.move_character_controller(unsafe { *h }, desired_motion)
+    {
+        unsafe { *out_result = result };
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_physx_get_character_controller_status(
+    engine: *mut MeshiEngine,
+    h: *const Handle<CharacterController>,
+    out_status: *mut meshi_physics::ActorStatus,
+) -> i32 {
+    if engine.is_null() || h.is_null() || out_status.is_null() {
+        return 0;
+    }
+    if let Some(status) =
+        unsafe { &(*engine).physics }.get_character_controller_status(unsafe { *h })
+    {
+        unsafe { *out_status = status };
         1
     } else {
         0

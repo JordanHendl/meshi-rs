@@ -109,6 +109,23 @@ pub struct RigidBodyInfo {
 }
 
 #[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct CharacterControllerInfo {
+    pub initial_position: Vec3,
+    pub radius: f32,
+    pub half_height: f32,
+    pub step_height: f32,
+    pub slope_limit_deg: f32,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct CharacterControllerMoveResult {
+    pub applied_motion: Vec3,
+    pub grounded: u32,
+}
+
+#[repr(C)]
 #[derive(Default)]
 /// C representation keeps `Material` compatible with FFI. `MaterialInfo` is
 /// already `repr(C)`, so this struct simply follows C layout without needing
@@ -148,6 +165,32 @@ impl RigidBody {
         let threshold = mat.info.static_friction_m * dt.x;
         if self.velocity.length() < threshold {
             self.velocity = Vec3::ZERO;
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct CharacterController {
+    position: Vec3,
+    velocity: Vec3,
+    radius: f32,
+    half_height: f32,
+    step_height: f32,
+    slope_limit_deg: f32,
+    grounded: u32,
+}
+
+impl From<&CharacterControllerInfo> for CharacterController {
+    fn from(value: &CharacterControllerInfo) -> Self {
+        Self {
+            position: value.initial_position,
+            velocity: Vec3::ZERO,
+            radius: value.radius.max(0.001),
+            half_height: value.half_height.max(0.001),
+            step_height: value.step_height.max(0.0),
+            slope_limit_deg: value.slope_limit_deg.clamp(0.0, 89.0),
+            grounded: 0,
         }
     }
 }
@@ -335,6 +378,7 @@ pub struct PhysicsSimulation {
     info: SimulationInfo,
     materials: Pool<Material>,
     rigid_bodies: Pool<RigidBody>,
+    character_controllers: Pool<CharacterController>,
     contacts: Vec<ContactInfo>,
     default_material: Handle<Material>,
 }
@@ -345,6 +389,7 @@ impl PhysicsSimulation {
             info: info.clone(),
             materials: Default::default(),
             rigid_bodies: Default::default(),
+            character_controllers: Default::default(),
             contacts: Vec::new(),
             default_material: Default::default(),
         };
@@ -637,6 +682,102 @@ impl PhysicsSimulation {
             Err(PhysicsError::InvalidHandle)
         } else {
             Ok(())
+        }
+    }
+
+    pub fn create_character_controller(
+        &mut self,
+        info: &CharacterControllerInfo,
+    ) -> Handle<CharacterController> {
+        self.character_controllers.insert(info.into()).unwrap()
+    }
+
+    pub fn release_character_controller(&mut self, h: Handle<CharacterController>) {
+        self.character_controllers.release(h);
+    }
+
+    pub fn get_character_controller_status(
+        &self,
+        h: Handle<CharacterController>,
+    ) -> Option<ActorStatus> {
+        if !h.valid() {
+            return None;
+        }
+        self.character_controllers.get_ref(h).map(|c| ActorStatus {
+            position: c.position,
+            rotation: Quat::IDENTITY,
+        })
+    }
+
+    pub fn move_character_controller(
+        &mut self,
+        h: Handle<CharacterController>,
+        desired_motion: Vec3,
+    ) -> Option<CharacterControllerMoveResult> {
+        if !h.valid() {
+            return None;
+        }
+
+        let (start, radius, half_height) = {
+            let c = self.character_controllers.get_ref(h)?;
+            (c.position, c.radius, c.half_height)
+        };
+
+        let mut target = start + desired_motion;
+        let mut grounded = 0u32;
+
+        let mut handles = Vec::new();
+        self.rigid_bodies
+            .for_each_occupied_handle_mut(|rbh| handles.push(rbh));
+
+        for rb_h in handles {
+            let Some(rb) = self.rigid_bodies.get_ref(rb_h) else {
+                continue;
+            };
+            let result = match rb.shape.shape_type {
+                CollisionShapeType::Sphere => collide_capsule_sphere(
+                    target,
+                    half_height,
+                    radius,
+                    rb.position,
+                    rb.shape.radius,
+                ),
+                CollisionShapeType::Capsule => collide_capsule_capsule(
+                    target,
+                    half_height,
+                    radius,
+                    rb.position,
+                    rb.shape.half_height,
+                    rb.shape.radius,
+                ),
+                CollisionShapeType::Box => collide_capsule_box(
+                    target,
+                    half_height,
+                    radius,
+                    rb.position,
+                    rb.shape.dimensions * 0.5,
+                ),
+            };
+
+            if let Some((normal, penetration)) = result {
+                target += normal * penetration;
+                if normal.y > 0.5 {
+                    grounded = 1;
+                }
+            }
+        }
+
+        let applied = target - start;
+        if let Some(c) = self.character_controllers.get_mut_ref(h) {
+            c.velocity = applied;
+            c.position = target;
+            c.grounded = grounded;
+            Some(CharacterControllerMoveResult {
+                applied_motion: applied,
+                grounded,
+            })
+        } else {
+            None
         }
     }
 

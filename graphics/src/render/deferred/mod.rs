@@ -1226,7 +1226,11 @@ impl DeferredRenderer {
             cmd = cmd
                 .combine(self.proc.scene.pre_compute())
                 .combine(self.proc.draw_builder.pre_compute())
-                .combine(self.subrender.environment.pre_compute(self.ctx.as_mut()))
+                .combine(
+                    self.subrender
+                        .environment
+                        .pre_compute(self.ctx.as_mut(), self.state.as_mut()),
+                )
                 .combine(self.subrender.shadow.pre_compute())
                 .combine(self.gui.pre_compute())
                 .combine(self.text.pre_compute())

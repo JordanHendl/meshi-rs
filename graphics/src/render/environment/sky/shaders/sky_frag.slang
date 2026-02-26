@@ -15,9 +15,9 @@ struct Camera
 struct SkyDrawParams
 {
     uint camera_index;
+    uint environment_cubemap_bindless_id;
     uint _padding0;
     uint _padding1;
-    uint _padding2;
 };
 
 struct SkyConfig
@@ -38,7 +38,8 @@ struct SkyConfig
     float4 fog_height_falloff[2];
     float4 fog_noise_speed[2];
     float fog_time;
-    float3 _padding1;
+    float environment_map_blend;
+    float2 _padding1;
 };
 
 struct FSInput
@@ -54,6 +55,8 @@ struct FSOutput
 StructuredBuffer<Camera> meshi_bindless_cameras : register(t2, space0);
 StructuredBuffer<SkyDrawParams> sky_draw_ssbo : register(t0, space1);
 StructuredBuffer<SkyConfig> SkyParams : register(t1, space1);
+TextureCube skybox_texture : register(t3, space1);
+SamplerState skybox_sampler : register(s1, space2);
 
 static SkyDrawParams sky_draw = sky_draw_ssbo[0];
 static SkyConfig sky = SkyParams[0];
@@ -120,6 +123,9 @@ FSOutput main(FSInput input)
     sky_color += sky.moon_color * sky.moon_intensity * (moon_disc + moon_halo);
 
     sky_color *= sky.intensity_scale;
+
+    float3 env_color = skybox_texture.Sample(skybox_sampler, world_dir).rgb;
+    sky_color = lerp(sky_color, env_color, saturate(sky.environment_map_blend));
 
     output.color = float4(sky_color, 1.0);
     return output;

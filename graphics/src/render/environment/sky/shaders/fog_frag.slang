@@ -15,9 +15,9 @@ struct Camera
 struct SkyDrawParams
 {
     uint camera_index;
+    uint environment_cubemap_bindless_id;
     uint _padding0;
     uint _padding1;
-    uint _padding2;
 };
 
 struct SkyConfig
@@ -38,7 +38,8 @@ struct SkyConfig
     float4 fog_height_falloff[2];
     float4 fog_noise_speed[2];
     float fog_time;
-    float3 _padding1;
+    float environment_map_blend;
+    float2 _padding1;
 };
 
 struct FSInput

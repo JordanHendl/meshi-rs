@@ -1,6 +1,8 @@
 #pragma once
 
 #include "meshi/bits/action.hpp"
+#define GLM_FORCE_LEFT_HANDED
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <cmath>
 #include <functional>
 #include <glm/glm.hpp>
@@ -8,13 +10,14 @@
 #include <meshi/bits/components/actor_component.hpp>
 #include <meshi/bits/components/camera_component.hpp>
 #include <meshi/engine.hpp>
+#include <optional>
 #include <utility>
 
 namespace meshi {
 
 class ThirdPersonCameraComponent : public CameraComponent {
 public:
-  static constexpr glm::vec3 WORLD_UP = glm::vec3(0.0f, -1.0f, 0.0f);
+  static constexpr glm::vec3 WORLD_UP = glm::vec3(0.0f, 1.0f, 0.0f);
 
   struct InputFrame {
     glm::vec2 look_delta = glm::vec2(0.0f);
@@ -29,7 +32,7 @@ public:
     KeyCode left = KeyCode::A;
     KeyCode right = KeyCode::D;
     MouseButton orbit_button = MouseButton::Right;
-    bool orbit_requires_button = false;
+    bool orbit_requires_button = true;
   };
 
   struct Config {
@@ -37,7 +40,7 @@ public:
     float min_follow_distance = 2.0f;
     float max_follow_distance = 40.0f;
     float rotation_speed = 250.0f;
-    float look_sensitivity = 0.001f;
+    float look_sensitivity = 0.1f;
     float movement_speed = 12.0f;
     float movement_input_sensitivity = 1.0f;
     float min_pitch_deg = -75.0f;
@@ -45,7 +48,10 @@ public:
     bool constrain_yaw = false;
     float min_yaw_deg = -180.0f;
     float max_yaw_deg = 180.0f;
-    glm::vec3 focus_offset = glm::vec3(0.0f, -1.6f, 0.0f);
+    glm::vec3 focus_offset = glm::vec3(0.0f, 1.6f, 0.0f);
+    bool use_character_controller = true;
+    float controller_radius = 0.4f;
+    float controller_half_height = 0.9f;
     KeyboardMouseBindings bindings{};
   };
 
@@ -60,8 +66,7 @@ public:
         "Third-Person-Camera-Mouse",
         [](const Event &event, Action &action) {
           if (event.source == EventSource::Mouse &&
-              (event.type == EventType::Motion2D ||
-               event.type == EventType::CursorMoved)) {
+              event.type == EventType::CursorMoved) {
             action.type = "camera-look";
             return true;
           }
@@ -75,10 +80,25 @@ public:
     sync_angles_from_transform();
   }
 
-  virtual ~ThirdPersonCameraComponent() = default;
+  virtual ~ThirdPersonCameraComponent() {
+    if (m_controller.has_value()) {
+      auto controller = *m_controller;
+      engine()->backend().physics().release_character_controller(controller);
+    }
+  }
 
   inline auto attach_target(ActorComponent *target_component) -> void {
     m_target = target_component;
+    m_controller = {};
+
+    if (m_target && m_config.use_character_controller) {
+      CharacterControllerCreateInfo controller_info{};
+      controller_info.initial_position = glm::vec3(m_target->world_transform()[3]);
+      controller_info.radius = m_config.controller_radius;
+      controller_info.half_height = m_config.controller_half_height;
+      m_controller = engine()->backend().physics().create_character_controller(controller_info);
+    }
+
     sync_angles_from_transform();
   }
 
@@ -119,7 +139,12 @@ public:
 
 private:
   inline auto handle_mouse_motion(const Action &event) -> void {
-    m_mouse_look_delta += event.event.payload.motion2d.motion;
+    const auto cursor_position = event.event.payload.motion2d.motion;
+    if (m_has_last_cursor_position) {
+      m_mouse_look_delta += cursor_position - m_last_cursor_position;
+    }
+    m_last_cursor_position = cursor_position;
+    m_has_last_cursor_position = true;
   }
 
   inline auto keyboard_mouse_input() -> InputFrame {
@@ -155,6 +180,7 @@ private:
   inline auto apply_orbit(const glm::vec2 &look_delta, bool orbit_active,
                           float dt) -> void {
     if (!orbit_active) {
+      m_has_last_cursor_position = false;
       return;
     }
 
@@ -178,18 +204,46 @@ private:
       movement = glm::normalize(movement);
     }
 
-    const auto yaw_rad = glm::radians(m_yaw_deg);
-    const glm::vec3 planar_forward =
-        glm::normalize(glm::vec3(std::sin(yaw_rad), 0.0f, std::cos(yaw_rad)));
-    const glm::vec3 planar_right =
-        glm::normalize(glm::cross(planar_forward, WORLD_UP));
+    glm::vec3 camera_forward = this->front();
+    glm::vec3 camera_right = this->right();
 
-    const glm::vec3 translation =
-        (planar_forward * movement.y + planar_right * movement.x) *
+    camera_forward.y = 0.0f;
+    camera_right.y = 0.0f;
+
+    if (glm::length(camera_forward) <= 0.0001f) {
+      camera_forward = glm::vec3(0.0f, 0.0f, -1.0f);
+    } else {
+      camera_forward = glm::normalize(camera_forward);
+    }
+
+    if (glm::length(camera_right) <= 0.0001f) {
+      camera_right = glm::normalize(glm::cross(camera_forward, WORLD_UP));
+    } else {
+      camera_right = glm::normalize(camera_right);
+    }
+
+    const glm::vec3 desired_translation =
+        (camera_forward * movement.y + camera_right * movement.x) *
         (m_config.movement_speed * dt);
 
+    if (m_controller.has_value()) {
+      CharacterControllerMoveResult result{};
+      auto controller_handle = *m_controller;
+      if (engine()->backend().physics().move_character_controller(
+              controller_handle, desired_translation, result)) {
+        if (auto status =
+                engine()->backend().physics().get_character_controller_status(
+                    controller_handle)) {
+          auto target_local = m_target->local_transform();
+          target_local[3] = glm::vec4(status->position, 1.0f);
+          m_target->set_transform(target_local);
+        }
+        return;
+      }
+    }
+
     auto target_local = m_target->local_transform();
-    target_local = glm::translate(target_local, translation);
+    target_local[3] += glm::vec4(desired_translation, 0.0f);
     m_target->set_transform(target_local);
   }
 
@@ -204,8 +258,8 @@ private:
     const auto pitch_rad = glm::radians(m_pitch_deg);
 
     const glm::vec3 forward = glm::normalize(glm::vec3(
-        std::cos(pitch_rad) * std::sin(yaw_rad), -std::sin(pitch_rad),
-        std::cos(pitch_rad) * std::cos(yaw_rad)));
+        std::cos(pitch_rad) * std::sin(yaw_rad), std::sin(pitch_rad),
+        -std::cos(pitch_rad) * std::cos(yaw_rad)));
 
     const glm::vec3 camera_position = focus - forward * m_distance;
     const auto view = glm::lookAt(camera_position, focus, WORLD_UP);
@@ -228,7 +282,10 @@ private:
   float m_pitch_deg = 15.0f;
 
   ActorComponent *m_target = nullptr;
+  std::optional<Handle<CharacterController>> m_controller{};
   glm::vec2 m_mouse_look_delta = glm::vec2(0.0f);
+  glm::vec2 m_last_cursor_position = glm::vec2(0.0f);
+  bool m_has_last_cursor_position = false;
 
   std::function<InputFrame()> m_input_provider;
   std::shared_ptr<ActionRegister<ThirdPersonCameraComponent>> m_event;

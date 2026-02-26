@@ -354,6 +354,19 @@ struct MeshiActorStatus {
     MeshiQuat rotation;
 };
 
+struct MeshiCharacterControllerInfo {
+    MeshiVec3 initial_position;
+    float radius;
+    float half_height;
+    float step_height;
+    float slope_limit_deg;
+};
+
+struct MeshiCharacterControllerMoveResult {
+    MeshiVec3 applied_motion;
+    std::uint32_t grounded;
+};
+
 struct MeshiContactInfo {
     MeshiHandle a;
     MeshiHandle b;
@@ -372,5 +385,6 @@ using MeshiDisplayHandle = MeshiHandle;
 using MeshiCameraHandle = MeshiHandle;
 using MeshiMaterialHandle = MeshiHandle;
 using MeshiRigidBodyHandle = MeshiHandle;
+using MeshiCharacterControllerHandle = MeshiHandle;
 using MeshiAudioSourceHandle = MeshiHandle;
 using MeshiAudioBusHandle = MeshiHandle;
