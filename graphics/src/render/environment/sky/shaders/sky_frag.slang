@@ -38,8 +38,10 @@ struct SkyConfig
     float4 fog_height_falloff[2];
     float4 fog_noise_speed[2];
     float fog_time;
-    float environment_map_blend;
-    float2 _padding1;
+    uint day_environment_id;
+    uint night_environment_id;
+    uint constellation_map_id;
+    uint _padding1;
 };
 
 struct FSInput
@@ -55,7 +57,9 @@ struct FSOutput
 StructuredBuffer<Camera> meshi_bindless_cameras : register(t2, space0);
 StructuredBuffer<SkyDrawParams> sky_draw_ssbo : register(t0, space1);
 StructuredBuffer<SkyConfig> SkyParams : register(t1, space1);
-TextureCube skybox_texture : register(t3, space1);
+TextureCube day_environment_texture : register(t3, space1);
+TextureCube night_environment_texture : register(t4, space1);
+TextureCube constellation_texture : register(t5, space1);
 SamplerState skybox_sampler : register(s1, space2);
 
 static SkyDrawParams sky_draw = sky_draw_ssbo[0];
@@ -118,14 +122,35 @@ FSOutput main(FSInput input)
     float sun_halo = pow(sun_dot, 256.0) * 0.1 + pow(sun_dot, 512.0) * 0.2;
     float moon_halo = pow(moon_dot, 64.0) * 0.25 + pow(moon_dot, 256.0) * 0.8;
 
+    float sun_height = saturate(sky.sun_dir.y * 0.5 + 0.5);
+    float day_weight = smoothstep(0.35, 0.7, sun_height);
+    float night_weight = 1.0 - day_weight;
+
+    float3 day_environment = day_environment_texture.Sample(skybox_sampler, world_dir).rgb;
+    float3 night_environment = night_environment_texture.Sample(skybox_sampler, world_dir).rgb;
+    float3 constellation = constellation_texture.Sample(skybox_sampler, world_dir).rgb;
+
     float3 sky_color = base_color;
-    sky_color += sky.sun_color * sky.sun_intensity * (sun_disc + sun_halo);
-    sky_color += sky.moon_color * sky.moon_intensity * (moon_disc + moon_halo);
+    if (sky.day_environment_id != 0xFFFFFFFF)
+    {
+        sky_color = lerp(sky_color, day_environment, day_weight);
+    }
+    if (sky.night_environment_id != 0xFFFFFFFF)
+    {
+        sky_color = lerp(sky_color, night_environment, night_weight);
+    }
+
+    // Constellations only at night, behind moon/sun overlays.
+    if (sky.constellation_map_id != 0xFFFFFFFF)
+    {
+        sky_color += constellation * (night_weight * 0.7);
+    }
 
     sky_color *= sky.intensity_scale;
 
-    float3 env_color = skybox_texture.Sample(skybox_sampler, world_dir).rgb;
-    sky_color = lerp(sky_color, env_color, saturate(sky.environment_map_blend));
+    // Always overlay sun/moon after all map composition so discs/halos remain in front.
+    sky_color += sky.sun_color * sky.sun_intensity * (sun_disc + sun_halo);
+    sky_color += sky.moon_color * sky.moon_intensity * (moon_disc + moon_halo);
 
     output.color = float4(sky_color, 1.0);
     return output;
