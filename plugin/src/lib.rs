@@ -7,7 +7,8 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{
-    Camera, Display, DisplayInfo as GfxDisplayInfo, Light, RenderEngineInfo, RenderObject,
+    Camera, Display, DisplayInfo as GfxDisplayInfo, EnvironmentLightingSettings, Light,
+    RenderEngineInfo, RenderObject,
     RenderObjectInfo as GfxRenderObjectInfo, WindowInfo as GfxWindowInfo,
 };
 pub use meshi_physics::PhysicsSimulation;
@@ -287,6 +288,7 @@ impl MeshiEngine {
         );
 
         render.initialize_database(database.as_mut());
+        render.set_environment_lighting(EnvironmentLightingSettings::default());
         let mut audio = AudioEngine::new(&AudioEngineInfo {
             debug_mode: info.debug_mode != 0,
             ..Default::default()

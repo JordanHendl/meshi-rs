@@ -7,6 +7,7 @@
 
 #include "example_helper.hpp"
 #include "meshi/bits/components/third_person_camera_component.hpp"
+#include "meshi/bits/components/character_controller_component.hpp"
 
 class ModelObject : public meshi::Actor {
 public:
@@ -34,8 +35,11 @@ public:
     root_component()->set_transform(target_transform);
 
     m_camera = add_subobject<meshi::ThirdPersonCameraComponent>();
-    m_camera->attach_to(root_component());
     m_camera->attach_target(root_component());
+
+    m_controller = add_subobject<meshi::CharacterControllerComponent>();
+    m_controller->set_orientation_source(m_camera);
+    m_controller->attach_to(root_component());
   }
 
   auto update(float dt) -> void override { meshi::Denizen::update(dt); }
@@ -50,6 +54,7 @@ public:
 private:
   meshi::ModelComponent *m_target_model = nullptr;
   meshi::ThirdPersonCameraComponent *m_camera = nullptr;
+  meshi::CharacterControllerComponent *m_controller = nullptr;
 };
 
 class Application {
