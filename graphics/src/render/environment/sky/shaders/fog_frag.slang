@@ -38,8 +38,10 @@ struct SkyConfig
     float4 fog_height_falloff[2];
     float4 fog_noise_speed[2];
     float fog_time;
-    float environment_map_blend;
-    float2 _padding1;
+    uint day_environment_id;
+    uint night_environment_id;
+    uint constellation_map_id;
+    uint _padding1;
 };
 
 struct FSInput

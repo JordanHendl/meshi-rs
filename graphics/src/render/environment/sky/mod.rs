@@ -30,6 +30,9 @@ use crate::gui::Slider;
 #[derive(Clone)]
 pub struct SkyboxInfo {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub day_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub night_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub constellation_map: Option<noren::rdb::imagery::DeviceCubemap>,
     pub intensity: f32,
     pub use_procedural_cubemap: bool,
     pub update_interval_frames: u32,
@@ -40,6 +43,9 @@ pub struct SkyboxInfo {
 pub struct SkyboxFrameSettings {
     pub intensity: f32,
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub day_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub night_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    pub constellation_map: Option<noren::rdb::imagery::DeviceCubemap>,
     pub use_procedural_cubemap: bool,
     pub update_interval_frames: u32,
     pub cubemap_resolution: u32,
@@ -83,6 +89,9 @@ impl Default for SkyboxInfo {
     fn default() -> Self {
         Self {
             cubemap: None,
+            day_environment: None,
+            night_environment: None,
+            constellation_map: None,
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
@@ -95,6 +104,9 @@ impl Default for SkyboxFrameSettings {
     fn default() -> Self {
         Self {
             cubemap: None,
+            day_environment: None,
+            night_environment: None,
+            constellation_map: None,
             intensity: 1.0,
             use_procedural_cubemap: true,
             update_interval_frames: 1,
@@ -554,8 +566,10 @@ struct SkyConfig {
     fog_height_falloff: [Vec4; 2],
     fog_noise_speed: [Vec4; 2],
     fog_time: f32,
-    environment_map_blend: f32,
-    _fog_padding: Vec2,
+    day_environment_id: u32,
+    night_environment_id: u32,
+    constellation_map_id: u32,
+    _fog_padding: u32,
 }
 
 #[repr(C)]
@@ -585,6 +599,12 @@ pub struct SkyRenderer {
     skybox_fallback_view: ImageView,
     skybox_fallback_bindless_id: u16,
     skybox_swap_info: Option<GPUImageInfo>,
+    day_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    day_environment_bindless_id: Option<u16>,
+    night_environment: Option<noren::rdb::imagery::DeviceCubemap>,
+    night_environment_bindless_id: Option<u16>,
+    constellation_map: Option<noren::rdb::imagery::DeviceCubemap>,
+    constellation_map_bindless_id: Option<u16>,
     skybox_intensity: f32,
     use_procedural_cubemap: bool,
     cubemap_update_interval: u32,
@@ -598,6 +618,9 @@ pub struct SkyRenderer {
     procedural_cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
     procedural_cubemap_bindless_id: Option<u16>,
     pending_cubemap_swap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pending_day_environment_swap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pending_night_environment_swap: Option<noren::rdb::imagery::DeviceCubemap>,
+    pending_constellation_map_swap: Option<noren::rdb::imagery::DeviceCubemap>,
     cubemap_format: Format,
     sky_settings: SkyFrameSettings,
     cfg: StagedBuffer,
@@ -847,7 +870,21 @@ impl SkyRenderer {
                 }],
             )
             .add_table_variable_with_resources(
-                "skybox_texture",
+                "day_environment_texture",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(skybox_view),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "night_environment_texture",
+                vec![dashi::IndexedResource {
+                    resource: ShaderResource::Image(skybox_view),
+                    slot: 0,
+                }],
+            )
+            .add_table_variable_with_resources(
+                "constellation_texture",
                 vec![dashi::IndexedResource {
                     resource: ShaderResource::Image(skybox_view),
                     slot: 0,
@@ -1026,6 +1063,12 @@ impl SkyRenderer {
             skybox_fallback_view: skybox_view,
             skybox_fallback_bindless_id,
             skybox_swap_info,
+            day_environment: info.skybox.day_environment.clone(),
+            day_environment_bindless_id: None,
+            night_environment: info.skybox.night_environment.clone(),
+            night_environment_bindless_id: None,
+            constellation_map: info.skybox.constellation_map.clone(),
+            constellation_map_bindless_id: None,
             skybox_intensity: info.skybox.intensity,
             use_procedural_cubemap: true,
             cubemap_update_interval: info.skybox.update_interval_frames.max(1),
@@ -1039,6 +1082,9 @@ impl SkyRenderer {
             procedural_cubemap: None,
             procedural_cubemap_bindless_id: None,
             pending_cubemap_swap: info.skybox.cubemap.clone(),
+            pending_day_environment_swap: info.skybox.day_environment.clone(),
+            pending_night_environment_swap: info.skybox.night_environment.clone(),
+            pending_constellation_map_swap: info.skybox.constellation_map.clone(),
             cubemap_format: info.color_format,
             sky_settings: SkyFrameSettings::default(),
             cfg,
@@ -1057,6 +1103,15 @@ impl SkyRenderer {
 
         if let Some(cubemap) = settings.cubemap {
             self.pending_cubemap_swap = Some(cubemap);
+        }
+        if let Some(day_environment) = settings.day_environment {
+            self.pending_day_environment_swap = Some(day_environment);
+        }
+        if let Some(night_environment) = settings.night_environment {
+            self.pending_night_environment_swap = Some(night_environment);
+        }
+        if let Some(constellation_map) = settings.constellation_map {
+            self.pending_constellation_map_swap = Some(constellation_map);
         }
 
         if procedural_changed || resolution_changed {
@@ -1541,6 +1596,48 @@ impl SkyRenderer {
             );
             self.apply_skybox_binding();
         }
+        if let Some(day_environment) = self.pending_day_environment_swap.take() {
+            self.day_environment = Some(day_environment.clone());
+            let _ = state.reserved_mut(
+                "meshi_bindless_cubemaps",
+                |cubemaps: &mut ReservedBindlessCubemaps| {
+                    if let Some(existing) = self.day_environment_bindless_id.take() {
+                        cubemaps.remove_texture(existing);
+                    }
+                    self.day_environment_bindless_id =
+                        Some(cubemaps.add_texture(day_environment.view));
+                },
+            );
+            self.apply_skybox_binding();
+        }
+        if let Some(night_environment) = self.pending_night_environment_swap.take() {
+            self.night_environment = Some(night_environment.clone());
+            let _ = state.reserved_mut(
+                "meshi_bindless_cubemaps",
+                |cubemaps: &mut ReservedBindlessCubemaps| {
+                    if let Some(existing) = self.night_environment_bindless_id.take() {
+                        cubemaps.remove_texture(existing);
+                    }
+                    self.night_environment_bindless_id =
+                        Some(cubemaps.add_texture(night_environment.view));
+                },
+            );
+            self.apply_skybox_binding();
+        }
+        if let Some(constellation_map) = self.pending_constellation_map_swap.take() {
+            self.constellation_map = Some(constellation_map.clone());
+            let _ = state.reserved_mut(
+                "meshi_bindless_cubemaps",
+                |cubemaps: &mut ReservedBindlessCubemaps| {
+                    if let Some(existing) = self.constellation_map_bindless_id.take() {
+                        cubemaps.remove_texture(existing);
+                    }
+                    self.constellation_map_bindless_id =
+                        Some(cubemaps.add_texture(constellation_map.view));
+                },
+            );
+            self.apply_skybox_binding();
+        }
         stream.end()
     }
 
@@ -1565,10 +1662,40 @@ impl SkyRenderer {
                 slot: 0,
             },
         );
+        let day_view = self
+            .day_environment
+            .as_ref()
+            .map(|cubemap| cubemap.view)
+            .unwrap_or(self.skybox_fallback_view);
+        let night_view = self
+            .night_environment
+            .as_ref()
+            .map(|cubemap| cubemap.view)
+            .unwrap_or(self.skybox_fallback_view);
+        let constellation_view = self
+            .constellation_map
+            .as_ref()
+            .map(|cubemap| cubemap.view)
+            .unwrap_or(self.skybox_fallback_view);
+
         self.pipeline.update_table(
-            "skybox_texture",
+            "day_environment_texture",
             dashi::IndexedResource {
-                resource: ShaderResource::Image(self.skybox_fallback_view),
+                resource: ShaderResource::Image(day_view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "night_environment_texture",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(night_view),
+                slot: 0,
+            },
+        );
+        self.pipeline.update_table(
+            "constellation_texture",
+            dashi::IndexedResource {
+                resource: ShaderResource::Image(constellation_view),
                 slot: 0,
             },
         );
@@ -1830,7 +1957,18 @@ impl SkyRenderer {
                 Vec4::new(layer.noise_speed.x, layer.noise_speed.y, 0.0, 0.0);
         }
         config.fog_time = self.sky_settings.fog_time;
-        config.environment_map_blend = self.skybox_intensity.clamp(0.0, 1.0);
+        config.day_environment_id = self
+            .day_environment_bindless_id
+            .map(u32::from)
+            .unwrap_or(u32::MAX);
+        config.night_environment_id = self
+            .night_environment_bindless_id
+            .map(u32::from)
+            .unwrap_or(u32::MAX);
+        config.constellation_map_id = self
+            .constellation_map_bindless_id
+            .map(u32::from)
+            .unwrap_or(u32::MAX);
     }
 }
 
