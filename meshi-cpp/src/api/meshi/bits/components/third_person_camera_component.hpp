@@ -20,6 +20,7 @@ public:
 
   struct InputFrame {
     glm::vec2 look_delta = glm::vec2(0.0f);
+    float zoom_delta = 0.0f;
     bool orbit_active = false;
     bool capture_cursor = false;
   };
@@ -27,6 +28,8 @@ public:
   struct KeyboardMouseBindings {
     MouseButton orbit_button = MouseButton::Right;
     bool orbit_requires_button = true;
+    KeyCode zoom_in = KeyCode::E;
+    KeyCode zoom_out = KeyCode::Q;
   };
 
   struct Config {
@@ -35,6 +38,7 @@ public:
     float max_follow_distance = 40.0f;
     float rotation_speed = 250.0f;
     float look_sensitivity = 0.1f;
+    float zoom_speed = 20.0f;
     float min_pitch_deg = -75.0f;
     float max_pitch_deg = 75.0f;
     bool constrain_yaw = false;
@@ -47,7 +51,7 @@ public:
   ThirdPersonCameraComponent() : ThirdPersonCameraComponent(Config{}) {}
 
   explicit ThirdPersonCameraComponent(const Config &config)
-      : CameraComponent(), m_config(config), m_distance(config.follow_distance) {
+      : CameraComponent(), m_config(config), m_radius(config.follow_distance) {
     m_event = std::make_shared<ActionRegister<ThirdPersonCameraComponent>>(
         engine()->action().make_registry(this));
 
@@ -64,6 +68,20 @@ public:
 
     m_event->register_action("Third-Person-Camera-Mouse",
                              &ThirdPersonCameraComponent::handle_mouse_motion);
+
+    engine()->action().register_action(
+        "Third-Person-Camera-Scroll",
+        [](const Event &event, Action &action) {
+          if (event.source == EventSource::Mouse &&
+              event.type == EventType::Motion2D) {
+            action.type = "camera-zoom";
+            return true;
+          }
+          return false;
+        });
+
+    m_event->register_action("Third-Person-Camera-Scroll",
+                             &ThirdPersonCameraComponent::handle_scroll_zoom);
 
     m_input_provider = [this]() { return keyboard_mouse_input(); };
     sync_angles_from_config();
@@ -107,6 +125,7 @@ public:
     engine()->backend().graphics().capture_mouse(input.capture_cursor);
 
     apply_orbit(input.look_delta, input.orbit_active, dt);
+    apply_zoom(input.zoom_delta, dt);
     update_camera_transform();
     CameraComponent::update(dt);
   }
@@ -119,6 +138,10 @@ private:
     }
     m_last_cursor_position = cursor_position;
     m_has_last_cursor_position = true;
+  }
+
+  inline auto handle_scroll_zoom(const Action &event) -> void {
+    m_scroll_zoom_delta += event.event.payload.motion2d.motion.y;
   }
 
   inline auto keyboard_mouse_input() -> InputFrame {
@@ -135,6 +158,16 @@ private:
     input.look_delta = m_mouse_look_delta;
     m_mouse_look_delta = glm::vec2(0.0f);
 
+    if (events.is_pressed(m_config.bindings.zoom_in)) {
+      input.zoom_delta += 1.0f;
+    }
+    if (events.is_pressed(m_config.bindings.zoom_out)) {
+      input.zoom_delta -= 1.0f;
+    }
+
+    input.zoom_delta += m_scroll_zoom_delta;
+    m_scroll_zoom_delta = 0.0f;
+
     return input;
   }
 
@@ -147,13 +180,23 @@ private:
 
     const auto rotation_scale =
         m_config.rotation_speed * m_config.look_sensitivity * dt;
-    m_yaw_deg += look_delta.x * rotation_scale;
+    m_azimuth_deg += look_delta.x * rotation_scale;
     if (m_config.constrain_yaw) {
-      m_yaw_deg =
-          glm::clamp(m_yaw_deg, m_config.min_yaw_deg, m_config.max_yaw_deg);
+      m_azimuth_deg =
+          glm::clamp(m_azimuth_deg, m_config.min_yaw_deg, m_config.max_yaw_deg);
     }
-    m_pitch_deg = glm::clamp(m_pitch_deg + look_delta.y * rotation_scale,
-                             m_config.min_pitch_deg, m_config.max_pitch_deg);
+    m_elevation_deg = glm::clamp(m_elevation_deg + look_delta.y * rotation_scale,
+                                 m_config.min_pitch_deg, m_config.max_pitch_deg);
+  }
+
+  inline auto apply_zoom(float zoom_delta, float dt) -> void {
+    if (zoom_delta == 0.0f) {
+      return;
+    }
+
+    m_radius = glm::clamp(m_radius - zoom_delta * (m_config.zoom_speed * dt),
+                          m_config.min_follow_distance,
+                          m_config.max_follow_distance);
   }
 
   inline auto update_camera_transform() -> void {
@@ -163,37 +206,45 @@ private:
 
     const auto focus = glm::vec3(m_target->world_transform()[3]) +
                        m_config.focus_offset;
-    const auto yaw_rad = glm::radians(m_yaw_deg);
-    const auto pitch_rad = glm::radians(m_pitch_deg);
+    // Polar coordinates: radius + azimuth/yaw + elevation/pitch
+    const auto azimuth_rad = glm::radians(m_azimuth_deg);
+    const auto elevation_rad = glm::radians(m_elevation_deg);
 
-    const glm::vec3 forward = glm::normalize(glm::vec3(
-        std::cos(pitch_rad) * std::sin(yaw_rad), std::sin(pitch_rad),
-        -std::cos(pitch_rad) * std::cos(yaw_rad)));
+    const glm::vec3 offset = glm::vec3(
+        m_radius * std::cos(elevation_rad) * std::sin(azimuth_rad),
+        m_radius * std::sin(elevation_rad),
+        -m_radius * std::cos(elevation_rad) * std::cos(azimuth_rad));
 
-    const glm::vec3 camera_position = focus - forward * m_distance;
+    const glm::vec3 camera_position = focus - offset;
     const auto view = glm::lookAt(camera_position, focus, WORLD_UP);
-    auto transform = glm::inverse(view);
+    const auto world_transform = glm::inverse(view);
+
+    auto transform = world_transform;
+    if (m_target && m_parent == m_target) {
+      transform = glm::inverse(m_target->world_transform()) * world_transform;
+    }
     set_transform(transform);
   }
 
   inline auto sync_angles_from_config() -> void {
-    m_distance = glm::clamp(m_config.follow_distance, m_config.min_follow_distance,
-                            m_config.max_follow_distance);
-    m_pitch_deg =
-        glm::clamp(m_pitch_deg, m_config.min_pitch_deg, m_config.max_pitch_deg);
+    m_radius = glm::clamp(m_config.follow_distance, m_config.min_follow_distance,
+                          m_config.max_follow_distance);
+    m_elevation_deg =
+        glm::clamp(m_elevation_deg, m_config.min_pitch_deg, m_config.max_pitch_deg);
     if (m_config.constrain_yaw) {
-      m_yaw_deg =
-          glm::clamp(m_yaw_deg, m_config.min_yaw_deg, m_config.max_yaw_deg);
+      m_azimuth_deg =
+          glm::clamp(m_azimuth_deg, m_config.min_yaw_deg, m_config.max_yaw_deg);
     }
   }
 
   Config m_config{};
-  float m_distance = 8.0f;
-  float m_yaw_deg = 180.0f;
-  float m_pitch_deg = 15.0f;
+  float m_radius = 8.0f;
+  float m_azimuth_deg = 180.0f;
+  float m_elevation_deg = 15.0f;
 
   ActorComponent *m_target = nullptr;
   glm::vec2 m_mouse_look_delta = glm::vec2(0.0f);
+  float m_scroll_zoom_delta = 0.0f;
   glm::vec2 m_last_cursor_position = glm::vec2(0.0f);
   bool m_has_last_cursor_position = false;
 

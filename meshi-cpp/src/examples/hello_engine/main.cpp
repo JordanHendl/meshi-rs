@@ -35,10 +35,12 @@ public:
     root_component()->set_transform(target_transform);
 
     m_camera = add_subobject<meshi::ThirdPersonCameraComponent>();
+    auto camera_config = m_camera->config();
+    camera_config.focus_offset = glm::vec3(0.0f);
+    m_camera->set_config(camera_config);
     m_camera->attach_target(root_component());
 
     m_controller = add_subobject<meshi::CharacterControllerComponent>();
-    m_controller->set_orientation_source(m_camera);
     m_controller->attach_to(root_component());
   }
 
