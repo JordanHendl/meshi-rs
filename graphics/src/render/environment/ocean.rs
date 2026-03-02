@@ -46,10 +46,10 @@ impl Default for OceanInfo {
             patch_size: 64.0,
             vertex_resolution: 32,
             cascade_fft_sizes: [256, 128, 64],
-            cascade_patch_scales: [0.1, 1.0, 4.0],
+            cascade_patch_scales: [1.0, 2.0, 4.0],
             base_tile_radius: 1,
-            max_tile_radius: 12,
-            far_tile_radius: 12,
+            max_tile_radius: 32,
+            far_tile_radius: 32,
             tile_height_step: 1.0,
         }
     }
