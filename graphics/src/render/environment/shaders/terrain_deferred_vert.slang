@@ -239,10 +239,10 @@ VSOutput main(VSInput input) {
   const uint clipmap_sample = clipmap_index(draw.terrain_clipmap_tile, vertex.tex_coords, scene.surface_grid_size, scene.surface_tile_texel_count);
   float terrain_height = 0.0;
   float3 terrain_normal = local_normal;
-  if (sample_terrain_surface(clipmap_sample, terrain_height, terrain_normal)) {
-    local_pos.y = terrain_height + vertex.position.y;
-    local_normal = terrain_normal;
-  }
+//  if (sample_terrain_surface(clipmap_sample, terrain_height, terrain_normal)) {
+//    local_pos.y = terrain_height + vertex.position.y;
+//    local_normal = terrain_normal;
+//  }
 
   const float4 world_pos = mul(model, float4(local_pos, 1.0));
   const float3 world_normal = normalize(mul(model, float4(local_normal, 0.0)).xyz);

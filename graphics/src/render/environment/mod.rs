@@ -8,11 +8,12 @@ use dashi::{
     Buffer, CommandStream, Context, DynamicAllocator, Format, Handle, ImageView, SampleCount,
     Viewport,
 };
-use furikake::{types::Camera, BindlessState};
+use furikake::{BindlessState, types::Camera};
 use glam::{Mat4, Vec3, Vec4};
-use noren::{RDBFile, DB};
+use noren::{DB, RDBFile};
 
 use crate::render::SubrendererDrawInfo;
+use crate::render::utils::gpu_draw_builder::GPUDrawBuilder;
 use crate::{CloudSettings, TerrainRenderSettings};
 use clouds::CloudRenderer;
 use ocean::OceanRenderer;
@@ -74,6 +75,7 @@ impl EnvironmentRenderer {
     pub fn new(
         ctx: &mut Context,
         state: &mut BindlessState,
+        draw_builder: &mut GPUDrawBuilder,
         info: EnvironmentRendererInfo,
     ) -> Self {
         let dynamic = ctx
@@ -93,7 +95,7 @@ impl EnvironmentRenderer {
             )
         });
         let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, environment_map);
-        let terrain = TerrainRenderer::new_deferred(ctx, state, &info, &dynamic);
+        let terrain = TerrainRenderer::new_deferred(ctx, state, draw_builder, &info, &dynamic);
 
         Self {
             color_format: info.color_format,
@@ -211,25 +213,8 @@ impl EnvironmentRenderer {
         self.terrain.update(camera, state);
     }
 
-    pub fn initialize_terrain_deferred(
-        &mut self,
-        ctx: &mut Context,
-        state: &mut BindlessState,
-        sample_count: SampleCount,
-        cull_results: Handle<Buffer>,
-        bin_counts: Handle<Buffer>,
-        num_bins: u32,
-        dynamic: &DynamicAllocator,
-    ) {
-//        self.terrain.initialize_deferred(
-//            ctx,
-//            state,
-//            sample_count,
-//            cull_results,
-//            bin_counts,
-//            num_bins,
-//            dynamic,
-//        );
+    pub fn initialize_terrain_deferred(&mut self, draw_builder: &mut GPUDrawBuilder) {
+        self.terrain.initialize_draws(draw_builder);
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -387,7 +372,7 @@ impl EnvironmentRenderer {
                     .record_compute(ctx, self.time, self.last_delta_time),
             )
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
-//            .combine(self.terrain.record_compute(&mut self.dynamic))
+            //            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
     }
 

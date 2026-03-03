@@ -1,7 +1,7 @@
 pub mod settings;
 use self::settings::TerrainRenderSettings;
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, CSOBuilder, PSOBuilder, PSO};
+use bento::builder::{AttachmentDesc, CSOBuilder, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use crossbeam_queue::SegQueue;
 use dashi::cmd::{Executable, PendingGraphics};
@@ -14,14 +14,14 @@ use dashi::{
 use furikake::BindlessState;
 use furikake::PSOBuilderFurikakeExt;
 use glam::{Mat4, Vec2, Vec3, Vec4};
+use noren::DB;
+use noren::RDBFile;
+use noren::rdb::DeviceGeometryLayer;
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{
-    chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry, TerrainCameraInfo,
-    TerrainChunk, TerrainChunkArtifact, TerrainFrustum, TerrainProjectSettings,
+    TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainFrustum, TerrainProjectSettings,
+    chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
 };
-use noren::rdb::DeviceGeometryLayer;
-use noren::RDBFile;
-use noren::DB;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -34,6 +34,7 @@ use tare::transient::BindlessTextureRegistry;
 use tracing::{info, warn};
 
 use crate::render::SubrendererDrawInfo;
+use crate::render::deferred::BIN_TERRAIN;
 use crate::render::deferred::PerDrawData;
 use crate::render::utils::gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo};
 use crate::terrain_loader;
@@ -43,13 +44,13 @@ use furikake::reservations::bindless_materials::ReservedBindlessMaterials;
 use furikake::reservations::bindless_transformations::ReservedBindlessTransformations;
 use furikake::reservations::bindless_vertices::ReservedBindlessVertices;
 use furikake::types::{
-    Camera, Material, Transformation, VertexBufferSlot, MATERIAL_FLAG_VERTEX_COLOR,
+    Camera, MATERIAL_FLAG_VERTEX_COLOR, Material, Transformation, VertexBufferSlot,
 };
 use tare::utils::StagedBuffer;
 
 pub type TerrainInfo = TerrainRenderSettings;
 
-pub const TERRAIN_DRAW_BIN: u32 = 0;
+pub const TERRAIN_DRAW_BIN: u32 = BIN_TERRAIN;
 const TERRAIN_REFRESH_FRAME_INTERVAL: u64 = 4;
 const TERRAIN_SETTINGS_POLL_INTERVAL: u64 = 30;
 const TERRAIN_CAMERA_POSITION_EPSILON: f32 = 0.25;
@@ -112,66 +113,66 @@ pub struct TerrainRenderer {
     settings: TerrainRenderSettings,
     project_key: String,
     enabled: bool,
-//    compute_pipeline: Option<bento::builder::CSO>,
-//    clipmap_buffer: Handle<Buffer>,
-//    draw_args_buffer: Handle<Buffer>,
-//    instance_buffer: Handle<Buffer>,
-//    heightmap_buffer: Handle<Buffer>,
-//    meshlet_buffer: Handle<Buffer>,
-//    patch_size: f32,
-//    lod_levels: u32,
-//    clipmap_resolution: u32,
-//    max_tiles: u32,
-//    enabled: bool,
-//    clipmap_surface_tile_resolution: [u32; 2],
-//    clipmap_material_tile_resolution: [u32; 2],
-//    camera_position: Vec3,
-//    camera_far: f32,
-//    frustum_planes: Option<[Vec4; 6]>,
-//    view_projection: Option<Mat4>,
-//    use_depth: bool,
-//    static_geometry: Option<TerrainStaticGeometry>,
-//    lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
-//    active_chunk_lods: HashMap<TerrainChunkKey, String>,
-//    active_chunk_lod_levels: HashMap<TerrainChunkKey, u8>,
-//    terrain_project_key: Option<String>,
-//    terrain_settings: Option<TerrainProjectSettings>,
-//    terrain_settings_dirty: bool,
-//    terrain_render_objects: HashMap<String, TerrainRenderObject>,
-//    terrain_dirty: bool,
-//    refresh_frame_index: u64,
-//    last_refresh_frame: u64,
-//    last_settings_poll_frame: u64,
-//    last_frame_camera_position: Option<Vec3>,
-//    last_refresh_camera_position: Option<Vec3>,
-//    last_refresh_view_projection: Option<Mat4>,
-//    last_refresh_chunk_coords: Option<[i32; 2]>,
-//    last_base_chunk_hashes: HashMap<TerrainChunkKey, u64>,
-//    missing_lod_artifacts: HashSet<String>,
-//    visibility_cache_selection_hash: u64,
-//    visibility_cache_view_projection: Option<Mat4>,
-//    visibility_cache_camera_position: Option<Vec3>,
-//    visibility_cache_camera_far: f32,
-//    visibility_cache_keys: HashSet<String>,
-//    camera_velocity: f32,
-//    pending_selection: Option<Vec<TerrainRenderObject>>,
-//    pending_selection_keys: HashMap<TerrainChunkKey, String>,
-//    pending_selection_lod_levels: HashMap<TerrainChunkKey, u8>,
-//    pending_refresh: Option<PendingTerrainRefresh>,
-//    texture_data_cache: HashMap<TerrainTextureCacheKey, Arc<Vec<f32>>>,
-//    texture_work_requests: Arc<SegQueue<TerrainTextureWorkItem>>,
-//    texture_work_results: Arc<SegQueue<TerrainTextureBuildResult>>,
-//    texture_work_pending: HashSet<TerrainTextureWorkKey>,
-//    texture_worker_running: Arc<AtomicBool>,
-//    texture_worker_handle: Option<JoinHandle<()>>,
-//    clipmap_buffers: Option<TerrainClipmapBuffers>,
-//    clipmap_slots: Vec<Option<TerrainClipmapSlot>>,
-//    clipmap_buffers_dirty: bool,
-//    clipmap_cache_dirty: bool,
-//    deferred_sample_count: Option<SampleCount>,
-//    deferred_dynamic_state: Option<DynamicAllocatorState>,
-//    pending_selection_tiles: HashMap<TerrainChunkKey, u32>,
-//    active_selection_tiles: HashMap<TerrainChunkKey, u32>,
+    //    compute_pipeline: Option<bento::builder::CSO>,
+    //    clipmap_buffer: Handle<Buffer>,
+    //    draw_args_buffer: Handle<Buffer>,
+    //    instance_buffer: Handle<Buffer>,
+    //    heightmap_buffer: Handle<Buffer>,
+    //    meshlet_buffer: Handle<Buffer>,
+    //    patch_size: f32,
+    //    lod_levels: u32,
+    //    clipmap_resolution: u32,
+    //    max_tiles: u32,
+    //    enabled: bool,
+    //    clipmap_surface_tile_resolution: [u32; 2],
+    //    clipmap_material_tile_resolution: [u32; 2],
+    //    camera_position: Vec3,
+    //    camera_far: f32,
+    //    frustum_planes: Option<[Vec4; 6]>,
+    //    view_projection: Option<Mat4>,
+    //    use_depth: bool,
+    //    static_geometry: Option<TerrainStaticGeometry>,
+    //    lod_sources: HashMap<TerrainChunkKey, Vec<TerrainRenderObject>>,
+    //    active_chunk_lods: HashMap<TerrainChunkKey, String>,
+    //    active_chunk_lod_levels: HashMap<TerrainChunkKey, u8>,
+    //    terrain_project_key: Option<String>,
+    //    terrain_settings: Option<TerrainProjectSettings>,
+    //    terrain_settings_dirty: bool,
+    //    terrain_render_objects: HashMap<String, TerrainRenderObject>,
+    //    terrain_dirty: bool,
+    //    refresh_frame_index: u64,
+    //    last_refresh_frame: u64,
+    //    last_settings_poll_frame: u64,
+    //    last_frame_camera_position: Option<Vec3>,
+    //    last_refresh_camera_position: Option<Vec3>,
+    //    last_refresh_view_projection: Option<Mat4>,
+    //    last_refresh_chunk_coords: Option<[i32; 2]>,
+    //    last_base_chunk_hashes: HashMap<TerrainChunkKey, u64>,
+    //    missing_lod_artifacts: HashSet<String>,
+    //    visibility_cache_selection_hash: u64,
+    //    visibility_cache_view_projection: Option<Mat4>,
+    //    visibility_cache_camera_position: Option<Vec3>,
+    //    visibility_cache_camera_far: f32,
+    //    visibility_cache_keys: HashSet<String>,
+    //    camera_velocity: f32,
+    //    pending_selection: Option<Vec<TerrainRenderObject>>,
+    //    pending_selection_keys: HashMap<TerrainChunkKey, String>,
+    //    pending_selection_lod_levels: HashMap<TerrainChunkKey, u8>,
+    //    pending_refresh: Option<PendingTerrainRefresh>,
+    //    texture_data_cache: HashMap<TerrainTextureCacheKey, Arc<Vec<f32>>>,
+    //    texture_work_requests: Arc<SegQueue<TerrainTextureWorkItem>>,
+    //    texture_work_results: Arc<SegQueue<TerrainTextureBuildResult>>,
+    //    texture_work_pending: HashSet<TerrainTextureWorkKey>,
+    //    texture_worker_running: Arc<AtomicBool>,
+    //    texture_worker_handle: Option<JoinHandle<()>>,
+    //    clipmap_buffers: Option<TerrainClipmapBuffers>,
+    //    clipmap_slots: Vec<Option<TerrainClipmapSlot>>,
+    //    clipmap_buffers_dirty: bool,
+    //    clipmap_cache_dirty: bool,
+    //    deferred_sample_count: Option<SampleCount>,
+    //    deferred_dynamic_state: Option<DynamicAllocatorState>,
+    //    pending_selection_tiles: HashMap<TerrainChunkKey, u32>,
+    //    active_selection_tiles: HashMap<TerrainChunkKey, u32>,
 }
 
 #[derive(Clone)]
@@ -285,7 +286,7 @@ struct TerrainEntryBuild {
 
 struct TerrainDeferredResources {
     pipeline: PSO,
-    draw_builder: NonNull<GPUDrawBuilder>,
+    draw_builder: Option<NonNull<GPUDrawBuilder>>,
     objects: HashMap<String, TerrainObjectEntry>,
     db: Option<NonNull<DB>>,
     sample_count: SampleCount,
@@ -369,9 +370,9 @@ impl TerrainRenderer {
             return CommandStream::new().begin().end();
         }
         let mut stream = CommandStream::new().begin();
-//        if let Some(sync) = self.sync_clipmap_buffers() {
-//            stream = stream.combine(sync);
-//        }
+        //        if let Some(sync) = self.sync_clipmap_buffers() {
+        //            stream = stream.combine(sync);
+        //        }
         stream.end()
     }
 
@@ -390,10 +391,45 @@ impl TerrainRenderer {
     pub fn new_deferred(
         ctx: &mut Context,
         state: &mut BindlessState,
+        draw: &mut GPUDrawBuilder,
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
-        todo!()
+        let clipmaps = todo!();
+        Self {
+            deferred: Some(TerrainDeferredResources {
+                pipeline: Self::build_deferred_pipeline(ctx, state, info.sample_count, draw, dynamic.state(), clipmaps),
+                draw_builder: None,
+                objects: Default::default(),
+                db: Default::default(),
+                sample_count: info.sample_count,
+            }),
+            terrain_rdb: None,
+            context: None,
+            settings: TerrainRenderSettings::default(),
+            project_key: String::new(),
+            enabled: false,
+        }
+    }
+
+    pub fn enable(&mut self) {
+        self.enabled = true;
+    }
+
+    pub fn disable(&mut self) {
+        self.enabled = false;
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub fn initialize_draws(&mut self, draw_builder: &mut GPUDrawBuilder) {
+        let Some(deferred) = self.deferred.as_mut() else {
+            return;
+        };
+
+        deferred.draw_builder = Some(NonNull::from(draw_builder));
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -415,8 +451,6 @@ impl TerrainRenderer {
         if !self.enabled {
             return;
         }
-
-        todo!()
     }
 
     fn load_terrain_settings(
@@ -466,19 +500,20 @@ impl TerrainRenderer {
             _padding1: u32,
         }
 
-        let mut alloc = info.alloc
+        let mut alloc = info
+            .alloc
             .bump()
             .expect("Failed to allocate terrain per-scene data");
 
-//        alloc.slice::<PerSceneData>()[0] = PerSceneData {
-//            camera: info.camera,
-//            surface_grid_size,
-//            surface_tile_texel_count,
-//            _padding0: 0,
-//            material_grid_size,
-//            material_tile_texel_count,
-//            _padding1: 0,
-//        };
+        //        alloc.slice::<PerSceneData>()[0] = PerSceneData {
+        //            camera: info.camera,
+        //            surface_grid_size,
+        //            surface_tile_texel_count,
+        //            _padding0: 0,
+        //            material_grid_size,
+        //            material_tile_texel_count,
+        //            _padding1: 0,
+        //        };
 
         let mut stream = CommandStream::<PendingGraphics>::subdraw();
         stream
@@ -486,7 +521,7 @@ impl TerrainRenderer {
             .update_viewport(&info.viewport)
             .draw_indexed_indirect(&DrawIndexedIndirect {
                 indices: indices_handle,
-                indirect: info.draw_builder.draw_list_for_bin(0).into(),
+                indirect: info.draw_builder.draw_list_for_bin(TERRAIN_DRAW_BIN).into(),
                 bind_tables: deferred.pipeline.tables(),
                 dynamic_buffers: [Some(alloc), None, None, None],
                 draw_count: info.draw_builder.draw_count(),

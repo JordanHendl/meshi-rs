@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use bento::{
-    builder::{AttachmentDesc, PSOBuilder, PSO},
     Compiler, OptimizationLevel, Request, ShaderLang,
+    builder::{AttachmentDesc, PSO, PSOBuilder},
 };
-use bumpalo::{collections::Vec as BumpVec, Bump};
+use bumpalo::{Bump, collections::Vec as BumpVec};
 use bytemuck::cast_slice;
 use dashi::{
     cmd::Executable,
@@ -15,56 +15,56 @@ use dashi::{
 use driver::command::{BlitImage, Draw, DrawIndexedIndirect};
 use execution::{CommandDispatch, CommandRing};
 use furikake::{
+    BindlessState, PSOBuilderFurikakeExt,
     reservations::{
-        bindless_camera::ReservedBindlessCamera, bindless_indices::ReservedBindlessIndices,
-        bindless_materials::ReservedBindlessMaterials, bindless_vertices::ReservedBindlessVertices,
-        ReservedBinding,
+        ReservedBinding, bindless_camera::ReservedBindlessCamera,
+        bindless_indices::ReservedBindlessIndices, bindless_materials::ReservedBindlessMaterials,
+        bindless_vertices::ReservedBindlessVertices,
     },
     types::{AnimationState as FurikakeAnimationState, Material, VertexBufferSlot, *},
-    BindlessState, PSOBuilderFurikakeExt,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use meshi_utils::MeshiError;
 use noren::{
+    DB, RDBFile,
     meta::{DeviceMaterial, DeviceMesh, DeviceModel},
-    rdb::{primitives::Vertex, DeviceGeometry, DeviceGeometryLayer, HostGeometry},
-    RDBFile, DB,
+    rdb::{DeviceGeometry, DeviceGeometryLayer, HostGeometry, primitives::Vertex},
 };
 use resource_pool::resource_list::ResourceList;
 use tare::{graph::*, transient::TransientAllocator, utils::StagedBuffer};
 use tracing::{info, warn};
 
 use super::{
+    Renderer, RendererInfo, ViewOutput,
     debug::DebugLayer,
     environment::{
-        terrain::{TerrainFrameSettings, TERRAIN_DRAW_BIN},
         EnvironmentFrameSettings, EnvironmentRenderer, EnvironmentRendererInfo,
+        terrain::{TERRAIN_DRAW_BIN, TerrainFrameSettings},
     },
     gui::GuiRenderer,
     shadow::{ShadowPipelineMode, ShadowProcessInfo, ShadowSystem, ShadowSystemInfo},
     text::{TextDraw, TextDrawMode, TextRenderer},
     utils::{
         billboard::{
-            allocate_billboard_material, build_billboard_pipeline, create_billboard_data,
-            update_billboard_material_texture, update_billboard_vertices, BillboardData,
+            BillboardData, allocate_billboard_material, build_billboard_pipeline,
+            create_billboard_data, update_billboard_material_texture, update_billboard_vertices,
         },
         gpu_draw_builder::{GPUDrawBuilder, GPUDrawBuilderInfo},
         scene::GPUScene,
         skinning::{SkinningDispatcher, SkinningHandle, SkinningInfo},
     },
-    Renderer, RendererInfo, ViewOutput,
 };
 use crate::{
-    gui::{
-        debug::{
-            debug_register_radial_with_description_and_conflicts, debug_register_with_description,
-            DebugRadialOption, DebugRegistryValue, PageType,
-        },
-        GuiFrame, Slider,
-    },
-    render::{utils::scene::*, SubrendererDrawInfo, SubrendererInitInfo, SubrendererProcessInfo},
     AnimationState, BillboardInfo, BillboardType, CloudDebugView, GuiInfo, GuiObject, RenderObject,
     RenderObjectInfo, TextInfo, TextObject, TextRenderMode,
+    gui::{
+        GuiFrame, Slider,
+        debug::{
+            DebugRadialOption, DebugRegistryValue, PageType,
+            debug_register_radial_with_description_and_conflicts, debug_register_with_description,
+        },
+    },
+    render::{SubrendererDrawInfo, SubrendererInitInfo, SubrendererProcessInfo, utils::scene::*},
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -75,6 +75,7 @@ use crate::{
 pub enum PassMask {
     PRE_Z = 0x00000001,
     OPAQUE_GEOMETRY = 0x00000010,
+    TERRAIN = 0x00000020,
     SHADOW = 0x0000100,
     TRANSPARENT = 0x00001000,
 }
@@ -83,6 +84,7 @@ const BIN_PRE_Z: u32 = 0;
 const BIN_GBUFFER_OPAQUE: u32 = 1;
 const BIN_SHADOW: u32 = 2;
 const BIN_TRANSPARENT: u32 = 3;
+pub(crate) const BIN_TERRAIN: u32 = 4;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -313,11 +315,35 @@ impl DeferredRenderer {
                         id: BIN_TRANSPARENT,
                         mask: PassMask::TRANSPARENT as u32,
                     },
+                    SceneBin {
+                        id: BIN_TERRAIN,
+                        mask: PassMask::TERRAIN as u32,
+                    },
                 ],
                 ..Default::default()
             },
             state.as_mut(),
         );
+
+        let skinning = SkinningDispatcher::new(ctx.as_mut(), state.as_ref());
+        let cull_results = scene.output_bins().get_gpu_handle();
+        let bin_counts = scene.bin_counts_gpu().handle;
+        let num_bins = scene.num_bins() as u32;
+        let mut proc = DataProcessors {
+            scene,
+            skinning,
+            draw_builder: GPUDrawBuilder::new(
+                &GPUDrawBuilderInfo {
+                    name: "[MESHI] Deferred Renderer GPU Draw Builder",
+                    ctx: ctx.as_mut(),
+                    cull_results,
+                    bin_counts,
+                    num_bins,
+                    ..Default::default()
+                },
+                state.as_mut(),
+            ),
+        };
 
         let mut alloc = Box::new(TransientAllocator::new(ctx.as_mut()));
 
@@ -331,6 +357,7 @@ impl DeferredRenderer {
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
+            &mut proc.draw_builder, 
             EnvironmentRendererInfo {
                 initial_viewport: info.initial_viewport,
                 color_format: Format::BGRA8,
@@ -353,8 +380,6 @@ impl DeferredRenderer {
                 queue_type: QueueType::Graphics,
             })
             .expect("Failed to make cull command queue");
-
-        let skinning = SkinningDispatcher::new(ctx.as_mut(), state.as_ref());
 
         let compiler = Compiler::new().expect("Failed to create shader compiler");
         let base_request = Request {
@@ -447,25 +472,6 @@ impl DeferredRenderer {
             dynamic,
         };
 
-        let cull_results = scene.output_bins().get_gpu_handle();
-        let bin_counts = scene.bin_counts_gpu().handle;
-        let num_bins = scene.num_bins() as u32;
-        let proc = DataProcessors {
-            scene,
-            skinning,
-            draw_builder: GPUDrawBuilder::new(
-                &GPUDrawBuilderInfo {
-                    name: "[MESHI] Deferred Renderer GPU Draw Builder",
-                    ctx: ctx.as_mut(),
-                    cull_results,
-                    bin_counts,
-                    num_bins,
-                    ..Default::default()
-                },
-                state.as_mut(),
-            ),
-        };
-
         let shadow = ShadowSystem::new(
             SubrendererInitInfo {
                 ctx: ctx.as_mut(),
@@ -491,16 +497,6 @@ impl DeferredRenderer {
             debug,
             shadow,
         };
-
-        subrender.environment.initialize_terrain_deferred(
-            ctx.as_mut(),
-            state.as_mut(),
-            info.sample_count,
-            cull_results,
-            bin_counts,
-            num_bins,
-            &data.dynamic,
-        );
 
         let psos = DeferredPSO {
             pipelines: Default::default(),
@@ -609,6 +605,10 @@ impl DeferredRenderer {
         db.import_furikake_state(self.state.as_mut());
         self.alloc.set_bindless_registry(self.state.as_mut());
         self.subrender.environment.initialize_database(db);
+        self.subrender
+            .environment
+            .initialize_terrain_deferred(&mut self.proc.draw_builder);
+
         self.register_debug_views();
         self.text.initialize_database(db);
     }
@@ -1379,11 +1379,10 @@ impl DeferredRenderer {
 
             self.graph.add_compute_pass(|cmd| {
                 let cmd = cmd
-                    .combine(
-                        self.proc
-                            .draw_builder
-                            .build_draws(&[BIN_GBUFFER_OPAQUE, BIN_SHADOW], view_idx as u32),
-                    )
+                    .combine(self.proc.draw_builder.build_draws(
+                        &[BIN_GBUFFER_OPAQUE, BIN_SHADOW, BIN_TERRAIN],
+                        view_idx as u32,
+                    ))
                     .sync(SyncPoint::ComputeToGraphics, Scope::AllCommonReads);
 
                 cmd.end()
