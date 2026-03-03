@@ -93,7 +93,7 @@ impl EnvironmentRenderer {
             )
         });
         let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, environment_map);
-        let terrain = TerrainRenderer::new(ctx, state, &info, &dynamic);
+        let terrain = TerrainRenderer::new_deferred(ctx, state, SampleCount::S1, &info, &dynamic);
 
         Self {
             color_format: info.color_format,
@@ -221,15 +221,15 @@ impl EnvironmentRenderer {
         num_bins: u32,
         dynamic: &DynamicAllocator,
     ) {
-        self.terrain.initialize_deferred(
-            ctx,
-            state,
-            sample_count,
-            cull_results,
-            bin_counts,
-            num_bins,
-            dynamic,
-        );
+//        self.terrain.initialize_deferred(
+//            ctx,
+//            state,
+//            sample_count,
+//            cull_results,
+//            bin_counts,
+//            num_bins,
+//            dynamic,
+//        );
     }
 
     pub fn initialize_database(&mut self, db: &mut DB) {
@@ -257,7 +257,8 @@ impl EnvironmentRenderer {
     }
 
     pub fn terrain_draw_info(&self) -> Option<terrain::TerrainDrawInfo> {
-        self.terrain.draw_info()
+        todo!()
+//        self.terrain.draw_info()
     }
 
     pub fn record_deferred_split(
@@ -391,7 +392,7 @@ impl EnvironmentRenderer {
                     .record_compute(ctx, self.time, self.last_delta_time),
             )
             .combine(self.ocean.record_compute(&mut self.dynamic, self.time))
-            .combine(self.terrain.record_compute(&mut self.dynamic))
+//            .combine(self.terrain.record_compute(&mut self.dynamic))
             .end()
     }
 

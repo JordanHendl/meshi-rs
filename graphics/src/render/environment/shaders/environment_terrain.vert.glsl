@@ -5,9 +5,9 @@ struct TerrainInstance {
     uint lod;
 };
 
-layout(set = 0, binding = 0) readonly buffer InstanceBuffer {
-    TerrainInstance instances[];
-} instance_data;
+//layout(set = 0, binding = 0) readonly buffer InstanceBuffer {
+//    TerrainInstance instances[];
+//} instance_data;
 
 layout(set = 1, binding = 0) readonly buffer TerrainParams {
     vec3 camera_position;
@@ -19,9 +19,9 @@ layout(set = 1, binding = 0) readonly buffer TerrainParams {
     vec2 _padding;
 } params;
 
-layout(set = 2, binding = 0) readonly buffer HeightmapBuffer {
-    float heights[];
-} heightmap;
+//layout(set = 2, binding = 0) readonly buffer HeightmapBuffer {
+//    float heights[];
+//} heightmap;
 
 layout(location = 0) out vec3 v_color;
 
