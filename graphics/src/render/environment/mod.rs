@@ -93,7 +93,7 @@ impl EnvironmentRenderer {
             )
         });
         let ocean = OceanRenderer::new(ctx, state, &info, &dynamic, environment_map);
-        let terrain = TerrainRenderer::new_deferred(ctx, state, SampleCount::S1, &info, &dynamic);
+        let terrain = TerrainRenderer::new_deferred(ctx, state, &info, &dynamic);
 
         Self {
             color_format: info.color_format,
@@ -254,11 +254,6 @@ impl EnvironmentRenderer {
 
     pub fn set_terrain_render_settings(&mut self, settings: TerrainRenderSettings) {
         self.terrain.set_render_settings(settings);
-    }
-
-    pub fn terrain_draw_info(&self) -> Option<terrain::TerrainDrawInfo> {
-        todo!()
-//        self.terrain.draw_info()
     }
 
     pub fn record_deferred_split(

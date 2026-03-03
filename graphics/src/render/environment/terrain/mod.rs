@@ -73,13 +73,6 @@ pub struct TerrainRenderObject {
     pub transform: Mat4,
 }
 
-#[derive(Clone, Copy)]
-pub struct TerrainDrawInfo {
-    pub per_draw_data: Handle<Buffer>,
-    pub draw_list: Handle<Buffer>,
-    pub draw_count: u32,
-}
-
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ClipmapDescriptor {
@@ -291,8 +284,8 @@ struct TerrainEntryBuild {
 }
 
 struct TerrainDeferredResources {
-    draw_builder: GPUDrawBuilder,
     pipeline: PSO,
+    draw_builder: NonNull<GPUDrawBuilder>,
     objects: HashMap<String, TerrainObjectEntry>,
     db: Option<NonNull<DB>>,
     sample_count: SampleCount,
@@ -379,9 +372,6 @@ impl TerrainRenderer {
 //        if let Some(sync) = self.sync_clipmap_buffers() {
 //            stream = stream.combine(sync);
 //        }
-        if let Some(deferred) = &mut self.deferred {
-            stream = stream.combine(deferred.draw_builder.pre_compute());
-        }
         stream.end()
     }
 
@@ -390,9 +380,6 @@ impl TerrainRenderer {
             return CommandStream::new().begin().end();
         }
         let mut stream = CommandStream::new().begin();
-        if let Some(deferred) = &mut self.deferred {
-            stream = stream.combine(deferred.draw_builder.post_compute());
-        }
         stream.end()
     }
 
@@ -403,7 +390,6 @@ impl TerrainRenderer {
     pub fn new_deferred(
         ctx: &mut Context,
         state: &mut BindlessState,
-        sample_count: SampleCount,
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
@@ -503,7 +489,7 @@ impl TerrainRenderer {
                 indirect: info.draw_builder.draw_list_for_bin(0).into(),
                 bind_tables: deferred.pipeline.tables(),
                 dynamic_buffers: [Some(alloc), None, None, None],
-                draw_count: deferred.draw_builder.draw_count(),
+                draw_count: info.draw_builder.draw_count(),
                 ..Default::default()
             })
             .unbind_graphics_pipeline()
