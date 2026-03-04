@@ -69,6 +69,10 @@ uint handle_slot(Handle handle_value) {
     return handle_value.val & 0xFFFFu;
 }
 
+bool is_invalid_handle(Handle handle_value) {
+    return handle_slot(handle_value) == 0xFFFFu;
+}
+
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= params.num_draws) {
@@ -104,7 +108,7 @@ void main() {
     uint bin_count = counts.counts[bin_offset];
     uint scene_slot = handle_slot(draw.scene_id);
 
-    bool visible = false;
+    bool visible = is_invalid_handle(draw.scene_id);
     uint capped_count = min(bin_count, params.max_objects);
     for (uint i = 0u; i < capped_count; ++i) {
         uint cull_index = bin_offset * params.max_objects + i;
