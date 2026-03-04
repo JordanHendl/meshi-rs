@@ -75,10 +75,64 @@ public:
     MeshiMat4 t = to_meshi_mat4(projection_matrix);
     api_->gfx_set_camera_projection(m_gfx, camera, &t);
   }
-  
+
+  void set_skybox_settings(const gfx::SkyboxSettingsInfo &info) {
+    MeshiSkyboxSettingsInfo ffi{};
+    ffi.intensity = info.intensity;
+    ffi.use_procedural_cubemap =
+        static_cast<std::int32_t>(info.use_procedural_cubemap);
+    ffi.update_interval_frames = info.update_interval_frames;
+    api_->gfx_set_skybox_settings(m_gfx, &ffi);
+  }
+
+  void set_environment_lighting(const gfx::EnvironmentLightingInfo &info) {
+    MeshiEnvironmentLightingInfo ffi{};
+    ffi.sky.enabled = static_cast<std::int32_t>(info.sky.enabled);
+    ffi.sky.has_sun_direction =
+        static_cast<std::int32_t>(info.sky.has_sun_direction);
+    ffi.sky.sun_direction.x = info.sky.sun_direction.x;
+    ffi.sky.sun_direction.y = info.sky.sun_direction.y;
+    ffi.sky.sun_direction.z = info.sky.sun_direction.z;
+    ffi.sun_light_intensity = info.sun_light_intensity;
+    ffi.moon_light_intensity = info.moon_light_intensity;
+    api_->gfx_set_environment_lighting(m_gfx, &ffi);
+  }
+
+  void set_ocean_settings(const gfx::OceanSettingsInfo &info) {
+    MeshiOceanSettingsInfo ffi{};
+    ffi.enabled = static_cast<std::int32_t>(info.enabled);
+    ffi.wind_speed = info.wind_speed;
+    ffi.wave_amplitude = info.wave_amplitude;
+    ffi.gerstner_amplitude = info.gerstner_amplitude;
+    api_->gfx_set_ocean_settings(m_gfx, &ffi);
+  }
+
+  void set_cloud_settings(const gfx::CloudSettingsInfo &info) {
+    MeshiCloudSettingsInfo ffi{};
+    ffi.enabled = static_cast<std::int32_t>(info.enabled);
+    api_->gfx_set_cloud_settings(m_gfx, &ffi);
+  }
+
+  void set_terrain_settings(const gfx::TerrainSettingsInfo &info) {
+    MeshiTerrainSettingsInfo ffi{};
+    ffi.enabled = static_cast<std::int32_t>(info.enabled);
+    ffi.clipmap_resolution = info.clipmap_resolution;
+    ffi.max_tiles = info.max_tiles;
+    ffi.lod_levels = info.lod_levels;
+    api_->gfx_set_terrain_settings(m_gfx, &ffi);
+  }
+
+  void set_terrain_project_key(const char *project_key) {
+    if (!project_key) {
+      return;
+    }
+    api_->gfx_set_terrain_project_key(m_gfx, project_key);
+  }
+
   inline auto capture_mouse(bool value) -> void {
     api_->gfx_capture_mouse(m_gfx, static_cast<int>(value));
   }
+
 private:
   friend class EngineBackend;
   GraphicsSystem() = default;

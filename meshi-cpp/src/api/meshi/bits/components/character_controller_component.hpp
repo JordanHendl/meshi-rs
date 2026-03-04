@@ -18,6 +18,7 @@ public:
     KeyCode backward = KeyCode::S;
     KeyCode left = KeyCode::A;
     KeyCode right = KeyCode::D;
+    KeyCode jump = KeyCode::Space;
   };
 
   struct Config {
@@ -26,23 +27,27 @@ public:
     bool use_character_controller = true;
     float controller_radius = 0.4f;
     float controller_half_height = 0.9f;
+    bool enable_gravity = false;
+    float gravity_acceleration = -24.0f;
+    float terminal_velocity = -60.0f;
+    bool enable_jump = false;
+    float jump_velocity = 9.0f;
     KeyboardBindings bindings{};
   };
+  using CreateInfo = Config;
 
   CharacterControllerComponent() : CharacterControllerComponent(Config{}) {}
   explicit CharacterControllerComponent(const Config &config) : m_config(config) {}
 
-  virtual ~CharacterControllerComponent() {
-    release_controller();
-  }
+  virtual ~CharacterControllerComponent() { release_controller(); }
 
-  inline auto set_config(const Config &config) -> void {
-    m_config = config;
-  }
+  inline auto set_config(const Config &config) -> void { m_config = config; }
 
   inline auto set_orientation_source(ActorComponent *source) -> void {
     m_orientation_source = source;
   }
+
+  inline auto grounded() const -> bool { return m_grounded; }
 
   virtual auto update(float dt) -> void override {
     ActorComponent::update(dt);
@@ -54,8 +59,8 @@ public:
 
     ensure_controller(target);
 
-    glm::vec2 movement(0.0f);
     auto &events = engine()->event();
+    glm::vec2 movement(0.0f);
     if (events.is_pressed(m_config.bindings.forward)) {
       movement.y += 1.0f;
     }
@@ -67,10 +72,6 @@ public:
     }
     if (events.is_pressed(m_config.bindings.left)) {
       movement.x -= 1.0f;
-    }
-
-    if (movement == glm::vec2(0.0f)) {
-      return;
     }
 
     movement *= m_config.movement_input_sensitivity;
@@ -95,14 +96,38 @@ public:
       right = glm::normalize(right);
     }
 
-    const glm::vec3 desired_translation =
+    glm::vec3 desired_translation =
         (forward * movement.y + right * movement.x) * (m_config.movement_speed * dt);
+
+    const bool jump_down = events.is_pressed(m_config.bindings.jump);
+    const bool jump_pressed = jump_down && !m_jump_held;
+    m_jump_held = jump_down;
+
+    if (m_config.enable_jump && jump_pressed && m_grounded) {
+      m_vertical_velocity = m_config.jump_velocity;
+      m_grounded = false;
+    }
+
+    if (m_config.enable_gravity) {
+      m_vertical_velocity += m_config.gravity_acceleration * dt;
+      if (m_vertical_velocity < m_config.terminal_velocity) {
+        m_vertical_velocity = m_config.terminal_velocity;
+      }
+      desired_translation += WORLD_UP * (m_vertical_velocity * dt);
+    } else if (m_config.enable_jump) {
+      desired_translation += WORLD_UP * (m_vertical_velocity * dt);
+    }
 
     if (m_controller.has_value()) {
       CharacterControllerMoveResult result{};
       auto controller_handle = *m_controller;
       if (engine()->backend().physics().move_character_controller(
               controller_handle, desired_translation, result)) {
+        m_grounded = result.grounded != 0;
+        if (m_grounded && m_vertical_velocity < 0.0f) {
+          m_vertical_velocity = 0.0f;
+        }
+
         if (auto status = engine()->backend().physics().get_character_controller_status(
                 controller_handle)) {
           auto target_local = target->local_transform();
@@ -124,6 +149,9 @@ private:
       auto controller = *m_controller;
       engine()->backend().physics().release_character_controller(controller);
       m_controller = {};
+      m_grounded = false;
+      m_vertical_velocity = 0.0f;
+      m_jump_held = false;
     }
   }
 
@@ -148,6 +176,9 @@ private:
   Config m_config{};
   ActorComponent *m_orientation_source = nullptr;
   std::optional<Handle<CharacterController>> m_controller{};
+  float m_vertical_velocity = 0.0f;
+  bool m_grounded = false;
+  bool m_jump_held = false;
 };
 
 } // namespace meshi

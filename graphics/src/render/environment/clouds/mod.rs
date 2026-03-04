@@ -4,11 +4,11 @@ pub mod cloud_pass_raymarch;
 pub mod cloud_pass_shadow;
 pub mod cloud_pass_temporal;
 
-use crate::gui::debug::{
-    debug_register_int_with_description, debug_register_radial_with_description,
-    debug_register_with_description, DebugRadialOption, DebugRegistryValue, PageType,
-};
 use crate::gui::Slider;
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int_with_description,
+    debug_register_radial_with_description, debug_register_with_description,
+};
 use crate::structs::{CloudResolutionScale, CloudSettings};
 use cloud_assets::{CloudAssets, CloudNoiseSizes};
 use cloud_pass_composite::CloudCompositePass;
@@ -20,8 +20,8 @@ use dashi::driver::command::BlitImage;
 use dashi::{
     Buffer, CommandStream, Context, Filter, Handle, ImageView, Rect2D, SubresourceRange, Viewport,
 };
-use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use furikake::BindlessState;
+use furikake::reservations::bindless_camera::ReservedBindlessCamera;
 use glam::Mat4;
 use tracing::warn;
 

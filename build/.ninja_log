@@ -1,21 +1,11 @@
 # ninja log v5
-33	3054	7938453669763507	_deps/glm-build/glm/CMakeFiles/glm.dir/detail/glm.cpp.obj	ef8bec0ee039c1ad
-3055	3131	7938453670513512	bin/glm.lib	eacec7bfa28664f9
-169	2805	7938454720982350	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	ea84704d50f2ad4d
-286	4985	7938453688978898	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	530883411d979978
-5023	5203	7938453690908452	bin/hello_lights.exe	45bf2ec1afb30fc9
-281	5023	7938453689287729	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	12e1c91c4cd1a422
-4986	5163	7938453690478434	bin/hello_animation.exe	4537f781f3c40da7
-2806	2958	7938454722282360	bin/hello_engine.exe	5077c7212e36978
-29	168	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
-29	168	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
-24	266	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
-24	266	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
-30	3167	7941690251415872	_deps/glm-build/glm/CMakeFiles/glm.dir/detail/glm.cpp.obj	ef8bec0ee039c1ad
-3168	3234	7941690252066958	bin/glm.lib	eacec7bfa28664f9
-271	5347	7941690273097638	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	12e1c91c4cd1a422
-276	5402	7941690273617306	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	530883411d979978
-266	5444	7941690273967319	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	ea84704d50f2ad4d
-5348	5543	7941690274706658	bin/hello_lights.exe	45bf2ec1afb30fc9
-5402	5620	7941690275435770	bin/hello_animation.exe	4537f781f3c40da7
-5445	5653	7941690275884923	bin/hello_engine.exe	5077c7212e36978
+6	316	0	CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
+6	316	0	C:/Program Files/Git/wksp/git/meshi-rs/build/CMakeFiles/meshi_rs_plugin_copy	ba74d3bf5b832fd3
+11	2531	7943674733501963	_deps/glm-build/glm/CMakeFiles/glm.dir/detail/glm.cpp.obj	ef8bec0ee039c1ad
+2534	2604	7943674734191944	bin/glm.lib	eacec7bfa28664f9
+321	3750	7943674745606330	src/examples/hello_lighting/CMakeFiles/hello_lights.dir/main.cpp.obj	12e1c91c4cd1a422
+326	3782	7943674745696320	src/examples/hello_animation/CMakeFiles/hello_animation.dir/main.cpp.obj	530883411d979978
+317	3827	7943674746388164	src/examples/hello_engine/CMakeFiles/hello_engine.dir/main.cpp.obj	ea84704d50f2ad4d
+3753	3933	7943674747098161	bin/hello_lights.exe	45bf2ec1afb30fc9
+3782	3944	7943674747238162	bin/hello_animation.exe	4537f781f3c40da7
+3828	3991	7943674747738155	bin/hello_engine.exe	5077c7212e36978

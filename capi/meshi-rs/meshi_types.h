@@ -66,6 +66,41 @@ struct MeshiDisplayInfo {
     std::int32_t vsync = 0;
     MeshiWindowInfo window;
 };
+struct MeshiSkyboxSettingsInfo {
+    float intensity = 1.0f;
+    std::int32_t use_procedural_cubemap = 1;
+    std::uint32_t update_interval_frames = 1;
+};
+
+struct MeshiSkySettingsInfo {
+    std::int32_t enabled = 1;
+    std::int32_t has_sun_direction = 0;
+    MeshiVec3 sun_direction = {0.0f, -1.0f, 0.0f};
+};
+
+struct MeshiEnvironmentLightingInfo {
+    MeshiSkySettingsInfo sky;
+    float sun_light_intensity = 1.0f;
+    float moon_light_intensity = 0.1f;
+};
+
+struct MeshiOceanSettingsInfo {
+    std::int32_t enabled = 1;
+    float wind_speed = 2.0f;
+    float wave_amplitude = 4.0f;
+    float gerstner_amplitude = 0.35f;
+};
+
+struct MeshiCloudSettingsInfo {
+    std::int32_t enabled = 1;
+};
+
+struct MeshiTerrainSettingsInfo {
+    std::int32_t enabled = 1;
+    std::uint32_t clipmap_resolution = 18;
+    std::uint32_t max_tiles = 12 * 12;
+    std::uint32_t lod_levels = 6;
+};
 
 struct MeshiRenderObjectInfo {
     const char* mesh = nullptr;
@@ -388,3 +423,4 @@ using MeshiRigidBodyHandle = MeshiHandle;
 using MeshiCharacterControllerHandle = MeshiHandle;
 using MeshiAudioSourceHandle = MeshiHandle;
 using MeshiAudioBusHandle = MeshiHandle;
+

@@ -190,8 +190,14 @@ pub fn terrain_chunk_content_hash(chunk: &TerrainChunk) -> u64 {
     chunk.chunk_coords.hash(&mut hasher);
     chunk.tiles_per_chunk.hash(&mut hasher);
     chunk.tile_size.to_bits().hash(&mut hasher);
-    chunk.bounds_min.iter().for_each(|value| value.to_bits().hash(&mut hasher));
-    chunk.bounds_max.iter().for_each(|value| value.to_bits().hash(&mut hasher));
+    chunk
+        .bounds_min
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
+    chunk
+        .bounds_max
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
     for tile in &chunk.tiles {
         tile.tile_id.hash(&mut hasher);
         tile.flags.hash(&mut hasher);

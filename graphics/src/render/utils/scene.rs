@@ -1,9 +1,9 @@
 use std::ptr::NonNull;
 
 use bento::builder::CSOBuilder;
-use dashi::*;
 use dashi::cmd::SyncPoint;
 use dashi::driver::command::Scope;
+use dashi::*;
 use dashi::{
     Buffer, BufferInfo, BufferUsage, BufferView, CommandStream, Context, Handle, MemoryVisibility,
     ShaderResource, UsageBits,
@@ -272,7 +272,8 @@ impl GPUScene {
                 "params",
                 ShaderResource::ConstBuffer(self.data.dispatch.device().into()),
             )
-            .build(&mut ctx).unwrap();
+            .build(&mut ctx)
+            .unwrap();
 
         state.register_cso_tables(&cull_state);
         state.register_cso_tables(&transform_state);
@@ -292,7 +293,7 @@ impl GPUScene {
         let max_views = info.limits.max_num_views as usize;
         let total_cull_slots = max_scene_objects * info.draw_bins.len() * max_views;
         let bin_counter_size = std::mem::size_of::<u32>() * info.draw_bins.len() * max_views;
-        
+
         assert_eq!(scene_object_size, 224);
 
         if BindlessState::reserved_names()
@@ -615,7 +616,7 @@ impl GPUScene {
         let num_objects = 2048;
 
         let dispatch_x = ((num_objects.max(1) + workgroup_size - 1) / workgroup_size).max(1);
-        
+
         let Some(transform_state) = self.pipelines.transform_state.as_ref() else {
             error!("No transform state to dispatch!");
             return stream.end();
@@ -659,7 +660,7 @@ impl GPUScene {
                 bind_tables: cull_state.tables(),
                 dynamic_buffers: Default::default(),
             })
-             .unbind_pipeline()
+            .unbind_pipeline()
             .end()
     }
 
@@ -683,7 +684,6 @@ impl GPUScene {
     pub fn bin_counts_gpu(&self) -> BufferView {
         self.data.bin_counts.device()
     }
-
 
     pub fn max_objects_per_bin(&self) -> u32 {
         self.data.dispatch.as_slice::<SceneDispatchInfo>()[0].max_objects
@@ -734,7 +734,13 @@ mod tests {
             Some(d) => d,
         };
 
-        let mut ctx = Box::new(Context::headless(&ContextInfo { device, profiles: Default::default() }).expect("create context"));
+        let mut ctx = Box::new(
+            Context::headless(&ContextInfo {
+                device,
+                profiles: Default::default(),
+            })
+            .expect("create context"),
+        );
         let mut state = Box::new(BindlessState::new(ctx.as_mut()));
         let scene = make_test_scene(&mut ctx, &mut state);
 
@@ -756,7 +762,7 @@ mod tests {
 
         let info = make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 0xFF);
 
-        let (handle,_) = scene.register_object(&info);
+        let (handle, _) = scene.register_object(&info);
 
         assert_eq!(scene.data.active_objects.len(), 1);
         assert_eq!(scene.data.active_objects[0], handle);
@@ -773,7 +779,8 @@ mod tests {
     fn releasing_object_clears_tracking() {
         let (_ctx, mut state, mut scene) = setup_scene();
 
-        let (handle,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (handle, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
         scene.release_object(handle);
 
@@ -785,7 +792,8 @@ mod tests {
     fn transforming_object_marks_dirty() {
         let (_ctx, mut state, mut scene) = setup_scene();
 
-        let (handle,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (handle, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
         let delta = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
         scene.transform_object(handle, &delta);
@@ -799,7 +807,8 @@ mod tests {
     fn setting_object_transform_replaces_value() {
         let (_ctx, mut state, mut scene) = setup_scene();
 
-        let (handle,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (handle, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
         let replacement = Mat4::from_scale(Vec3::splat(2.0));
         scene.set_object_transform(handle, &replacement);
@@ -813,8 +822,10 @@ mod tests {
     fn adding_and_removing_child_updates_relationships() {
         let (_ctx, mut state, mut scene) = setup_scene();
 
-        let (parent,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
-        let (child,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (parent, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (child, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
         scene.add_child(parent, child);
 
@@ -842,8 +853,10 @@ mod tests {
     fn releasing_child_detaches_from_parent() {
         let (_ctx, mut state, mut scene) = setup_scene();
 
-        let (parent,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
-        let (child,_) = scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (parent, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
+        let (child, _) =
+            scene.register_object(&make_object_info(Mat4::IDENTITY, Mat4::IDENTITY, 1));
 
         scene.add_child(parent, child);
         scene.release_object(child);
@@ -906,12 +919,13 @@ mod tests {
         let parent_transform = Mat4::from_translation(Vec3::new(0.0, 0.0, -2.0));
         let child_local = Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0));
 
-        let (parent,_) = scene.register_object(&make_object_info(
+        let (parent, _) = scene.register_object(&make_object_info(
             parent_transform,
             Mat4::IDENTITY,
             u32::MAX,
         ));
-        let (child,_) = scene.register_object(&make_object_info(child_local, Mat4::IDENTITY, u32::MAX));
+        let (child, _) =
+            scene.register_object(&make_object_info(child_local, Mat4::IDENTITY, u32::MAX));
 
         scene.add_child(parent, child);
 

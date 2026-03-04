@@ -1,6 +1,4 @@
-use dashi::{
-    AspectMask, Context, Format, ImageInfo, ImageView, ImageViewType, SubresourceRange,
-};
+use dashi::{AspectMask, Context, Format, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use glam::UVec3;
 
 #[derive(Clone, Copy, Debug)]
@@ -31,7 +29,11 @@ pub struct CloudWeatherChannels {
 
 impl CloudWeatherChannels {
     pub fn as_u32(self) -> [u32; 3] {
-        [self.coverage as u32, self.cloud_type as u32, self.thickness as u32]
+        [
+            self.coverage as u32,
+            self.cloud_type as u32,
+            self.thickness as u32,
+        ]
     }
 }
 
@@ -77,8 +79,16 @@ pub struct CloudAssets {
 impl CloudAssets {
     pub fn new(ctx: &mut Context, sizes: CloudNoiseSizes) -> Self {
         let weather_layout = CloudWeatherChannelLayout::default();
-        let base_noise_dims = UVec3::new(sizes.base_noise_size, sizes.base_noise_size, sizes.base_noise_size);
-        let detail_noise_dims = UVec3::new(sizes.detail_noise_size, sizes.detail_noise_size, sizes.detail_noise_size);
+        let base_noise_dims = UVec3::new(
+            sizes.base_noise_size,
+            sizes.base_noise_size,
+            sizes.base_noise_size,
+        );
+        let detail_noise_dims = UVec3::new(
+            sizes.detail_noise_size,
+            sizes.detail_noise_size,
+            sizes.detail_noise_size,
+        );
 
         let base_noise = create_noise_atlas(
             ctx,
@@ -102,11 +112,7 @@ impl CloudAssets {
             sizes.weather_map_size,
             weather_layout,
         );
-        let blue_noise = create_blue_noise(
-            ctx,
-            "[CLOUD] Blue Noise",
-            sizes.blue_noise_size,
-        );
+        let blue_noise = create_blue_noise(ctx, "[CLOUD] Blue Noise", sizes.blue_noise_size);
 
         Self {
             base_noise,
@@ -294,9 +300,5 @@ fn fbm_2d(x: f32, y: f32, base_freq: f32, octaves: u32, seed: u32) -> f32 {
         amplitude *= 0.5;
         freq *= 2.0;
     }
-    if max > 0.0 {
-        total / max
-    } else {
-        0.0
-    }
+    if max > 0.0 { total / max } else { 0.0 }
 }

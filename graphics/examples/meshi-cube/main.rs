@@ -85,7 +85,7 @@ fn main() {
     let mut last_time = timer.elapsed_seconds_f32();
     let mut total_time = 0.0f32;
     let angular_velocity = 2.0f32;
-    
+
     setup.engine.set_ocean_settings(OceanFrameSettings {
         enabled: false,
         ..Default::default()
@@ -108,7 +108,9 @@ fn main() {
         }
 
         let camera_transform = data.camera.update(dt);
-        setup.engine.set_camera_transform(setup.camera, &camera_transform);
+        setup
+            .engine
+            .set_camera_transform(setup.camera, &camera_transform);
 
         setup.engine.update(dt);
         last_time = now;

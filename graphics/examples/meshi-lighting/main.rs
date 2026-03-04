@@ -174,11 +174,18 @@ fn main() {
         .unwrap();
 
     let translation = Mat4::from_translation(Vec3::new(0.0, -0.2, -2.8));
-    setup.engine.set_object_transform(model_handle, &translation);
+    setup
+        .engine
+        .set_object_transform(model_handle, &translation);
 
     let lights = [
         directional_light(Vec3::new(-0.2, -70.0, -0.3), Vec3::splat(1.0), 1.4),
-        point_light(Vec3::new(1.0, 0.3, -60.0), Vec3::new(1.0, 0.2, 0.2), 7.0, 6.0),
+        point_light(
+            Vec3::new(1.0, 0.3, -60.0),
+            Vec3::new(1.0, 0.2, 0.2),
+            7.0,
+            6.0,
+        ),
         spot_light(
             Vec3::new(-20.1, 1.1, -2.3),
             Vec3::new(0.2, -1.0, -0.2),
@@ -275,7 +282,9 @@ fn main() {
         }
 
         let camera_transform = data.camera.update(dt);
-        setup.engine.set_camera_transform(setup.camera, &camera_transform);
+        setup
+            .engine
+            .set_camera_transform(setup.camera, &camera_transform);
 
         setup.engine.update(dt);
         last_time = now;

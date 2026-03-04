@@ -18,7 +18,10 @@ impl<T: Default> Default for GpuOption<T> {
 impl<T> GpuOption<T> {
     #[inline]
     pub fn none(default: T) -> Self {
-        Self { is_some: 0, value: default }
+        Self {
+            is_some: 0,
+            value: default,
+        }
     }
 
     #[inline]
@@ -38,11 +41,19 @@ impl<T> GpuOption<T> {
 
     #[inline]
     pub fn as_ref(&self) -> Option<&T> {
-        if self.is_some != 0 { Some(&self.value) } else { None }
+        if self.is_some != 0 {
+            Some(&self.value)
+        } else {
+            None
+        }
     }
 
     #[inline]
     pub fn as_mut(&mut self) -> Option<&mut T> {
-        if self.is_some != 0 { Some(&mut self.value) } else { None }
+        if self.is_some != 0 {
+            Some(&mut self.value)
+        } else {
+            None
+        }
     }
 }

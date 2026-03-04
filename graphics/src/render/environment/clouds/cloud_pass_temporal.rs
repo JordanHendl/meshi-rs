@@ -191,7 +191,10 @@ impl CloudTemporalPass {
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().combine(self.params.sync_up()).end()
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .end()
     }
 
     pub fn history_index(&self) -> usize {

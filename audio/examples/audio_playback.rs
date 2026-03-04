@@ -3,13 +3,7 @@ use noren::{
     rdb::audio::{AudioClip, AudioFormat},
     DBInfo, RDBFile, DB,
 };
-use std::{
-    f32::consts::PI,
-    fs,
-    path::PathBuf,
-    thread::sleep,
-    time::Duration,
-};
+use std::{f32::consts::PI, fs, path::PathBuf, thread::sleep, time::Duration};
 
 const SAMPLE_CLIP: &str = "audio/sample";
 

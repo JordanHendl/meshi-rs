@@ -198,7 +198,6 @@ impl GPUDrawBuilder {
         self.data.draw_list
     }
 
-
     pub fn draw_list_for_bin(&self, bin: u32) -> BufferView {
         let offset = bin as u64
             * self.data.max_objects as u64
@@ -234,7 +233,7 @@ impl GPUDrawBuilder {
         let Some(build_draws) = self.pipelines.build_draws.as_ref() else {
             return stream.end();
         };
-        
+
         #[repr(C)]
         #[derive(Debug)]
         struct PerDispatch {

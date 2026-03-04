@@ -372,7 +372,10 @@ impl CloudRaymarchPass {
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().combine(self.params.sync_up()).end()
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

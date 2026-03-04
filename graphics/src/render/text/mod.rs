@@ -255,7 +255,7 @@ impl TextRenderer {
     }
 
     fn preload_font_for_info(&mut self, info: &TextInfo) {
-        let s: &mut Self = unsafe{(&mut *(self as *mut Self))};
+        let s: &mut Self = unsafe { (&mut *(self as *mut Self)) };
         match &info.render_mode {
             TextRenderMode::Sdf { font } => {
                 if !font.is_empty() {
@@ -454,7 +454,7 @@ impl TextRenderer {
         let draws = self.emit_draws().to_vec();
         let glyphs = self.build_text_glyphs(&draws, viewport);
         let glyph_count = self.upload_text_glyphs(ctx, &glyphs);
-        
+
         let mut cmd = CommandStream::<PendingGraphics>::subdraw();
         let Some(pso) = self.text_pso.as_ref() else {
             error!("Failed to  build text without a text pso");
@@ -561,14 +561,15 @@ impl TextRenderer {
     }
 
     pub fn build_draws(&mut self) {
-        let s: &mut Self = unsafe{(&mut *(self as *mut Self))};
+        let s: &mut Self = unsafe { (&mut *(self as *mut Self)) };
         let handles: Vec<_> = self.objects.entries.clone();
-        let handles_changed = self.cached_object_handles.len() != handles.len()
-            || self
-                .cached_object_handles
-                .iter()
-                .zip(handles.iter())
-                .any(|(cached, current)| cached.slot != current.slot || cached.generation != current.generation);
+        let handles_changed =
+            self.cached_object_handles.len() != handles.len()
+                || self.cached_object_handles.iter().zip(handles.iter()).any(
+                    |(cached, current)| {
+                        cached.slot != current.slot || cached.generation != current.generation
+                    },
+                );
 
         if self.object_list_dirty || handles_changed {
             self.cached_object_draws.clear();

@@ -255,12 +255,8 @@ pub fn generate_height_chunk(
     }
 
     let slope = compute_slope_map(size as u32, &heights, settings.height.sample_spacing);
-    let material_weights = compute_material_weights(
-        size as u32,
-        &heights,
-        &slope,
-        &settings.materials,
-    );
+    let material_weights =
+        compute_material_weights(size as u32, &heights, &slope, &settings.materials);
 
     HeightChunk {
         size: size as u32,
@@ -279,10 +275,7 @@ pub fn detect_feature_volumes(
     Vec::new()
 }
 
-pub fn volumes_overlapping_aabb(
-    volumes: &[FeatureVolume],
-    aabb_world: Aabb,
-) -> Vec<FeatureVolume> {
+pub fn volumes_overlapping_aabb(volumes: &[FeatureVolume], aabb_world: Aabb) -> Vec<FeatureVolume> {
     volumes
         .iter()
         .filter(|volume| volume.shape.intersects(&aabb_world))
@@ -318,12 +311,9 @@ pub fn generate_density_chunk(
     for z in 0..dims_with_border[2] as i32 {
         for y in 0..dims_with_border[1] as i32 {
             for x in 0..dims_with_border[0] as i32 {
-                let world_x =
-                    origin[0] + (x - border) as f32 * settings.density.voxel_size;
-                let world_y =
-                    origin[1] + (y - border) as f32 * settings.density.voxel_size;
-                let world_z =
-                    origin[2] + (z - border) as f32 * settings.density.voxel_size;
+                let world_x = origin[0] + (x - border) as f32 * settings.density.voxel_size;
+                let world_y = origin[1] + (y - border) as f32 * settings.density.voxel_size;
+                let world_z = origin[2] + (z - border) as f32 * settings.density.voxel_size;
                 let height = height_sampler.height_at_world(world_x, world_z);
                 let mut d = height - world_y;
                 for volume in volumes_in_range {
@@ -331,12 +321,7 @@ pub fn generate_density_chunk(
                         d = apply_feature_density(seed, volume, d, [world_x, world_y, world_z]);
                     }
                 }
-                density[index_3d(
-                    x as u32,
-                    y as u32,
-                    z as u32,
-                    dims_with_border,
-                )] = d;
+                density[index_3d(x as u32, y as u32, z as u32, dims_with_border)] = d;
             }
         }
     }
@@ -348,7 +333,10 @@ pub fn generate_density_chunk(
     }
 }
 
-pub fn mesh_density_chunk(density_chunk: &DensityChunk, settings: &TerrainGenSettings) -> MeshChunk {
+pub fn mesh_density_chunk(
+    density_chunk: &DensityChunk,
+    settings: &TerrainGenSettings,
+) -> MeshChunk {
     let dims = density_chunk.dims;
     let border = settings.density.border_samples as i32;
     let voxel = settings.density.voxel_size;
@@ -540,7 +528,10 @@ pub fn build_region(
         write_height_chunk(&output_root, coord, &chunk)?;
         height_chunks.push(*coord);
         let bounds = height_chunk_aabb(coord, settings);
-        chunk_bounds.insert(format!("height:{}:{}:{}", coord.cx, coord.cz, coord.lod), bounds);
+        chunk_bounds.insert(
+            format!("height:{}:{}:{}", coord.cx, coord.cz, coord.lod),
+            bounds,
+        );
     }
 
     let volume_candidates = volumes_overlapping_aabb(authored_volumes, region_bounds);
@@ -557,13 +548,20 @@ pub fn build_region(
         if volumes_in_range.is_empty() {
             continue;
         }
-        let density_chunk = generate_density_chunk(seed, coord, &volumes_in_range, settings, &sampler);
+        let density_chunk =
+            generate_density_chunk(seed, coord, &volumes_in_range, settings, &sampler);
         write_density_chunk(&output_root, &coord, &density_chunk)?;
         let mesh = mesh_density_chunk(&density_chunk, settings);
         write_mesh_chunk(&output_root, &coord, &mesh)?;
         density_chunks.push(coord);
         mesh_chunks.push(coord);
-        chunk_bounds.insert(format!("density:{}:{}:{}:{}", coord.cx, coord.cy, coord.cz, coord.lod), chunk_aabb);
+        chunk_bounds.insert(
+            format!(
+                "density:{}:{}:{}:{}",
+                coord.cx, coord.cy, coord.cz, coord.lod
+            ),
+            chunk_aabb,
+        );
     }
 
     let manifest = RegionManifest {
@@ -611,12 +609,7 @@ fn collect_density_chunks(region: Aabb, settings: &TerrainGenSettings) -> Vec<Ch
     for cz in min_cz..=max_cz {
         for cy in min_cy..=max_cy {
             for cx in min_cx..=max_cx {
-                coords.push(ChunkCoord3 {
-                    cx,
-                    cy,
-                    cz,
-                    lod: 0,
-                });
+                coords.push(ChunkCoord3 { cx, cy, cz, lod: 0 });
             }
         }
     }
@@ -677,8 +670,10 @@ fn write_height_chunk(root: &Path, coord: &ChunkCoord2, chunk: &HeightChunk) -> 
 fn write_density_chunk(root: &Path, coord: &ChunkCoord3, chunk: &DensityChunk) -> io::Result<()> {
     let density_dir = root.join("density");
     fs::create_dir_all(&density_dir)?;
-    let density_path =
-        density_dir.join(format!("{}_{}_{}_{}.bin", coord.cx, coord.cy, coord.cz, coord.lod));
+    let density_path = density_dir.join(format!(
+        "{}_{}_{}_{}.bin",
+        coord.cx, coord.cy, coord.cz, coord.lod
+    ));
     write_f32_slice(&density_path, &chunk.density)?;
     Ok(())
 }
@@ -686,8 +681,10 @@ fn write_density_chunk(root: &Path, coord: &ChunkCoord3, chunk: &DensityChunk) -
 fn write_mesh_chunk(root: &Path, coord: &ChunkCoord3, chunk: &MeshChunk) -> io::Result<()> {
     let mesh_dir = root.join("mesh");
     fs::create_dir_all(&mesh_dir)?;
-    let mesh_path =
-        mesh_dir.join(format!("{}_{}_{}_{}.meshbin", coord.cx, coord.cy, coord.cz, coord.lod));
+    let mesh_path = mesh_dir.join(format!(
+        "{}_{}_{}_{}.meshbin",
+        coord.cx, coord.cy, coord.cz, coord.lod
+    ));
     let mut file = fs::File::create(mesh_path)?;
     file.write_all(&(chunk.positions.len() as u32).to_le_bytes())?;
     file.write_all(&(chunk.indices.len() as u32).to_le_bytes())?;
@@ -771,10 +768,20 @@ fn compute_material_weights(
     weights
 }
 
-fn apply_feature_density(seed: WorldSeed, volume: &FeatureVolume, density: f32, pos: [f32; 3]) -> f32 {
+fn apply_feature_density(
+    seed: WorldSeed,
+    volume: &FeatureVolume,
+    density: f32,
+    pos: [f32; 3],
+) -> f32 {
     match (&volume.kind, &volume.params) {
         (FeatureKind::Cave, FeatureParams::Cave(params)) => {
-            let n = noise3(seed, pos[0] * params.frequency, pos[1] * params.frequency, pos[2] * params.frequency);
+            let n = noise3(
+                seed,
+                pos[0] * params.frequency,
+                pos[1] * params.frequency,
+                pos[2] * params.frequency,
+            );
             if n > params.threshold {
                 density.min(-params.strength.abs())
             } else {
@@ -843,13 +850,25 @@ fn cube_index(cube: &[f32; 8], iso: f32) -> usize {
 
 fn vertex_interp(iso: f32, v1: f32, v2: f32, p1: [i32; 3], p2: [i32; 3], voxel: f32) -> [f32; 3] {
     if (iso - v1).abs() < f32::EPSILON {
-        return [p1[0] as f32 * voxel, p1[1] as f32 * voxel, p1[2] as f32 * voxel];
+        return [
+            p1[0] as f32 * voxel,
+            p1[1] as f32 * voxel,
+            p1[2] as f32 * voxel,
+        ];
     }
     if (iso - v2).abs() < f32::EPSILON {
-        return [p2[0] as f32 * voxel, p2[1] as f32 * voxel, p2[2] as f32 * voxel];
+        return [
+            p2[0] as f32 * voxel,
+            p2[1] as f32 * voxel,
+            p2[2] as f32 * voxel,
+        ];
     }
     if (v1 - v2).abs() < f32::EPSILON {
-        return [p1[0] as f32 * voxel, p1[1] as f32 * voxel, p1[2] as f32 * voxel];
+        return [
+            p1[0] as f32 * voxel,
+            p1[1] as f32 * voxel,
+            p1[2] as f32 * voxel,
+        ];
     }
     let t = (iso - v1) / (v2 - v1);
     [
@@ -969,7 +988,12 @@ fn noise3(seed: WorldSeed, x: f32, y: f32, z: f32) -> f32 {
     let c001 = hash_to_unit(seed, x0 as i32, y0 as i32, (z0 + 1.0) as i32);
     let c101 = hash_to_unit(seed, (x0 + 1.0) as i32, y0 as i32, (z0 + 1.0) as i32);
     let c011 = hash_to_unit(seed, x0 as i32, (y0 + 1.0) as i32, (z0 + 1.0) as i32);
-    let c111 = hash_to_unit(seed, (x0 + 1.0) as i32, (y0 + 1.0) as i32, (z0 + 1.0) as i32);
+    let c111 = hash_to_unit(
+        seed,
+        (x0 + 1.0) as i32,
+        (y0 + 1.0) as i32,
+        (z0 + 1.0) as i32,
+    );
 
     let x00 = lerp(c000, c100, u);
     let x10 = lerp(c010, c110, u);
@@ -1006,28 +1030,26 @@ fn splitmix64(mut x: u64) -> u64 {
 
 #[allow(clippy::all)]
 const EDGE_TABLE: [u16; 256] = [
-    0x000, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06,
-    0xc0a, 0xd03, 0xe09, 0xf00, 0x190, 0x099, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c,
-    0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90, 0x230, 0x339, 0x033, 0x13a,
-    0x636, 0x73f, 0x435, 0x53c, 0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30,
-    0x3a0, 0x2a9, 0x1a3, 0x0aa, 0x7a6, 0x6af, 0x5a5, 0x4ac, 0xbac, 0xaa5, 0x9af, 0x8a6,
-    0xfaa, 0xea3, 0xda9, 0xca0, 0x460, 0x569, 0x663, 0x76a, 0x066, 0x16f, 0x265, 0x36c,
-    0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963, 0xa69, 0xb60, 0x5f0, 0x4f9, 0x7f3, 0x6fa,
-    0x1f6, 0x0ff, 0x3f5, 0x2fc, 0xdfc, 0xcf5, 0xfff, 0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0,
-    0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x055, 0x15c, 0xe5c, 0xf55, 0xc5f, 0xd56,
-    0xa5a, 0xb53, 0x859, 0x950, 0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6, 0x2cf, 0x1c5, 0x0cc,
-    0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0, 0x8c0, 0x9c9, 0xac3, 0xbca,
-    0xcc6, 0xdcf, 0xec5, 0xfcc, 0x0cc, 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9, 0x7c0,
-    0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c, 0x15c, 0x055, 0x35f, 0x256,
-    0x55a, 0x453, 0x759, 0x650, 0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc,
-    0x2fc, 0x3f5, 0x0ff, 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0, 0xb60, 0xa69, 0x963, 0x86a,
-    0xf66, 0xe6f, 0xd65, 0xc6c, 0x36c, 0x265, 0x16f, 0x066, 0x76a, 0x663, 0x569, 0x460,
-    0xca0, 0xda9, 0xea3, 0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac, 0x4ac, 0x5a5, 0x6af, 0x7a6,
-    0x0aa, 0x1a3, 0x2a9, 0x3a0, 0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c,
-    0x53c, 0x435, 0x73f, 0x636, 0x13a, 0x033, 0x339, 0x230, 0xe90, 0xf99, 0xc93, 0xd9a,
-    0xa96, 0xb9f, 0x895, 0x99c, 0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x099, 0x190,
-    0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c, 0x70c, 0x605, 0x50f, 0x406,
-    0x30a, 0x203, 0x109, 0x000,
+    0x000, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a,
+    0xd03, 0xe09, 0xf00, 0x190, 0x099, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c, 0x99c, 0x895,
+    0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90, 0x230, 0x339, 0x033, 0x13a, 0x636, 0x73f, 0x435,
+    0x53c, 0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30, 0x3a0, 0x2a9, 0x1a3, 0x0aa,
+    0x7a6, 0x6af, 0x5a5, 0x4ac, 0xbac, 0xaa5, 0x9af, 0x8a6, 0xfaa, 0xea3, 0xda9, 0xca0, 0x460,
+    0x569, 0x663, 0x76a, 0x066, 0x16f, 0x265, 0x36c, 0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963,
+    0xa69, 0xb60, 0x5f0, 0x4f9, 0x7f3, 0x6fa, 0x1f6, 0x0ff, 0x3f5, 0x2fc, 0xdfc, 0xcf5, 0xfff,
+    0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0, 0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x055, 0x15c,
+    0xe5c, 0xf55, 0xc5f, 0xd56, 0xa5a, 0xb53, 0x859, 0x950, 0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6,
+    0x2cf, 0x1c5, 0x0cc, 0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0, 0x8c0, 0x9c9,
+    0xac3, 0xbca, 0xcc6, 0xdcf, 0xec5, 0xfcc, 0x0cc, 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9,
+    0x7c0, 0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c, 0x15c, 0x055, 0x35f, 0x256,
+    0x55a, 0x453, 0x759, 0x650, 0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc, 0x2fc,
+    0x3f5, 0x0ff, 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0, 0xb60, 0xa69, 0x963, 0x86a, 0xf66, 0xe6f,
+    0xd65, 0xc6c, 0x36c, 0x265, 0x16f, 0x066, 0x76a, 0x663, 0x569, 0x460, 0xca0, 0xda9, 0xea3,
+    0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac, 0x4ac, 0x5a5, 0x6af, 0x7a6, 0x0aa, 0x1a3, 0x2a9, 0x3a0,
+    0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c, 0x53c, 0x435, 0x73f, 0x636, 0x13a,
+    0x033, 0x339, 0x230, 0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c, 0x69c, 0x795,
+    0x49f, 0x596, 0x29a, 0x393, 0x099, 0x190, 0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905,
+    0x80c, 0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x000,
 ];
 
 #[allow(clippy::all)]
@@ -1108,7 +1130,11 @@ mod tests {
     fn determinism_height_chunk() {
         let settings = base_settings();
         let seed = WorldSeed(1234);
-        let coord = ChunkCoord2 { cx: 0, cz: 0, lod: 0 };
+        let coord = ChunkCoord2 {
+            cx: 0,
+            cz: 0,
+            lod: 0,
+        };
         let chunk_a = generate_height_chunk(seed, coord, &settings);
         let chunk_b = generate_height_chunk(seed, coord, &settings);
         assert_eq!(chunk_a.size, chunk_b.size);
@@ -1122,8 +1148,16 @@ mod tests {
     fn seam_height_chunk_border_matches() {
         let settings = base_settings();
         let seed = WorldSeed(99);
-        let coord_a = ChunkCoord2 { cx: 0, cz: 0, lod: 0 };
-        let coord_b = ChunkCoord2 { cx: 1, cz: 0, lod: 0 };
+        let coord_a = ChunkCoord2 {
+            cx: 0,
+            cz: 0,
+            lod: 0,
+        };
+        let coord_b = ChunkCoord2 {
+            cx: 1,
+            cz: 0,
+            lod: 0,
+        };
         let chunk_a = generate_height_chunk(seed, coord_a, &settings);
         let chunk_b = generate_height_chunk(seed, coord_b, &settings);
         let size = chunk_a.size as usize;
@@ -1152,8 +1186,18 @@ mod tests {
             kind: FeatureKind::Cave,
             params: FeatureParams::Cave(settings.density.cave.clone()),
         };
-        let coord_a = ChunkCoord3 { cx: 0, cy: 0, cz: 0, lod: 0 };
-        let coord_b = ChunkCoord3 { cx: 1, cy: 0, cz: 0, lod: 0 };
+        let coord_a = ChunkCoord3 {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+            lod: 0,
+        };
+        let coord_b = ChunkCoord3 {
+            cx: 1,
+            cy: 0,
+            cz: 0,
+            lod: 0,
+        };
         let chunk_a = generate_density_chunk(seed, coord_a, &[volume.clone()], &settings, &sampler);
         let chunk_b = generate_density_chunk(seed, coord_b, &[volume], &settings, &sampler);
         let dims = chunk_a.dims;
@@ -1207,8 +1251,8 @@ mod tests {
         let mesh = mesh_density_chunk(&chunk, &settings);
         assert!(!mesh.indices.is_empty());
         for normal in mesh.normals {
-            let len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
-                .sqrt();
+            let len =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             assert!((len - 1.0).abs() < 0.05);
         }
     }

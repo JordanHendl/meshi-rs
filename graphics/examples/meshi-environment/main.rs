@@ -48,15 +48,15 @@ fn main() {
         .engine
         .set_terrain_render_settings(TerrainRenderSettings {
             enabled: true,
-            clipmap_resolution: 18,
-            max_tiles: 12 * 12,
-            lod_levels: 6,
+            clipmap_resolution: 14,
+            max_tiles: 10 * 10,
+            lod_levels: 5,
             clipmap: TerrainClipmapSettings {
                 surface: TerrainClipmapResourceSettings {
-                    tile_resolution: [257, 257],
+                    tile_resolution: [193, 193],
                 },
                 material: TerrainClipmapResourceSettings {
-                    tile_resolution: [257, 257],
+                    tile_resolution: [193, 193],
                 },
             },
             ..Default::default()
@@ -103,17 +103,22 @@ fn main() {
     setup.engine.set_skybox_settings(SkyboxFrameSettings {
         intensity: 1.0,
         use_procedural_cubemap: true,
-        update_interval_frames: 1,
+        update_interval_frames: 4,
         ..Default::default()
     });
     let mut cloud_settings = setup.engine.cloud_settings();
     cloud_settings.enabled = true;
+    cloud_settings.low_res_scale = CloudResolutionScale::Quarter;
+    cloud_settings.step_count = 10;
+    cloud_settings.light_step_count = 6;
     setup.engine.set_cloud_settings(cloud_settings);
     setup.engine.set_ocean_settings(OceanFrameSettings {
         enabled: true,
         wind_speed: 2.0,
         wave_amplitude: 4.0,
         gerstner_amplitude: 0.35,
+        ssr_strength: 0.45,
+        ssr_steps: 12,
         cascade_spectrum_scales: [500.0, 1.0, 0.8],
         ..Default::default()
     });

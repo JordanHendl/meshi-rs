@@ -78,10 +78,7 @@ impl PartialEq for DockNode {
                 },
             ) => d1 == d2 && f1 == f2 && s1 == s2,
 
-            (
-                DockNode::Tabs { group: g1 },
-                DockNode::Tabs { group: g2 },
-            ) => g1 == g2,
+            (DockNode::Tabs { group: g1 }, DockNode::Tabs { group: g2 }) => g1 == g2,
 
             _ => false,
         }
@@ -302,7 +299,12 @@ impl DockArea {
     }
 }
 
-fn layout_node(node: &DockNode, rect: DockRect, tab_bar_height: f32, output: &mut Vec<DockGroupLayout>) {
+fn layout_node(
+    node: &DockNode,
+    rect: DockRect,
+    tab_bar_height: f32,
+    output: &mut Vec<DockGroupLayout>,
+) {
     match node {
         DockNode::Split {
             direction,
@@ -314,7 +316,8 @@ fn layout_node(node: &DockNode, rect: DockRect, tab_bar_height: f32, output: &mu
             match direction {
                 DockSplitDirection::Horizontal => {
                     let first_width = size.x * ratio.clamp(0.05, 0.95);
-                    let first_rect = DockRect::from_position_size(rect.min, vec2(first_width, size.y));
+                    let first_rect =
+                        DockRect::from_position_size(rect.min, vec2(first_width, size.y));
                     let second_rect = DockRect::from_position_size(
                         vec2(rect.min.x + first_width, rect.min.y),
                         vec2(size.x - first_width, size.y),
@@ -324,7 +327,8 @@ fn layout_node(node: &DockNode, rect: DockRect, tab_bar_height: f32, output: &mu
                 }
                 DockSplitDirection::Vertical => {
                     let first_height = size.y * ratio.clamp(0.05, 0.95);
-                    let first_rect = DockRect::from_position_size(rect.min, vec2(size.x, first_height));
+                    let first_rect =
+                        DockRect::from_position_size(rect.min, vec2(size.x, first_height));
                     let second_rect = DockRect::from_position_size(
                         vec2(rect.min.x, rect.min.y + first_height),
                         vec2(size.x, size.y - first_height),

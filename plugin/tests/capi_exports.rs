@@ -105,14 +105,8 @@ fn capi_headers_match_rust_exports() {
         header_exports.extend(declared_functions_from_header(&contents));
     }
 
-    let missing_in_headers: Vec<_> = rust_exports
-        .difference(&header_exports)
-        .cloned()
-        .collect();
-    let extra_in_headers: Vec<_> = header_exports
-        .difference(&rust_exports)
-        .cloned()
-        .collect();
+    let missing_in_headers: Vec<_> = rust_exports.difference(&header_exports).cloned().collect();
+    let extra_in_headers: Vec<_> = header_exports.difference(&rust_exports).cloned().collect();
 
     assert!(
         rust_exports.contains("meshi_plugin_get_api")

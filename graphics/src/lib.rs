@@ -596,6 +596,7 @@ impl RenderEngine {
     }
 
     fn publish_events(&mut self) {
+        use winit::event::Event as WinitEvent;
         use winit::event_loop::ControlFlow;
         use winit::platform::run_return::EventLoopExtRunReturn;
 
@@ -608,7 +609,11 @@ impl RenderEngine {
                 if let DisplayImpl::Window(Some(display)) = &mut dis.raw {
                     let event_loop = display.winit_event_loop();
                     event_loop.run_return(|event, _target, control_flow| {
-                        *control_flow = ControlFlow::Exit;
+                        *control_flow = ControlFlow::Poll;
+                        if matches!(event, WinitEvent::MainEventsCleared) {
+                            *control_flow = ControlFlow::Exit;
+                            return;
+                        }
                         if let Some(mut e) = event::from_winit_event(&event) {
                             triggered = true;
                             unsafe {
@@ -634,7 +639,11 @@ impl RenderEngine {
                 if let DisplayImpl::Window(Some(display)) = &mut dis.raw {
                     let event_loop = display.winit_event_loop();
                     event_loop.run_return(|event, _target, control_flow| {
-                        *control_flow = ControlFlow::Exit;
+                        *control_flow = ControlFlow::Poll;
+                        if matches!(event, WinitEvent::MainEventsCleared) {
+                            *control_flow = ControlFlow::Exit;
+                            return;
+                        }
                         if let Some(e) = event::from_winit_event(&event) {
                             unsafe {
                                 (*debug_gui_ptr).handle_event(&e);

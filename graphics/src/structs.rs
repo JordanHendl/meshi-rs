@@ -283,8 +283,8 @@ impl Default for ShadowCascadeSettings {
         Self {
             cascade_count: 4,
             split_lambda: 0.9,
-            cascade_splits:  [0.05, 0.15, 0.35, 1.0],
-            cascade_extents:  [100.0, 4000.0, 8000.0, 12000.0],
+            cascade_splits: [0.05, 0.15, 0.35, 1.0],
+            cascade_extents: [100.0, 4000.0, 8000.0, 12000.0],
             cascade_resolutions: [2048, 2048, 1024, 1024],
             cascade_strengths: [1.0; 4],
         }

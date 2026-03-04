@@ -10,7 +10,8 @@ use furikake::PSOBuilderFurikakeExt;
 use furikake::{
     BindlessState,
     reservations::{
-        bindless_joints::ReservedBindlessJoints, bindless_skeletons::ReservedBindlessSkeletons,
+        bindless_joints::ReservedBindlessJoints,
+        bindless_skeletons::ReservedBindlessSkeletons,
         per_obj_joints::{PerObjectJointAllocation, ReservedPerObjJoints},
     },
     types::{AnimationState as FurikakeAnimationState, JointTransform, SkeletonHeader},
@@ -172,7 +173,8 @@ impl SkinningDispatcher {
                 "skinning_dispatches",
                 ShaderResource::StorageBuffer(dispatches.device().into()),
             )
-            .add_reserved_table_variables(state).unwrap()
+            .add_reserved_table_variables(state)
+            .unwrap()
             .build(ctx)
             .ok();
 
@@ -268,7 +270,8 @@ impl SkinningDispatcher {
                 continue;
             }
             let time_seconds = skinned.advance_time(delta_time);
-            buffer[dispatch_count] = SkinningDispatch::from_model(skinned, delta_time, time_seconds);
+            buffer[dispatch_count] =
+                SkinningDispatch::from_model(skinned, delta_time, time_seconds);
             skinned.clear_animation_dirty();
             dispatch_count += 1;
         }
@@ -311,12 +314,10 @@ impl SkinningDispatcher {
 pub fn unregister_skinned_model(bindless: &mut BindlessState, skinned: &SkinnedModelData) {
     bindless.unregister_animation_state(skinned.animation_state);
     if let Some(allocation) = skinned.per_obj_joints {
-        let _ = bindless.reserved_mut::<ReservedPerObjJoints, _>(
-            "meshi_per_obj_joints",
-            |joints| {
+        let _ =
+            bindless.reserved_mut::<ReservedPerObjJoints, _>("meshi_per_obj_joints", |joints| {
                 joints.free(allocation);
-            },
-        );
+            });
     }
     if skinned.instance_skeleton.valid() {
         let header = bindless
@@ -476,18 +477,20 @@ fn reserve_per_obj_joints(
         return None;
     }
 
-    let skeletons =
-        bindless.reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons").ok()?;
+    let skeletons = bindless
+        .reserved::<ReservedBindlessSkeletons>("meshi_bindless_skeletons")
+        .ok()?;
     let header = *skeletons.skeleton(skeleton);
     if header.joint_count == 0 {
         return None;
     }
-    
+
     let mut h = Option::None;
     bindless
         .reserved_mut::<ReservedPerObjJoints, _>("meshi_per_obj_joints", |joints| {
             h = joints.reserve(header.joint_count)
-        }).unwrap();
+        })
+        .unwrap();
 
     h
 }

@@ -50,6 +50,12 @@ typedef struct MeshiPluginApi {
         MeshiCameraHandle camera_handle,
         const MeshiMat4* transform);
     void (*gfx_capture_mouse)(struct MeshiEngine* render, int32_t value);
+    void (*gfx_set_skybox_settings)(struct MeshiEngine* render, const MeshiSkyboxSettingsInfo* info);
+    void (*gfx_set_environment_lighting)(struct MeshiEngine* render, const MeshiEnvironmentLightingInfo* info);
+    void (*gfx_set_ocean_settings)(struct MeshiEngine* render, const MeshiOceanSettingsInfo* info);
+    void (*gfx_set_cloud_settings)(struct MeshiEngine* render, const MeshiCloudSettingsInfo* info);
+    void (*gfx_set_terrain_settings)(struct MeshiEngine* render, const MeshiTerrainSettingsInfo* info);
+    void (*gfx_set_terrain_project_key)(struct MeshiEngine* render, const char* project_key);
     MeshiAudioSourceHandle (*audio_create_source)(struct MeshiEngine* engine, const char* path);
     void (*audio_destroy_source)(struct MeshiEngine* engine, MeshiAudioSourceHandle h);
     void (*audio_play)(struct MeshiEngine* engine, MeshiAudioSourceHandle h);
@@ -174,6 +180,12 @@ void meshi_gfx_set_camera_projection(
     MeshiCameraHandle camera_handle,
     const MeshiMat4* transform);
 void meshi_gfx_capture_mouse(struct MeshiEngine* render, int32_t value);
+void meshi_gfx_set_skybox_settings(struct MeshiEngine* render, const MeshiSkyboxSettingsInfo* info);
+void meshi_gfx_set_environment_lighting(struct MeshiEngine* render, const MeshiEnvironmentLightingInfo* info);
+void meshi_gfx_set_ocean_settings(struct MeshiEngine* render, const MeshiOceanSettingsInfo* info);
+void meshi_gfx_set_cloud_settings(struct MeshiEngine* render, const MeshiCloudSettingsInfo* info);
+void meshi_gfx_set_terrain_settings(struct MeshiEngine* render, const MeshiTerrainSettingsInfo* info);
+void meshi_gfx_set_terrain_project_key(struct MeshiEngine* render, const char* project_key);
 
 
 // Physics
@@ -216,3 +228,4 @@ void meshi_unpair_render_physics(
 #ifdef __cplusplus
 } // extern "C"
 #endif
+

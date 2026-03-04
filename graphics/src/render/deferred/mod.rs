@@ -357,7 +357,7 @@ impl DeferredRenderer {
         let environment = EnvironmentRenderer::new(
             ctx.as_mut(),
             state.as_mut(),
-            &mut proc.draw_builder, 
+            &mut proc.draw_builder,
             EnvironmentRendererInfo {
                 initial_viewport: info.initial_viewport,
                 color_format: Format::BGRA8,

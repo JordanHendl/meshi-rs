@@ -147,9 +147,8 @@ impl CloudShadowPass {
         self.shadow_cascade_count = settings.shadow_cascade_count.max(1);
         let mut max_resolution = self.shadow_resolution.max(1);
         for cascade_index in 0..self.shadow_cascade_count.min(4) {
-            max_resolution = max_resolution.max(
-                settings.shadow_cascade_resolutions[cascade_index as usize].max(1),
-            );
+            max_resolution = max_resolution
+                .max(settings.shadow_cascade_resolutions[cascade_index as usize].max(1));
         }
         self.shadow_resolution = max_resolution;
         let params = &mut self.params.as_slice_mut::<CloudShadowParams>()[0];
@@ -230,7 +229,10 @@ impl CloudShadowPass {
     }
 
     pub fn pre_compute(&mut self) -> CommandStream<Executable> {
-        CommandStream::new().begin().combine(self.params.sync_up()).end()
+        CommandStream::new()
+            .begin()
+            .combine(self.params.sync_up())
+            .end()
     }
 
     pub fn sampler(&self) -> Handle<Sampler> {

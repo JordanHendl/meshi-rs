@@ -1,15 +1,20 @@
 #pragma once
 #include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <meshi.h>
 #include <optional>
+
 #include "meshi/types.hpp"
 
 namespace meshi {
 
 class PhysicsSystem {
 public:
+  void set_gravity(float gravity_mps) {
+    api_->physx_set_gravity(m_phys, gravity_mps);
+  }
+
   auto create_material(PhysicsMaterialCreateInfo &info)
       -> Handle<PhysicsMaterial> {
     return api_->physx_create_material(m_phys, &info);
@@ -19,12 +24,11 @@ public:
     api_->physx_release_material(m_phys, &material);
   }
 
-
   auto create_character_controller(CharacterControllerCreateInfo &info)
       -> Handle<CharacterController> {
     MeshiCharacterControllerInfo ffi{};
-    ffi.initial_position = {info.initial_position.x, info.initial_position.y,
-                            info.initial_position.z};
+    ffi.initial_position =
+        {info.initial_position.x, info.initial_position.y, info.initial_position.z};
     ffi.radius = info.radius;
     ffi.half_height = info.half_height;
     ffi.step_height = info.step_height;
@@ -38,11 +42,13 @@ public:
 
   auto move_character_controller(Handle<CharacterController> &controller,
                                  const glm::vec3 &desired_motion,
-                                 CharacterControllerMoveResult &out_result) -> bool {
+                                 CharacterControllerMoveResult &out_result)
+      -> bool {
     MeshiCharacterControllerMoveResult ffi{};
     if (api_->physx_move_character_controller(
             m_phys, &controller,
-            {desired_motion.x, desired_motion.y, desired_motion.z}, &ffi) == 0) {
+            {desired_motion.x, desired_motion.y, desired_motion.z},
+            &ffi) == 0) {
       return false;
     }
     out_result.applied_motion = {
@@ -57,7 +63,8 @@ public:
   auto get_character_controller_status(Handle<CharacterController> &controller)
       -> std::optional<PhysicsActorStatus> {
     MeshiActorStatus ffi{};
-    if (api_->physx_get_character_controller_status(m_phys, &controller, &ffi) == 0) {
+    if (api_->physx_get_character_controller_status(m_phys, &controller, &ffi) ==
+        0) {
       return std::nullopt;
     }
 
@@ -71,12 +78,12 @@ public:
   auto create_rigid_body(RigidBodyCreateInfo &info) -> Handle<RigidBody> {
     MeshiRigidBodyInfo ffi{};
     ffi.material = info.material;
-    ffi.initial_position = {info.initial_position.x, info.initial_position.y,
-                           info.initial_position.z};
-    ffi.initial_velocity = {info.initial_velocity.x, info.initial_velocity.y,
-                           info.initial_velocity.z};
+    ffi.initial_position =
+        {info.initial_position.x, info.initial_position.y, info.initial_position.z};
+    ffi.initial_velocity =
+        {info.initial_velocity.x, info.initial_velocity.y, info.initial_velocity.z};
     ffi.initial_rotation = {info.initial_rotation.x, info.initial_rotation.y,
-                           info.initial_rotation.z, info.initial_rotation.w};
+                            info.initial_rotation.z, info.initial_rotation.w};
     ffi.has_gravity = info.has_gravity;
     ffi.collision_shape = info.collision_shape;
     return api_->physx_create_rigid_body(m_phys, &ffi);
@@ -91,17 +98,16 @@ public:
     api_->physx_apply_force_to_rigid_body(m_phys, &rigidBody, &info);
   }
 
-
   auto set_rigid_body_status(Handle<RigidBody> &rigidBody,
                              const PhysicsActorStatus &status) -> bool {
     MeshiActorStatus ffi{};
     ffi.position = {status.position.x, status.position.y, status.position.z};
     ffi.rotation = {status.rotation.x, status.rotation.y, status.rotation.z,
                     status.rotation.w};
-    return api_->physx_set_rigid_body_transform(m_phys, &rigidBody, &ffi) == 0;
+    return api_->physx_set_rigid_body_transform(m_phys, &rigidBody, &ffi) != 0;
   }
-  auto get_rigid_body_status(Handle<RigidBody> &rigidBody)
-      -> PhysicsActorStatus {
+
+  auto get_rigid_body_status(Handle<RigidBody> &rigidBody) -> PhysicsActorStatus {
     MeshiActorStatus ffi{};
     api_->physx_get_rigid_body_status(m_phys, &rigidBody, &ffi);
     PhysicsActorStatus status{};
@@ -109,6 +115,40 @@ public:
     status.rotation = {ffi.rotation.w, ffi.rotation.x, ffi.rotation.y,
                        ffi.rotation.z};
     return status;
+  }
+
+  auto set_collision_shape(Handle<RigidBody> &rigidBody,
+                           const MeshiCollisionShape &shape) -> bool {
+    return api_->physx_set_collision_shape(m_phys, &rigidBody, &shape) != 0;
+  }
+
+  static auto collision_shape_sphere(float radius) -> MeshiCollisionShape {
+    return MeshiCollisionShape{
+        .dimensions = {0.0f, 0.0f, 0.0f},
+        .radius = radius,
+        .half_height = 0.0f,
+        .shape_type = MeshiCollisionShapeType::Sphere,
+    };
+  }
+
+  static auto collision_shape_box(const glm::vec3 &dimensions)
+      -> MeshiCollisionShape {
+    return MeshiCollisionShape{
+        .dimensions = {dimensions.x, dimensions.y, dimensions.z},
+        .radius = 0.0f,
+        .half_height = 0.0f,
+        .shape_type = MeshiCollisionShapeType::Box,
+    };
+  }
+
+  static auto collision_shape_capsule(float half_height, float radius)
+      -> MeshiCollisionShape {
+    return MeshiCollisionShape{
+        .dimensions = {0.0f, 0.0f, 0.0f},
+        .radius = radius,
+        .half_height = half_height,
+        .shape_type = MeshiCollisionShapeType::Capsule,
+    };
   }
 
 private:

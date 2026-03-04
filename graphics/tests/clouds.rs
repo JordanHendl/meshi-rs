@@ -3,13 +3,13 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use dashi::{
-    AspectMask, BufferView, CommandQueueInfo2, Context, ContextInfo, Format, FRect2D, ImageInfo,
-    ImageView, ImageViewType, Rect2D, SampleCount, SubresourceRange, Viewport,
-};
+use dashi::QueueType;
 use dashi::cmd::Executable;
 use dashi::execution::CommandRing;
-use dashi::QueueType;
+use dashi::{
+    AspectMask, BufferView, CommandQueueInfo2, Context, ContextInfo, FRect2D, Format, ImageInfo,
+    ImageView, ImageViewType, Rect2D, SampleCount, SubresourceRange, Viewport,
+};
 use furikake::{BindlessState, reservations::bindless_camera::ReservedBindlessCamera};
 use meshi_graphics::CloudRenderer;
 use noren::rdb::imagery::{HostCubemap, ImageInfo as NorenImageInfo};
@@ -27,15 +27,15 @@ fn hash_transmittance(ctx: &mut Context, buffer: dashi::Handle<dashi::Buffer>) -
 }
 
 fn submit_compute(queue: &mut CommandRing, stream: dashi::CommandStream<Executable>) {
-//    queue
-//        .record(move |c| {
-//            stream.append(c).expect("record cloud compute");
-//        })
-//        .expect("record cloud compute ring");
-//    queue
-//        .submit(&Default::default())
-//        .expect("submit cloud compute");
-//    queue.wait_all().expect("wait cloud compute");
+    //    queue
+    //        .record(move |c| {
+    //            stream.append(c).expect("record cloud compute");
+    //        })
+    //        .expect("record cloud compute ring");
+    //    queue
+    //        .submit(&Default::default())
+    //        .expect("submit cloud compute");
+    //    queue.wait_all().expect("wait cloud compute");
 }
 
 fn default_environment_cubemap(ctx: &mut Context) -> ImageView {
@@ -92,7 +92,12 @@ fn cloud_transmittance_deterministic_and_jittered() {
             w: 640.0,
             h: 360.0,
         },
-        scissor: Rect2D { x: 0, y: 0, w: 640, h: 360 },
+        scissor: Rect2D {
+            x: 0,
+            y: 0,
+            w: 640,
+            h: 360,
+        },
         ..Default::default()
     };
 
@@ -117,12 +122,15 @@ fn cloud_transmittance_deterministic_and_jittered() {
 
     let mut camera = dashi::Handle::default();
     state
-        .reserved_mut("meshi_bindless_cameras", |cameras: &mut ReservedBindlessCamera| {
-            camera = cameras.add_camera();
-            let cam = cameras.camera_mut(camera);
-            cam.set_perspective(std::f32::consts::FRAC_PI_3, 640.0, 360.0, 0.1, 10000.0);
-            cam.set_position(glam::Vec3::new(0.0, 1500.0, 0.0));
-        })
+        .reserved_mut(
+            "meshi_bindless_cameras",
+            |cameras: &mut ReservedBindlessCamera| {
+                camera = cameras.add_camera();
+                let cam = cameras.camera_mut(camera);
+                cam.set_perspective(std::f32::consts::FRAC_PI_3, 640.0, 360.0, 0.1, 10000.0);
+                cam.set_position(glam::Vec3::new(0.0, 1500.0, 0.0));
+            },
+        )
         .expect("create camera");
 
     let environment_view = default_environment_cubemap(&mut ctx);
@@ -151,10 +159,10 @@ fn cloud_transmittance_deterministic_and_jittered() {
     submit_compute(&mut queue, clouds_b_cmd);
     let hash_b = hash_transmittance(&mut ctx, clouds_b.transmittance_buffer());
     //TODO Fixhe submit_compute and uncommenthese
-  //  assert_eq!(hash_a, hash_b, "Cloud transmittance must be deterministic for identical inputs.");
+    //  assert_eq!(hash_a, hash_b, "Cloud transmittance must be deterministic for identical inputs.");
 
     let clouds_b_cmd = clouds_b.update(&mut ctx, &mut state, &viewport, camera, 0.0);
     submit_compute(&mut queue, clouds_b_cmd);
     let hash_c = hash_transmittance(&mut ctx, clouds_b.transmittance_buffer());
-//    assert_ne!(hash_b, hash_c, "Cloud transmittance should change with frame index jitter.");
+    //    assert_ne!(hash_b, hash_c, "Cloud transmittance should change with frame index jitter.");
 }

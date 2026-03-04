@@ -1,4 +1,3 @@
-
 pub mod event;
 use glam::*;
 use std::ffi::{c_char, c_void};
@@ -27,6 +26,112 @@ pub struct DisplayInfo {
     pub window: WindowInfo,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SkyboxSettingsInfo {
+    pub intensity: f32,
+    pub use_procedural_cubemap: i32,
+    pub update_interval_frames: u32,
+}
+
+impl Default for SkyboxSettingsInfo {
+    fn default() -> Self {
+        Self {
+            intensity: 1.0,
+            use_procedural_cubemap: 1,
+            update_interval_frames: 1,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SkySettingsInfo {
+    pub enabled: i32,
+    pub has_sun_direction: i32,
+    pub sun_direction: Vec3,
+}
+
+impl Default for SkySettingsInfo {
+    fn default() -> Self {
+        Self {
+            enabled: 1,
+            has_sun_direction: 0,
+            sun_direction: Vec3::new(0.0, -1.0, 0.0),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct EnvironmentLightingInfo {
+    pub sky: SkySettingsInfo,
+    pub sun_light_intensity: f32,
+    pub moon_light_intensity: f32,
+}
+
+impl Default for EnvironmentLightingInfo {
+    fn default() -> Self {
+        Self {
+            sky: SkySettingsInfo::default(),
+            sun_light_intensity: 1.0,
+            moon_light_intensity: 0.1,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct OceanSettingsInfo {
+    pub enabled: i32,
+    pub wind_speed: f32,
+    pub wave_amplitude: f32,
+    pub gerstner_amplitude: f32,
+}
+
+impl Default for OceanSettingsInfo {
+    fn default() -> Self {
+        Self {
+            enabled: 1,
+            wind_speed: 2.0,
+            wave_amplitude: 4.0,
+            gerstner_amplitude: 0.35,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CloudSettingsInfo {
+    pub enabled: i32,
+}
+
+impl Default for CloudSettingsInfo {
+    fn default() -> Self {
+        Self { enabled: 1 }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct TerrainSettingsInfo {
+    pub enabled: i32,
+    pub clipmap_resolution: u32,
+    pub max_tiles: u32,
+    pub lod_levels: u32,
+}
+
+impl Default for TerrainSettingsInfo {
+    fn default() -> Self {
+        Self {
+            enabled: 1,
+            clipmap_resolution: 18,
+            max_tiles: 12 * 12,
+            lod_levels: 6,
+        }
+    }
+}
+
 #[deprecated(note = "Use RenderObjectInfo instead.")]
 pub type MeshObjectInfo = RenderObjectInfo;
 
@@ -34,9 +139,9 @@ pub type MeshObjectInfo = RenderObjectInfo;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LightType {
     Directional = 0,
-    Point       = 1,
-    Spot        = 2,
-    RectArea    = 3,
+    Point = 1,
+    Spot = 2,
+    RectArea = 3,
 }
 
 bitflags::bitflags! {

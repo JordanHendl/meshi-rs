@@ -1,5 +1,5 @@
 use super::EnvironmentRendererInfo;
-use bento::builder::{AttachmentDesc, PSOBuilder, PSO};
+use bento::builder::{AttachmentDesc, PSO, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
 use dashi::cmd::{Executable, PendingGraphics};
 use dashi::driver::command::{BlitImage, Draw};
@@ -11,22 +11,22 @@ use dashi::{
 };
 use furikake::PSOBuilderFurikakeExt;
 use furikake::{
+    BindlessState,
     reservations::{
         bindless_camera::ReservedBindlessCamera, bindless_textures::ReservedBindlessCubemaps,
     },
     types::Camera,
-    BindlessState,
 };
 use glam::*;
 use noren::rdb::imagery::{GPUImageInfo, HostCubemap, ImageInfo as NorenImageInfo};
 use tare::utils::StagedBuffer;
 use tracing::{info, warn};
 
-use crate::gui::debug::{
-    debug_register_int, debug_register_radial_with_description, debug_register_with_description,
-    DebugRadialOption, DebugRegistryValue, PageType,
-};
 use crate::gui::Slider;
+use crate::gui::debug::{
+    DebugRadialOption, DebugRegistryValue, PageType, debug_register_int,
+    debug_register_radial_with_description, debug_register_with_description,
+};
 #[derive(Clone)]
 pub struct SkyboxInfo {
     pub cubemap: Option<noren::rdb::imagery::DeviceCubemap>,
@@ -2012,11 +2012,7 @@ fn resolve_celestial_direction(
         }
     }
 
-    if is_moon {
-        -Vec3::Y
-    } else {
-        Vec3::Y
-    }
+    if is_moon { -Vec3::Y } else { Vec3::Y }
 }
 
 fn compute_celestial_lighting(settings: &SkyFrameSettings) -> CelestialLighting {

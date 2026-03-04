@@ -20,8 +20,7 @@ use noren::rdb::DeviceGeometryLayer;
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{
     TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainProjectSettings,
-    chunk_coords_in_radius,
-    chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
+    chunk_artifact_entry, chunk_coord_key, chunk_coords_in_radius, lod_key, project_settings_entry,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -114,6 +113,8 @@ pub struct TerrainRenderer {
     settings: TerrainRenderSettings,
     project_key: String,
     enabled: bool,
+    refresh_frame_index: u64,
+    last_refresh_camera_position: Option<Vec3>,
     //    compute_pipeline: Option<bento::builder::CSO>,
     //    clipmap_buffer: Handle<Buffer>,
     //    draw_args_buffer: Handle<Buffer>,
@@ -392,6 +393,8 @@ impl TerrainRenderer {
     pub fn set_render_settings(&mut self, settings: TerrainRenderSettings) {
         self.settings = settings;
         self.enabled = settings.enabled;
+        self.refresh_frame_index = 0;
+        self.last_refresh_camera_position = None;
     }
 
     pub fn new_deferred(
@@ -427,6 +430,8 @@ impl TerrainRenderer {
             settings,
             project_key: String::new(),
             enabled: false,
+            refresh_frame_index: 0,
+            last_refresh_camera_position: None,
         }
     }
 
@@ -459,17 +464,20 @@ impl TerrainRenderer {
     pub fn set_rdb(&mut self, rdb: &mut RDBFile, project_key: &str) {
         self.terrain_rdb = Some(NonNull::new(rdb).expect("terrain rdb"));
         self.project_key = project_key.to_string();
+        self.refresh_frame_index = 0;
+        self.last_refresh_camera_position = None;
     }
 
     pub fn set_project_key(&mut self, project_key: &str) {
         self.project_key = project_key.to_string();
+        self.refresh_frame_index = 0;
+        self.last_refresh_camera_position = None;
     }
 
     pub fn update(&mut self, camera: Handle<Camera>, state: &mut BindlessState) {
         if !self.enabled {
             return;
         }
-        let _ = camera;
         let Some(draw_builder_ptr) = self.deferred.as_ref().and_then(|d| d.draw_builder) else {
             return;
         };
@@ -478,6 +486,29 @@ impl TerrainRenderer {
         };
         if self.project_key.is_empty() {
             return;
+        }
+
+        self.refresh_frame_index = self.refresh_frame_index.wrapping_add(1);
+        let periodic_refresh = self.refresh_frame_index % TERRAIN_REFRESH_FRAME_INTERVAL == 0;
+        let camera_position = Self::camera_position_for_lod(state, camera);
+        let camera_moved = match (self.last_refresh_camera_position, camera_position) {
+            (Some(last), Some(current)) => {
+                let epsilon = TERRAIN_CAMERA_POSITION_EPSILON * TERRAIN_CAMERA_POSITION_EPSILON;
+                last.distance_squared(current) > epsilon
+            }
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        let has_active_objects = self
+            .deferred
+            .as_ref()
+            .map(|d| !d.objects.is_empty())
+            .unwrap_or(false);
+        if has_active_objects && !periodic_refresh && !camera_moved {
+            return;
+        }
+        if let Some(position) = camera_position {
+            self.last_refresh_camera_position = Some(position);
         }
 
         let db = unsafe { db_ptr.as_mut() };
@@ -615,10 +646,12 @@ impl TerrainRenderer {
         state: &BindlessState,
         camera: Handle<Camera>,
     ) -> Vec<TerrainRenderObject> {
-        let artifacts = match db
-            .terrain_mut()
-            .fetch_chunks_from_view(settings, &self.project_key, state, camera)
-        {
+        let artifacts = match db.terrain_mut().fetch_chunks_from_view(
+            settings,
+            &self.project_key,
+            state,
+            camera,
+        ) {
             Ok(chunks) => chunks,
             Err(err) => {
                 warn!(
@@ -642,7 +675,8 @@ impl TerrainRenderer {
         artifacts
             .into_iter()
             .map(|mut artifact| {
-                artifact.lod = Self::render_lod_for_chunk(settings, camera_position, artifact.chunk_coords, 3);
+                artifact.lod =
+                    Self::render_lod_for_chunk(settings, camera_position, artifact.chunk_coords, 3);
                 let entry = chunk_artifact_entry(
                     &self.project_key,
                     &chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]),
@@ -684,10 +718,7 @@ impl TerrainRenderer {
         if coords.is_empty() {
             warn!(
                 "Terrain fallback visibility query found 0 chunk coordinates in radius; camera=({}, {}, {}), radius={}",
-                pos.x,
-                pos.y,
-                pos.z,
-                max_dist
+                pos.x, pos.y, pos.z, max_dist
             );
             return Vec::new();
         }

@@ -646,8 +646,12 @@ impl GuiContext {
                 } else {
                     colors.disabled
                 };
-                let indicator_quad =
-                    quad_from_pixels(indicator_pos, metrics.indicator_size, indicator_color, viewport);
+                let indicator_quad = quad_from_pixels(
+                    indicator_pos,
+                    metrics.indicator_size,
+                    indicator_color,
+                    viewport,
+                );
                 let indicator_draw = if let Some(clip) = clip_rect {
                     GuiDraw::with_clip_rect(options.layer, None, indicator_quad, clip)
                 } else {
@@ -667,7 +671,11 @@ impl GuiContext {
                 self.submit_text(GuiTextDraw {
                     text: button.label.clone(),
                     position: label_pos,
-                    color: if enabled { colors.label } else { colors.disabled },
+                    color: if enabled {
+                        colors.label
+                    } else {
+                        colors.disabled
+                    },
                     scale: metrics.font_scale,
                 });
             }
@@ -1881,10 +1889,8 @@ impl CommandPalette {
         let list_start_y = input_rect.max[1] + metrics.input_gap;
         let list_height =
             size[1] - metrics.padding[1] * 2.0 - metrics.input_height - metrics.input_gap;
-        let list_rect = MenuRect::from_position_size(
-            [position[0], list_start_y],
-            [size[0], list_height],
-        );
+        let list_rect =
+            MenuRect::from_position_size([position[0], list_start_y], [size[0], list_height]);
         let max_visible = if list_height <= 0.0 {
             0
         } else {

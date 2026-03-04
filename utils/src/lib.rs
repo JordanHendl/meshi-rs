@@ -5,10 +5,7 @@ use furikake::error::FurikakeError;
 use noren::NorenError;
 
 #[derive(Debug)]
-pub struct MeshiError {
-
-}
-
+pub struct MeshiError {}
 
 impl From<dashi::GPUError> for MeshiError {
     fn from(_value: dashi::GPUError) -> Self {
@@ -33,7 +30,6 @@ impl From<FurikakeError> for MeshiError {
         todo!()
     }
 }
-
 
 //impl From<dashi::GPUError> for MeshiError {
 //    fn from(value: dashi::GPUError) -> Self {

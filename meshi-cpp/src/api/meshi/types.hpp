@@ -28,6 +28,43 @@ struct DisplayInfo {
   bool resizable = false;
   bool vsync = false;
 };
+
+struct SkyboxSettingsInfo {
+  float intensity = 1.0f;
+  bool use_procedural_cubemap = true;
+  std::uint32_t update_interval_frames = 1;
+};
+
+struct SkySettingsInfo {
+  bool enabled = true;
+  bool has_sun_direction = false;
+  glm::vec3 sun_direction{0.0f, -1.0f, 0.0f};
+};
+
+struct EnvironmentLightingInfo {
+  SkySettingsInfo sky{};
+  float sun_light_intensity = 1.0f;
+  float moon_light_intensity = 0.1f;
+};
+
+struct OceanSettingsInfo {
+  bool enabled = true;
+  float wind_speed = 2.0f;
+  float wave_amplitude = 4.0f;
+  float gerstner_amplitude = 0.35f;
+};
+
+struct CloudSettingsInfo {
+  bool enabled = true;
+};
+
+struct TerrainSettingsInfo {
+  bool enabled = true;
+  std::uint32_t clipmap_resolution = 18;
+  std::uint32_t max_tiles = 12 * 12;
+  std::uint32_t lod_levels = 6;
+};
+
 using Camera = MeshiCameraHandle;
 using DirectionalLight = MeshiLightHandle;
 struct DirectionalLightInfo {

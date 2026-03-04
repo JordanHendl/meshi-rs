@@ -280,7 +280,7 @@ impl From<u32> for GamepadButton {
     }
 }
 
-use glam::{vec2, Vec2};
+use glam::{Vec2, vec2};
 
 use winit::event::{
     DeviceEvent, ElementState, Event as WEvent, MouseButton as WMouseButton, MouseScrollDelta,

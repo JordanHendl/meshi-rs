@@ -1,8 +1,8 @@
 use dashi::{AspectMask, Context, Format, ImageInfo, ImageView, ImageViewType, SubresourceRange};
 use image::GenericImageView;
 use meshi_utils::MeshiError;
-use noren::rdb::imagery::DeviceImage;
 use noren::DB;
+use noren::rdb::imagery::DeviceImage;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -40,10 +40,69 @@ struct ImagePagerEntry {
     status: ImagePagerStatus,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ImagePagerClipmapDestination {
+    pub slot: u32,
+    pub handle: BindlessImageHandle,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImagePagerClipmapRing {
+    handles: Vec<BindlessImageHandle>,
+    next_slot: usize,
+    generation: u64,
+}
+
+impl ImagePagerClipmapRing {
+    pub fn initialize(slot_count: usize, backend: &mut impl ImagePagerBackend) -> Self {
+        let slot_count = slot_count.max(1);
+        let mut handles = Vec::with_capacity(slot_count);
+        for _ in 0..slot_count {
+            handles.push(backend.reserve_handle());
+        }
+        Self {
+            handles,
+            next_slot: 0,
+            generation: 0,
+        }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn handle_for_slot(&self, slot: u32) -> Option<BindlessImageHandle> {
+        self.handles.get(slot as usize).copied()
+    }
+
+    pub fn release(&mut self, backend: &mut impl ImagePagerBackend) {
+        for handle in self.handles.drain(..) {
+            backend.release_image(handle);
+        }
+        self.next_slot = 0;
+    }
+
+    fn reserve_destination(&mut self) -> ImagePagerClipmapDestination {
+        let slot = self.next_slot as u32;
+        let handle = self.handles[self.next_slot];
+        self.next_slot = (self.next_slot + 1) % self.handles.len();
+        self.generation = self.generation.wrapping_add(1);
+        ImagePagerClipmapDestination {
+            slot,
+            handle,
+            generation: self.generation,
+        }
+    }
+}
+
 pub trait ImagePagerBackend {
     fn reserve_handle(&mut self) -> BindlessImageHandle;
-    fn register_image(&mut self, handle: BindlessImageHandle, view: ImageView)
-        -> BindlessImageHandle;
+    fn register_image(
+        &mut self,
+        handle: BindlessImageHandle,
+        view: ImageView,
+    ) -> BindlessImageHandle;
     fn register_image_immediate(&mut self, view: ImageView) -> BindlessImageHandle {
         let handle = self.reserve_handle();
         self.register_image(handle, view)
@@ -136,14 +195,22 @@ impl ImagePagerLoader for ImagePagerDefaultLoader<'_> {
 pub struct ImagePager {
     entries: HashMap<ImagePagerKey, ImagePagerEntry>,
     pending: VecDeque<ImagePagerKey>,
+    pending_clipmap: VecDeque<(ImagePagerClipmapDestination, ImagePagerKey)>,
+    clipmap_status: HashMap<ImagePagerClipmapDestination, ImagePagerStatus>,
     handle_to_key: HashMap<BindlessImageHandle, ImagePagerKey>,
 }
 
 impl ImagePager {
+    pub fn initialize() -> Self {
+        Self::new()
+    }
+
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
             pending: VecDeque::new(),
+            pending_clipmap: VecDeque::new(),
+            clipmap_status: HashMap::new(),
             handle_to_key: HashMap::new(),
         }
     }
@@ -168,6 +235,14 @@ impl ImagePager {
         self.handle_to_key.insert(handle, key.clone());
         self.pending.push_back(key);
         handle
+    }
+
+    pub fn request_database_image_async(
+        &mut self,
+        key: DatabaseImageKey,
+        backend: &mut impl ImagePagerBackend,
+    ) -> BindlessImageHandle {
+        self.request_image(ImagePagerKey::Database(key), backend)
     }
 
     pub fn status(&self, key: &ImagePagerKey) -> Option<ImagePagerStatus> {
@@ -200,6 +275,48 @@ impl ImagePager {
         handle
     }
 
+    pub fn push_image_to_clipmap_async(
+        &mut self,
+        clipmap: &mut ImagePagerClipmapRing,
+        key: ImagePagerKey,
+    ) -> ImagePagerClipmapDestination {
+        let destination = clipmap.reserve_destination();
+        self.clipmap_status
+            .retain(|current, _| current.handle != destination.handle);
+        self.pending_clipmap
+            .retain(|(current, _)| current.handle != destination.handle);
+        self.clipmap_status
+            .insert(destination, ImagePagerStatus::Pending);
+        self.pending_clipmap.push_back((destination, key));
+        destination
+    }
+
+    pub fn push_database_to_clipmap_async(
+        &mut self,
+        clipmap: &mut ImagePagerClipmapRing,
+        key: DatabaseImageKey,
+    ) -> ImagePagerClipmapDestination {
+        self.push_image_to_clipmap_async(clipmap, ImagePagerKey::Database(key))
+    }
+
+    pub fn clipmap_status(
+        &self,
+        destination: &ImagePagerClipmapDestination,
+    ) -> Option<ImagePagerStatus> {
+        self.clipmap_status.get(destination).copied()
+    }
+
+    fn load_key(
+        loader: &mut impl ImagePagerLoader,
+        key: &ImagePagerKey,
+    ) -> Result<ImageView, MeshiError> {
+        match key {
+            ImagePagerKey::Disk(path) => loader.load_from_disk(path),
+            ImagePagerKey::Database(db_key) => loader.load_from_database(db_key),
+            ImagePagerKey::Inline(_) => Ok(ImageView::default()),
+        }
+    }
+
     pub fn process_pending(
         &mut self,
         loader: &mut impl ImagePagerLoader,
@@ -219,11 +336,7 @@ impl ImagePager {
                 continue;
             }
 
-            let load_result = match &key {
-                ImagePagerKey::Disk(path) => loader.load_from_disk(path),
-                ImagePagerKey::Database(db_key) => loader.load_from_database(db_key),
-                ImagePagerKey::Inline(_) => Ok(ImageView::default()),
-            };
+            let load_result = Self::load_key(loader, &key);
 
             match load_result {
                 Ok(view) => {
@@ -240,6 +353,22 @@ impl ImagePager {
                 }
             }
 
+            processed += 1;
+        }
+
+        while processed < max_per_tick {
+            let Some((destination, key)) = self.pending_clipmap.pop_front() else {
+                break;
+            };
+
+            let status = match Self::load_key(loader, &key) {
+                Ok(view) => {
+                    let _ = backend.register_image(destination.handle, view);
+                    ImagePagerStatus::Ready
+                }
+                Err(_) => ImagePagerStatus::Failed,
+            };
+            self.clipmap_status.insert(destination, status);
             processed += 1;
         }
     }
@@ -357,6 +486,51 @@ mod tests {
     }
 
     #[test]
+    fn clipmap_push_returns_predicted_destination_and_uploads_to_reserved_handle() {
+        let mut pager = ImagePager::initialize();
+        let mut backend = TestBackend::new();
+        let mut loader = TestLoader;
+        let mut clipmap = ImagePagerClipmapRing::initialize(2, &mut backend);
+
+        let destination = pager.push_database_to_clipmap_async(
+            &mut clipmap,
+            DatabaseImageKey {
+                project: Some("demo".to_string()),
+                asset_key: "imagery/test.png".to_string(),
+            },
+        );
+
+        assert_eq!(
+            pager.clipmap_status(&destination),
+            Some(ImagePagerStatus::Pending)
+        );
+
+        pager.process_pending(&mut loader, &mut backend, 1);
+
+        assert_eq!(
+            pager.clipmap_status(&destination),
+            Some(ImagePagerStatus::Ready)
+        );
+        assert!(backend.registered.contains(&destination.handle));
+    }
+
+    #[test]
+    fn clipmap_ring_wraps_slots() {
+        let mut backend = TestBackend::new();
+        let mut clipmap = ImagePagerClipmapRing::initialize(2, &mut backend);
+
+        let first = clipmap.reserve_destination();
+        let second = clipmap.reserve_destination();
+        let third = clipmap.reserve_destination();
+
+        assert_eq!(first.slot, 0);
+        assert_eq!(second.slot, 1);
+        assert_eq!(third.slot, 0);
+        assert_eq!(first.handle, third.handle);
+        assert!(third.generation > second.generation);
+    }
+
+    #[test]
     fn disk_loader_creates_image_view() {
         let Ok(mut ctx) = Context::headless(&Default::default()) else {
             return;
@@ -364,13 +538,12 @@ mod tests {
 
         let tmp_dir = std::env::temp_dir();
         let path = tmp_dir.join(format!("image_pager_test_{}.png", std::process::id()));
-        let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 4]));
+        let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 4]));
         image.save(&path).expect("save test image");
 
         let mut loader = ImagePagerDefaultLoader::new(&mut ctx);
-        let view = loader
-            .load_from_disk(&path)
-            .expect("load image from disk");
+        let view = loader.load_from_disk(&path).expect("load image from disk");
         assert!(view.img.valid());
 
         let _ = fs::remove_file(&path);

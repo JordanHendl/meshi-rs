@@ -1,6 +1,6 @@
 use bento::builder::{AttachmentDesc, PSOBuilder};
 use bento::{Compiler, OptimizationLevel, Request, ShaderLang};
-use bytemuck::{cast_slice, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use dashi::cmd::{Executable, PendingGraphics, Recording};
 use dashi::driver::command::Draw;
 use dashi::{
@@ -9,10 +9,10 @@ use dashi::{
     MemoryVisibility, Rect2D, SampleCount, ShaderResource, ShaderType, Viewport,
 };
 use furikake::PSOBuilderFurikakeExt;
-use resource_pool::{resource_list::ResourceList, Handle};
-use tare::utils::StagedBuffer;
+use resource_pool::{Handle, resource_list::ResourceList};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tare::utils::StagedBuffer;
 use tracing::{error, warn};
 
 use crate::gui::{GuiBatchMesh, GuiClipRect, GuiFrame};
@@ -134,8 +134,14 @@ impl GuiRenderer {
             },
         );
 
-        let gui_pso =
-            Self::build_gui_pipeline(ctx, state, dynamic, sample_count, &vertex_buffer, &index_buffer);
+        let gui_pso = Self::build_gui_pipeline(
+            ctx,
+            state,
+            dynamic,
+            sample_count,
+            &vertex_buffer,
+            &index_buffer,
+        );
         state.register_pso_tables(&gui_pso);
 
         self.gui_pso = Some(gui_pso);
@@ -350,27 +356,26 @@ impl GuiRenderer {
                         .clip_rect
                         .map(|clip| scissor_from_clip(clip, viewport))
                         .unwrap_or(viewport.scissor);
-                    let batch_viewport = Viewport { scissor, ..*viewport };
+                    let batch_viewport = Viewport {
+                        scissor,
+                        ..*viewport
+                    };
 
                     if needs_upload {
                         graphics_cmd = graphics_cmd.combine(self.sync_mesh_range(range));
                     }
 
-                    let mut alloc = dynamic
-                        .bump()
-                        .expect("Failed to allocate GUI draw params");
+                    let mut alloc = dynamic.bump().expect("Failed to allocate GUI draw params");
                     let params = &mut alloc.slice::<GuiDrawParams>()[0];
                     *params = GuiDrawParams::default();
 
-                    graphics_cmd = graphics_cmd
-                        .update_viewport(&batch_viewport)
-                        .draw(&Draw {
-                            bind_tables,
-                            dynamic_buffers: [None, Some(alloc), None, None],
-                            count: range.index_count as u32,
-                            instance_count: 1,
-                            ..Default::default()
-                        });
+                    graphics_cmd = graphics_cmd.update_viewport(&batch_viewport).draw(&Draw {
+                        bind_tables,
+                        dynamic_buffers: [None, Some(alloc), None, None],
+                        count: range.index_count as u32,
+                        instance_count: 1,
+                        ..Default::default()
+                    });
                 }
             } else {
                 self.last_single_batch_hash = None;
@@ -380,7 +385,9 @@ impl GuiRenderer {
                 for batch in &batches {
                     let index_start = combined_mesh.indices.len() as u32;
                     let base_vertex = combined_mesh.vertices.len() as u32;
-                    combined_mesh.vertices.extend_from_slice(&batch.mesh.vertices);
+                    combined_mesh
+                        .vertices
+                        .extend_from_slice(&batch.mesh.vertices);
                     combined_mesh
                         .indices
                         .extend(batch.mesh.indices.iter().map(|index| *index + base_vertex));
@@ -400,24 +407,23 @@ impl GuiRenderer {
                         let scissor = clip_rect
                             .map(|clip| scissor_from_clip(clip, viewport))
                             .unwrap_or(viewport.scissor);
-                        let batch_viewport = Viewport { scissor, ..*viewport };
+                        let batch_viewport = Viewport {
+                            scissor,
+                            ..*viewport
+                        };
 
-                        let mut alloc = dynamic
-                            .bump()
-                            .expect("Failed to allocate GUI draw params");
+                        let mut alloc = dynamic.bump().expect("Failed to allocate GUI draw params");
                         let params = &mut alloc.slice::<GuiDrawParams>()[0];
                         params.index_offset = index_start;
                         params._padding = [0; 3];
 
-                        graphics_cmd = graphics_cmd
-                            .update_viewport(&batch_viewport)
-                            .draw(&Draw {
-                                bind_tables,
-                                dynamic_buffers: [None, Some(alloc), None, None],
-                                count: index_count,
-                                instance_count: 1,
-                                ..Default::default()
-                            });
+                        graphics_cmd = graphics_cmd.update_viewport(&batch_viewport).draw(&Draw {
+                            bind_tables,
+                            dynamic_buffers: [None, Some(alloc), None, None],
+                            count: index_count,
+                            instance_count: 1,
+                            ..Default::default()
+                        });
                     }
                 }
             }
@@ -444,7 +450,12 @@ impl GuiRenderer {
         }
 
         let handle = from_handle(handle);
-        if !self.objects.entries.iter().any(|entry| entry.slot == handle.slot) {
+        if !self
+            .objects
+            .entries
+            .iter()
+            .any(|entry| entry.slot == handle.slot)
+        {
             return;
         }
 
@@ -457,7 +468,12 @@ impl GuiRenderer {
         }
 
         let handle = from_handle(handle);
-        if !self.objects.entries.iter().any(|entry| entry.slot == handle.slot) {
+        if !self
+            .objects
+            .entries
+            .iter()
+            .any(|entry| entry.slot == handle.slot)
+        {
             return;
         }
 
@@ -472,7 +488,12 @@ impl GuiRenderer {
         }
 
         let handle = from_handle(handle);
-        if !self.objects.entries.iter().any(|entry| entry.slot == handle.slot) {
+        if !self
+            .objects
+            .entries
+            .iter()
+            .any(|entry| entry.slot == handle.slot)
+        {
             return;
         }
 

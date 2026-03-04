@@ -7,9 +7,10 @@ use meshi_audio::{
 pub use meshi_ffi_structs::*;
 pub use meshi_graphics::RenderEngine;
 use meshi_graphics::{
-    Camera, Display, DisplayInfo as GfxDisplayInfo, EnvironmentLightingSettings, Light,
-    RenderEngineInfo, RenderObject,
-    RenderObjectInfo as GfxRenderObjectInfo, WindowInfo as GfxWindowInfo,
+    Camera, CloudSettings, Display, DisplayInfo as GfxDisplayInfo, EnvironmentLightingSettings,
+    Light, OceanFrameSettings, RenderEngineInfo, RenderObject,
+    RenderObjectInfo as GfxRenderObjectInfo, SkyFrameSettings, SkyboxFrameSettings,
+    TerrainRenderSettings, WindowInfo as GfxWindowInfo,
 };
 pub use meshi_physics::PhysicsSimulation;
 use meshi_physics::SimulationInfo;
@@ -64,6 +65,13 @@ pub struct MeshiPluginApi {
     pub gfx_set_camera_transform: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
     pub gfx_set_camera_projection: extern "C" fn(*mut MeshiEngine, Handle<Camera>, *const Mat4),
     pub gfx_capture_mouse: extern "C" fn(*mut MeshiEngine, i32),
+    pub gfx_set_skybox_settings: extern "C" fn(*mut MeshiEngine, *const SkyboxSettingsInfo),
+    pub gfx_set_environment_lighting:
+        extern "C" fn(*mut MeshiEngine, *const EnvironmentLightingInfo),
+    pub gfx_set_ocean_settings: extern "C" fn(*mut MeshiEngine, *const OceanSettingsInfo),
+    pub gfx_set_cloud_settings: extern "C" fn(*mut MeshiEngine, *const CloudSettingsInfo),
+    pub gfx_set_terrain_settings: extern "C" fn(*mut MeshiEngine, *const TerrainSettingsInfo),
+    pub gfx_set_terrain_project_key: extern "C" fn(*mut MeshiEngine, *const c_char),
     pub audio_create_source: extern "C" fn(*mut MeshiEngine, *const c_char) -> Handle<AudioSource>,
     pub audio_destroy_source: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
     pub audio_play: extern "C" fn(*mut MeshiEngine, Handle<AudioSource>),
@@ -169,6 +177,12 @@ pub static MESHI_PLUGIN_API: MeshiPluginApi = MeshiPluginApi {
     gfx_set_camera_transform: meshi_gfx_set_camera_transform,
     gfx_set_camera_projection: meshi_gfx_set_camera_projection,
     gfx_capture_mouse: meshi_gfx_capture_mouse,
+    gfx_set_skybox_settings: meshi_gfx_set_skybox_settings,
+    gfx_set_environment_lighting: meshi_gfx_set_environment_lighting,
+    gfx_set_ocean_settings: meshi_gfx_set_ocean_settings,
+    gfx_set_cloud_settings: meshi_gfx_set_cloud_settings,
+    gfx_set_terrain_settings: meshi_gfx_set_terrain_settings,
+    gfx_set_terrain_project_key: meshi_gfx_set_terrain_project_key,
     audio_create_source: meshi_audio_create_source,
     audio_destroy_source: meshi_audio_destroy_source,
     audio_play: meshi_audio_play,
@@ -823,6 +837,135 @@ pub extern "C" fn meshi_gfx_capture_mouse(render: *mut MeshiEngine, value: i32) 
     engine.render.set_capture_mouse(value != 0);
 }
 
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_skybox_settings(
+    render: *mut MeshiEngine,
+    info: *const SkyboxSettingsInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+    engine.render.set_skybox_settings(SkyboxFrameSettings {
+        intensity: info.intensity,
+        use_procedural_cubemap: info.use_procedural_cubemap != 0,
+        update_interval_frames: info.update_interval_frames.max(1),
+        ..Default::default()
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_environment_lighting(
+    render: *mut MeshiEngine,
+    info: *const EnvironmentLightingInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+
+    let sun_direction = if info.sky.has_sun_direction != 0 {
+        let direction = Vec3::new(
+            info.sky.sun_direction.x,
+            info.sky.sun_direction.y,
+            info.sky.sun_direction.z,
+        );
+        Some(direction.normalize_or_zero())
+    } else {
+        None
+    };
+
+    engine
+        .render
+        .set_environment_lighting(EnvironmentLightingSettings {
+            sky: SkyFrameSettings {
+                enabled: info.sky.enabled != 0,
+                sun_direction,
+                ..Default::default()
+            },
+            sun_light_intensity: info.sun_light_intensity,
+            moon_light_intensity: info.moon_light_intensity,
+        });
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_ocean_settings(
+    render: *mut MeshiEngine,
+    info: *const OceanSettingsInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+    engine.render.set_ocean_settings(OceanFrameSettings {
+        enabled: info.enabled != 0,
+        wind_speed: info.wind_speed,
+        wave_amplitude: info.wave_amplitude,
+        gerstner_amplitude: info.gerstner_amplitude,
+        ..Default::default()
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_cloud_settings(
+    render: *mut MeshiEngine,
+    info: *const CloudSettingsInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+    let mut settings: CloudSettings = engine.render.cloud_settings();
+    settings.enabled = info.enabled != 0;
+    engine.render.set_cloud_settings(settings);
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_terrain_settings(
+    render: *mut MeshiEngine,
+    info: *const TerrainSettingsInfo,
+) {
+    if render.is_null() || info.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let info = unsafe { &*info };
+    engine
+        .render
+        .set_terrain_render_settings(TerrainRenderSettings {
+            enabled: info.enabled != 0,
+            clipmap_resolution: info.clipmap_resolution.max(1),
+            max_tiles: info.max_tiles.max(1),
+            lod_levels: info.lod_levels.max(1),
+            ..Default::default()
+        });
+}
+
+#[no_mangle]
+pub extern "C" fn meshi_gfx_set_terrain_project_key(
+    render: *mut MeshiEngine,
+    project_key: *const c_char,
+) {
+    if render.is_null() || project_key.is_null() {
+        return;
+    }
+
+    let engine: &mut MeshiEngine = unsafe { &mut (*render) };
+    let Ok(project_key) = unsafe { CStr::from_ptr(project_key) }.to_str() else {
+        return;
+    };
+
+    engine.render.set_terrain_project_key(project_key);
+}
 ////////////////////////////////////////////
 ///////////////////AUDIO////////////////////
 ////////////////////////////////////////////
