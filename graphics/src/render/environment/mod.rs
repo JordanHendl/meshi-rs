@@ -249,16 +249,6 @@ impl EnvironmentRenderer {
         self.terrain.record_deferred_draws(info, indices_handle)
     }
 
-    pub fn record_terrain_draws(
-        &mut self,
-        viewport: &Viewport,
-        dynamic: &mut DynamicAllocator,
-        camera: Handle<Camera>,
-        indices_handle: Handle<Buffer>,
-    ) -> CommandStream<PendingGraphics> {
-        todo!()
-    }
-
     pub fn set_time(&mut self, time_seconds: f32) {
         self.time = time_seconds;
     }

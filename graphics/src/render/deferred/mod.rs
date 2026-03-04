@@ -1215,6 +1215,9 @@ impl DeferredRenderer {
             delta_time: *delta_time,
             ..Default::default()
         });
+        self.subrender
+            .environment
+            .update_terrain(*camera, self.state.as_mut());
 
         self.graph.add_compute_pass(|mut cmd| {
             let state_update = self

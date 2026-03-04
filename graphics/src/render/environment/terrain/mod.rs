@@ -19,7 +19,8 @@ use noren::RDBFile;
 use noren::rdb::DeviceGeometryLayer;
 use noren::rdb::primitives::Vertex;
 use noren::rdb::terrain::{
-    TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainFrustum, TerrainProjectSettings,
+    TerrainCameraInfo, TerrainChunk, TerrainChunkArtifact, TerrainProjectSettings,
+    chunk_coords_in_radius,
     chunk_artifact_entry, chunk_coord_key, lod_key, project_settings_entry,
 };
 use std::collections::hash_map::DefaultHasher;
@@ -289,6 +290,10 @@ struct TerrainDeferredResources {
     draw_builder: Option<NonNull<GPUDrawBuilder>>,
     objects: HashMap<String, TerrainObjectEntry>,
     db: Option<NonNull<DB>>,
+    static_geometry: Option<TerrainStaticGeometry>,
+    clipmap_buffers: TerrainClipmapBuffers,
+    free_clipmap_tiles: Vec<u32>,
+    next_clipmap_tile: u32,
     sample_count: SampleCount,
 }
 
@@ -386,6 +391,7 @@ impl TerrainRenderer {
 
     pub fn set_render_settings(&mut self, settings: TerrainRenderSettings) {
         self.settings = settings;
+        self.enabled = settings.enabled;
     }
 
     pub fn new_deferred(
@@ -395,18 +401,30 @@ impl TerrainRenderer {
         info: &EnvironmentRendererInfo,
         dynamic: &DynamicAllocator,
     ) -> Self {
-        let clipmaps = todo!();
+        let settings = TerrainRenderSettings::default();
+        let clipmaps = Self::allocate_clipmap_buffers(ctx, &settings);
         Self {
             deferred: Some(TerrainDeferredResources {
-                pipeline: Self::build_deferred_pipeline(ctx, state, info.sample_count, draw, dynamic.state(), clipmaps),
+                pipeline: Self::build_deferred_pipeline(
+                    ctx,
+                    state,
+                    info.sample_count,
+                    draw,
+                    dynamic.state(),
+                    &clipmaps,
+                ),
                 draw_builder: None,
                 objects: Default::default(),
                 db: Default::default(),
+                static_geometry: None,
+                clipmap_buffers: clipmaps,
+                free_clipmap_tiles: Vec::new(),
+                next_clipmap_tile: 0,
                 sample_count: info.sample_count,
             }),
             terrain_rdb: None,
-            context: None,
-            settings: TerrainRenderSettings::default(),
+            context: Some(NonNull::from(ctx)),
+            settings,
             project_key: String::new(),
             enabled: false,
         }
@@ -451,6 +469,403 @@ impl TerrainRenderer {
         if !self.enabled {
             return;
         }
+        let _ = camera;
+        let Some(draw_builder_ptr) = self.deferred.as_ref().and_then(|d| d.draw_builder) else {
+            return;
+        };
+        let Some(mut db_ptr) = self.deferred.as_ref().and_then(|d| d.db) else {
+            return;
+        };
+        if self.project_key.is_empty() {
+            return;
+        }
+
+        let db = unsafe { db_ptr.as_mut() };
+        let Some(project_settings) = self.load_terrain_settings(&self.project_key.clone(), db)
+        else {
+            return;
+        };
+
+        let lod_levels = 3u8;
+        self.ensure_static_geometry(&project_settings, state, lod_levels);
+        let desired = self.collect_visible_terrain_objects(&project_settings, db, state, camera);
+
+        let Some(deferred) = self.deferred.as_mut() else {
+            return;
+        };
+        let Some(geometry_lods) = deferred.static_geometry.as_ref().map(|g| g.lods.clone()) else {
+            return;
+        };
+        let draw_builder = unsafe { &mut *draw_builder_ptr.as_ptr() };
+
+        let active_keys: HashSet<String> = deferred.objects.keys().cloned().collect();
+        let desired_keys: HashSet<String> = desired.iter().map(|obj| obj.key.clone()).collect();
+
+        for stale in active_keys.difference(&desired_keys) {
+            if let Some(mut entry) = deferred.objects.remove(stale) {
+                Self::release_terrain_draws(&mut entry, draw_builder);
+                Self::release_entry_resources(state, &entry);
+                deferred.free_clipmap_tiles.push(entry.clipmap_tile_index);
+            }
+        }
+
+        for object in desired {
+            if deferred.objects.contains_key(&object.key) {
+                continue;
+            }
+            let Some(tile) = Self::allocate_clipmap_tile(
+                deferred,
+                self.settings
+                    .max_tiles
+                    .max(deferred.clipmap_buffers.tile_count),
+            ) else {
+                break;
+            };
+            let Some(entry) =
+                Self::build_entry_for_object(&object, &geometry_lods, tile, state, draw_builder)
+            else {
+                deferred.free_clipmap_tiles.push(tile);
+                continue;
+            };
+            deferred.objects.insert(object.key.clone(), entry);
+        }
+    }
+
+    fn allocate_clipmap_buffers(
+        ctx: &mut Context,
+        settings: &TerrainRenderSettings,
+    ) -> TerrainClipmapBuffers {
+        let surface_grid_size = settings.clipmap.surface.tile_resolution;
+        let material_grid_size = settings.clipmap.material.tile_resolution;
+        let surface_tile_texel_count = surface_grid_size[0].max(1) * surface_grid_size[1].max(1);
+        let material_tile_texel_count = material_grid_size[0].max(1) * material_grid_size[1].max(1);
+        let tile_count = settings.max_tiles.max(1);
+
+        let mut make = |name: &'static str, texels: u32| {
+            let byte_size = (std::mem::size_of::<[f32; 4]>() as u32 * texels * tile_count).max(256);
+            let mut buffer = StagedBuffer::new(
+                ctx,
+                BufferInfo {
+                    debug_name: name,
+                    byte_size,
+                    visibility: MemoryVisibility::CpuAndGpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: None,
+                },
+            );
+            for value in buffer.as_slice_mut() {
+                *value = [0.0, 0.0, 0.0, 0.0];
+            }
+            buffer
+        };
+
+        TerrainClipmapBuffers {
+            surface_grid_size,
+            material_grid_size,
+            surface_tile_texel_count,
+            material_tile_texel_count,
+            tile_count,
+            height: make("[MESHI] Terrain Clipmap Height", surface_tile_texel_count),
+            normal: make("[MESHI] Terrain Clipmap Normal", surface_tile_texel_count),
+            blend: make("[MESHI] Terrain Clipmap Blend", material_tile_texel_count),
+            blend_ids: make(
+                "[MESHI] Terrain Clipmap Blend IDs",
+                material_tile_texel_count,
+            ),
+            hole_mask: make("[MESHI] Terrain Clipmap Hole", surface_tile_texel_count),
+        }
+    }
+
+    fn ensure_static_geometry(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        state: &mut BindlessState,
+        lod_levels: u8,
+    ) {
+        let hash = Self::static_geometry_hash(settings, lod_levels as u32);
+        let matches_existing = self
+            .deferred
+            .as_ref()
+            .and_then(|d| d.static_geometry.as_ref())
+            .map(|geo| geo.settings_hash == hash)
+            .unwrap_or(false);
+        if matches_existing {
+            return;
+        }
+
+        let mut lods = Vec::with_capacity(lod_levels as usize);
+        for lod in 0..lod_levels {
+            let Some(plane) = self.build_plane_geometry(settings, state, lod, lod_levels) else {
+                return;
+            };
+            lods.push(plane);
+        }
+        if let Some(deferred) = self.deferred.as_mut() {
+            deferred.static_geometry = Some(TerrainStaticGeometry {
+                lods,
+                settings_hash: hash,
+            });
+        }
+    }
+
+    fn collect_visible_terrain_objects(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        db: &mut DB,
+        state: &BindlessState,
+        camera: Handle<Camera>,
+    ) -> Vec<TerrainRenderObject> {
+        let artifacts = match db
+            .terrain_mut()
+            .fetch_chunks_from_view(settings, &self.project_key, state, camera)
+        {
+            Ok(chunks) => chunks,
+            Err(err) => {
+                warn!(
+                    "Failed to query visible terrain tiles for project '{}': {err:?}",
+                    self.project_key
+                );
+                Vec::new()
+            }
+        };
+
+        if artifacts.is_empty() {
+            warn!(
+                "Visible terrain query returned 0 chunks for project '{}'; trying fallback query with per-coordinate LOD fallback.",
+                self.project_key
+            );
+            return self.collect_visible_terrain_objects_fallback(settings, db, state, camera);
+        }
+
+        let camera_position = Self::camera_position_for_lod(state, camera).unwrap_or(Vec3::ZERO);
+
+        artifacts
+            .into_iter()
+            .map(|mut artifact| {
+                artifact.lod = Self::render_lod_for_chunk(settings, camera_position, artifact.chunk_coords, 3);
+                let entry = chunk_artifact_entry(
+                    &self.project_key,
+                    &chunk_coord_key(artifact.chunk_coords[0], artifact.chunk_coords[1]),
+                    &lod_key(artifact.lod),
+                );
+                terrain_loader::terrain_render_object_from_artifact(settings, entry, artifact)
+            })
+            .collect()
+    }
+
+    fn collect_visible_terrain_objects_fallback(
+        &mut self,
+        settings: &TerrainProjectSettings,
+        db: &mut DB,
+        state: &BindlessState,
+        camera: Handle<Camera>,
+    ) -> Vec<TerrainRenderObject> {
+        let cameras = match state.reserved::<ReservedBindlessCamera>("meshi_bindless_cameras") {
+            Ok(cameras) => cameras,
+            Err(err) => {
+                warn!("Terrain fallback visibility query failed to access camera state: {err:?}");
+                return Vec::new();
+            }
+        };
+
+        let cam = cameras.camera(camera);
+        let pos = cam.position();
+        let camera_position = Vec3::new(pos.x, pos.y, pos.z);
+        let max_dist = cam.far.max(1.0);
+        let camera_info = TerrainCameraInfo {
+            frustum: [[0.0; 2]; 4],
+            position: [pos.x, pos.y, pos.z],
+            curve: 1.0,
+            falloff: 0.35,
+            max_dist,
+        };
+
+        let coords = chunk_coords_in_radius(settings, [pos.x, pos.z], max_dist);
+        if coords.is_empty() {
+            warn!(
+                "Terrain fallback visibility query found 0 chunk coordinates in radius; camera=({}, {}, {}), radius={}",
+                pos.x,
+                pos.y,
+                pos.z,
+                max_dist
+            );
+            return Vec::new();
+        }
+
+        let mut objects = Vec::new();
+        let mut seen = HashSet::new();
+        let max_lod = settings.lod_policy.max_lod;
+        let chunk_world_size = [
+            settings.tiles_per_chunk[0] as f32 * settings.tile_size,
+            settings.tiles_per_chunk[1] as f32 * settings.tile_size,
+        ];
+
+        for coord in coords {
+            if !seen.insert(coord) {
+                continue;
+            }
+
+            let desired_lod = Self::render_lod_for_chunk(settings, camera_position, coord, 3);
+
+            for lod in desired_lod..=max_lod.max(2) {
+                let entry = chunk_artifact_entry(
+                    &self.project_key,
+                    &chunk_coord_key(coord[0], coord[1]),
+                    &lod_key(lod),
+                );
+                if let Ok(mut artifact) = db.terrain_mut().fetch_chunk_artifact(entry.as_str()) {
+                    artifact.lod = desired_lod;
+                    objects.push(terrain_loader::terrain_render_object_from_artifact(
+                        settings, entry, artifact,
+                    ));
+                    break;
+                }
+            }
+        }
+
+        objects
+    }
+
+    fn camera_position_for_lod(state: &BindlessState, camera: Handle<Camera>) -> Option<Vec3> {
+        let cameras = state
+            .reserved::<ReservedBindlessCamera>("meshi_bindless_cameras")
+            .ok()?;
+        let pos = cameras.camera(camera).position();
+        Some(Vec3::new(pos.x, pos.y, pos.z))
+    }
+
+    fn render_lod_for_chunk(
+        settings: &TerrainProjectSettings,
+        camera_position: Vec3,
+        chunk_coords: [i32; 2],
+        lod_levels: u8,
+    ) -> u8 {
+        let chunk_world_size_x = settings.tiles_per_chunk[0] as f32 * settings.tile_size;
+        let chunk_world_size_z = settings.tiles_per_chunk[1] as f32 * settings.tile_size;
+        let center_x = settings.world_bounds_min[0]
+            + (chunk_coords[0] as f32 + 0.5) * chunk_world_size_x.max(1.0);
+        let center_z = settings.world_bounds_min[2]
+            + (chunk_coords[1] as f32 + 0.5) * chunk_world_size_z.max(1.0);
+        let dx = center_x - camera_position.x;
+        let dz = center_z - camera_position.z;
+        let distance = (dx * dx + dz * dz).sqrt();
+
+        let mut camera_info = TerrainCameraInfo {
+            frustum: [[0.0; 2]; 4],
+            position: [camera_position.x, camera_position.y, camera_position.z],
+            curve: 1.0,
+            falloff: 0.35,
+            max_dist: settings
+                .lod_policy
+                .distance_bands
+                .last()
+                .copied()
+                .unwrap_or(1024.0)
+                .max(1.0),
+        };
+
+        if settings.lod_policy.distance_bands.is_empty() {
+            camera_info.max_dist = (chunk_world_size_x.max(chunk_world_size_z) * 16.0).max(1.0);
+        }
+
+        let mut settings_for_render = settings.clone();
+        settings_for_render.lod_policy.max_lod = lod_levels.saturating_sub(1);
+        camera_info
+            .lod_for_distance(&settings_for_render, distance)
+            .min(lod_levels.saturating_sub(1))
+    }
+
+    fn allocate_clipmap_tile(
+        deferred: &mut TerrainDeferredResources,
+        max_tiles: u32,
+    ) -> Option<u32> {
+        if let Some(tile) = deferred.free_clipmap_tiles.pop() {
+            return Some(tile);
+        }
+        if deferred.next_clipmap_tile >= max_tiles {
+            return None;
+        }
+        let tile = deferred.next_clipmap_tile;
+        deferred.next_clipmap_tile += 1;
+        Some(tile)
+    }
+
+    fn build_entry_for_object(
+        object: &TerrainRenderObject,
+        geometry_lods: &[TerrainPlaneGeometry],
+        clipmap_tile_index: u32,
+        state: &mut BindlessState,
+        draw_builder: &mut GPUDrawBuilder,
+    ) -> Option<TerrainObjectEntry> {
+        let lod_idx = (object.artifact.lod as usize).min(geometry_lods.len().saturating_sub(1));
+        let plane = geometry_lods[lod_idx];
+        let transform = Self::allocate_transform(state, object.transform)?;
+        let material = Self::allocate_lod_material(state, object.artifact.lod)?;
+
+        let instance = TerrainDrawInstance {
+            material,
+            vertex_id: plane.vertex_id,
+            vertex_count: plane.vertex_count,
+            index_id: plane.index_id,
+            index_count: plane.index_count,
+            clipmap_tile_index,
+        };
+        let draws = Self::register_draw_instances(&[instance.clone()], transform, draw_builder);
+        Some(TerrainObjectEntry {
+            transform_handle: transform,
+            draws,
+            draw_instances: vec![instance],
+            content_hash: object.artifact.content_hash,
+            material_handle: material,
+            clipmap_tile_index,
+        })
+    }
+
+    fn allocate_transform(
+        state: &mut BindlessState,
+        transform: Mat4,
+    ) -> Option<Handle<Transformation>> {
+        let mut handle = Handle::default();
+        state
+            .reserved_mut::<ReservedBindlessTransformations, _>(
+                "meshi_bindless_transformations",
+                |transforms| {
+                    handle = transforms.add_transform();
+                    transforms.transform_mut(handle).transform = transform;
+                },
+            )
+            .ok()?;
+        Some(handle)
+    }
+
+    fn allocate_lod_material(state: &mut BindlessState, lod: u8) -> Option<Handle<Material>> {
+        let mut handle = Handle::default();
+        state
+            .reserved_mut::<ReservedBindlessMaterials, _>("meshi_bindless_materials", |materials| {
+                handle = materials.add_material();
+                let mat = materials.material_mut(handle);
+                *mat = Material::default();
+                mat.material_flags = MATERIAL_FLAG_VERTEX_COLOR as u32;
+                mat.base_color_texture_id = u32::MAX;
+                mat.normal_texture_id = u32::MAX;
+                mat.metallic_roughness_texture_id = u32::MAX;
+                mat.occlusion_texture_id = u32::MAX;
+                mat.emissive_texture_id = u32::MAX;
+                mat.render_mask = lod as u32;
+            })
+            .ok()?;
+        Some(handle)
+    }
+
+    fn release_entry_resources(state: &mut BindlessState, entry: &TerrainObjectEntry) {
+        let _ = state.reserved_mut::<ReservedBindlessTransformations, _>(
+            "meshi_bindless_transformations",
+            |transforms| transforms.remove_transform(entry.transform_handle),
+        );
+        let _ = state.reserved_mut::<ReservedBindlessMaterials, _>(
+            "meshi_bindless_materials",
+            |materials| materials.remove_material(entry.material_handle),
+        );
     }
 
     fn load_terrain_settings(
@@ -504,16 +919,15 @@ impl TerrainRenderer {
             .alloc
             .bump()
             .expect("Failed to allocate terrain per-scene data");
-
-        //        alloc.slice::<PerSceneData>()[0] = PerSceneData {
-        //            camera: info.camera,
-        //            surface_grid_size,
-        //            surface_tile_texel_count,
-        //            _padding0: 0,
-        //            material_grid_size,
-        //            material_tile_texel_count,
-        //            _padding1: 0,
-        //        };
+        alloc.slice::<PerSceneData>()[0] = PerSceneData {
+            camera: info.camera,
+            surface_grid_size: deferred.clipmap_buffers.surface_grid_size,
+            surface_tile_texel_count: deferred.clipmap_buffers.surface_tile_texel_count,
+            _padding0: 0,
+            material_grid_size: deferred.clipmap_buffers.material_grid_size,
+            material_tile_texel_count: deferred.clipmap_buffers.material_tile_texel_count,
+            _padding1: 0,
+        };
 
         let mut stream = CommandStream::<PendingGraphics>::subdraw();
         stream
@@ -631,7 +1045,6 @@ impl TerrainRenderer {
     }
 
     fn register_draw_instances(
-        &mut self,
         instances: &[TerrainDrawInstance],
         transform_handle: Handle<Transformation>,
         draw_builder: &mut GPUDrawBuilder,
@@ -694,12 +1107,17 @@ impl TerrainRenderer {
                     x as f32 / (grid_x.saturating_sub(1).max(1)) as f32,
                     y as f32 / (grid_y.saturating_sub(1).max(1)) as f32,
                 ];
+                let lod_color = match lod {
+                    0 => [1.0, 0.3, 0.3, 1.0],
+                    1 => [0.3, 1.0, 0.3, 1.0],
+                    _ => [0.3, 0.3, 1.0, 1.0],
+                };
                 vertices.push(Vertex {
                     position,
                     normal: [0.0, 1.0, 0.0],
                     tangent: [1.0, 0.0, 0.0, 1.0],
                     uv,
-                    color: [1.0, 1.0, 1.0, 1.0],
+                    color: lod_color,
                     joint_indices: [0; 4],
                     joint_weights: [0.0; 4],
                 });
